@@ -1,0 +1,259 @@
+# DockerDAS
+
+Portable mixed-disk DAS pooling and service layer for turning old drives into
+SMB/S3/NFS storage, with optional object-level duplication and
+Synoptikon/Mneion integration.
+
+DockerDAS is an SSD-ingest-first object appliance for people who have old hard
+drives, direct-attached storage enclosures, and a practical need for local
+capacity without buying a new stack of large disks.
+
+The core idea is simple:
+
+1. Capture normal writes onto a mandatory SSD.
+2. Verify and settle object copies onto heterogeneous HDDs in the DAS.
+3. Expose settled data through S3 first, with read-only SMB/NFS exports later.
+4. Keep pool identity and recovery metadata on the DAS so it can move between
+   hosts.
+
+DockerDAS is not intended to be a traditional RAID replacement or a guarantee
+that local storage is a backup. It is a portable, mixed-disk storage appliance
+with explicit health, placement, and redundancy policy.
+
+## Why
+
+Disk storage prices are high, but many home labs and development environments
+have older HDDs that are still useful. The hard part is making those disks
+usable without pretending that they are all the same size, speed, or health.
+
+DockerDAS is designed for:
+
+- home lab users who want to reuse mixed old drives;
+- developers and data engineers who need a local S3-compatible object store;
+- users with portable USB-C DAS enclosures;
+- projects with reproducible public datasets that are expensive to redownload;
+- Synoptikon/Mnemosyne development environments that need a governed local
+  object storage backend.
+
+## Product Direction
+
+DockerDAS is:
+
+- SSD-ingest-first;
+- S3/object-first;
+- mixed-disk and mixed-size by design;
+- portable across hosts through disk-borne metadata;
+- health-aware and evacuation-capable;
+- copy-policy based rather than classic RAID-first;
+- useful without Mnemosyne;
+- extensible through an optional Mnemosyne adapter.
+
+DockerDAS is not:
+
+- a backup system by itself;
+- normal read/write SMB storage in the MVP;
+- a block RAID manager first;
+- active compute scratch storage;
+- tied to a single host.
+
+## Architecture Sketch
+
+```text
+USB-C DAS enclosure(s)
+  -> mandatory SSD ingest device
+  -> heterogeneous HDD capacity members
+  -> DockerDAS Rust supervisor
+  -> SQLite live metadata on SSD
+  -> replicated recovery metadata on HDDs
+  -> object service selected by benchmark milestone
+  -> S3 API and CLI
+  -> read-only SMB/NFS exports later
+  -> optional Mnemosyne adapter
+```
+
+The object service will initially be an existing service orchestrated by
+DockerDAS rather than a custom S3 implementation. Garage and RustFS will be
+benchmarked as a milestone before selecting the first-class default.
+
+## Storage Model
+
+DockerDAS stores data in named stores. A store defines how data is ingested,
+placed, protected, retained, and repaired.
+
+Initial core store classes:
+
+- `reproducible_cache`: public or reproducible data with a download cost;
+- `generated_data`: derivative outputs and user-generated results;
+- `critical_metadata`: manifests, indexes, provenance, credentials references;
+- `export_bundle`: packaged data intended for external transfer;
+- `ingest_staging`: temporary SSD-backed ingest state.
+
+The pool provides adaptive defaults by store class. Stores can override those
+defaults.
+
+Example:
+
+```toml
+[pool.default_policy]
+placement = "weighted_health_capacity_performance"
+
+[store.public_reference_cache]
+class = "reproducible_cache"
+copies = 1
+ingest_mode = "ssd_first"
+on_disk_suspect = "evacuate_if_capacity_available"
+
+[store.synoptikon_derivatives]
+class = "generated_data"
+copies = 2
+ingest_mode = "ssd_first"
+prefer_distinct_enclosures = true
+
+[store.system_manifests]
+class = "critical_metadata"
+copies = 3
+ingest_mode = "ssd_first"
+prefer_distinct_enclosures = true
+retention = "tombstone_then_gc"
+```
+
+## Ingest Model
+
+Normal writes go to the mandatory SSD first. Background workers then copy data
+to HDD members according to store policy.
+
+```text
+received_on_ssd
+  -> hash_verified
+  -> placement_planned
+  -> copying_to_hdd
+  -> hdd_copy_verified
+  -> protected
+  -> ssd_eviction_eligible
+```
+
+CLI-managed public imports may bypass SSD ingest later:
+
+```bash
+dockerdas import-url \
+  --store public_reference_cache \
+  --sha256 <digest> \
+  https://example.org/dataset.tar.zst
+```
+
+That bypass is intentionally not the normal S3/API write path.
+
+## Portability
+
+DockerDAS pools must not depend on hidden state from one host.
+
+The live metadata database lives on the mandatory SSD. Recovery snapshots live
+on HDD metadata areas. If the SSD fails, the MVP target is recovery of committed
+HDD objects, with loss of pending SSD-only ingest data. A later target is full
+live metadata reconstruction from HDD snapshots.
+
+Each disk has a composite identity:
+
+- DockerDAS disk UUID;
+- observed hardware serials where available;
+- enclosure and bay hints;
+- size and partition fingerprints.
+
+Enclosures are inferred from USB topology where possible and confirmed by the
+user.
+
+## Health and Repair
+
+DockerDAS assumes old disks will fail.
+
+Disk health states:
+
+```text
+healthy -> watch -> suspect -> draining -> retired
+healthy -> failed
+```
+
+Health inputs include:
+
+- SMART warnings;
+- reallocated, pending, and uncorrectable sectors;
+- IO errors;
+- failed hash verification;
+- USB resets and disconnects;
+- temperature history;
+- latency and throughput drift;
+- user trust overrides.
+
+When a disk becomes suspect, DockerDAS stops placing new protected data on it
+and automatically evacuates protected stores. Reproducible cache data is moved
+opportunistically if capacity exists.
+
+Explicit disk retirement is a first-class workflow:
+
+```bash
+dockerdas disk retire <disk-id>
+dockerdas disk drain <disk-id>
+dockerdas disk replace <old-disk-id> --with <new-disk-id>
+```
+
+Protected stores must satisfy their policy before safe removal. Reproducible
+cache objects may be marked redownload-required.
+
+## Interfaces
+
+MVP:
+
+- Rust CLI;
+- S3-compatible object API through an orchestrated object service;
+- Web UI dashboard and safe operations;
+- local admin credential;
+- per-store service credentials.
+
+Initial SMB/NFS scope:
+
+- read-only exports of settled/protected data;
+- not a primary write path.
+
+Future:
+
+- full setup wizard;
+- notification sinks;
+- optional store-level encryption;
+- coarse disk zones;
+- DockerDAS-native parity or erasure policies.
+
+## Mnemosyne Integration
+
+DockerDAS is public-core first. Mnemosyne integration lives behind an adapter.
+
+Initial integration target:
+
+- export Mneion-compatible storage definition snippets;
+- support Synoptikon/Mneion development stores;
+- preserve the Mnemosyne boundary where Limen mediates artefact ingress/egress
+  and public contracts remain object-style.
+
+Later integration target:
+
+- `dockerdas-mnemosyne` adapter crate/module;
+- CLI commands to export, register, and verify storage context against Mneion.
+
+## Platform Plan
+
+Initial full platform:
+
+- Linux, including GB10-style development hosts.
+
+Initial macOS beta:
+
+- attach and inspect a DockerDAS pool;
+- read settled objects;
+- expose read-only export where feasible.
+
+Docker/Compose is the default deployment path for supporting services, with
+native/systemd support allowed where it improves reliability.
+
+## License
+
+DockerDAS is intended to be licensed under the Mozilla Public License 2.0.
+
