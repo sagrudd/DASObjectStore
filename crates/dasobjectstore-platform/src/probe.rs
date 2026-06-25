@@ -5,7 +5,7 @@ pub trait ProbeProvider {
     fn probe(&self) -> Result<ProbeReport, ProbeError>;
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProbeError {
     CommandFailed { command: String, message: String },
     ParseFailed { source: String, message: String },

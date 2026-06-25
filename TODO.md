@@ -53,7 +53,7 @@ developers
 - [x] Create `dasobjectstore-platform` crate with trait-based probe interfaces.
 - [x] Define Linux disk inventory command contract using `lsblk --json`.
 - [x] Add structured Linux `lsblk --json` disk inventory parser.
-- [ ] Wire Linux disk inventory parser to command execution.
+- [x] Wire Linux disk inventory parser to command execution.
 - [ ] Implement macOS disk inventory using native command/API choices and
   structured parsing.
 - [x] Add data model for observed disk identity: size, serial hints, partition
