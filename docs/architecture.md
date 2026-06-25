@@ -95,6 +95,9 @@ Responsibilities:
 
 Must not hide object placement or protection state from core/metadata.
 
+Docker/Compose behavior, including macOS Docker Desktop limits, is documented in
+[Service Orchestration Notes](service-orchestration.md).
+
 ### `dasobjectstore-mnemosyne`
 
 Owns optional Mnemosyne, Monas, and Synoptikon integration.
