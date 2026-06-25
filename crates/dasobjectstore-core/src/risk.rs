@@ -167,66 +167,56 @@ mod tests {
     }
 
     #[test]
-    fn denies_operation_without_policy_allowance() {
+    fn denies_each_operation_without_policy_allowance() {
         let gate = RiskGate::new(RiskPolicy::default());
-        let confirmation = ActionConfirmation::for_operation(RiskyOperation::ForceRetire);
 
-        let err = gate
-            .evaluate(RiskyOperation::ForceRetire, &confirmation)
-            .expect_err("default policy denies risky operations");
+        for operation in all_risky_operations() {
+            let confirmation = ActionConfirmation::for_operation(operation);
+            let err = gate
+                .evaluate(operation, &confirmation)
+                .expect_err("default policy denies risky operations");
 
-        assert_eq!(
-            err,
-            RiskGateError::PolicyDoesNotAllow {
-                operation: RiskyOperation::ForceRetire
-            }
-        );
+            assert_eq!(err, RiskGateError::PolicyDoesNotAllow { operation });
+        }
     }
 
     #[test]
-    fn rejects_allowed_operation_without_confirmation() {
-        let gate = RiskGate::new(RiskPolicy {
-            allow_force_read_write_import: true,
-            ..RiskPolicy::default()
-        });
+    fn rejects_each_allowed_operation_without_confirmation() {
+        for operation in all_risky_operations() {
+            let gate = RiskGate::new(policy_allowing(operation));
+            let err = gate
+                .evaluate(operation, &ActionConfirmation::default())
+                .expect_err("confirmation is mandatory");
 
-        let err = gate
-            .evaluate(
-                RiskyOperation::ForceReadWriteImport,
-                &ActionConfirmation::default(),
-            )
-            .expect_err("confirmation is mandatory");
-
-        assert_eq!(
-            err,
-            RiskGateError::MissingConfirmation {
-                operation: RiskyOperation::ForceReadWriteImport,
-                required_phrase: "confirm force read-write import"
-            }
-        );
+            assert_eq!(
+                err,
+                RiskGateError::MissingConfirmation {
+                    operation,
+                    required_phrase: operation.confirmation_phrase()
+                }
+            );
+        }
     }
 
     #[test]
-    fn rejects_allowed_operation_with_wrong_confirmation() {
-        let gate = RiskGate::new(RiskPolicy {
-            allow_direct_to_hdd_import: true,
-            ..RiskPolicy::default()
-        });
+    fn rejects_each_allowed_operation_with_wrong_confirmation() {
+        for operation in all_risky_operations() {
+            let gate = RiskGate::new(policy_allowing(operation));
+            let err = gate
+                .evaluate(
+                    operation,
+                    &ActionConfirmation::new("confirm something else"),
+                )
+                .expect_err("confirmation must match operation");
 
-        let err = gate
-            .evaluate(
-                RiskyOperation::DirectToHddImport,
-                &ActionConfirmation::new("confirm something else"),
-            )
-            .expect_err("confirmation must match operation");
-
-        assert_eq!(
-            err,
-            RiskGateError::ConfirmationMismatch {
-                operation: RiskyOperation::DirectToHddImport,
-                required_phrase: "confirm direct-to-hdd import"
-            }
-        );
+            assert_eq!(
+                err,
+                RiskGateError::ConfirmationMismatch {
+                    operation,
+                    required_phrase: operation.confirmation_phrase()
+                }
+            );
+        }
     }
 
     #[test]
@@ -253,5 +243,30 @@ mod tests {
         assert!(policy.allows(RiskyOperation::DirectToHddImport));
         assert!(!policy.allows(RiskyOperation::ForceRetire));
         assert!(!policy.allows(RiskyOperation::ForceReadWriteImport));
+    }
+
+    fn all_risky_operations() -> [RiskyOperation; 3] {
+        [
+            RiskyOperation::DirectToHddImport,
+            RiskyOperation::ForceRetire,
+            RiskyOperation::ForceReadWriteImport,
+        ]
+    }
+
+    fn policy_allowing(operation: RiskyOperation) -> RiskPolicy {
+        match operation {
+            RiskyOperation::DirectToHddImport => RiskPolicy {
+                allow_direct_to_hdd_import: true,
+                ..RiskPolicy::default()
+            },
+            RiskyOperation::ForceRetire => RiskPolicy {
+                allow_force_retire: true,
+                ..RiskPolicy::default()
+            },
+            RiskyOperation::ForceReadWriteImport => RiskPolicy {
+                allow_force_read_write_import: true,
+                ..RiskPolicy::default()
+            },
+        }
     }
 }
