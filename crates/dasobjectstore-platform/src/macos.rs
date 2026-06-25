@@ -138,39 +138,8 @@ mod tests {
     use crate::model::{HostPlatform, Transport};
     use crate::probe::{CommandRunner, ProbeError, ProbeProvider};
 
-    const DISKUTIL_LIST_FIXTURE: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>AllDisksAndPartitions</key>
-  <array>
-    <dict>
-      <key>Content</key>
-      <string>GUID_partition_scheme</string>
-      <key>DeviceIdentifier</key>
-      <string>disk4</string>
-      <key>Size</key>
-      <integer>1000204886016</integer>
-      <key>Partitions</key>
-      <array>
-        <dict>
-          <key>Content</key>
-          <string>Microsoft Basic Data</string>
-          <key>DeviceIdentifier</key>
-          <string>disk4s1</string>
-          <key>MountPoint</key>
-          <string>/Volumes/DAS_STAGING</string>
-          <key>Size</key>
-          <integer>1000203091968</integer>
-          <key>VolumeName</key>
-          <string>DAS_STAGING</string>
-        </dict>
-      </array>
-    </dict>
-  </array>
-</dict>
-</plist>"#;
+    const DISKUTIL_LIST_FIXTURE: &[u8] =
+        include_bytes!("../fixtures/macos/diskutil-list-usb-das.plist");
 
     #[test]
     fn defines_stable_diskutil_list_command() {
