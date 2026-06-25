@@ -163,7 +163,8 @@ developers
 
 - [x] Create `dasobjectstore-object-service` crate with provider trait.
 - [ ] Implement provider for selected MVP object service.
-- [ ] Generate Docker/Compose configuration from store and pool policy.
+  Blocked until Milestone 8 selects the MVP provider.
+- [x] Generate Docker/Compose configuration from store and pool policy.
 - [ ] Generate per-store service credentials.
 - [ ] Persist credential references without leaking secrets into normal logs.
 - [ ] Map store definitions to bucket/service layout.
