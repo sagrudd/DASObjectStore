@@ -3,22 +3,25 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
     HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectExportArgs,
-    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
-    StoreValidateArgs,
+    ObjectInspectArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, ProbeArgs, ServiceCommand,
+    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
+    StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
+use dasobjectstore_core::lifecycle::PoolState;
 use dasobjectstore_core::risk::{ActionConfirmation, RiskPolicy};
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    export_settled_object, force_retire_disk, inspect_pool_metadata, measure_ssd_capacity,
-    read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue, read_object_inspect,
-    request_disk_retirement, DiskCopyRoot, DiskDrainAction, DiskDrainError, DiskDrainObjectSummary,
-    DiskDrainPlanSummary, DiskReplacementPlanSummary, DiskRetirementError, DiskRetirementReport,
-    IngestQueueReadError, ObjectExportError, ObjectExportReport, ObjectExportRequest,
-    ObjectInspectError, ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
-    SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
+    attach_clean_pool_read_only, export_settled_object, force_retire_disk,
+    import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan,
+    read_disk_replacement_plan, read_ingest_queue, read_object_inspect, request_disk_retirement,
+    DiskCopyRoot, DiskDrainAction, DiskDrainError, DiskDrainObjectSummary, DiskDrainPlanSummary,
+    DiskReplacementPlanSummary, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
+    ObjectExportError, ObjectExportReport, ObjectExportRequest, ObjectInspectError,
+    ObjectInspectSummary, PoolInspectError, PoolInspectSummary, ReadOnlyAttachError,
+    ReadOnlyAttachOptions, ReadOnlyAttachReport, SsdCapacity, SsdCapacityMeasurementError,
+    SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -50,6 +53,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Health(args)) => run_health(args, writer),
         Some(Command::Pool(args)) => match args.command() {
             PoolCommand::Inspect(args) => run_pool_inspect(args, writer),
+            PoolCommand::Import(args) => run_pool_import(args, writer),
             #[cfg(feature = "debug-commands")]
             PoolCommand::MarkClean(args) => run_pool_mark_clean(args, writer),
             #[cfg(feature = "debug-commands")]
@@ -366,6 +370,28 @@ fn run_pool_inspect(args: &PoolInspectArgs, writer: &mut impl Write) -> Result<(
     Ok(())
 }
 
+fn run_pool_import(args: &PoolImportArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    if !args.read_only() {
+        return Err(CliError::UnsupportedPoolImportMode);
+    }
+
+    let summary = inspect_pool_metadata(args.source_path())?;
+    let options = ReadOnlyAttachOptions::new(
+        args.source_path(),
+        args.recovery_metadata_dir(),
+        args.recorded_at_utc().to_string(),
+    );
+    let report = match summary.state {
+        PoolState::Clean => attach_clean_pool_read_only(&options)?,
+        PoolState::Dirty => import_dirty_pool_read_only(&options)?,
+        state => return Err(CliError::UnsupportedPoolImportState { state }),
+    };
+
+    write_pool_import_report(&report, writer)?;
+
+    Ok(())
+}
+
 fn run_disk_retire(args: &DiskRetireArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let report = request_disk_retirement(
         args.live_sqlite_path(),
@@ -618,6 +644,20 @@ fn write_pool_inspect_summary(
         writer,
         "Metadata path: {}",
         summary.metadata_path.to_string_lossy()
+    )
+}
+
+fn write_pool_import_report(
+    report: &ReadOnlyAttachReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Pool: {}", report.pool_id)?;
+    writeln!(writer, "Mode: read-only")?;
+    writeln!(writer, "Disks: {}", report.recovered_disk_count)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        report.recovered_live_sqlite_path.to_string_lossy()
     )
 }
 
@@ -1034,6 +1074,7 @@ pub(crate) enum CliError {
     Json(serde_json::Error),
     IngestQueueRead(IngestQueueReadError),
     MetadataInspect(PoolInspectError),
+    PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
     DiskRetirement(DiskRetirementError),
     ObjectExport(ObjectExportError),
@@ -1051,6 +1092,10 @@ pub(crate) enum CliError {
     StorePolicyValidation(StorePolicyValidationErrors),
     UnsupportedHealthFormat,
     UnsupportedIngestQueueFormat,
+    UnsupportedPoolImportMode,
+    UnsupportedPoolImportState {
+        state: PoolState,
+    },
     UnsupportedProbeFormat,
     UnsupportedServiceStatusFormat,
 }
@@ -1062,6 +1107,7 @@ impl Display for CliError {
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
+            Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
@@ -1084,6 +1130,13 @@ impl Display for CliError {
             Self::UnsupportedIngestQueueFormat => {
                 formatter.write_str("ingest queue requires JSON output; use `--json`")
             }
+            Self::UnsupportedPoolImportMode => {
+                formatter.write_str("pool import currently requires `--read-only`")
+            }
+            Self::UnsupportedPoolImportState { state } => write!(
+                formatter,
+                "pool import --read-only supports Clean and Dirty snapshots, found {state:?}"
+            ),
             Self::UnsupportedProbeFormat => formatter
                 .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
             Self::UnsupportedServiceStatusFormat => {
@@ -1116,6 +1169,12 @@ impl From<IngestQueueReadError> for CliError {
 impl From<PoolInspectError> for CliError {
     fn from(err: PoolInspectError) -> Self {
         Self::MetadataInspect(err)
+    }
+}
+
+impl From<ReadOnlyAttachError> for CliError {
+    fn from(err: ReadOnlyAttachError) -> Self {
+        Self::PoolImport(err)
     }
 }
 
@@ -1187,11 +1246,10 @@ mod tests {
     use dasobjectstore_core::store::{
         CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
     };
-    #[cfg(feature = "debug-commands")]
-    use dasobjectstore_metadata::{initialize_pool, PoolInitOptions};
     use dasobjectstore_metadata::{
-        manifest::DiskRole, ArtifactReference, DiskManifest, DiskManifestEntry, FormatVersion,
-        MetadataArtifact, PoolManifest, DISK_MANIFEST_FILE_NAME, LIVE_SCHEMA_SQL,
+        export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
+        DiskManifest, DiskManifestEntry, FormatVersion, MetadataArtifact, PoolInitOptions,
+        PoolManifest, SnapshotExportOptions, DISK_MANIFEST_FILE_NAME, LIVE_SCHEMA_SQL,
         PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
@@ -1337,6 +1395,68 @@ mod tests {
         assert!(output.contains("Pool: pool-a"));
         assert!(output.contains("State: Clean"));
         assert!(output.contains("Disks: 1"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn pool_import_read_only_imports_clean_snapshot() {
+        let root = temp_root("pool-import-clean");
+        let source_root = root.join("mounted-disk");
+        let recovery_root = root.join("recovered");
+        create_portable_pool_snapshot(&root.join("source-ssd"), &source_root, "Clean");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            "import",
+            "--read-only",
+            "--source-path",
+            source_root.to_str().expect("utf8 source path"),
+            "--recovery-metadata-dir",
+            recovery_root.to_str().expect("utf8 recovery path"),
+            "--recorded-at-utc",
+            "2026-01-04T00:00:00Z",
+        ])
+        .expect("pool import parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("pool import runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Pool: pool-a"));
+        assert!(output.contains("Mode: read-only"));
+        assert_eq!(pool_state(&recovery_root.join("live.sqlite")), "ReadOnly");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn pool_import_read_only_imports_dirty_snapshot() {
+        let root = temp_root("pool-import-dirty");
+        let source_root = root.join("mounted-disk");
+        let recovery_root = root.join("recovered");
+        create_portable_pool_snapshot(&root.join("source-ssd"), &source_root, "Dirty");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            "import",
+            "--read-only",
+            "--source-path",
+            source_root.to_str().expect("utf8 source path"),
+            "--recovery-metadata-dir",
+            recovery_root.to_str().expect("utf8 recovery path"),
+            "--recorded-at-utc",
+            "2026-01-04T00:00:00Z",
+        ])
+        .expect("pool import parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("pool import runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Pool: pool-a"));
+        assert!(output.contains("Mode: read-only"));
+        assert_eq!(pool_state(&recovery_root.join("live.sqlite")), "ReadOnly");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -2022,7 +2142,6 @@ mod tests {
         Ok(String::from_utf8(output).expect("utf8 output"))
     }
 
-    #[cfg(feature = "debug-commands")]
     fn pool_state(live_sqlite_path: &Path) -> String {
         let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
 
@@ -2033,6 +2152,29 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("pool state")
+    }
+
+    fn create_portable_pool_snapshot(ssd_root: &Path, source_root: &Path, state: &str) {
+        let init = initialize_pool(&PoolInitOptions::new(
+            ssd_root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-02T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        let connection = Connection::open(&init.live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute(
+                "UPDATE pools SET state = ?1, updated_at_utc = ?2 WHERE pool_id = ?3",
+                (state, "2026-01-03T00:00:00Z", "pool-a"),
+            )
+            .expect("pool state updates");
+        insert_disk(&connection, "disk-a", "Healthy");
+        export_metadata_snapshot(&SnapshotExportOptions::new(
+            &init.live_sqlite_path,
+            vec![source_root.join(".dasobjectstore").join("metadata")],
+            "2026-01-03T00:00:00Z",
+        ))
+        .expect("snapshot exports");
     }
 
     fn write_snapshot_manifests(path: &Path) {

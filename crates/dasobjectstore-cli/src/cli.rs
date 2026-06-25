@@ -85,6 +85,8 @@ impl PoolArgs {
 pub(crate) enum PoolCommand {
     /// Inspect portable pool metadata from a snapshot directory.
     Inspect(PoolInspectArgs),
+    /// Import a portable pool snapshot for local read-only use.
+    Import(PoolImportArgs),
     /// Mark a pool clean in live metadata for developer testing.
     #[cfg(feature = "debug-commands")]
     MarkClean(PoolMarkerArgs),
@@ -103,6 +105,40 @@ pub(crate) struct PoolInspectArgs {
 impl PoolInspectArgs {
     pub(crate) fn metadata_path(&self) -> &Path {
         &self.metadata_path
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct PoolImportArgs {
+    /// Import the pool in read-only mode.
+    #[arg(long)]
+    read_only: bool,
+    /// Mounted pool root or metadata snapshot directory to import from.
+    #[arg(long)]
+    source_path: PathBuf,
+    /// Local metadata directory where recovered live.sqlite will be written.
+    #[arg(long)]
+    recovery_metadata_dir: PathBuf,
+    /// Timestamp to record in the read-only import marker.
+    #[arg(long)]
+    recorded_at_utc: String,
+}
+
+impl PoolImportArgs {
+    pub(crate) fn read_only(&self) -> bool {
+        self.read_only
+    }
+
+    pub(crate) fn source_path(&self) -> &Path {
+        &self.source_path
+    }
+
+    pub(crate) fn recovery_metadata_dir(&self) -> &Path {
+        &self.recovery_metadata_dir
+    }
+
+    pub(crate) fn recorded_at_utc(&self) -> &str {
+        &self.recorded_at_utc
     }
 }
 
@@ -1134,8 +1170,39 @@ mod tests {
             PoolCommand::Inspect(inspect) => {
                 assert_eq!(inspect.metadata_path(), Path::new("/tmp/metadata"));
             }
+            PoolCommand::Import(_) => panic!("expected inspect command"),
             #[cfg(feature = "debug-commands")]
             _ => panic!("expected inspect command"),
+        }
+    }
+
+    #[test]
+    fn parses_pool_import_read_only() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            "import",
+            "--read-only",
+            "--source-path",
+            "/Volumes/pool-disk",
+            "--recovery-metadata-dir",
+            "/tmp/recovered",
+            "--recorded-at-utc",
+            "2026-01-04T00:00:00Z",
+        ])
+        .expect("pool import parses");
+
+        let Some(Command::Pool(args)) = cli.command() else {
+            panic!("expected pool command");
+        };
+        match args.command() {
+            PoolCommand::Import(import) => {
+                assert!(import.read_only());
+                assert_eq!(import.source_path(), Path::new("/Volumes/pool-disk"));
+                assert_eq!(import.recovery_metadata_dir(), Path::new("/tmp/recovered"));
+                assert_eq!(import.recorded_at_utc(), "2026-01-04T00:00:00Z");
+            }
+            _ => panic!("expected import command"),
         }
     }
 
