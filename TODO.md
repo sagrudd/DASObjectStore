@@ -239,7 +239,7 @@ developers
 
 - [x] Keep CLI examples synchronized between `README.md`,
   `docs/requirements.md`, `ROADMAP.md`, and this file.
-- [ ] Keep JSON/schema-like formats versioned before implementation lands.
+- [x] Keep JSON/schema-like formats versioned before implementation lands.
 - [ ] Add test fixtures whenever platform command output parsing is introduced.
 - [ ] Add negative tests for risky operation gates.
 - [ ] Keep documentation for data-loss risks adjacent to commands that can

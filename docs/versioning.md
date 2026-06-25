@@ -57,6 +57,8 @@ Persistent metadata must carry explicit format versions.
 
 Recovery behavior and metadata compatibility boundaries are documented in
 [Metadata Compatibility and Recovery](metadata-compatibility.md).
+Current machine-readable and schema-like formats are listed in
+[Public Format Registry](format-registry.md).
 
 At minimum, these formats require independent versions:
 
