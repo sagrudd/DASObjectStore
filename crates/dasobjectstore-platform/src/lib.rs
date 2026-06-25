@@ -1,9 +1,11 @@
 //! Platform probing boundary for macOS and Linux.
 
 pub mod enclosure;
+pub mod health;
 pub mod linux;
 pub mod linux_smart;
 pub mod macos;
+pub mod macos_health;
 pub mod model;
 pub mod probe;
 

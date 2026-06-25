@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>DeviceIdentifier</key>
+  <string>disk5</string>
+  <key>DeviceNode</key>
+  <string>/dev/disk5</string>
+  <key>MediaName</key>
+  <string>USB Bridge Disk</string>
+  <key>SMARTStatus</key>
+  <string>Not Supported</string>
+</dict>
+</plist>

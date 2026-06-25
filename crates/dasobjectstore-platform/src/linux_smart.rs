@@ -1,18 +1,10 @@
+use crate::health::DiskHealthReport;
 use crate::probe::{CommandRunner, ProbeError};
 use dasobjectstore_core::health::HealthSignals;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 pub const SMARTCTL_COMMAND: &str = "smartctl";
 pub const SMARTCTL_BASE_ARGS: [&str; 3] = ["--json", "--health", "--attributes"];
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SmartHealthReport {
-    pub device_path: Option<String>,
-    pub model_hint: Option<String>,
-    pub serial_hint: Option<String>,
-    pub smart_passed: Option<bool>,
-    pub signals: HealthSignals,
-}
 
 pub fn smartctl_health_args(device_path: &str) -> Vec<String> {
     SMARTCTL_BASE_ARGS
@@ -25,7 +17,7 @@ pub fn smartctl_health_args(device_path: &str) -> Vec<String> {
 pub fn read_smartctl_health<R>(
     runner: &R,
     device_path: &str,
-) -> Result<SmartHealthReport, ProbeError>
+) -> Result<DiskHealthReport, ProbeError>
 where
     R: CommandRunner,
 {
@@ -36,7 +28,7 @@ where
     parse_smartctl_json(&output)
 }
 
-pub fn parse_smartctl_json(input: &str) -> Result<SmartHealthReport, ProbeError> {
+pub fn parse_smartctl_json(input: &str) -> Result<DiskHealthReport, ProbeError> {
     let output: SmartctlOutput =
         serde_json::from_str(input).map_err(|err| ProbeError::ParseFailed {
             source: SMARTCTL_COMMAND.to_string(),
@@ -48,7 +40,7 @@ pub fn parse_smartctl_json(input: &str) -> Result<SmartHealthReport, ProbeError>
         .as_ref()
         .and_then(|temperature| temperature.current);
 
-    Ok(SmartHealthReport {
+    Ok(DiskHealthReport {
         device_path: output.device.and_then(|device| device.name),
         model_hint: output.model_name,
         serial_hint: output.serial_number,
@@ -58,6 +50,7 @@ pub fn parse_smartctl_json(input: &str) -> Result<SmartHealthReport, ProbeError>
             temperature_celsius,
             ..HealthSignals::default()
         },
+        warnings: Vec::new(),
     })
 }
 
