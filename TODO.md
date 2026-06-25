@@ -76,7 +76,7 @@ developers
 - [x] Define metadata format version table and migration table.
 - [x] Define canonical pool manifest format.
 - [x] Define canonical disk manifest format.
-- [ ] Define append-only placement log format.
+- [x] Define append-only placement log format.
 - [ ] Implement metadata initialization for a new pool on an SSD path.
 - [ ] Implement metadata snapshot export to HDD metadata directories.
 - [ ] Implement metadata snapshot import/reconstruction tests.
