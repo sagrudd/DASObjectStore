@@ -57,6 +57,9 @@ Expected constraints:
 Health decisions must combine SMART data with other signals rather than relying
 on SMART alone.
 
+Command-output fixture expectations for platform parsers are documented in
+[Platform Fixture Policy](platform-fixtures.md).
+
 ## Health Signal Policy
 
 The health model should treat these signals as independent inputs:
