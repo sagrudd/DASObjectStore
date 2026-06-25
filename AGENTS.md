@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file defines working rules for AI coding agents contributing to DockerDAS.
+This file defines working rules for AI coding agents contributing to DASObjectStore.
 
 ## Repository Discipline
 
@@ -51,7 +51,7 @@ This file defines working rules for AI coding agents contributing to DockerDAS.
 
 ## Project Architecture Preferences
 
-- Keep DockerDAS public-core first.
+- Keep DASObjectStore public-core first.
 - Keep Mnemosyne/Synoptikon integration in an adapter layer.
 - Keep storage profiles and object-service providers abstract enough to evolve
   without breaking pool metadata.

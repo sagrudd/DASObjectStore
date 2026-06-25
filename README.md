@@ -1,10 +1,10 @@
-# DockerDAS
+# DASObjectStore
 
 Portable mixed-disk DAS pooling and service layer for turning old drives into
 SMB/S3/NFS storage, with optional object-level duplication and
 Synoptikon/Mneion integration.
 
-DockerDAS is an SSD-ingest-first object appliance for people who have old hard
+DASObjectStore is an SSD-ingest-first object appliance for people who have old hard
 drives, direct-attached storage enclosures, and a practical need for local
 capacity without buying a new stack of large disks.
 
@@ -16,7 +16,7 @@ The core idea is simple:
 4. Keep pool identity and recovery metadata on the DAS so it can move between
    hosts.
 
-DockerDAS is not intended to be a traditional RAID replacement or a guarantee
+DASObjectStore is not intended to be a traditional RAID replacement or a guarantee
 that local storage is a backup. It is a portable, mixed-disk storage appliance
 with explicit health, placement, and redundancy policy.
 
@@ -26,7 +26,7 @@ Disk storage prices are high, but many home labs and development environments
 have older HDDs that are still useful. The hard part is making those disks
 usable without pretending that they are all the same size, speed, or health.
 
-DockerDAS is designed for:
+DASObjectStore is designed for:
 
 - home lab users who want to reuse mixed old drives;
 - developers and data engineers who need a local S3-compatible object store;
@@ -37,7 +37,7 @@ DockerDAS is designed for:
 
 ## Product Direction
 
-DockerDAS is:
+DASObjectStore is:
 
 - SSD-ingest-first;
 - S3/object-first;
@@ -48,7 +48,9 @@ DockerDAS is:
 - useful without Mnemosyne;
 - extensible through an optional Mnemosyne adapter.
 
-DockerDAS is not:
+The current MVP milestone plan is tracked in [ROADMAP.md](ROADMAP.md).
+
+DASObjectStore is not:
 
 - a backup system by itself;
 - normal read/write SMB storage in the MVP;
@@ -62,7 +64,7 @@ DockerDAS is not:
 USB-C DAS enclosure(s)
   -> mandatory SSD ingest device
   -> heterogeneous HDD capacity members
-  -> DockerDAS Rust supervisor
+  -> DASObjectStore Rust supervisor
   -> SQLite live metadata on SSD
   -> replicated recovery metadata on HDDs
   -> object service selected by benchmark milestone
@@ -72,12 +74,12 @@ USB-C DAS enclosure(s)
 ```
 
 The object service will initially be an existing service orchestrated by
-DockerDAS rather than a custom S3 implementation. Garage and RustFS will be
+DASObjectStore rather than a custom S3 implementation. Garage and RustFS will be
 benchmarked as a milestone before selecting the first-class default.
 
 ## Storage Model
 
-DockerDAS stores data in named stores. A store defines how data is ingested,
+DASObjectStore stores data in named stores. A store defines how data is ingested,
 placed, protected, retained, and repaired.
 
 Initial core store classes:
@@ -135,7 +137,7 @@ received_on_ssd
 CLI-managed public imports may bypass SSD ingest later:
 
 ```bash
-dockerdas import-url \
+dasobjectstore import-url \
   --store public_reference_cache \
   --sha256 <digest> \
   https://example.org/dataset.tar.zst
@@ -145,7 +147,7 @@ That bypass is intentionally not the normal S3/API write path.
 
 ## Portability
 
-DockerDAS pools must not depend on hidden state from one host.
+DASObjectStore pools must not depend on hidden state from one host.
 
 The live metadata database lives on the mandatory SSD. Recovery snapshots live
 on HDD metadata areas. If the SSD fails, the MVP target is recovery of committed
@@ -154,7 +156,7 @@ live metadata reconstruction from HDD snapshots.
 
 Each disk has a composite identity:
 
-- DockerDAS disk UUID;
+- DASObjectStore disk UUID;
 - observed hardware serials where available;
 - enclosure and bay hints;
 - size and partition fingerprints.
@@ -164,7 +166,7 @@ user.
 
 ## Health and Repair
 
-DockerDAS assumes old disks will fail.
+DASObjectStore assumes old disks will fail.
 
 Disk health states:
 
@@ -184,16 +186,16 @@ Health inputs include:
 - latency and throughput drift;
 - user trust overrides.
 
-When a disk becomes suspect, DockerDAS stops placing new protected data on it
+When a disk becomes suspect, DASObjectStore stops placing new protected data on it
 and automatically evacuates protected stores. Reproducible cache data is moved
 opportunistically if capacity exists.
 
 Explicit disk retirement is a first-class workflow:
 
 ```bash
-dockerdas disk retire <disk-id>
-dockerdas disk drain <disk-id>
-dockerdas disk replace <old-disk-id> --with <new-disk-id>
+dasobjectstore disk retire <disk-id>
+dasobjectstore disk drain <disk-id>
+dasobjectstore disk replace <old-disk-id> --with <new-disk-id>
 ```
 
 Protected stores must satisfy their policy before safe removal. Reproducible
@@ -220,11 +222,11 @@ Future:
 - notification sinks;
 - optional store-level encryption;
 - coarse disk zones;
-- DockerDAS-native parity or erasure policies.
+- DASObjectStore-native parity or erasure policies.
 
 ## Mnemosyne Integration
 
-DockerDAS is public-core first. Mnemosyne integration lives behind an adapter.
+DASObjectStore is public-core first. Mnemosyne integration lives behind an adapter.
 
 Initial integration target:
 
@@ -235,7 +237,7 @@ Initial integration target:
 
 Later integration target:
 
-- `dockerdas-mnemosyne` adapter crate/module;
+- `dasobjectstore-mnemosyne` adapter crate/module;
 - CLI commands to export, register, and verify storage context against Mneion.
 
 ## Platform Plan
@@ -246,7 +248,7 @@ Initial full platform:
 
 Initial macOS beta:
 
-- attach and inspect a DockerDAS pool;
+- attach and inspect a DASObjectStore pool;
 - read settled objects;
 - expose read-only export where feasible.
 
@@ -255,5 +257,4 @@ native/systemd support allowed where it improves reliability.
 
 ## License
 
-DockerDAS is intended to be licensed under the Mozilla Public License 2.0.
-
+DASObjectStore is intended to be licensed under the Mozilla Public License 2.0.
