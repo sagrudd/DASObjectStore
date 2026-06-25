@@ -224,7 +224,7 @@ developers
 - [x] Add safe Web UI actions for health check, service start/stop, and read-only
   import where supported.
 - [x] Add read-only SMB export recipe generation.
-- [ ] Add read-only NFS export recipe generation.
+- [x] Add read-only NFS export recipe generation.
 - [ ] Add optional managed read-only export task for Linux if safe and
   well-bounded.
 - [ ] Create `dasobjectstore-mnemosyne` adapter crate/module.
