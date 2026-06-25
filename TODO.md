@@ -93,7 +93,7 @@ developers
 - [x] Implement built-in store class defaults for `reproducible_cache`,
   `generated_data`, `critical_metadata`, `export_bundle`, and
   `ingest_staging`.
-- [ ] Implement policy validation for copy count, mutability, retention,
+- [x] Implement policy validation for copy count, mutability, retention,
   placement, ingest mode, and capacity behavior.
 - [ ] Implement policy validation for enclosure-aware placement preferences and
   requirements.

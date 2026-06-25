@@ -56,6 +56,12 @@ pub enum RetentionPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum MutabilityPolicy {
+    Immutable,
+    Mutable,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RepairPolicy {
     RestoreFromCopy,
     RedownloadOrRehydrate,
@@ -89,6 +95,7 @@ pub struct StorePolicy {
     pub placement_strategy: PlacementStrategy,
     pub enclosure_placement: EnclosurePlacement,
     pub retention_policy: RetentionPolicy,
+    pub mutability_policy: MutabilityPolicy,
     pub repair_policy: RepairPolicy,
     pub capacity_behavior: CapacityBehavior,
     pub credential_policy: CredentialPolicy,
@@ -102,6 +109,7 @@ pub struct PoolPolicyDefaults {
     pub placement_strategy: PlacementStrategy,
     pub enclosure_placement: EnclosurePlacement,
     pub retention_policy: RetentionPolicy,
+    pub mutability_policy: MutabilityPolicy,
     pub repair_policy: RepairPolicy,
     pub capacity_behavior: CapacityBehavior,
     pub credential_policy: CredentialPolicy,
@@ -129,6 +137,9 @@ impl PoolPolicyDefaults {
                 .enclosure_placement
                 .unwrap_or(self.enclosure_placement),
             retention_policy: overrides.retention_policy.unwrap_or(self.retention_policy),
+            mutability_policy: overrides
+                .mutability_policy
+                .unwrap_or(self.mutability_policy),
             repair_policy: overrides.repair_policy.unwrap_or(self.repair_policy),
             capacity_behavior: overrides
                 .capacity_behavior
@@ -147,6 +158,7 @@ impl PoolPolicyDefaults {
             placement_strategy: policy.placement_strategy,
             enclosure_placement: policy.enclosure_placement,
             retention_policy: policy.retention_policy,
+            mutability_policy: policy.mutability_policy,
             repair_policy: policy.repair_policy,
             capacity_behavior: policy.capacity_behavior,
             credential_policy: policy.credential_policy,
@@ -162,6 +174,7 @@ pub struct StorePolicyOverrides {
     pub placement_strategy: Option<PlacementStrategy>,
     pub enclosure_placement: Option<EnclosurePlacement>,
     pub retention_policy: Option<RetentionPolicy>,
+    pub mutability_policy: Option<MutabilityPolicy>,
     pub repair_policy: Option<RepairPolicy>,
     pub capacity_behavior: Option<CapacityBehavior>,
     pub credential_policy: Option<CredentialPolicy>,
@@ -185,6 +198,7 @@ impl StorePolicy {
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::Ignore,
                 retention_policy: RetentionPolicy::ImmediateDelete,
+                mutability_policy: MutabilityPolicy::Immutable,
                 repair_policy: RepairPolicy::EvacuateIfCapacityAvailable,
                 capacity_behavior: CapacityBehavior::MarkRedownloadRequired,
                 credential_policy: CredentialPolicy::PerStore,
@@ -197,6 +211,7 @@ impl StorePolicy {
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::PreferDistinct,
                 retention_policy: RetentionPolicy::TombstoneThenGc,
+                mutability_policy: MutabilityPolicy::Immutable,
                 repair_policy: RepairPolicy::RestoreFromCopy,
                 capacity_behavior: CapacityBehavior::BackpressureByPriority,
                 credential_policy: CredentialPolicy::PerStore,
@@ -209,6 +224,7 @@ impl StorePolicy {
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::PreferDistinct,
                 retention_policy: RetentionPolicy::TombstoneThenGc,
+                mutability_policy: MutabilityPolicy::Immutable,
                 repair_policy: RepairPolicy::RestoreFromCopy,
                 capacity_behavior: CapacityBehavior::RejectWrites,
                 credential_policy: CredentialPolicy::PerStore,
@@ -221,6 +237,7 @@ impl StorePolicy {
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::PreferDistinct,
                 retention_policy: RetentionPolicy::TombstoneThenGc,
+                mutability_policy: MutabilityPolicy::Immutable,
                 repair_policy: RepairPolicy::RestoreFromCopy,
                 capacity_behavior: CapacityBehavior::BackpressureByPriority,
                 credential_policy: CredentialPolicy::PerStore,
@@ -233,6 +250,7 @@ impl StorePolicy {
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::Ignore,
                 retention_policy: RetentionPolicy::ImmediateDelete,
+                mutability_policy: MutabilityPolicy::Mutable,
                 repair_policy: RepairPolicy::RedownloadOrRehydrate,
                 capacity_behavior: CapacityBehavior::BackpressureByPriority,
                 credential_policy: CredentialPolicy::PerStore,
@@ -240,13 +258,85 @@ impl StorePolicy {
             },
         }
     }
+
+    pub fn validate(&self) -> Result<(), StorePolicyValidationErrors> {
+        let mut errors = Vec::new();
+
+        if !(1..=3).contains(&self.copies) {
+            errors.push(StorePolicyValidationError::InvalidCopyCount {
+                copies: self.copies,
+            });
+        }
+
+        if self.enclosure_placement == EnclosurePlacement::RequireDistinct && self.copies < 2 {
+            errors.push(StorePolicyValidationError::DistinctPlacementNeedsMultipleCopies);
+        }
+
+        if self.is_protected_class() {
+            if self.ingest_mode == IngestMode::DirectToHdd {
+                errors.push(StorePolicyValidationError::ProtectedStoreDirectToHdd {
+                    class: self.class,
+                });
+            }
+            if self.retention_policy == RetentionPolicy::ImmediateDelete {
+                errors.push(StorePolicyValidationError::ProtectedStoreImmediateDelete {
+                    class: self.class,
+                });
+            }
+            if self.mutability_policy == MutabilityPolicy::Mutable {
+                errors
+                    .push(StorePolicyValidationError::ProtectedStoreMutable { class: self.class });
+            }
+            if self.capacity_behavior == CapacityBehavior::MarkRedownloadRequired {
+                errors.push(
+                    StorePolicyValidationError::ProtectedStoreMarksRedownloadRequired {
+                        class: self.class,
+                    },
+                );
+            }
+        }
+
+        if self.class == StoreClass::IngestStaging && self.export_policy != ExportPolicy::Disabled {
+            errors.push(StorePolicyValidationError::IngestStagingExportEnabled);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(StorePolicyValidationErrors { errors })
+        }
+    }
+
+    fn is_protected_class(&self) -> bool {
+        matches!(
+            self.class,
+            StoreClass::GeneratedData | StoreClass::CriticalMetadata | StoreClass::ExportBundle
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorePolicyValidationErrors {
+    pub errors: Vec<StorePolicyValidationError>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StorePolicyValidationError {
+    InvalidCopyCount { copies: u8 },
+    DistinctPlacementNeedsMultipleCopies,
+    ProtectedStoreDirectToHdd { class: StoreClass },
+    ProtectedStoreImmediateDelete { class: StoreClass },
+    ProtectedStoreMutable { class: StoreClass },
+    ProtectedStoreMarksRedownloadRequired { class: StoreClass },
+    IngestStagingExportEnabled,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CapacityBehavior, EnclosurePlacement, ExportPolicy, PoolPolicyDefaults, RepairPolicy,
-        StoreClass, StorePolicy, StorePolicyOverrides,
+        CapacityBehavior, EnclosurePlacement, ExportPolicy, IngestMode, MutabilityPolicy,
+        PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass, StorePolicy,
+        StorePolicyOverrides, StorePolicyValidationError,
     };
 
     #[test]
@@ -361,5 +451,71 @@ mod tests {
         assert_eq!(policy.capacity_behavior, CapacityBehavior::RejectWrites);
         assert_eq!(policy.export_policy, ExportPolicy::ReadOnlyFileExport);
         assert_eq!(policy.repair_policy, RepairPolicy::RestoreFromCopy);
+    }
+
+    #[test]
+    fn accepts_builtin_store_policy_defaults() {
+        for policy in StorePolicy::built_in_defaults() {
+            policy.validate().expect("built-in default is valid");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_copy_count_and_distinct_single_copy() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.copies = 0;
+        policy.enclosure_placement = EnclosurePlacement::RequireDistinct;
+
+        let err = policy.validate().expect_err("policy should fail");
+
+        assert_eq!(
+            err.errors,
+            vec![
+                StorePolicyValidationError::InvalidCopyCount { copies: 0 },
+                StorePolicyValidationError::DistinctPlacementNeedsMultipleCopies
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_protected_policy_with_unsafe_semantics() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        policy.retention_policy = RetentionPolicy::ImmediateDelete;
+        policy.mutability_policy = MutabilityPolicy::Mutable;
+        policy.capacity_behavior = CapacityBehavior::MarkRedownloadRequired;
+
+        let err = policy.validate().expect_err("policy should fail");
+
+        assert_eq!(
+            err.errors,
+            vec![
+                StorePolicyValidationError::ProtectedStoreDirectToHdd {
+                    class: StoreClass::GeneratedData
+                },
+                StorePolicyValidationError::ProtectedStoreImmediateDelete {
+                    class: StoreClass::GeneratedData
+                },
+                StorePolicyValidationError::ProtectedStoreMutable {
+                    class: StoreClass::GeneratedData
+                },
+                StorePolicyValidationError::ProtectedStoreMarksRedownloadRequired {
+                    class: StoreClass::GeneratedData
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_export_enabled_ingest_staging_policy() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::IngestStaging);
+        policy.export_policy = ExportPolicy::S3;
+
+        let err = policy.validate().expect_err("policy should fail");
+
+        assert_eq!(
+            err.errors,
+            vec![StorePolicyValidationError::IngestStagingExportEnabled]
+        );
     }
 }
