@@ -82,7 +82,7 @@ developers
 - [x] Implement metadata snapshot import/reconstruction tests.
 - [x] Implement dirty-state markers for clean eject, dirty attach, read-only
   import, repair, and force import.
-- [ ] Add `dasobjectstore pool inspect --metadata-path`.
+- [x] Add `dasobjectstore pool inspect --metadata-path`.
 - [ ] Add `dasobjectstore pool mark-clean` and `mark-dirty` developer-only test
   commands behind an explicit debug feature.
 - [ ] Document metadata compatibility and recovery guarantees.

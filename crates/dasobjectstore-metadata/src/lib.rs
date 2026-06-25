@@ -2,6 +2,7 @@
 
 pub mod format;
 pub mod initialize;
+pub mod inspect;
 pub mod manifest;
 pub mod markers;
 pub mod placement_log;
@@ -13,6 +14,7 @@ pub use initialize::{
     initialize_pool, MetadataInitError, PoolInitOptions, PoolInitReport, LIVE_SQLITE_FILE_NAME,
     METADATA_DIR_NAME, SNAPSHOT_DIR_NAME,
 };
+pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
 pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,
     POOL_MANIFEST_FORMAT_VERSION,
