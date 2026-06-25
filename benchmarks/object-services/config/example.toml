@@ -1,0 +1,26 @@
+# Example object-service benchmark configuration.
+# Copy this file for local runs; do not store machine-specific paths here.
+
+[run]
+output_dir = "benchmarks/output/object-services"
+seed = 20260625
+
+[dataset]
+small_object_bytes = 65536
+large_object_bytes = 1073741824
+large_object_count = 4
+small_object_count = 1000
+
+[clients]
+concurrent_clients = 4
+request_timeout_seconds = 120
+
+[storage]
+ssd_ingest_path = "/tmp/dasobjectstore-bench/ssd"
+hdd_root_path = "/tmp/dasobjectstore-bench/hdd"
+
+[providers.garage]
+enabled = true
+
+[providers.rustfs]
+enabled = true
