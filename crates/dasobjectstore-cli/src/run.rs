@@ -1,5 +1,9 @@
+#[cfg(feature = "debug-commands")]
+use crate::cli::PoolMarkerArgs;
 use crate::cli::{Cli, Command, PoolCommand, PoolInspectArgs, ProbeArgs};
 use dasobjectstore_metadata::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
+#[cfg(feature = "debug-commands")]
+use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
 #[cfg(target_os = "macos")]
@@ -15,6 +19,10 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Probe(args)) => run_probe(args, writer),
         Some(Command::Pool(args)) => match args.command() {
             PoolCommand::Inspect(args) => run_pool_inspect(args, writer),
+            #[cfg(feature = "debug-commands")]
+            PoolCommand::MarkClean(args) => run_pool_mark_clean(args, writer),
+            #[cfg(feature = "debug-commands")]
+            PoolCommand::MarkDirty(args) => run_pool_mark_dirty(args, writer),
         },
         _ => Ok(()),
     }
@@ -41,6 +49,28 @@ fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> 
 fn run_pool_inspect(args: &PoolInspectArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let summary = inspect_pool_metadata(args.metadata_path())?;
     write_pool_inspect_summary(&summary, writer)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "debug-commands")]
+fn run_pool_mark_clean(args: &PoolMarkerArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let marker =
+        PoolStateMarker::clean_eject(args.pool_id().clone(), args.recorded_at_utc().to_string());
+    record_pool_state_marker_at(args.live_sqlite_path(), &marker)
+        .map_err(|err| CliError::MetadataMarker(err.to_string()))?;
+    writeln!(writer, "Marked pool {} clean", args.pool_id())?;
+
+    Ok(())
+}
+
+#[cfg(feature = "debug-commands")]
+fn run_pool_mark_dirty(args: &PoolMarkerArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let marker =
+        PoolStateMarker::dirty_attach(args.pool_id().clone(), args.recorded_at_utc().to_string());
+    record_pool_state_marker_at(args.live_sqlite_path(), &marker)
+        .map_err(|err| CliError::MetadataMarker(err.to_string()))?;
+    writeln!(writer, "Marked pool {} dirty", args.pool_id())?;
 
     Ok(())
 }
@@ -136,6 +166,8 @@ pub(crate) enum CliError {
     Io(io::Error),
     Json(serde_json::Error),
     MetadataInspect(PoolInspectError),
+    #[cfg(feature = "debug-commands")]
+    MetadataMarker(String),
     Probe(ProbeError),
     UnsupportedProbeFormat,
 }
@@ -146,6 +178,8 @@ impl Display for CliError {
             Self::Io(err) => write!(formatter, "failed to write command output: {err}"),
             Self::Json(err) => write!(formatter, "failed to encode JSON output: {err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
+            #[cfg(feature = "debug-commands")]
+            Self::MetadataMarker(err) => write!(formatter, "failed to update pool metadata: {err}"),
             Self::Probe(err) => write!(formatter, "{err}"),
             Self::UnsupportedProbeFormat => formatter
                 .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
@@ -186,6 +220,8 @@ mod tests {
     use clap::Parser;
     use dasobjectstore_core::ids::{DiskId, PoolId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
+    #[cfg(feature = "debug-commands")]
+    use dasobjectstore_metadata::{initialize_pool, PoolInitOptions};
     use dasobjectstore_metadata::{
         manifest::DiskRole, ArtifactReference, DiskManifest, DiskManifestEntry, FormatVersion,
         MetadataArtifact, PoolManifest, DISK_MANIFEST_FILE_NAME, PLACEMENT_LOG_FILE_NAME,
@@ -194,6 +230,8 @@ mod tests {
     use dasobjectstore_platform::{
         EnclosureIdentity, HostPlatform, ObservedDisk, ObservedEnclosure, ProbeReport, Transport,
     };
+    #[cfg(feature = "debug-commands")]
+    use rusqlite::Connection;
     use std::fs::{self, File};
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -279,6 +317,71 @@ mod tests {
         assert!(output.contains("Disks: 1"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[cfg(feature = "debug-commands")]
+    #[test]
+    fn pool_debug_marker_commands_update_live_metadata() {
+        let root = temp_root("pool-debug-markers");
+        let init = initialize_pool(&PoolInitOptions::new(
+            &root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-02T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        let live_sqlite_path = init
+            .live_sqlite_path
+            .to_str()
+            .expect("utf8 live sqlite path");
+
+        run_marker_command("mark-dirty", live_sqlite_path, "2026-01-03T00:00:00Z")
+            .expect("mark dirty runs");
+        assert_eq!(pool_state(&init.live_sqlite_path), "Dirty");
+
+        let output = run_marker_command("mark-clean", live_sqlite_path, "2026-01-04T00:00:00Z")
+            .expect("mark clean runs");
+        assert!(output.contains("Marked pool pool-a clean"));
+        assert_eq!(pool_state(&init.live_sqlite_path), "Clean");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[cfg(feature = "debug-commands")]
+    fn run_marker_command(
+        command: &str,
+        live_sqlite_path: &str,
+        recorded_at_utc: &str,
+    ) -> Result<String, CliError> {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            command,
+            "--live-sqlite-path",
+            live_sqlite_path,
+            "--pool-id",
+            "pool-a",
+            "--recorded-at-utc",
+            recorded_at_utc,
+        ])
+        .expect("marker command parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output)?;
+
+        Ok(String::from_utf8(output).expect("utf8 output"))
+    }
+
+    #[cfg(feature = "debug-commands")]
+    fn pool_state(live_sqlite_path: &Path) -> String {
+        let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
+
+        connection
+            .query_row(
+                "SELECT state FROM pools WHERE pool_id = 'pool-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("pool state")
     }
 
     fn write_snapshot_manifests(path: &Path) {

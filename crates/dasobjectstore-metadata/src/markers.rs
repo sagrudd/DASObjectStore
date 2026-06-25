@@ -2,6 +2,7 @@ use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::lifecycle::{ImportMode, PoolState};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -167,6 +168,15 @@ pub fn record_pool_state_marker(
     )?;
 
     Ok(())
+}
+
+pub fn record_pool_state_marker_at(
+    live_sqlite_path: impl AsRef<Path>,
+    marker: &PoolStateMarker,
+) -> Result<(), rusqlite::Error> {
+    let connection = Connection::open(live_sqlite_path)?;
+
+    record_pool_state_marker(&connection, marker)
 }
 
 fn state_name(state: PoolState) -> &'static str {

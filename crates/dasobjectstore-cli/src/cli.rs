@@ -1,4 +1,6 @@
 use clap::{Args, Parser, Subcommand};
+#[cfg(feature = "debug-commands")]
+use dasobjectstore_core::ids::PoolId;
 use std::path::{Path, PathBuf};
 
 /// Portable mixed-disk DAS object store.
@@ -49,6 +51,12 @@ impl PoolArgs {
 pub(crate) enum PoolCommand {
     /// Inspect portable pool metadata from a snapshot directory.
     Inspect(PoolInspectArgs),
+    /// Mark a pool clean in live metadata for developer testing.
+    #[cfg(feature = "debug-commands")]
+    MarkClean(PoolMarkerArgs),
+    /// Mark a pool dirty in live metadata for developer testing.
+    #[cfg(feature = "debug-commands")]
+    MarkDirty(PoolMarkerArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -61,6 +69,35 @@ pub(crate) struct PoolInspectArgs {
 impl PoolInspectArgs {
     pub(crate) fn metadata_path(&self) -> &Path {
         &self.metadata_path
+    }
+}
+
+#[cfg(feature = "debug-commands")]
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct PoolMarkerArgs {
+    /// Path to live.sqlite for the pool under test.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Pool identifier to mark.
+    #[arg(long)]
+    pool_id: PoolId,
+    /// Timestamp to record in metadata.
+    #[arg(long)]
+    recorded_at_utc: String,
+}
+
+#[cfg(feature = "debug-commands")]
+impl PoolMarkerArgs {
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn pool_id(&self) -> &PoolId {
+        &self.pool_id
+    }
+
+    pub(crate) fn recorded_at_utc(&self) -> &str {
+        &self.recorded_at_utc
     }
 }
 
@@ -133,6 +170,37 @@ mod tests {
             PoolCommand::Inspect(inspect) => {
                 assert_eq!(inspect.metadata_path(), Path::new("/tmp/metadata"));
             }
+            #[cfg(feature = "debug-commands")]
+            _ => panic!("expected inspect command"),
+        }
+    }
+
+    #[cfg(feature = "debug-commands")]
+    #[test]
+    fn parses_pool_mark_clean_debug_command() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            "mark-clean",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--pool-id",
+            "pool-a",
+            "--recorded-at-utc",
+            "2026-01-03T00:00:00Z",
+        ])
+        .expect("pool mark-clean parses");
+
+        let Some(Command::Pool(args)) = cli.command() else {
+            panic!("expected pool command");
+        };
+        match args.command() {
+            PoolCommand::MarkClean(marker) => {
+                assert_eq!(marker.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert_eq!(marker.pool_id().as_str(), "pool-a");
+                assert_eq!(marker.recorded_at_utc(), "2026-01-03T00:00:00Z");
+            }
+            _ => panic!("expected mark-clean"),
         }
     }
 

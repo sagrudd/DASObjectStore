@@ -128,6 +128,7 @@ dependencies = [
  "dasobjectstore-core",
  "dasobjectstore-metadata",
  "dasobjectstore-platform",
+ "rusqlite",
  "serde_json",
 ]
 
