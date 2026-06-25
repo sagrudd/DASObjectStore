@@ -1,0 +1,14 @@
+services:
+  garage:
+    image: ${DASOBJECTSTORE_GARAGE_IMAGE:-dxflrs/garage:v2.3.0}
+    container_name: dasobjectstore-bench-garage
+    restart: "no"
+    ports:
+      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:3901:3901"
+      - "127.0.0.1:3902:3902"
+      - "127.0.0.1:3903:3903"
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - ../../../output/object-services/garage/meta:/var/lib/garage/meta
+      - ../../../output/object-services/garage/data:/var/lib/garage/data
