@@ -29,6 +29,9 @@ case "$workload" in
   large-object)
     exec "$(dirname "$0")/../workloads/large-object.sh" "$provider"
     ;;
+  small-object)
+    exec "$(dirname "$0")/../workloads/small-object.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69
