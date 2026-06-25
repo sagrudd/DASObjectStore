@@ -78,7 +78,7 @@ developers
 - [x] Define canonical disk manifest format.
 - [x] Define append-only placement log format.
 - [x] Implement metadata initialization for a new pool on an SSD path.
-- [ ] Implement metadata snapshot export to HDD metadata directories.
+- [x] Implement metadata snapshot export to HDD metadata directories.
 - [ ] Implement metadata snapshot import/reconstruction tests.
 - [ ] Implement dirty-state markers for clean eject, dirty attach, read-only
   import, repair, and force import.

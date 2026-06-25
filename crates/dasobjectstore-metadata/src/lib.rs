@@ -5,6 +5,7 @@ pub mod initialize;
 pub mod manifest;
 pub mod placement_log;
 pub mod schema;
+pub mod snapshot;
 
 pub use format::{FormatVersion, MetadataArtifact};
 pub use initialize::{
@@ -17,6 +18,10 @@ pub use manifest::{
 };
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
+pub use snapshot::{
+    export_metadata_snapshot, SnapshotExportError, SnapshotExportOptions, SnapshotExportReport,
+    DISK_MANIFEST_FILE_NAME, PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
+};
 
 /// Returns the metadata crate version.
 pub fn version() -> &'static str {
