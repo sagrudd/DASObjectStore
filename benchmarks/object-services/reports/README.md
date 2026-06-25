@@ -21,3 +21,10 @@ benchmarks/object-services/scripts/check-report-inputs.sh
 
 The check fails until each required Garage and RustFS workload has generated its
 expected TSV report under `benchmarks/output/object-services/`.
+
+To generate a Markdown inventory of raw report inputs for the selection report,
+run:
+
+```sh
+benchmarks/object-services/scripts/report-input-index.sh
+```

@@ -77,6 +77,12 @@ benchmarks/object-services/scripts/check-report-inputs.sh
 
 The selection report must not be produced until this check passes.
 
+Generate a Markdown input inventory for the report appendix:
+
+```sh
+benchmarks/object-services/scripts/report-input-index.sh
+```
+
 ## 5. Stop Providers
 
 Garage:
@@ -102,5 +108,7 @@ The report must:
 - score performance only for providers that pass every reliability gate;
 - state whether Garage, RustFS, or neither is selected for MVP integration;
 - record environment details, Docker image tags, and configuration overrides;
+- include or link the raw input inventory generated from the benchmark output
+  tree;
 - keep raw benchmark outputs under `benchmarks/output/object-services/` and out
   of version control.

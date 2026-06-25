@@ -66,5 +66,11 @@ Check whether the raw outputs are sufficient for a selection report:
 benchmarks/object-services/scripts/check-report-inputs.sh
 ```
 
+Generate a Markdown inventory of raw report inputs:
+
+```sh
+benchmarks/object-services/scripts/report-input-index.sh
+```
+
 Provider-specific setup is intentionally added in separate tasks so Garage and
 RustFS remain comparable.
