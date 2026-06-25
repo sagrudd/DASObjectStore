@@ -90,6 +90,12 @@ benchmarks/object-services/scripts/draft-report.sh \
   > benchmarks/object-services/reports/YYYY-MM-DD-provider-selection.md
 ```
 
+Capture a Markdown environment snapshot for the report:
+
+```sh
+benchmarks/object-services/scripts/environment-snapshot.sh
+```
+
 ## 5. Stop Providers
 
 Garage:

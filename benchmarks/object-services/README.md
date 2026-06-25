@@ -78,5 +78,11 @@ Generate a draft provider-selection report:
 benchmarks/object-services/scripts/draft-report.sh
 ```
 
+Capture a Markdown environment snapshot:
+
+```sh
+benchmarks/object-services/scripts/environment-snapshot.sh
+```
+
 Provider-specific setup is intentionally added in separate tasks so Garage and
 RustFS remain comparable.

@@ -34,3 +34,9 @@ To generate a draft report from the template plus that input inventory, run:
 ```sh
 benchmarks/object-services/scripts/draft-report.sh
 ```
+
+To capture host and tool versions for the report environment section, run:
+
+```sh
+benchmarks/object-services/scripts/environment-snapshot.sh
+```
