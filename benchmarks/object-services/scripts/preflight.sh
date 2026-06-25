@@ -64,6 +64,44 @@ require_s3_cli() {
   fi
 }
 
+command_finishes_within() {
+  seconds="$1"
+  shift
+
+  "$@" >/dev/null 2>&1 &
+  command_pid="$!"
+
+  (
+    sleep "$seconds"
+    kill "$command_pid" >/dev/null 2>&1 || true
+  ) &
+  timer_pid="$!"
+
+  if wait "$command_pid"; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  kill "$timer_pid" >/dev/null 2>&1 || true
+  wait "$timer_pid" >/dev/null 2>&1 || true
+
+  return "$status"
+}
+
+require_docker_daemon() {
+  if ! command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  timeout_seconds="${DASOBJECTSTORE_BENCH_DOCKER_CHECK_TIMEOUT_SECONDS:-15}"
+  if command_finishes_within "$timeout_seconds" docker info; then
+    echo "ok command: docker daemon"
+  else
+    record_failure "docker daemon did not respond within ${timeout_seconds}s"
+  fi
+}
+
 require_file() {
   path="$1"
   if [ -f "$path" ]; then
@@ -111,6 +149,7 @@ done
 
 if [ "$offline" -eq 0 ]; then
   require_s3_cli
+  require_docker_daemon
   require_command awk
   require_command cp
   require_command date

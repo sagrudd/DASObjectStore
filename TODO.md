@@ -167,9 +167,11 @@ developers
 - [x] Include environment snapshot in benchmark draft report.
 - [x] Support containerized AWS CLI for benchmark workloads.
 - [x] Autogenerate Garage benchmark S3 keys and bucket permissions.
+- [x] Add bounded Docker daemon responsiveness check to benchmark preflight.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
-  `benchmarks/output/object-services/`.
+  `benchmarks/output/object-services/`. Automation attempt on 2026-06-25 was
+  blocked because local Docker commands hung before provider startup completed.
 - [ ] Produce first benchmark report and recommend MVP object service.
   Blocked until the complete Garage and RustFS workload set exists under
   `benchmarks/output/object-services/`.

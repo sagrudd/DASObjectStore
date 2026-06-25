@@ -29,8 +29,10 @@ Check local tool dependencies before a real run:
 benchmarks/object-services/scripts/preflight.sh
 ```
 
-If the local preflight fails, fix the missing command or Docker Compose issue
-before starting provider containers.
+If the local preflight fails, fix the missing command, Docker daemon, or Docker
+Compose issue before starting provider containers. The Docker daemon
+responsiveness check defaults to 15 seconds and can be adjusted with
+`DASOBJECTSTORE_BENCH_DOCKER_CHECK_TIMEOUT_SECONDS`.
 
 When `aws` is not installed locally, the workload scripts run S3 commands via
 Docker using `${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}`. Local
