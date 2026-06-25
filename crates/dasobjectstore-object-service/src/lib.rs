@@ -2,6 +2,7 @@
 
 pub mod compose;
 pub mod credentials;
+pub mod layout;
 pub mod provider;
 
 pub use compose::{render_compose, ComposeServiceConfig};
@@ -10,6 +11,7 @@ pub use credentials::{
     CredentialReferenceManifest, SecretAccessKey, StoreCredentialReference, StoreCredentialRequest,
     StoreServiceCredential, SystemCredentialEntropy,
 };
+pub use layout::{plan_store_service_layout, StoreServiceDefinition, StoreServiceLayout};
 pub use provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus, StoreBucketBinding,

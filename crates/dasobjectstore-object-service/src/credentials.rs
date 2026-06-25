@@ -179,13 +179,13 @@ fn generate_store_credential(
     Ok(StoreServiceCredential {
         store_id: request.store_id.clone(),
         bucket_name: request.bucket_name.clone(),
-        credential_reference: credential_reference_for(&request.store_id),
+        credential_reference: credential_reference_for_store(&request.store_id),
         access_key_id: format!("DOS{}", hex_upper(&access_key_bytes)),
         secret_access_key: SecretAccessKey(hex_lower(&secret_key_bytes)),
     })
 }
 
-fn credential_reference_for(store_id: &StoreId) -> String {
+pub fn credential_reference_for_store(store_id: &StoreId) -> String {
     format!("secret://dasobjectstore/stores/{store_id}/s3")
 }
 

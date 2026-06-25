@@ -167,7 +167,7 @@ developers
 - [x] Generate Docker/Compose configuration from store and pool policy.
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.
-- [ ] Map store definitions to bucket/service layout.
+- [x] Map store definitions to bucket/service layout.
 - [ ] Add `dasobjectstore service render-compose`.
 - [ ] Add `dasobjectstore service up`.
 - [ ] Add `dasobjectstore service down`.
