@@ -244,5 +244,5 @@ developers
 - [x] Add negative tests for risky operation gates.
 - [x] Keep documentation for data-loss risks adjacent to commands that can
   trigger those risks.
-- [ ] Review file sizes before each milestone completion and split modules that
+- [x] Review file sizes before each milestone completion and split modules that
   have grown too broad.
