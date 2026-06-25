@@ -26,6 +26,17 @@ CREATE TABLE IF NOT EXISTS pools (
     updated_at_utc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pool_state_markers (
+    marker_id INTEGER PRIMARY KEY NOT NULL,
+    pool_id TEXT NOT NULL REFERENCES pools(pool_id),
+    marker_kind TEXT NOT NULL,
+    previous_state TEXT,
+    next_state TEXT NOT NULL,
+    import_mode TEXT,
+    reason TEXT,
+    recorded_at_utc TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS disks (
     disk_id TEXT PRIMARY KEY NOT NULL,
     pool_id TEXT NOT NULL REFERENCES pools(pool_id),
@@ -115,6 +126,7 @@ mod tests {
                 "metadata_migrations",
                 "objects",
                 "placements",
+                "pool_state_markers",
                 "pools",
                 "stores",
             ]

@@ -3,6 +3,7 @@
 pub mod format;
 pub mod initialize;
 pub mod manifest;
+pub mod markers;
 pub mod placement_log;
 pub mod schema;
 pub mod snapshot;
@@ -16,6 +17,7 @@ pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,
     POOL_MANIFEST_FORMAT_VERSION,
 };
+pub use markers::{record_pool_state_marker, PoolStateMarker, PoolStateMarkerKind};
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{
