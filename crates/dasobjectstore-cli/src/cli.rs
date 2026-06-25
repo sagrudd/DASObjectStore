@@ -299,6 +299,8 @@ pub(crate) enum ServiceCommand {
     RenderCompose(ServiceRenderComposeArgs),
     /// Start the rendered object service with Docker Compose.
     Up(ServiceComposeArgs),
+    /// Stop the rendered object service with Docker Compose.
+    Down(ServiceComposeArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -502,6 +504,31 @@ mod tests {
                 assert!(up.dry_run());
             }
             _ => panic!("expected up command"),
+        }
+    }
+
+    #[test]
+    fn parses_service_down_dry_run() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "down",
+            "--compose-file",
+            "/tmp/compose.yaml",
+            "--dry-run",
+        ])
+        .expect("service down parses");
+
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command");
+        };
+        match args.command() {
+            ServiceCommand::Down(down) => {
+                assert_eq!(down.compose_file(), Path::new("/tmp/compose.yaml"));
+                assert_eq!(down.project_directory(), None);
+                assert!(down.dry_run());
+            }
+            _ => panic!("expected down command"),
         }
     }
 

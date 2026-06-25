@@ -57,13 +57,38 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Service(args)) => match args.command() {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
             ServiceCommand::Up(args) => run_service_up(args, writer),
+            ServiceCommand::Down(args) => run_service_down(args, writer),
         },
         _ => Ok(()),
     }
 }
 
 fn run_service_up(args: &ServiceComposeArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let command = docker_compose_args(args.compose_file(), args.project_directory(), ["up", "-d"]);
+    run_docker_compose(args, ["up", "-d"], writer)?;
+    if args.dry_run() {
+        return Ok(());
+    }
+    writeln!(writer, "Object service started")?;
+
+    Ok(())
+}
+
+fn run_service_down(args: &ServiceComposeArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    run_docker_compose(args, ["down"], writer)?;
+    if args.dry_run() {
+        return Ok(());
+    }
+    writeln!(writer, "Object service stopped")?;
+
+    Ok(())
+}
+
+fn run_docker_compose(
+    args: &ServiceComposeArgs,
+    action_args: impl IntoIterator<Item = &'static str>,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let command = docker_compose_args(args.compose_file(), args.project_directory(), action_args);
 
     if args.dry_run() {
         writeln!(writer, "docker {}", command.join(" "))?;
@@ -79,15 +104,13 @@ fn run_service_up(args: &ServiceComposeArgs, writer: &mut impl Write) -> Result<
         )));
     }
 
-    writeln!(writer, "Object service started")?;
-
     Ok(())
 }
 
-fn docker_compose_args<'a>(
-    compose_file: &'a Path,
-    project_directory: Option<&'a Path>,
-    action_args: impl IntoIterator<Item = &'a str>,
+fn docker_compose_args(
+    compose_file: &Path,
+    project_directory: Option<&Path>,
+    action_args: impl IntoIterator<Item = &'static str>,
 ) -> Vec<String> {
     let mut args = vec![
         "compose".to_string(),
@@ -898,6 +921,25 @@ mod tests {
             output,
             "docker compose -f /tmp/compose.yaml --project-directory /tmp/project up -d\n"
         );
+    }
+
+    #[test]
+    fn service_down_dry_run_writes_docker_compose_command() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "down",
+            "--compose-file",
+            "/tmp/compose.yaml",
+            "--dry-run",
+        ])
+        .expect("service down parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("service down dry run succeeds");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert_eq!(output, "docker compose -f /tmp/compose.yaml down\n");
     }
 
     #[cfg(feature = "debug-commands")]
