@@ -131,7 +131,7 @@ developers
 - [x] Implement duplicate-copy prevention on the same disk for protected
   objects.
 - [x] Implement HDD copy write and post-copy hash verification.
-- [ ] Implement object protection state update after policy-satisfying copies.
+- [x] Implement object protection state update after policy-satisfying copies.
 - [ ] Implement redownload-required state for reproducible cache objects.
 - [ ] Add `dasobjectstore object inspect <object-id>`.
 - [ ] Add placement tests for mixed disk sizes.
