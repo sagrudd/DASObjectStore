@@ -20,7 +20,8 @@ pub mod schema;
 pub mod snapshot;
 
 pub use attach::{
-    attach_clean_pool_read_only, ReadOnlyAttachError, ReadOnlyAttachOptions, ReadOnlyAttachReport,
+    attach_clean_pool_read_only, import_dirty_pool_read_only, ReadOnlyAttachError,
+    ReadOnlyAttachOptions, ReadOnlyAttachReport,
 };
 pub use capacity::{
     measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError, SsdCapacityPolicy,

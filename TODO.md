@@ -201,7 +201,7 @@ developers
 
 - [x] Implement macOS read-only pool inspection from metadata snapshots.
 - [x] Implement macOS clean-pool read-only attach flow.
-- [ ] Implement macOS dirty-pool read-only default import flow.
+- [x] Implement macOS dirty-pool read-only default import flow.
 - [ ] Implement settled object export command for macOS.
 - [ ] Add `dasobjectstore pool import --read-only`.
 - [ ] Add `dasobjectstore pool repair --dry-run`.

@@ -44,13 +44,45 @@ pub fn attach_clean_pool_read_only(
         });
     }
 
-    let import = import_metadata_snapshot(&SnapshotImportOptions::new(
+    attach_read_only(
         summary.metadata_path,
+        options,
+        "clean portable read-only attach",
+        PoolStateMarker::read_only_clean_attach,
+    )
+}
+
+pub fn import_dirty_pool_read_only(
+    options: &ReadOnlyAttachOptions,
+) -> Result<ReadOnlyAttachReport, ReadOnlyAttachError> {
+    let summary = inspect_pool_metadata(&options.source_path)?;
+    if summary.state != PoolState::Dirty {
+        return Err(ReadOnlyAttachError::PoolNotDirty {
+            state: summary.state,
+        });
+    }
+
+    attach_read_only(
+        summary.metadata_path,
+        options,
+        "dirty portable read-only import",
+        PoolStateMarker::read_only_import,
+    )
+}
+
+fn attach_read_only(
+    metadata_path: PathBuf,
+    options: &ReadOnlyAttachOptions,
+    reason: &'static str,
+    marker_fn: fn(PoolId, &'static str, String) -> PoolStateMarker,
+) -> Result<ReadOnlyAttachReport, ReadOnlyAttachError> {
+    let import = import_metadata_snapshot(&SnapshotImportOptions::new(
+        metadata_path,
         &options.recovery_metadata_dir,
     ))?;
-    let marker = PoolStateMarker::read_only_clean_attach(
+    let marker = marker_fn(
         import.pool_id.clone(),
-        "clean portable read-only attach",
+        reason,
         options.recorded_at_utc.clone(),
     );
     record_pool_state_marker_at(&import.recovered_live_sqlite_path, &marker)?;
@@ -68,6 +100,7 @@ pub enum ReadOnlyAttachError {
     Import(SnapshotImportError),
     Sqlite(rusqlite::Error),
     PoolNotClean { state: PoolState },
+    PoolNotDirty { state: PoolState },
 }
 
 impl Display for ReadOnlyAttachError {
@@ -79,6 +112,10 @@ impl Display for ReadOnlyAttachError {
             Self::PoolNotClean { state } => write!(
                 formatter,
                 "clean read-only attach requires a clean pool snapshot, found {state:?}"
+            ),
+            Self::PoolNotDirty { state } => write!(
+                formatter,
+                "dirty read-only import requires a dirty pool snapshot, found {state:?}"
             ),
         }
     }
@@ -106,7 +143,10 @@ impl From<rusqlite::Error> for ReadOnlyAttachError {
 
 #[cfg(test)]
 mod tests {
-    use super::{attach_clean_pool_read_only, ReadOnlyAttachError, ReadOnlyAttachOptions};
+    use super::{
+        attach_clean_pool_read_only, import_dirty_pool_read_only, ReadOnlyAttachError,
+        ReadOnlyAttachOptions,
+    };
     use crate::initialize::{initialize_pool, PoolInitOptions};
     use crate::snapshot::{export_metadata_snapshot, SnapshotExportOptions};
     use dasobjectstore_core::ids::PoolId;
@@ -188,6 +228,79 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn imports_dirty_pool_snapshot_as_read_only_by_default() {
+        let root = temp_root("dirty-default-read-only-import");
+        let ssd_root = root.join("ssd");
+        let source_root = root.join("mounted-disk");
+        let recovery_root = root.join("recovered");
+        let snapshot_dir = source_root.join(".dasobjectstore").join("metadata");
+        let init = initialize_pool(&PoolInitOptions::new(
+            &ssd_root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-02T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        mark_pool_state(&init.live_sqlite_path, "Dirty");
+        insert_disk(&init.live_sqlite_path);
+        export_metadata_snapshot(&SnapshotExportOptions::new(
+            &init.live_sqlite_path,
+            vec![snapshot_dir],
+            "2026-01-03T00:00:00Z",
+        ))
+        .expect("snapshot exports");
+
+        let report = import_dirty_pool_read_only(&ReadOnlyAttachOptions::new(
+            &source_root,
+            &recovery_root,
+            "2026-01-04T00:00:00Z",
+        ))
+        .expect("dirty pool imports read-only");
+
+        assert_eq!(report.pool_id.as_str(), "pool-a");
+        assert_eq!(report.recovered_disk_count, 1);
+        assert_eq!(pool_state(&report.recovered_live_sqlite_path), "ReadOnly");
+        assert_eq!(
+            marker_reason(&report.recovered_live_sqlite_path),
+            "dirty portable read-only import"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn rejects_clean_pool_snapshot_for_dirty_import() {
+        let root = temp_root("clean-dirty-import");
+        let ssd_root = root.join("ssd");
+        let source_root = root.join("mounted-disk");
+        let recovery_root = root.join("recovered");
+        let snapshot_dir = source_root.join(".dasobjectstore").join("metadata");
+        let init = initialize_pool(&PoolInitOptions::new(
+            &ssd_root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-02T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        mark_pool_state(&init.live_sqlite_path, "Clean");
+        export_metadata_snapshot(&SnapshotExportOptions::new(
+            &init.live_sqlite_path,
+            vec![snapshot_dir],
+            "2026-01-03T00:00:00Z",
+        ))
+        .expect("snapshot exports");
+
+        let err = import_dirty_pool_read_only(&ReadOnlyAttachOptions::new(
+            &source_root,
+            &recovery_root,
+            "2026-01-04T00:00:00Z",
+        ))
+        .expect_err("clean pool is rejected for dirty import");
+
+        assert!(matches!(err, ReadOnlyAttachError::PoolNotDirty { .. }));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     fn mark_pool_state(live_sqlite_path: &PathBuf, state: &str) {
         let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
         connection
@@ -243,6 +356,17 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("marker kind")
+    }
+
+    fn marker_reason(live_sqlite_path: &PathBuf) -> String {
+        let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
+        connection
+            .query_row(
+                "SELECT reason FROM pool_state_markers WHERE pool_id = 'pool-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("marker reason")
     }
 
     fn temp_root(name: &str) -> PathBuf {
