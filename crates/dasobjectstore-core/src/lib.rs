@@ -2,6 +2,7 @@
 
 pub mod ids;
 pub mod lifecycle;
+pub mod risk;
 pub mod store;
 
 /// Current core crate version.

@@ -97,7 +97,7 @@ developers
   placement, ingest mode, and capacity behavior.
 - [x] Implement policy validation for enclosure-aware placement preferences and
   requirements.
-- [ ] Implement risk-gating model for direct-to-HDD import, force retire, and
+- [x] Implement risk-gating model for direct-to-HDD import, force retire, and
   force read-write import.
 - [ ] Add `dasobjectstore store validate <policy-file>`.
 - [ ] Add `dasobjectstore store defaults --class <class>`.
