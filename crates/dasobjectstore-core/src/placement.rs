@@ -1,5 +1,6 @@
 //! HDD placement candidate domain model.
 
+use crate::health::health_state_score;
 use crate::ids::{DiskId, EnclosureId};
 use crate::lifecycle::HealthState;
 use crate::store::{EnclosurePlacement, StorePolicy};
@@ -61,7 +62,7 @@ impl PlacementCandidate {
         }
 
         let capacity_score = capacity_score(self.available_bytes, request.object_size_bytes);
-        let health_score = health_score(self.health_state);
+        let health_score = health_state_score(self.health_state);
         let performance_score = performance_score(self.performance_class);
         let write_load_score = write_load_score(self.write_load);
         let total = capacity_score
@@ -302,15 +303,6 @@ fn capacity_score(available_bytes: u64, object_size_bytes: u64) -> u16 {
     let capacity_multiple = available_bytes / object_size_bytes;
     let capped = capacity_multiple.min(100);
     capped as u16
-}
-
-fn health_score(health_state: HealthState) -> u8 {
-    match health_state {
-        HealthState::Healthy => 100,
-        HealthState::Watch => 70,
-        HealthState::Suspect => 20,
-        HealthState::Draining | HealthState::Retired | HealthState::Failed => 0,
-    }
 }
 
 fn performance_score(performance_class: PerformanceClass) -> u8 {
