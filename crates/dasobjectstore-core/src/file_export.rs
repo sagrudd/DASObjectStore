@@ -1,6 +1,13 @@
 //! Read-only file export recipe generation.
 
+mod managed;
+
 use crate::ids::StoreId;
+pub use managed::{
+    plan_managed_read_only_export_task, ManagedExportCommand, ManagedExportExecutionMode,
+    ManagedExportHost, ManagedExportProtocol, ManagedReadOnlyExportTaskPlan,
+    ManagedReadOnlyExportTaskRequest,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
@@ -137,9 +144,12 @@ pub enum FileExportRecipeError {
     BlankShareName,
     BlankExportName,
     BlankClientSpec,
+    BlankServiceName,
     InvalidShareName { value: String },
     InvalidExportName { value: String },
     RelativeSettledPath { path: PathBuf },
+    RelativeRecipePath { path: PathBuf },
+    UnsupportedManagedExportHost { host: String },
 }
 
 impl Display for FileExportRecipeError {
@@ -148,6 +158,9 @@ impl Display for FileExportRecipeError {
             Self::BlankShareName => formatter.write_str("SMB share name must not be blank"),
             Self::BlankExportName => formatter.write_str("NFS export name must not be blank"),
             Self::BlankClientSpec => formatter.write_str("NFS client spec must not be blank"),
+            Self::BlankServiceName => {
+                formatter.write_str("managed export service name must not be blank")
+            }
             Self::InvalidShareName { value } => write!(
                 formatter,
                 "invalid SMB share name `{value}`; use letters, numbers, dots, dashes, and underscores"
@@ -158,6 +171,15 @@ impl Display for FileExportRecipeError {
             ),
             Self::RelativeSettledPath { path } => write!(
                 formatter, "settled export path must be absolute: {}", path.display()
+            ),
+            Self::RelativeRecipePath { path } => write!(
+                formatter,
+                "managed export recipe path must be absolute: {}",
+                path.display()
+            ),
+            Self::UnsupportedManagedExportHost { host } => write!(
+                formatter,
+                "managed read-only exports are only planned for Linux hosts, not {host}"
             ),
         }
     }
