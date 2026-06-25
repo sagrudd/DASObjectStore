@@ -135,11 +135,19 @@ hardware path, with macOS results recorded only as development observations.
      --recorded-at-utc 2026-01-05T00:00:00Z
    ```
 
+   Read-only import creates local recovered metadata for inspection. It must not
+   be treated as a repaired writable pool, and it does not recover SSD-only
+   ingest data that was never settled to HDD.
+
 3. Preview repair intent without mutation:
 
    ```bash
    dasobjectstore pool repair --source-path /Volumes/das-disk --dry-run
    ```
+
+   `pool repair --dry-run` is advisory only. Any future non-dry-run repair path
+   must document whether it rewrites metadata, changes pool state, or marks
+   unresolved ingest work as lost.
 
 4. Export settled objects only from readable mounted disk roots.
 

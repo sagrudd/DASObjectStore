@@ -148,7 +148,9 @@ received_on_ssd
 
 CLI-managed public imports may bypass SSD ingest later for reproducible objects
 with an expected digest and source URL. That bypass is intentionally not the
-normal S3/API write path and is not exposed by the current CLI.
+normal S3/API write path and is not exposed by the current CLI. If implemented,
+it must remain limited to reproducible data because it bypasses the normal SSD
+capture and acknowledgement path.
 
 ## Portability
 
@@ -216,6 +218,13 @@ dasobjectstore disk force-retire <disk-id> \
   --allow-force-retire \
   --confirm "confirm force retire"
 ```
+
+`disk retire` and `disk drain` are planning and state-transition workflows for
+safe removal. They do not make a disk safe to pull until protected stores have
+policy-satisfying verified copies elsewhere. `disk force-retire` bypasses that
+safe drain requirement and can leave data unavailable unless it is already
+protected or reproducible, so it requires both policy allowance and action-time
+confirmation.
 
 Protected stores must satisfy their policy before safe removal. Reproducible
 cache objects may be marked redownload-required. Force retirement bypasses the

@@ -242,7 +242,7 @@ developers
 - [x] Keep JSON/schema-like formats versioned before implementation lands.
 - [x] Add test fixtures whenever platform command output parsing is introduced.
 - [x] Add negative tests for risky operation gates.
-- [ ] Keep documentation for data-loss risks adjacent to commands that can
+- [x] Keep documentation for data-loss risks adjacent to commands that can
   trigger those risks.
 - [ ] Review file sizes before each milestone completion and split modules that
   have grown too broad.

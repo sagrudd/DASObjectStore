@@ -216,6 +216,10 @@ for large reproducible downloads.
 
 Direct-to-HDD bypass SHALL NOT be the default S3/API write path.
 
+Direct-to-HDD command documentation SHALL state adjacent to the command that the
+path bypasses SSD capture and is only appropriate for reproducible objects with
+known source metadata and expected digests.
+
 Risky bypass behavior SHALL require both policy allowance and action-time
 confirmation.
 
@@ -295,6 +299,10 @@ require explicit user confirmation before formatting or adding it.
 DASObjectStore SHALL provide explicit disk retirement workflow.
 
 Protected stores SHALL be drained before a disk is safe to remove.
+
+Disk retire, drain, replace, and force-retire command documentation SHALL state
+adjacent to command examples whether the operation is only planning, whether the
+disk is safe to remove, and what data may become unavailable.
 
 Reproducible cache objects MAY be marked redownload-required during retirement.
 
