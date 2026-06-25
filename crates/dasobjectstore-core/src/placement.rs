@@ -473,6 +473,85 @@ mod tests {
     }
 
     #[test]
+    fn scorer_prefers_larger_mixed_size_disk_when_other_inputs_match() {
+        let candidates = vec![
+            candidate(
+                "disk-2tb",
+                None,
+                2_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-8tb",
+                None,
+                8_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-4tb",
+                None,
+                4_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let scores = score_candidates(&candidates, &PlacementRequest::protected(1_000));
+
+        assert_eq!(scores[0].disk_id.as_str(), "disk-8tb");
+        assert_eq!(scores[0].capacity_score, 8);
+        assert_eq!(scores[1].disk_id.as_str(), "disk-4tb");
+        assert_eq!(scores[1].capacity_score, 4);
+        assert_eq!(scores[2].disk_id.as_str(), "disk-2tb");
+        assert_eq!(scores[2].capacity_score, 2);
+    }
+
+    #[test]
+    fn copy_planner_filters_too_small_disks_from_mixed_size_pool() {
+        let candidates = vec![
+            candidate(
+                "disk-too-small",
+                None,
+                999,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-small-eligible",
+                None,
+                1_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+            candidate(
+                "disk-large",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+        ];
+
+        let plan =
+            plan_copies(&candidates, &PlacementRequest::protected(1_000), 2).expect("copy plan");
+
+        assert!(plan.is_complete());
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-large");
+        assert_eq!(
+            plan.planned_copies[1].disk_id.as_str(),
+            "disk-small-eligible"
+        );
+    }
+
+    #[test]
     fn copy_planner_supports_one_two_and_three_copies() {
         let candidates = vec![
             candidate(
