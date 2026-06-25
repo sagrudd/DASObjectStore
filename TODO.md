@@ -74,7 +74,7 @@ developers
 - [x] Create `dasobjectstore-metadata` crate.
 - [x] Define SQLite schema for live SSD metadata.
 - [x] Define metadata format version table and migration table.
-- [ ] Define canonical pool manifest format.
+- [x] Define canonical pool manifest format.
 - [ ] Define canonical disk manifest format.
 - [ ] Define append-only placement log format.
 - [ ] Implement metadata initialization for a new pool on an SSD path.

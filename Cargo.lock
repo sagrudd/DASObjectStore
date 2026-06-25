@@ -144,6 +144,8 @@ version = "0.0.0"
 dependencies = [
  "dasobjectstore-core",
  "rusqlite",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

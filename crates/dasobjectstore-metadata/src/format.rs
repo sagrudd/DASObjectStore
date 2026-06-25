@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MetadataArtifact {
     LiveSqlite,
     PoolManifest,
@@ -25,7 +27,7 @@ impl Display for MetadataArtifact {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FormatVersion {
     pub artifact: MetadataArtifact,
     pub major: u16,
