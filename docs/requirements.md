@@ -294,6 +294,9 @@ pressure to jeopardize critical work.
 DASObjectStore SHALL measure SSD ingest filesystem capacity and evaluate it
 against explicit high and critical watermarks before accepting new ingest work.
 
+DASObjectStore SHALL order ingest work by priority, then by age, and SHALL ignore
+completed or failed ingest jobs when planning runnable queue work.
+
 Per-store SSD budgets MAY be added later.
 
 ## 16. Performance Requirements

@@ -115,7 +115,7 @@ developers
   `ssd_eviction_eligible`.
 - [x] Implement store-configurable acknowledgement policy.
 - [x] Implement SSD capacity measurement and high-watermark policy.
-- [ ] Implement priority queue and backpressure behavior for SSD pressure.
+- [x] Implement priority queue and backpressure behavior for SSD pressure.
 - [ ] Add `dasobjectstore ingest status`.
 - [ ] Add `dasobjectstore ingest queue --json`.
 - [ ] Add crash/restart test for an ingest job before HDD settlement.

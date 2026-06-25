@@ -8,6 +8,7 @@ pub mod inspect;
 pub mod manifest;
 pub mod markers;
 pub mod placement_log;
+pub mod queue;
 pub mod schema;
 pub mod snapshot;
 
@@ -34,6 +35,10 @@ pub use markers::{
     record_pool_state_marker, record_pool_state_marker_at, PoolStateMarker, PoolStateMarkerKind,
 };
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
+pub use queue::{
+    IngestAdmission, IngestBackpressurePolicy, IngestQueueEntry, IngestQueuePlan,
+    DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY, DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
+};
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{
     export_metadata_snapshot, import_metadata_snapshot, SnapshotExportError, SnapshotExportOptions,
