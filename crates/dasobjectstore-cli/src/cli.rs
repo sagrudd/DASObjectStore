@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 /// Portable mixed-disk DAS object store.
 #[derive(Debug, Parser)]
@@ -17,7 +17,7 @@ impl Cli {
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum Command {
     /// Inspect candidate DAS disks and enclosures.
-    Probe,
+    Probe(ProbeArgs),
     /// Report pool, disk, and service health.
     Health,
     /// Manage portable storage pools.
@@ -32,9 +32,22 @@ pub(crate) enum Command {
     Mnemosyne,
 }
 
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ProbeArgs {
+    /// Emit probe results as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl ProbeArgs {
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command};
+    use super::{Cli, Command, ProbeArgs};
     use clap::Parser;
 
     #[test]
@@ -47,7 +60,6 @@ mod tests {
     #[test]
     fn parses_top_level_command_skeletons() {
         let cases = [
-            ("probe", Command::Probe),
             ("health", Command::Health),
             ("pool", Command::Pool),
             ("disk", Command::Disk),
@@ -62,5 +74,15 @@ mod tests {
 
             assert_eq!(cli.command(), Some(&expected));
         }
+    }
+
+    #[test]
+    fn parses_probe_json_flag() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "probe", "--json"]).expect("probe parses");
+
+        assert_eq!(
+            cli.command(),
+            Some(&Command::Probe(ProbeArgs { json: true }))
+        );
     }
 }
