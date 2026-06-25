@@ -55,6 +55,9 @@ library APIs.
 
 Persistent metadata must carry explicit format versions.
 
+Recovery behavior and metadata compatibility boundaries are documented in
+[Metadata Compatibility and Recovery](metadata-compatibility.md).
+
 At minimum, these formats require independent versions:
 
 - live SQLite metadata schema;
@@ -104,4 +107,3 @@ one of:
 - `TODO.md`;
 - an ADR or design note;
 - release notes.
-

@@ -129,6 +129,9 @@ Metadata SHALL support recovery of committed HDD objects if the SSD fails.
 The MVP MAY lose pending SSD-only ingest objects if the SSD fails before
 settlement.
 
+Metadata compatibility and recovery guarantees are documented in
+[Metadata Compatibility and Recovery](metadata-compatibility.md).
+
 ## 8. Store Model
 
 DASObjectStore SHALL organize data into stores.

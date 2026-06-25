@@ -85,7 +85,7 @@ developers
 - [x] Add `dasobjectstore pool inspect --metadata-path`.
 - [x] Add `dasobjectstore pool mark-clean` and `mark-dirty` developer-only test
   commands behind an explicit debug feature.
-- [ ] Document metadata compatibility and recovery guarantees.
+- [x] Document metadata compatibility and recovery guarantees.
 
 ## Milestone 5: Store Policy Engine
 

@@ -155,6 +155,9 @@ on HDD metadata areas. If the SSD fails, the MVP target is recovery of committed
 HDD objects, with loss of pending SSD-only ingest data. A later target is full
 live metadata reconstruction from HDD snapshots.
 
+Metadata compatibility and recovery boundaries are documented in
+[Metadata Compatibility and Recovery](docs/metadata-compatibility.md).
+
 Each disk has a composite identity:
 
 - DASObjectStore disk UUID;
