@@ -1,5 +1,8 @@
 //! Core domain types for DASObjectStore.
 
+pub mod ids;
+pub mod lifecycle;
+
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

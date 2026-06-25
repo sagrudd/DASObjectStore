@@ -31,13 +31,13 @@ developers
 
 ## Milestone 2: Rust Workspace and Domain Skeleton
 
-- [ ] Create `dasobjectstore-core` crate for domain types and lifecycle state
+- [x] Create `dasobjectstore-core` crate for domain types and lifecycle state
   machines.
 - [x] Create `dasobjectstore-cli` crate using `clap` with a minimal
   `dasobjectstore --help`.
-- [ ] Define domain IDs: pool ID, disk ID, enclosure ID, store ID, object ID,
+- [x] Define domain IDs: pool ID, disk ID, enclosure ID, store ID, object ID,
   ingest job ID, and placement ID.
-- [ ] Define lifecycle enums for pool, disk, store, object, ingest job, health,
+- [x] Define lifecycle enums for pool, disk, store, object, ingest job, health,
   repair, and import mode.
 - [ ] Define store class and store policy structs matching
   `docs/requirements.md`.
