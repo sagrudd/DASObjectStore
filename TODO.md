@@ -102,7 +102,7 @@ developers
 - [x] Add `dasobjectstore store validate <policy-file>`.
 - [x] Add `dasobjectstore store defaults --class <class>`.
 - [x] Add tests for valid public cache policy.
-- [ ] Add tests for valid generated data policy.
+- [x] Add tests for valid generated data policy.
 - [ ] Add tests for valid critical metadata policy.
 - [ ] Add tests for invalid and unsafe policy combinations.
 

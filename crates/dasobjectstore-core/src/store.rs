@@ -574,6 +574,35 @@ mod tests {
     }
 
     #[test]
+    fn accepts_valid_generated_data_policy() {
+        let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+
+        assert_eq!(policy.class, StoreClass::GeneratedData);
+        assert_eq!(policy.ingest_mode, IngestMode::SsdFirst);
+        assert_eq!(policy.copies, 2);
+        assert_eq!(
+            policy.enclosure_placement,
+            EnclosurePlacement::PreferDistinct
+        );
+        assert_eq!(policy.retention_policy, RetentionPolicy::TombstoneThenGc);
+        assert_eq!(policy.mutability_policy, MutabilityPolicy::Immutable);
+        assert_eq!(policy.repair_policy, RepairPolicy::RestoreFromCopy);
+        assert_eq!(
+            policy.capacity_behavior,
+            CapacityBehavior::BackpressureByPriority
+        );
+        assert_eq!(policy.export_policy, ExportPolicy::S3);
+
+        policy.validate().expect("generated data policy is valid");
+        policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(1))
+            .expect("preferred enclosure diversity remains best effort");
+        policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(2))
+            .expect("generated data policy is valid with two enclosures");
+    }
+
+    #[test]
     fn critical_metadata_defaults_to_three_copies() {
         let policy = StorePolicy::defaults_for(StoreClass::CriticalMetadata);
 
