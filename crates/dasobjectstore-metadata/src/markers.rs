@@ -78,6 +78,22 @@ impl PoolStateMarker {
         )
     }
 
+    pub fn read_only_clean_attach(
+        pool_id: PoolId,
+        reason: impl Into<String>,
+        recorded_at_utc: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            pool_id,
+            PoolStateMarkerKind::ReadOnlyImport,
+            Some(PoolState::Clean),
+            PoolState::ReadOnly,
+            Some(ImportMode::ReadOnly),
+            Some(reason.into()),
+            recorded_at_utc,
+        )
+    }
+
     pub fn repair_import(
         pool_id: PoolId,
         reason: impl Into<String>,
@@ -238,12 +254,25 @@ mod tests {
 
         let read_only =
             PoolStateMarker::read_only_import(pool_id.clone(), "unclean detach", "2026-01-03");
+        let read_only_clean_attach = PoolStateMarker::read_only_clean_attach(
+            pool_id.clone(),
+            "portable clean attach",
+            "2026-01-03",
+        );
         let repair =
             PoolStateMarker::repair_import(pool_id.clone(), "checksum repair", "2026-01-03");
         let force =
             PoolStateMarker::force_read_write_import(pool_id, "operator override", "2026-01-03");
 
         assert_eq!(read_only.marker_kind, PoolStateMarkerKind::ReadOnlyImport);
+        assert_eq!(
+            read_only_clean_attach.marker_kind,
+            PoolStateMarkerKind::ReadOnlyImport
+        );
+        assert_eq!(
+            read_only_clean_attach.previous_state,
+            Some(dasobjectstore_core::lifecycle::PoolState::Clean)
+        );
         assert_eq!(repair.marker_kind, PoolStateMarkerKind::RepairImport);
         assert_eq!(force.marker_kind, PoolStateMarkerKind::ForceReadWriteImport);
     }
