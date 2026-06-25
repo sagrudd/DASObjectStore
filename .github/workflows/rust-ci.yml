@@ -20,6 +20,9 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      - name: Run benchmark harness smoke tests
+        run: benchmarks/object-services/scripts/smoke-test.sh
+
       - name: Check formatting
         run: cargo fmt --check
 

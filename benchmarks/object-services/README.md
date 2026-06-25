@@ -84,5 +84,11 @@ Capture a Markdown environment snapshot:
 benchmarks/object-services/scripts/environment-snapshot.sh
 ```
 
+Run offline smoke tests for the benchmark harness:
+
+```sh
+benchmarks/object-services/scripts/smoke-test.sh
+```
+
 Provider-specific setup is intentionally added in separate tasks so Garage and
 RustFS remain comparable.

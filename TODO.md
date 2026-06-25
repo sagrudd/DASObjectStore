@@ -163,6 +163,7 @@ developers
 - [x] Add benchmark report draft generator.
 - [x] Add benchmark environment snapshot generator.
 - [x] Add Docker Compose compatibility helper for benchmark workloads.
+- [x] Add benchmark harness smoke test to CI.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
   `benchmarks/output/object-services/`.

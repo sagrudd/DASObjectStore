@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir="$(dirname "$0")"
+
+sh -n "$script_dir"/*.sh "$script_dir"/../workloads/*.sh
+
+"$script_dir/preflight.sh" --offline >/dev/null
+DASOBJECTSTORE_BENCH_DRY_RUN=1 "$script_dir/run-matrix.sh" >/dev/null
+
+empty_tmpdir="$(mktemp -d)"
+cleanup_empty() {
+  rm -rf "$empty_tmpdir"
+}
+trap cleanup_empty EXIT
+
+missing_count="$(DASOBJECTSTORE_BENCH_OUTPUT_DIR="$empty_tmpdir" "$script_dir/report-input-index.sh" | grep -c '| missing |')"
+if [ "$missing_count" -ne 18 ]; then
+  echo "expected 18 missing reports in empty fixture tree, found $missing_count" >&2
+  exit 65
+fi
+
+tmpdir="$(mktemp -d)"
+cleanup() {
+  rm -rf "$empty_tmpdir" "$tmpdir"
+}
+trap cleanup EXIT
+
+for provider in garage rustfs; do
+  for workload in large-object small-object crash-restart-ingest interrupted-write metadata-recovery disk-full simulated-disk-removal ssd-ingest-hdd-destage; do
+    mkdir -p "$tmpdir/$provider/workloads/$workload"
+    printf 'header\nrow\n' > "$tmpdir/$provider/workloads/$workload/report.tsv"
+  done
+  mkdir -p "$tmpdir/$provider/workloads/concurrent-client"
+  printf 'header\nrow\n' > "$tmpdir/$provider/workloads/concurrent-client/summary.tsv"
+done
+
+DASOBJECTSTORE_BENCH_OUTPUT_DIR="$tmpdir" "$script_dir/check-report-inputs.sh" >/dev/null
+present_count="$(DASOBJECTSTORE_BENCH_OUTPUT_DIR="$tmpdir" "$script_dir/report-input-index.sh" | grep -c '| present |')"
+if [ "$present_count" -ne 18 ]; then
+  echo "expected 18 present fixture reports, found $present_count" >&2
+  exit 65
+fi
+
+DASOBJECTSTORE_BENCHMARK_DATE=2026-06-25 "$script_dir/draft-report.sh" | grep -q '## Raw Input Inventory'
+"$script_dir/environment-snapshot.sh" | grep -q '| Host OS |'
+
+echo "benchmark smoke test passed"
