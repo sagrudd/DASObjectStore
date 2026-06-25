@@ -89,7 +89,7 @@ developers
 
 ## Milestone 5: Store Policy Engine
 
-- [ ] Implement global pool defaults with per-store overrides.
+- [x] Implement global pool defaults with per-store overrides.
 - [ ] Implement built-in store class defaults for `reproducible_cache`,
   `generated_data`, `critical_metadata`, `export_bundle`, and
   `ingest_staging`.
