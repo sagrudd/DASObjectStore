@@ -231,7 +231,7 @@ developers
 - [x] Implement Mneion-compatible storage definition export.
 - [x] Implement Mneion-compatible binding snippet export.
 - [x] Add `dasobjectstore mnemosyne export`.
-- [ ] Document a bioinformatics reference workflow using `reproducible_cache`
+- [x] Document a bioinformatics reference workflow using `reproducible_cache`
   and `generated_data`.
 - [ ] Add README section linking to the reference workflow.
 
