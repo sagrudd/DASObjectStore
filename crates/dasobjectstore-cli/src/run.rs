@@ -2,7 +2,7 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand,
-    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand,
+    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
@@ -28,6 +28,8 @@ use dasobjectstore_platform::{
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{self, Write};
+use std::path::Path;
+use std::process::Command as ProcessCommand;
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
@@ -54,9 +56,52 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Service(args)) => match args.command() {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
+            ServiceCommand::Up(args) => run_service_up(args, writer),
         },
         _ => Ok(()),
     }
+}
+
+fn run_service_up(args: &ServiceComposeArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let command = docker_compose_args(args.compose_file(), args.project_directory(), ["up", "-d"]);
+
+    if args.dry_run() {
+        writeln!(writer, "docker {}", command.join(" "))?;
+        return Ok(());
+    }
+
+    let status = ProcessCommand::new("docker").args(&command).status()?;
+    if !status.success() {
+        return Err(CliError::CommandFailed(format!(
+            "docker {} exited with status {}",
+            command.join(" "),
+            status
+        )));
+    }
+
+    writeln!(writer, "Object service started")?;
+
+    Ok(())
+}
+
+fn docker_compose_args<'a>(
+    compose_file: &'a Path,
+    project_directory: Option<&'a Path>,
+    action_args: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "compose".to_string(),
+        "-f".to_string(),
+        compose_file.to_string_lossy().to_string(),
+    ];
+
+    if let Some(project_directory) = project_directory {
+        args.push("--project-directory".to_string());
+        args.push(project_directory.to_string_lossy().to_string());
+    }
+
+    args.extend(action_args.into_iter().map(String::from));
+    args
 }
 
 fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -355,6 +400,7 @@ pub(crate) enum CliError {
     MetadataInspect(PoolInspectError),
     ObjectInspect(ObjectInspectError),
     ObjectService(ObjectServiceError),
+    CommandFailed(String),
     SsdCapacityMeasurement(SsdCapacityMeasurementError),
     SsdCapacityPolicy(SsdCapacityPolicyError),
     #[cfg(feature = "debug-commands")]
@@ -374,6 +420,7 @@ impl Display for CliError {
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
+            Self::CommandFailed(err) => write!(formatter, "{err}"),
             Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
             Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
@@ -827,6 +874,30 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn service_up_dry_run_writes_docker_compose_command() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "up",
+            "--compose-file",
+            "/tmp/compose.yaml",
+            "--project-directory",
+            "/tmp/project",
+            "--dry-run",
+        ])
+        .expect("service up parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("service up dry run succeeds");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert_eq!(
+            output,
+            "docker compose -f /tmp/compose.yaml --project-directory /tmp/project up -d\n"
+        );
     }
 
     #[cfg(feature = "debug-commands")]

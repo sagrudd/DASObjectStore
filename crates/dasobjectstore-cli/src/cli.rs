@@ -297,6 +297,35 @@ impl ServiceArgs {
 pub(crate) enum ServiceCommand {
     /// Render Docker Compose YAML for store-aware object service access.
     RenderCompose(ServiceRenderComposeArgs),
+    /// Start the rendered object service with Docker Compose.
+    Up(ServiceComposeArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ServiceComposeArgs {
+    /// Path to the rendered Docker Compose YAML file.
+    #[arg(long)]
+    compose_file: PathBuf,
+    /// Optional Docker Compose project directory.
+    #[arg(long)]
+    project_directory: Option<PathBuf>,
+    /// Print the Docker Compose command without executing it.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+impl ServiceComposeArgs {
+    pub(crate) fn compose_file(&self) -> &Path {
+        &self.compose_file
+    }
+
+    pub(crate) fn project_directory(&self) -> Option<&Path> {
+        self.project_directory.as_deref()
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -445,6 +474,34 @@ mod tests {
                 assert_eq!(render.image(), "garage:latest");
                 assert_eq!(render.api_port(), 3900);
             }
+            _ => panic!("expected render-compose command"),
+        }
+    }
+
+    #[test]
+    fn parses_service_up_dry_run() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "up",
+            "--compose-file",
+            "/tmp/compose.yaml",
+            "--project-directory",
+            "/tmp/project",
+            "--dry-run",
+        ])
+        .expect("service up parses");
+
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command");
+        };
+        match args.command() {
+            ServiceCommand::Up(up) => {
+                assert_eq!(up.compose_file(), Path::new("/tmp/compose.yaml"));
+                assert_eq!(up.project_directory(), Some(Path::new("/tmp/project")));
+                assert!(up.dry_run());
+            }
+            _ => panic!("expected up command"),
         }
     }
 

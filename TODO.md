@@ -169,7 +169,7 @@ developers
 - [x] Persist credential references without leaking secrets into normal logs.
 - [x] Map store definitions to bucket/service layout.
 - [x] Add `dasobjectstore service render-compose`.
-- [ ] Add `dasobjectstore service up`.
+- [x] Add `dasobjectstore service up`.
 - [ ] Add `dasobjectstore service down`.
 - [ ] Add `dasobjectstore service status --json`.
 - [ ] Add integration test using local generated Compose where available.
