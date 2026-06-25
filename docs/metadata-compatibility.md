@@ -37,6 +37,11 @@ The live database records:
 The live database lives under the mandatory SSD metadata root. It must not be
 the only durable recovery source for committed HDD objects.
 
+Live SQLite format `0.2` adds explicit ingest job metadata for SSD-first writes:
+ingest mode, acknowledgement policy, priority, staging path, expected and
+received byte counts, content hash fields, failure messages, and indexes for
+state/priority queue views.
+
 ## Snapshot Metadata
 
 Snapshot export writes recovery metadata into HDD metadata directories.
