@@ -3,8 +3,8 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
     HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectExportArgs,
-    ObjectInspectArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, ProbeArgs, ServiceCommand,
-    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
+    ObjectInspectArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
+    ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
     StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
@@ -54,6 +54,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Pool(args)) => match args.command() {
             PoolCommand::Inspect(args) => run_pool_inspect(args, writer),
             PoolCommand::Import(args) => run_pool_import(args, writer),
+            PoolCommand::Repair(args) => run_pool_repair(args, writer),
             #[cfg(feature = "debug-commands")]
             PoolCommand::MarkClean(args) => run_pool_mark_clean(args, writer),
             #[cfg(feature = "debug-commands")]
@@ -392,6 +393,17 @@ fn run_pool_import(args: &PoolImportArgs, writer: &mut impl Write) -> Result<(),
     Ok(())
 }
 
+fn run_pool_repair(args: &PoolRepairArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    if !args.dry_run() {
+        return Err(CliError::UnsupportedPoolRepairMode);
+    }
+
+    let summary = inspect_pool_metadata(args.source_path())?;
+    write_pool_repair_dry_run(&summary, writer)?;
+
+    Ok(())
+}
+
 fn run_disk_retire(args: &DiskRetireArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let report = request_disk_retirement(
         args.live_sqlite_path(),
@@ -659,6 +671,41 @@ fn write_pool_import_report(
         "Live metadata: {}",
         report.recovered_live_sqlite_path.to_string_lossy()
     )
+}
+
+fn write_pool_repair_dry_run(
+    summary: &PoolInspectSummary,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Pool repair dry run")?;
+    writeln!(writer, "Pool: {}", summary.pool_id)?;
+    writeln!(writer, "State: {:?}", summary.state)?;
+    writeln!(writer, "Disks: {}", summary.disk_count)?;
+    writeln!(
+        writer,
+        "Metadata path: {}",
+        summary.metadata_path.to_string_lossy()
+    )?;
+    writeln!(
+        writer,
+        "Planned action: {}",
+        pool_repair_planned_action(summary.state)
+    )
+}
+
+fn pool_repair_planned_action(state: PoolState) -> &'static str {
+    match state {
+        PoolState::Clean => "no repair required; use pool import --read-only for local attach",
+        PoolState::Dirty => {
+            "read-only recovery import; repair marker requires a future non-dry-run flow"
+        }
+        PoolState::ReadOnly => {
+            "already read-only; inspect recovered metadata before further repair"
+        }
+        PoolState::Repairing => "repair already in progress; manual review required",
+        PoolState::Degraded => "degraded pool; run disk health and drain planning before repair",
+        PoolState::New => "new pool metadata; no portable repair action planned",
+    }
 }
 
 fn write_health_summary(report: &HealthReport, writer: &mut impl Write) -> Result<(), io::Error> {
@@ -1096,6 +1143,7 @@ pub(crate) enum CliError {
     UnsupportedPoolImportState {
         state: PoolState,
     },
+    UnsupportedPoolRepairMode,
     UnsupportedProbeFormat,
     UnsupportedServiceStatusFormat,
 }
@@ -1137,6 +1185,9 @@ impl Display for CliError {
                 formatter,
                 "pool import --read-only supports Clean and Dirty snapshots, found {state:?}"
             ),
+            Self::UnsupportedPoolRepairMode => {
+                formatter.write_str("pool repair currently requires `--dry-run`")
+            }
             Self::UnsupportedProbeFormat => formatter
                 .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
             Self::UnsupportedServiceStatusFormat => {
@@ -1457,6 +1508,35 @@ mod tests {
         assert!(output.contains("Pool: pool-a"));
         assert!(output.contains("Mode: read-only"));
         assert_eq!(pool_state(&recovery_root.join("live.sqlite")), "ReadOnly");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn pool_repair_dry_run_reports_dirty_snapshot_without_writing() {
+        let root = temp_root("pool-repair-dirty");
+        let source_root = root.join("mounted-disk");
+        create_portable_pool_snapshot(&root.join("source-ssd"), &source_root, "Dirty");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            "repair",
+            "--source-path",
+            source_root.to_str().expect("utf8 source path"),
+            "--dry-run",
+        ])
+        .expect("pool repair parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("pool repair dry run runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Pool repair dry run"));
+        assert!(output.contains("Pool: pool-a"));
+        assert!(output.contains("State: Dirty"));
+        assert!(output.contains("Disks: 1"));
+        assert!(output.contains("Planned action: read-only recovery import"));
+        assert!(!root.join("recovered").exists());
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

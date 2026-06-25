@@ -87,6 +87,8 @@ pub(crate) enum PoolCommand {
     Inspect(PoolInspectArgs),
     /// Import a portable pool snapshot for local read-only use.
     Import(PoolImportArgs),
+    /// Preview pool repair actions without modifying metadata.
+    Repair(PoolRepairArgs),
     /// Mark a pool clean in live metadata for developer testing.
     #[cfg(feature = "debug-commands")]
     MarkClean(PoolMarkerArgs),
@@ -139,6 +141,26 @@ impl PoolImportArgs {
 
     pub(crate) fn recorded_at_utc(&self) -> &str {
         &self.recorded_at_utc
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct PoolRepairArgs {
+    /// Mounted pool root or metadata snapshot directory to inspect.
+    #[arg(long)]
+    source_path: PathBuf,
+    /// Preview repair actions without writing recovered metadata.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+impl PoolRepairArgs {
+    pub(crate) fn source_path(&self) -> &Path {
+        &self.source_path
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
     }
 }
 
@@ -1171,6 +1193,7 @@ mod tests {
                 assert_eq!(inspect.metadata_path(), Path::new("/tmp/metadata"));
             }
             PoolCommand::Import(_) => panic!("expected inspect command"),
+            PoolCommand::Repair(_) => panic!("expected inspect command"),
             #[cfg(feature = "debug-commands")]
             _ => panic!("expected inspect command"),
         }
@@ -1203,6 +1226,30 @@ mod tests {
                 assert_eq!(import.recorded_at_utc(), "2026-01-04T00:00:00Z");
             }
             _ => panic!("expected import command"),
+        }
+    }
+
+    #[test]
+    fn parses_pool_repair_dry_run() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pool",
+            "repair",
+            "--source-path",
+            "/Volumes/pool-disk",
+            "--dry-run",
+        ])
+        .expect("pool repair parses");
+
+        let Some(Command::Pool(args)) = cli.command() else {
+            panic!("expected pool command");
+        };
+        match args.command() {
+            PoolCommand::Repair(repair) => {
+                assert_eq!(repair.source_path(), Path::new("/Volumes/pool-disk"));
+                assert!(repair.dry_run());
+            }
+            _ => panic!("expected repair command"),
         }
     }
 
