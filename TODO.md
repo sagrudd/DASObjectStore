@@ -132,7 +132,7 @@ developers
   objects.
 - [x] Implement HDD copy write and post-copy hash verification.
 - [x] Implement object protection state update after policy-satisfying copies.
-- [ ] Implement redownload-required state for reproducible cache objects.
+- [x] Implement redownload-required state for reproducible cache objects.
 - [ ] Add `dasobjectstore object inspect <object-id>`.
 - [ ] Add placement tests for mixed disk sizes.
 - [ ] Add placement tests for degraded/suspect disks.

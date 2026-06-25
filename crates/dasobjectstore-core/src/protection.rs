@@ -2,7 +2,7 @@
 
 use crate::ids::DiskId;
 use crate::lifecycle::{ObjectState, ObjectStateTransitionError};
-use crate::store::StorePolicy;
+use crate::store::{CapacityBehavior, StoreClass, StorePolicy};
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
 
@@ -38,6 +38,7 @@ impl ObjectProtectionDecision {
 pub enum ObjectProtectionError {
     InvalidCurrentState(ObjectState),
     InvalidTransition(ObjectStateTransitionError),
+    RedownloadRequiredNotAllowed { class: StoreClass },
 }
 
 impl Display for ObjectProtectionError {
@@ -48,6 +49,11 @@ impl Display for ObjectProtectionError {
                 "object protection can only be evaluated from HddCopyVerified, got {state:?}"
             ),
             Self::InvalidTransition(err) => err.fmt(formatter),
+            Self::RedownloadRequiredNotAllowed { class } => write!(
+                formatter,
+                "store class {} cannot mark objects redownload-required",
+                class.name()
+            ),
         }
     }
 }
@@ -83,6 +89,24 @@ pub fn evaluate_object_protection(
     })
 }
 
+pub fn mark_redownload_required(
+    current_state: ObjectState,
+    policy: &StorePolicy,
+) -> Result<ObjectState, ObjectProtectionError> {
+    if !allows_redownload_required(policy) {
+        return Err(ObjectProtectionError::RedownloadRequiredNotAllowed {
+            class: policy.class,
+        });
+    }
+
+    Ok(current_state.transition_to(ObjectState::RedownloadRequired)?)
+}
+
+fn allows_redownload_required(policy: &StorePolicy) -> bool {
+    policy.class == StoreClass::ReproducibleCache
+        && policy.capacity_behavior == CapacityBehavior::MarkRedownloadRequired
+}
+
 fn count_distinct_copy_disks(verified_copies: &[VerifiedCopy]) -> u8 {
     verified_copies
         .iter()
@@ -94,10 +118,12 @@ fn count_distinct_copy_disks(verified_copies: &[VerifiedCopy]) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{evaluate_object_protection, ObjectProtectionError, VerifiedCopy};
+    use super::{
+        evaluate_object_protection, mark_redownload_required, ObjectProtectionError, VerifiedCopy,
+    };
     use crate::ids::DiskId;
     use crate::lifecycle::ObjectState;
-    use crate::store::{StoreClass, StorePolicy};
+    use crate::store::{CapacityBehavior, StoreClass, StorePolicy};
 
     #[test]
     fn marks_object_protected_when_policy_required_copies_are_verified() {
@@ -151,6 +177,47 @@ mod tests {
         assert_eq!(
             err,
             ObjectProtectionError::InvalidCurrentState(ObjectState::CopyingToHdd)
+        );
+    }
+
+    #[test]
+    fn marks_reproducible_cache_object_redownload_required() {
+        let policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+
+        let next_state =
+            mark_redownload_required(ObjectState::Protected, &policy).expect("redownload marker");
+
+        assert_eq!(next_state, ObjectState::RedownloadRequired);
+    }
+
+    #[test]
+    fn rejects_redownload_required_for_protected_store_class() {
+        let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+
+        let err = mark_redownload_required(ObjectState::Protected, &policy)
+            .expect_err("protected data cannot be redownload-required");
+
+        assert_eq!(
+            err,
+            ObjectProtectionError::RedownloadRequiredNotAllowed {
+                class: StoreClass::GeneratedData
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_redownload_required_when_cache_policy_disables_marker() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.capacity_behavior = CapacityBehavior::BackpressureByPriority;
+
+        let err = mark_redownload_required(ObjectState::Protected, &policy)
+            .expect_err("policy disables redownload marker");
+
+        assert_eq!(
+            err,
+            ObjectProtectionError::RedownloadRequiredNotAllowed {
+                class: StoreClass::ReproducibleCache
+            }
         );
     }
 

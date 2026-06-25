@@ -292,6 +292,9 @@ Protected stores SHALL be drained before a disk is safe to remove.
 
 Reproducible cache objects MAY be marked redownload-required during retirement.
 
+Only `reproducible_cache` policy may mark an object redownload-required; protected
+store classes SHALL preserve recovery or drain semantics instead.
+
 Forced retire SHALL require both policy allowance and explicit action-time
 confirmation.
 
