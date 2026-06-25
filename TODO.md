@@ -171,7 +171,7 @@ developers
 - [x] Add `dasobjectstore service render-compose`.
 - [x] Add `dasobjectstore service up`.
 - [x] Add `dasobjectstore service down`.
-- [ ] Add `dasobjectstore service status --json`.
+- [x] Add `dasobjectstore service status --json`.
 - [ ] Add integration test using local generated Compose where available.
 - [ ] Document macOS Docker Desktop limitations for service orchestration.
 

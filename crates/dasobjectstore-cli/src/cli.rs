@@ -301,6 +301,8 @@ pub(crate) enum ServiceCommand {
     Up(ServiceComposeArgs),
     /// Stop the rendered object service with Docker Compose.
     Down(ServiceComposeArgs),
+    /// Inspect the rendered object service with Docker Compose.
+    Status(ServiceStatusArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -323,6 +325,40 @@ impl ServiceComposeArgs {
 
     pub(crate) fn project_directory(&self) -> Option<&Path> {
         self.project_directory.as_deref()
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ServiceStatusArgs {
+    /// Path to the rendered Docker Compose YAML file.
+    #[arg(long)]
+    compose_file: PathBuf,
+    /// Optional Docker Compose project directory.
+    #[arg(long)]
+    project_directory: Option<PathBuf>,
+    /// Emit Docker Compose service status as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Print the Docker Compose status command as JSON without executing it.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+impl ServiceStatusArgs {
+    pub(crate) fn compose_file(&self) -> &Path {
+        &self.compose_file
+    }
+
+    pub(crate) fn project_directory(&self) -> Option<&Path> {
+        self.project_directory.as_deref()
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
     }
 
     pub(crate) fn dry_run(&self) -> bool {
@@ -529,6 +565,35 @@ mod tests {
                 assert!(down.dry_run());
             }
             _ => panic!("expected down command"),
+        }
+    }
+
+    #[test]
+    fn parses_service_status_json_dry_run() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "status",
+            "--compose-file",
+            "/tmp/compose.yaml",
+            "--project-directory",
+            "/tmp/project",
+            "--json",
+            "--dry-run",
+        ])
+        .expect("service status parses");
+
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command");
+        };
+        match args.command() {
+            ServiceCommand::Status(status) => {
+                assert_eq!(status.compose_file(), Path::new("/tmp/compose.yaml"));
+                assert_eq!(status.project_directory(), Some(Path::new("/tmp/project")));
+                assert!(status.json());
+                assert!(status.dry_run());
+            }
+            _ => panic!("expected status command"),
         }
     }
 

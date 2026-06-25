@@ -3,7 +3,8 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand,
     ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
+    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
+    StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
@@ -58,6 +59,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
             ServiceCommand::Up(args) => run_service_up(args, writer),
             ServiceCommand::Down(args) => run_service_down(args, writer),
+            ServiceCommand::Status(args) => run_service_status(args, writer),
         },
         _ => Ok(()),
     }
@@ -79,6 +81,48 @@ fn run_service_down(args: &ServiceComposeArgs, writer: &mut impl Write) -> Resul
         return Ok(());
     }
     writeln!(writer, "Object service stopped")?;
+
+    Ok(())
+}
+
+fn run_service_status(args: &ServiceStatusArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    if !args.json() {
+        return Err(CliError::UnsupportedServiceStatusFormat);
+    }
+
+    let command = docker_compose_args(
+        args.compose_file(),
+        args.project_directory(),
+        ["ps", "--format", "json"],
+    );
+
+    if args.dry_run() {
+        let mut dry_run_command = vec!["docker".to_string()];
+        dry_run_command.extend(command);
+        serde_json::to_writer_pretty(
+            &mut *writer,
+            &serde_json::json!({
+                "dry_run": true,
+                "command": dry_run_command,
+            }),
+        )?;
+        writer.write_all(b"\n")?;
+        return Ok(());
+    }
+
+    let output = ProcessCommand::new("docker").args(&command).output()?;
+    if !output.status.success() {
+        return Err(CliError::CommandFailed(format!(
+            "docker {} exited with status {}",
+            command.join(" "),
+            output.status
+        )));
+    }
+
+    writer.write_all(&output.stdout)?;
+    if !output.stdout.ends_with(b"\n") {
+        writer.write_all(b"\n")?;
+    }
 
     Ok(())
 }
@@ -432,6 +476,7 @@ pub(crate) enum CliError {
     StorePolicyValidation(StorePolicyValidationErrors),
     UnsupportedIngestQueueFormat,
     UnsupportedProbeFormat,
+    UnsupportedServiceStatusFormat,
 }
 
 impl Display for CliError {
@@ -455,6 +500,9 @@ impl Display for CliError {
             }
             Self::UnsupportedProbeFormat => formatter
                 .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
+            Self::UnsupportedServiceStatusFormat => {
+                formatter.write_str("service status requires JSON output; use `--json`")
+            }
         }
     }
 }
@@ -940,6 +988,60 @@ mod tests {
 
         let output = String::from_utf8(output).expect("utf8 output");
         assert_eq!(output, "docker compose -f /tmp/compose.yaml down\n");
+    }
+
+    #[test]
+    fn service_status_json_dry_run_writes_command_json() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "status",
+            "--compose-file",
+            "/tmp/compose.yaml",
+            "--project-directory",
+            "/tmp/project",
+            "--json",
+            "--dry-run",
+        ])
+        .expect("service status parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("service status dry run succeeds");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("status output is json");
+        assert_eq!(output["dry_run"], true);
+        assert_eq!(
+            output["command"],
+            serde_json::json!([
+                "docker",
+                "compose",
+                "-f",
+                "/tmp/compose.yaml",
+                "--project-directory",
+                "/tmp/project",
+                "ps",
+                "--format",
+                "json"
+            ])
+        );
+    }
+
+    #[test]
+    fn service_status_requires_json_flag() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "status",
+            "--compose-file",
+            "/tmp/compose.yaml",
+        ])
+        .expect("service status parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("json flag required");
+
+        assert!(matches!(err, CliError::UnsupportedServiceStatusFormat));
     }
 
     #[cfg(feature = "debug-commands")]
