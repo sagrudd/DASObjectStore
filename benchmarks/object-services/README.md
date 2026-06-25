@@ -72,7 +72,8 @@ Generate a Markdown inventory of raw report inputs:
 benchmarks/object-services/scripts/report-input-index.sh
 ```
 
-Generate a draft provider-selection report:
+Generate a draft provider-selection report with environment and raw input
+inventory:
 
 ```sh
 benchmarks/object-services/scripts/draft-report.sh

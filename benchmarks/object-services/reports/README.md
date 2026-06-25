@@ -29,7 +29,8 @@ run:
 benchmarks/object-services/scripts/report-input-index.sh
 ```
 
-To generate a draft report from the template plus that input inventory, run:
+To generate a draft report from the template, environment snapshot, and input
+inventory, run:
 
 ```sh
 benchmarks/object-services/scripts/draft-report.sh

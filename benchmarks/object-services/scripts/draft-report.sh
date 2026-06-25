@@ -18,6 +18,14 @@ done < "$template_path"
 
 cat <<'EOF'
 
+## Environment Snapshot
+
+EOF
+
+"$script_dir/environment-snapshot.sh"
+
+cat <<'EOF'
+
 ## Raw Input Inventory
 
 EOF
