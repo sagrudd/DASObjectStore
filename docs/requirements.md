@@ -57,6 +57,9 @@ DASObjectStore SHALL provide macOS beta support for:
 - settled object read/export;
 - read-only SMB/S3 export where feasible.
 
+macOS support boundaries are documented in
+[macOS Development and Read/Export Notes](macos-development.md).
+
 DASObjectStore SHALL use Docker/Compose as the default deployment path for
 supporting services.
 

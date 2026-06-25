@@ -65,6 +65,8 @@ directly.
 
 Probe results are best-effort observations. Known USB bridge and SMART
 limitations are documented in [Platform Probing Notes](probing.md).
+macOS development and read/export limits are documented in
+[macOS Development and Read/Export Notes](macos-development.md).
 
 ### `dasobjectstore-metadata`
 

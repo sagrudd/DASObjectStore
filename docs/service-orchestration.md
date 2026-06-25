@@ -19,6 +19,8 @@ The service orchestration layer should:
 Linux is the intended full-operation target for the MVP. macOS is a supported
 development, inspection, and read/export platform, but it should not pretend to
 have the same service-management or hardware-observation behavior as Linux.
+The wider macOS support boundary is documented in
+[macOS Development and Read/Export Notes](macos-development.md).
 
 ## CLI Surface
 
