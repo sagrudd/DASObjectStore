@@ -51,6 +51,7 @@ Scope:
 - create a Rust workspace;
 - add crates/modules for core domain types, CLI, metadata, platform probing,
   and adapters;
+- use `clap` for CLI parsing and command documentation;
 - define initial state enums for pools, disks, stores, objects, ingest jobs,
   health, and repair;
 - add test fixtures for store policies and lifecycle transitions.

@@ -52,6 +52,9 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 ## Project Architecture Preferences
 
 - Keep DASObjectStore public-core first.
+- Keep the implementation Rust-first unless an integration boundary clearly
+  requires another language or tool.
+- Use `clap` for CLI parsing and command documentation.
 - Keep Mnemosyne/Synoptikon integration in an adapter layer.
 - Keep storage profiles and object-service providers abstract enough to evolve
   without breaking pool metadata.
@@ -66,4 +69,3 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
   confirmation.
 - Health, repair, drain, and recovery paths should favor clear user-facing state
   over silent automation.
-

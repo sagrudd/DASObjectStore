@@ -9,6 +9,8 @@ Scope: MVP and near-term architecture alignment
 DASObjectStore SHALL be a portable, SSD-ingest-first, mixed-disk DAS object
 appliance.
 
+DASObjectStore SHALL be implemented primarily in Rust.
+
 DASObjectStore SHALL be useful to non-Mnemosyne users. Mnemosyne/Synoptikon support
 SHALL be implemented as an adapter over the public core model.
 
@@ -335,6 +337,8 @@ Production claims SHALL require long-duration soak testing.
 
 DASObjectStore SHALL provide CLI and S3-compatible access from the outset.
 
+The CLI SHALL be implemented in Rust using `clap`.
+
 DASObjectStore SHALL provide a Web UI that initially supports:
 
 - dashboard;
@@ -402,4 +406,3 @@ artefact ingress and egress and public storage contracts remain object-style.
 
 DASObjectStore SHALL be licensed under the Mozilla Public License 2.0 unless this
 decision is later superseded.
-

@@ -33,7 +33,8 @@ developers
 
 - [ ] Create `dasobjectstore-core` crate for domain types and lifecycle state
   machines.
-- [ ] Create `dasobjectstore-cli` crate with a minimal `dasobjectstore --help`.
+- [ ] Create `dasobjectstore-cli` crate using `clap` with a minimal
+  `dasobjectstore --help`.
 - [ ] Define domain IDs: pool ID, disk ID, enclosure ID, store ID, object ID,
   ingest job ID, and placement ID.
 - [ ] Define lifecycle enums for pool, disk, store, object, ingest job, health,
@@ -45,7 +46,7 @@ developers
   transitions.
 - [ ] Add CLI command skeletons for `probe`, `health`, `pool`, `disk`, `store`,
   `ingest`, and `mnemosyne`.
-- [ ] Keep CLI parsing separate from domain logic and persistence.
+- [ ] Keep `clap` CLI parsing separate from domain logic and persistence.
 
 ## Milestone 3: Cross-Platform Disk and Enclosure Probe
 
@@ -237,4 +238,3 @@ developers
   trigger those risks.
 - [ ] Review file sizes before each milestone completion and split modules that
   have grown too broad.
-

@@ -39,6 +39,7 @@ DASObjectStore is designed for:
 
 DASObjectStore is:
 
+- Rust-based;
 - SSD-ingest-first;
 - S3/object-first;
 - mixed-disk and mixed-size by design;
@@ -205,7 +206,7 @@ cache objects may be marked redownload-required.
 
 MVP:
 
-- Rust CLI;
+- Rust CLI built with `clap`;
 - S3-compatible object API through an orchestrated object service;
 - Web UI dashboard and safe operations;
 - local admin credential;
