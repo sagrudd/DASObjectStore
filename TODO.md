@@ -1,0 +1,240 @@
+# DASObjectStore TODO
+
+Status: Draft  
+Source roadmap: [ROADMAP.md](ROADMAP.md)  
+Purpose: discrete implementation tasks suitable for CODEX agents or senior
+developers
+
+## Working Rules
+
+- Keep changes surgical and tied to one task or closely related task group.
+- Prefer small modules and tests with each implementation task.
+- Update this file when tasks are completed, split, or superseded.
+- Keep persistent metadata, CLI behavior, and compatibility-impacting changes
+  documented before merging implementation.
+
+## Milestone 1: Workspace, Naming, and Release Baseline
+
+- [ ] Add Rust workspace `Cargo.toml` with placeholder crates for core, CLI,
+  platform, metadata, object service orchestration, and Mnemosyne adapter.
+- [ ] Add `.gitignore` for Rust, editor, macOS, test output, and generated
+  benchmark artifacts.
+- [ ] Add CI workflow for `cargo fmt --check`, `cargo clippy`, and
+  `cargo test`.
+- [ ] Add `docs/versioning.md` describing semantic versioning, pre-1.0
+  compatibility expectations, and metadata format version policy.
+- [ ] Add `docs/architecture.md` with the high-level crate/module boundaries.
+- [ ] Add `CONTRIBUTING.md` pointing contributors to `AGENTS.md`,
+  `ROADMAP.md`, and this TODO.
+- [ ] Verify repository text uses `DASObjectStore` for project name and
+  `dasobjectstore` for CLI examples.
+
+## Milestone 2: Rust Workspace and Domain Skeleton
+
+- [ ] Create `dasobjectstore-core` crate for domain types and lifecycle state
+  machines.
+- [ ] Create `dasobjectstore-cli` crate with a minimal `dasobjectstore --help`.
+- [ ] Define domain IDs: pool ID, disk ID, enclosure ID, store ID, object ID,
+  ingest job ID, and placement ID.
+- [ ] Define lifecycle enums for pool, disk, store, object, ingest job, health,
+  repair, and import mode.
+- [ ] Define store class and store policy structs matching
+  `docs/requirements.md`.
+- [ ] Add serialization/deserialization tests for domain types.
+- [ ] Add lifecycle transition tests for valid and invalid object state
+  transitions.
+- [ ] Add CLI command skeletons for `probe`, `health`, `pool`, `disk`, `store`,
+  `ingest`, and `mnemosyne`.
+- [ ] Keep CLI parsing separate from domain logic and persistence.
+
+## Milestone 3: Cross-Platform Disk and Enclosure Probe
+
+- [ ] Create `dasobjectstore-platform` crate with trait-based probe interfaces.
+- [ ] Implement Linux disk inventory using stable command/API choices and
+  structured parsing.
+- [ ] Implement macOS disk inventory using native command/API choices and
+  structured parsing.
+- [ ] Add data model for observed disk identity: size, serial hints, partition
+  hints, filesystem hints, removable/direct-attached hints, and transport.
+- [ ] Add data model for observed enclosure identity: USB topology path, vendor,
+  product, bridge hints, and user-assigned name.
+- [ ] Implement best-effort enclosure grouping from USB topology.
+- [ ] Add `dasobjectstore probe --json`.
+- [ ] Add `dasobjectstore probe --pretty`.
+- [ ] Add fixture-based tests for Linux probe parsing.
+- [ ] Add fixture-based tests for macOS probe parsing.
+- [ ] Document known SMART/USB identity limitations for common USB bridge
+  behavior.
+
+## Milestone 4: Portable Metadata Format
+
+- [ ] Create `dasobjectstore-metadata` crate.
+- [ ] Define SQLite schema for live SSD metadata.
+- [ ] Define metadata format version table and migration table.
+- [ ] Define canonical pool manifest format.
+- [ ] Define canonical disk manifest format.
+- [ ] Define append-only placement log format.
+- [ ] Implement metadata initialization for a new pool on an SSD path.
+- [ ] Implement metadata snapshot export to HDD metadata directories.
+- [ ] Implement metadata snapshot import/reconstruction tests.
+- [ ] Implement dirty-state markers for clean eject, dirty attach, read-only
+  import, repair, and force import.
+- [ ] Add `dasobjectstore pool inspect --metadata-path`.
+- [ ] Add `dasobjectstore pool mark-clean` and `mark-dirty` developer-only test
+  commands behind an explicit debug feature.
+- [ ] Document metadata compatibility and recovery guarantees.
+
+## Milestone 5: Store Policy Engine
+
+- [ ] Implement global pool defaults with per-store overrides.
+- [ ] Implement built-in store class defaults for `reproducible_cache`,
+  `generated_data`, `critical_metadata`, `export_bundle`, and
+  `ingest_staging`.
+- [ ] Implement policy validation for copy count, mutability, retention,
+  placement, ingest mode, and capacity behavior.
+- [ ] Implement policy validation for enclosure-aware placement preferences and
+  requirements.
+- [ ] Implement risk-gating model for direct-to-HDD import, force retire, and
+  force read-write import.
+- [ ] Add `dasobjectstore store validate <policy-file>`.
+- [ ] Add `dasobjectstore store defaults --class <class>`.
+- [ ] Add tests for valid public cache policy.
+- [ ] Add tests for valid generated data policy.
+- [ ] Add tests for valid critical metadata policy.
+- [ ] Add tests for invalid and unsafe policy combinations.
+
+## Milestone 6: SSD Ingest Pipeline
+
+- [ ] Define ingest job schema in live metadata.
+- [ ] Implement ingest staging directory layout on SSD.
+- [ ] Implement streaming hash computation for ingest writes.
+- [ ] Implement object state transitions from `received_on_ssd` to
+  `ssd_eviction_eligible`.
+- [ ] Implement store-configurable acknowledgement policy.
+- [ ] Implement SSD capacity measurement and high-watermark policy.
+- [ ] Implement priority queue and backpressure behavior for SSD pressure.
+- [ ] Add `dasobjectstore ingest status`.
+- [ ] Add `dasobjectstore ingest queue --json`.
+- [ ] Add crash/restart test for an ingest job before HDD settlement.
+- [ ] Add crash/restart test for an ingest job after metadata commit.
+- [ ] Document exactly what is lost if SSD fails before settlement.
+
+## Milestone 7: HDD Placement and Copy Verification
+
+- [ ] Define placement candidate model using capacity, health, performance,
+  write load, and enclosure constraints.
+- [ ] Implement weighted placement scorer.
+- [ ] Implement copy planner for `copies = 1`, `copies = 2`, and `copies = 3`.
+- [ ] Implement duplicate-copy prevention on the same disk for protected
+  objects.
+- [ ] Implement HDD copy write and post-copy hash verification.
+- [ ] Implement object protection state update after policy-satisfying copies.
+- [ ] Implement redownload-required state for reproducible cache objects.
+- [ ] Add `dasobjectstore object inspect <object-id>`.
+- [ ] Add placement tests for mixed disk sizes.
+- [ ] Add placement tests for degraded/suspect disks.
+- [ ] Add placement tests for enclosure-aware store policy.
+- [ ] Add copy verification tests with deliberate checksum mismatch.
+
+## Milestone 8: Object Service Benchmark and Selection
+
+- [ ] Create `benchmarks/object-services` harness structure.
+- [ ] Add Docker/Compose setup for Garage benchmark runs.
+- [ ] Add Docker/Compose setup for RustFS benchmark runs.
+- [ ] Implement large-object upload/download benchmark.
+- [ ] Implement small-object upload/download benchmark.
+- [ ] Implement concurrent-client benchmark.
+- [ ] Implement crash/restart during ingest benchmark.
+- [ ] Implement interrupted-write benchmark.
+- [ ] Implement metadata recovery benchmark.
+- [ ] Implement disk-full behavior benchmark.
+- [ ] Implement simulated disk removal benchmark.
+- [ ] Implement SSD ingest and HDD destage compatibility benchmark.
+- [ ] Define benchmark scoring rubric with reliability hard gates.
+- [ ] Write benchmark report template.
+- [ ] Produce first benchmark report and recommend MVP object service.
+
+## Milestone 9: S3 Service Orchestration
+
+- [ ] Create `dasobjectstore-object-service` crate with provider trait.
+- [ ] Implement provider for selected MVP object service.
+- [ ] Generate Docker/Compose configuration from store and pool policy.
+- [ ] Generate per-store service credentials.
+- [ ] Persist credential references without leaking secrets into normal logs.
+- [ ] Map store definitions to bucket/service layout.
+- [ ] Add `dasobjectstore service render-compose`.
+- [ ] Add `dasobjectstore service up`.
+- [ ] Add `dasobjectstore service down`.
+- [ ] Add `dasobjectstore service status --json`.
+- [ ] Add integration test using local generated Compose where available.
+- [ ] Document macOS Docker Desktop limitations for service orchestration.
+
+## Milestone 10: Health, Drain, Repair, and Disk Retirement
+
+- [ ] Define health score inputs and weighting.
+- [ ] Implement SMART ingestion where available on Linux.
+- [ ] Implement best-effort SMART/health ingestion on macOS.
+- [ ] Implement IO error and checksum failure health signals.
+- [ ] Implement USB reset/disconnect event ingestion where feasible.
+- [ ] Implement benchmark drift signal ingestion.
+- [ ] Implement disk health state transitions.
+- [ ] Block new protected placement on suspect disks.
+- [ ] Implement protected-store evacuation planner.
+- [ ] Implement evacuation executor with copy verification.
+- [ ] Implement reproducible-cache opportunistic evacuation.
+- [ ] Add `dasobjectstore disk retire <disk-id>`.
+- [ ] Add `dasobjectstore disk drain <disk-id>`.
+- [ ] Add `dasobjectstore disk replace <old-disk-id> --with <new-disk-id>`.
+- [ ] Add force-retire flow with policy allowance and action-time
+  confirmation.
+- [ ] Add health summary, verbose, and JSON output.
+- [ ] Add tests for suspect disk evacuation.
+- [ ] Add tests for insufficient capacity during drain.
+
+## Milestone 11: macOS Development and Read/Export Path
+
+- [ ] Implement macOS read-only pool inspection from metadata snapshots.
+- [ ] Implement macOS clean-pool read-only attach flow.
+- [ ] Implement macOS dirty-pool read-only default import flow.
+- [ ] Implement settled object export command for macOS.
+- [ ] Add `dasobjectstore pool import --read-only`.
+- [ ] Add `dasobjectstore pool repair --dry-run`.
+- [ ] Add macOS fixture tests for metadata inspection.
+- [ ] Add cross-platform test that reads metadata generated by Linux fixtures on
+  macOS.
+- [ ] Document macOS limits for Docker Desktop, service management, SMART,
+  filesystem support, permissions, and performance.
+
+## Milestone 12: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
+
+- [ ] Create Web UI scaffold with clear separation from core domain logic.
+- [ ] Add dashboard view for pool status.
+- [ ] Add dashboard view for disk health.
+- [ ] Add dashboard view for ingest and destage queues.
+- [ ] Add dashboard view for warnings and required actions.
+- [ ] Add safe Web UI actions for health check, service start/stop, and read-only
+  import where supported.
+- [ ] Add read-only SMB export recipe generation.
+- [ ] Add read-only NFS export recipe generation.
+- [ ] Add optional managed read-only export task for Linux if safe and
+  well-bounded.
+- [ ] Create `dasobjectstore-mnemosyne` adapter crate/module.
+- [ ] Implement Mneion-compatible storage definition export.
+- [ ] Implement Mneion-compatible binding snippet export.
+- [ ] Add `dasobjectstore mnemosyne export`.
+- [ ] Document a bioinformatics reference workflow using `reproducible_cache`
+  and `generated_data`.
+- [ ] Add README section linking to the reference workflow.
+
+## Cross-Cutting Tasks
+
+- [ ] Keep CLI examples synchronized between `README.md`,
+  `docs/requirements.md`, `ROADMAP.md`, and this file.
+- [ ] Keep JSON/schema-like formats versioned before implementation lands.
+- [ ] Add test fixtures whenever platform command output parsing is introduced.
+- [ ] Add negative tests for risky operation gates.
+- [ ] Keep documentation for data-loss risks adjacent to commands that can
+  trigger those risks.
+- [ ] Review file sizes before each milestone completion and split modules that
+  have grown too broad.
+
