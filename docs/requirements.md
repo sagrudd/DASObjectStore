@@ -182,6 +182,9 @@ DASObjectStore SHALL support placement weighting by:
 - prior write load;
 - enclosure diversity where required by store policy.
 
+DASObjectStore SHALL score eligible placement candidates deterministically before
+copy planning, with stable ordering for equal scores.
+
 DASObjectStore SHOULD avoid placing two copies of the same protected object on the
 same disk.
 
@@ -320,6 +323,9 @@ DASObjectStore SHALL use benchmark results in placement scoring.
 DASObjectStore SHALL model HDD placement candidates with available capacity,
 health state, performance class, write load, and enclosure identity before
 weighted scoring is applied.
+
+DASObjectStore SHALL exclude candidates without enough capacity and candidates
+that are unsafe for protected copies before scoring.
 
 DASObjectStore SHALL not implement fine-grained HDD physical region placement in the
 MVP.

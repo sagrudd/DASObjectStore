@@ -45,6 +45,30 @@ impl PlacementCandidate {
         self.has_capacity_for(request.object_size_bytes)
             && (!request.protected_copy || self.accepts_new_protected_copy())
     }
+
+    pub fn score_for(&self, request: &PlacementRequest) -> Option<PlacementScore> {
+        if !self.is_candidate_for(request) {
+            return None;
+        }
+
+        let capacity_score = capacity_score(self.available_bytes, request.object_size_bytes);
+        let health_score = health_score(self.health_state);
+        let performance_score = performance_score(self.performance_class);
+        let write_load_score = write_load_score(self.write_load);
+        let total = capacity_score
+            + health_score as u16
+            + performance_score as u16
+            + write_load_score as u16;
+
+        Some(PlacementScore {
+            disk_id: self.disk_id.clone(),
+            total,
+            capacity_score,
+            health_score,
+            performance_score,
+            write_load_score,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -85,9 +109,77 @@ impl PlacementRequest {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlacementScore {
+    pub disk_id: DiskId,
+    pub total: u16,
+    pub capacity_score: u16,
+    pub health_score: u8,
+    pub performance_score: u8,
+    pub write_load_score: u8,
+}
+
+pub fn score_candidates(
+    candidates: &[PlacementCandidate],
+    request: &PlacementRequest,
+) -> Vec<PlacementScore> {
+    let mut scores: Vec<_> = candidates
+        .iter()
+        .filter_map(|candidate| candidate.score_for(request))
+        .collect();
+    scores.sort_by(compare_scores);
+    scores
+}
+
+fn compare_scores(left: &PlacementScore, right: &PlacementScore) -> std::cmp::Ordering {
+    right
+        .total
+        .cmp(&left.total)
+        .then_with(|| left.disk_id.cmp(&right.disk_id))
+}
+
+fn capacity_score(available_bytes: u64, object_size_bytes: u64) -> u16 {
+    if object_size_bytes == 0 {
+        return 100;
+    }
+
+    let capacity_multiple = available_bytes / object_size_bytes;
+    let capped = capacity_multiple.min(100);
+    capped as u16
+}
+
+fn health_score(health_state: HealthState) -> u8 {
+    match health_state {
+        HealthState::Healthy => 100,
+        HealthState::Watch => 70,
+        HealthState::Suspect => 20,
+        HealthState::Draining | HealthState::Retired | HealthState::Failed => 0,
+    }
+}
+
+fn performance_score(performance_class: PerformanceClass) -> u8 {
+    match performance_class {
+        PerformanceClass::Fast => 100,
+        PerformanceClass::Standard => 70,
+        PerformanceClass::Unknown => 50,
+        PerformanceClass::Slow => 25,
+    }
+}
+
+fn write_load_score(write_load: WriteLoad) -> u8 {
+    match write_load {
+        WriteLoad::Idle => 100,
+        WriteLoad::Light => 70,
+        WriteLoad::Busy => 35,
+        WriteLoad::Saturated => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad};
+    use super::{
+        score_candidates, PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad,
+    };
     use crate::ids::{DiskId, EnclosureId};
     use crate::lifecycle::HealthState;
 
@@ -183,6 +275,97 @@ mod tests {
             serde_json::from_str(&encoded).expect("candidate deserializes");
 
         assert_eq!(decoded, candidate);
+    }
+
+    #[test]
+    fn scorer_orders_candidates_by_weighted_inputs() {
+        let candidates = vec![
+            candidate(
+                "disk-slow",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Slow,
+                WriteLoad::Busy,
+            ),
+            candidate(
+                "disk-fast",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let scores = score_candidates(&candidates, &PlacementRequest::protected(1_000));
+
+        assert_eq!(scores[0].disk_id.as_str(), "disk-fast");
+        assert!(scores[0].total > scores[1].total);
+        assert_eq!(scores[0].performance_score, 100);
+        assert_eq!(scores[0].write_load_score, 100);
+    }
+
+    #[test]
+    fn scorer_filters_ineligible_candidates() {
+        let candidates = vec![
+            candidate(
+                "disk-too-small",
+                None,
+                999,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-suspect",
+                None,
+                10_000,
+                HealthState::Suspect,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-ok",
+                None,
+                10_000,
+                HealthState::Watch,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+        ];
+
+        let scores = score_candidates(&candidates, &PlacementRequest::protected(1_000));
+
+        assert_eq!(scores.len(), 1);
+        assert_eq!(scores[0].disk_id.as_str(), "disk-ok");
+    }
+
+    #[test]
+    fn scorer_uses_disk_id_as_stable_tie_breaker() {
+        let candidates = vec![
+            candidate(
+                "disk-b",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-a",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let scores = score_candidates(&candidates, &PlacementRequest::protected(1_000));
+
+        assert_eq!(scores[0].disk_id.as_str(), "disk-a");
+        assert_eq!(scores[1].disk_id.as_str(), "disk-b");
     }
 
     fn candidate(
