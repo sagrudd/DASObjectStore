@@ -1,5 +1,6 @@
 //! Core domain types for DASObjectStore.
 
+pub mod file_export;
 pub mod health;
 pub mod ids;
 pub mod lifecycle;
