@@ -199,7 +199,7 @@ developers
 
 ## Milestone 11: macOS Development and Read/Export Path
 
-- [ ] Implement macOS read-only pool inspection from metadata snapshots.
+- [x] Implement macOS read-only pool inspection from metadata snapshots.
 - [ ] Implement macOS clean-pool read-only attach flow.
 - [ ] Implement macOS dirty-pool read-only default import flow.
 - [ ] Implement settled object export command for macOS.

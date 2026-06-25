@@ -1,5 +1,6 @@
 use crate::manifest::{DiskManifest, PoolManifest};
 use crate::snapshot::{DISK_MANIFEST_FILE_NAME, POOL_MANIFEST_FILE_NAME};
+use crate::{METADATA_DIR_NAME, SNAPSHOT_DIR_NAME};
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::lifecycle::PoolState;
 use std::fmt::{self, Display};
@@ -19,7 +20,7 @@ pub struct PoolInspectSummary {
 pub fn inspect_pool_metadata(
     path: impl AsRef<Path>,
 ) -> Result<PoolInspectSummary, PoolInspectError> {
-    let metadata_path = path.as_ref();
+    let metadata_path = resolve_metadata_snapshot_path(path.as_ref())?;
     let pool_manifest: PoolManifest = read_json(metadata_path.join(POOL_MANIFEST_FILE_NAME))?;
     let disk_manifest: DiskManifest = read_json(metadata_path.join(DISK_MANIFEST_FILE_NAME))?;
 
@@ -31,13 +32,32 @@ pub fn inspect_pool_metadata(
     }
 
     Ok(PoolInspectSummary {
-        metadata_path: metadata_path.to_path_buf(),
+        metadata_path,
         pool_id: pool_manifest.pool_id,
         state: pool_manifest.state,
         created_at_utc: pool_manifest.created_at_utc,
         updated_at_utc: pool_manifest.updated_at_utc,
         disk_count: disk_manifest.disks.len(),
     })
+}
+
+fn resolve_metadata_snapshot_path(path: &Path) -> Result<PathBuf, PoolInspectError> {
+    if has_snapshot_manifests(path) {
+        return Ok(path.to_path_buf());
+    }
+
+    let canonical_snapshot_path = path.join(METADATA_DIR_NAME).join(SNAPSHOT_DIR_NAME);
+    if has_snapshot_manifests(&canonical_snapshot_path) {
+        return Ok(canonical_snapshot_path);
+    }
+
+    Err(PoolInspectError::MissingMetadataSnapshot {
+        path: path.to_path_buf(),
+    })
+}
+
+fn has_snapshot_manifests(path: &Path) -> bool {
+    path.join(POOL_MANIFEST_FILE_NAME).is_file() && path.join(DISK_MANIFEST_FILE_NAME).is_file()
 }
 
 fn read_json<T>(path: PathBuf) -> Result<T, PoolInspectError>
@@ -53,6 +73,9 @@ where
 pub enum PoolInspectError {
     Io(std::io::Error),
     Json(serde_json::Error),
+    MissingMetadataSnapshot {
+        path: PathBuf,
+    },
     ManifestPoolMismatch {
         pool_manifest_pool_id: String,
         disk_manifest_pool_id: String,
@@ -64,6 +87,14 @@ impl Display for PoolInspectError {
         match self {
             Self::Io(err) => write!(formatter, "failed to read pool metadata: {err}"),
             Self::Json(err) => write!(formatter, "failed to parse pool metadata: {err}"),
+            Self::MissingMetadataSnapshot { path } => write!(
+                formatter,
+                "failed to find pool metadata snapshot at {} or {}/{}/{}",
+                path.to_string_lossy(),
+                path.to_string_lossy(),
+                METADATA_DIR_NAME,
+                SNAPSHOT_DIR_NAME
+            ),
             Self::ManifestPoolMismatch {
                 pool_manifest_pool_id,
                 disk_manifest_pool_id,
@@ -118,6 +149,21 @@ mod tests {
         assert_eq!(summary.disk_count, 1);
 
         fs::remove_dir_all(summary.metadata_path).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn inspects_snapshot_under_portable_pool_root() {
+        let root = temp_root("inspect-portable-root");
+        let metadata_path = root.join(".dasobjectstore").join("metadata");
+        write_snapshot_manifests(&metadata_path, "pool-a");
+
+        let summary = inspect_pool_metadata(&root).expect("metadata inspects");
+
+        assert_eq!(summary.metadata_path, metadata_path);
+        assert_eq!(summary.pool_id.as_str(), "pool-a");
+        assert_eq!(summary.disk_count, 1);
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
     fn write_snapshot_manifests(path: &Path, pool_id: &str) {
