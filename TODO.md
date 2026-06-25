@@ -111,7 +111,7 @@ developers
 - [x] Define ingest job schema in live metadata.
 - [x] Implement ingest staging directory layout on SSD.
 - [x] Implement streaming hash computation for ingest writes.
-- [ ] Implement object state transitions from `received_on_ssd` to
+- [x] Implement object state transitions from `received_on_ssd` to
   `ssd_eviction_eligible`.
 - [ ] Implement store-configurable acknowledgement policy.
 - [ ] Implement SSD capacity measurement and high-watermark policy.

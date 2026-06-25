@@ -1,6 +1,7 @@
 //! Domain lifecycle states.
 
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PoolState {
@@ -45,6 +46,16 @@ pub enum ObjectState {
 }
 
 impl ObjectState {
+    pub const SSD_SETTLEMENT_PATH: [Self; 7] = [
+        Self::ReceivedOnSsd,
+        Self::HashVerified,
+        Self::PlacementPlanned,
+        Self::CopyingToHdd,
+        Self::HddCopyVerified,
+        Self::Protected,
+        Self::SsdEvictionEligible,
+    ];
+
     pub fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
@@ -57,7 +68,48 @@ impl ObjectState {
                 | (_, Self::RedownloadRequired)
         )
     }
+
+    pub fn next_ssd_settlement_state(self) -> Option<Self> {
+        match self {
+            Self::ReceivedOnSsd => Some(Self::HashVerified),
+            Self::HashVerified => Some(Self::PlacementPlanned),
+            Self::PlacementPlanned => Some(Self::CopyingToHdd),
+            Self::CopyingToHdd => Some(Self::HddCopyVerified),
+            Self::HddCopyVerified => Some(Self::Protected),
+            Self::Protected => Some(Self::SsdEvictionEligible),
+            Self::SsdEvictionEligible | Self::RedownloadRequired => None,
+        }
+    }
+
+    pub fn transition_to(self, next: Self) -> Result<Self, ObjectStateTransitionError> {
+        if self.can_transition_to(next) {
+            Ok(next)
+        } else {
+            Err(ObjectStateTransitionError {
+                current: self,
+                next,
+            })
+        }
+    }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObjectStateTransitionError {
+    pub current: ObjectState,
+    pub next: ObjectState,
+}
+
+impl Display for ObjectStateTransitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "invalid object state transition: {:?} -> {:?}",
+            self.current, self.next
+        )
+    }
+}
+
+impl std::error::Error for ObjectStateTransitionError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IngestJobState {
@@ -101,7 +153,7 @@ pub enum ImportMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{HealthState, ObjectState};
+    use super::{HealthState, ObjectState, ObjectStateTransitionError};
 
     const OBJECT_STATES: [ObjectState; 8] = [
         ObjectState::ReceivedOnSsd,
@@ -126,21 +178,54 @@ mod tests {
 
     #[test]
     fn permits_full_object_settlement_path() {
-        let transitions = [
-            (ObjectState::ReceivedOnSsd, ObjectState::HashVerified),
-            (ObjectState::HashVerified, ObjectState::PlacementPlanned),
-            (ObjectState::PlacementPlanned, ObjectState::CopyingToHdd),
-            (ObjectState::CopyingToHdd, ObjectState::HddCopyVerified),
-            (ObjectState::HddCopyVerified, ObjectState::Protected),
-            (ObjectState::Protected, ObjectState::SsdEvictionEligible),
-        ];
-
-        for (current, next) in transitions {
+        for states in ObjectState::SSD_SETTLEMENT_PATH.windows(2) {
+            let [current, next] = states else {
+                unreachable!("window size is two");
+            };
             assert!(
-                current.can_transition_to(next),
-                "{current:?} should transition to {next:?}"
+                current.can_transition_to(*next),
+                "{current:?} should transition to {next:?}",
             );
         }
+    }
+
+    #[test]
+    fn exposes_full_ssd_settlement_path() {
+        assert_eq!(
+            ObjectState::SSD_SETTLEMENT_PATH,
+            [
+                ObjectState::ReceivedOnSsd,
+                ObjectState::HashVerified,
+                ObjectState::PlacementPlanned,
+                ObjectState::CopyingToHdd,
+                ObjectState::HddCopyVerified,
+                ObjectState::Protected,
+                ObjectState::SsdEvictionEligible,
+            ]
+        );
+    }
+
+    #[test]
+    fn advances_object_through_ssd_settlement_path() {
+        let mut current = ObjectState::ReceivedOnSsd;
+
+        for expected in [
+            ObjectState::HashVerified,
+            ObjectState::PlacementPlanned,
+            ObjectState::CopyingToHdd,
+            ObjectState::HddCopyVerified,
+            ObjectState::Protected,
+            ObjectState::SsdEvictionEligible,
+        ] {
+            let next = current
+                .next_ssd_settlement_state()
+                .expect("next settlement state");
+            assert_eq!(next, expected);
+            current = current.transition_to(next).expect("transition succeeds");
+        }
+
+        assert_eq!(current, ObjectState::SsdEvictionEligible);
+        assert_eq!(current.next_ssd_settlement_state(), None);
     }
 
     #[test]
@@ -171,6 +256,25 @@ mod tests {
                 "{current:?} should not transition to {next:?}"
             );
         }
+    }
+
+    #[test]
+    fn checked_transition_returns_invalid_transition_error() {
+        let err = ObjectState::ReceivedOnSsd
+            .transition_to(ObjectState::Protected)
+            .expect_err("skip should fail");
+
+        assert_eq!(
+            err,
+            ObjectStateTransitionError {
+                current: ObjectState::ReceivedOnSsd,
+                next: ObjectState::Protected
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "invalid object state transition: ReceivedOnSsd -> Protected"
+        );
     }
 
     #[test]
