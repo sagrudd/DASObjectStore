@@ -38,6 +38,18 @@ require_command() {
   fi
 }
 
+require_s3_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    return
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "AWS CLI or Docker is required for S3 benchmark workloads" >&2
+  exit 69
+}
+
 require_compose_command() {
   message="$1"
 
@@ -97,6 +109,8 @@ configure_provider_s3() {
     garage)
       endpoint="${DASOBJECTSTORE_S3_ENDPOINT:-http://127.0.0.1:3900}"
       region="${AWS_DEFAULT_REGION:-garage}"
+      export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-garageadmin}"
+      export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-garageadmin}"
       ;;
     rustfs)
       endpoint="${DASOBJECTSTORE_S3_ENDPOINT:-http://127.0.0.1:9000}"
@@ -174,5 +188,27 @@ start_epoch() {
 }
 
 aws_s3() {
-  aws --endpoint-url "$endpoint" s3api "$@"
+  if command -v aws >/dev/null 2>&1; then
+    aws --endpoint-url "$endpoint" s3api "$@"
+    return
+  fi
+
+  docker run --rm \
+    --add-host host.docker.internal:host-gateway \
+    -v "$PWD:/work" \
+    -v /tmp:/tmp \
+    -w /work \
+    -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-}" \
+    -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-}" \
+    -e AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}" \
+    "${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}" \
+    --endpoint-url "$(container_s3_endpoint)" s3api "$@"
+}
+
+container_s3_endpoint() {
+  case "$endpoint" in
+    http://127.0.0.1:*) printf 'http://host.docker.internal:%s\n' "${endpoint##*:}" ;;
+    http://localhost:*) printf 'http://host.docker.internal:%s\n' "${endpoint##*:}" ;;
+    *) printf '%s\n' "$endpoint" ;;
+  esac
 }

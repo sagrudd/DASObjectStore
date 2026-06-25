@@ -54,6 +54,16 @@ require_compose_command() {
   fi
 }
 
+require_s3_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    echo "ok command: aws"
+  elif command -v docker >/dev/null 2>&1; then
+    echo "ok command: docker for containerized AWS CLI"
+  else
+    record_failure "missing command: aws or docker for containerized AWS CLI"
+  fi
+}
+
 require_file() {
   path="$1"
   if [ -f "$path" ]; then
@@ -90,7 +100,7 @@ for provider in $providers; do
 done
 
 if [ "$offline" -eq 0 ]; then
-  require_command aws
+  require_s3_cli
   require_command awk
   require_command cp
   require_command date

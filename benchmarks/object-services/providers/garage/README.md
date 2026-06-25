@@ -26,6 +26,9 @@ under `benchmarks/output/object-services/garage/`.
 
 ## Notes
 
+- The benchmark client defaults to `garageadmin` / `garageadmin` when
+  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are not set. Provision
+  matching Garage keys before running real S3 workloads.
 - The image is pinned to `dxflrs/garage:v2.3.0` for repeatable benchmark runs.
 - The Garage documentation recommends fixed image tags rather than `latest`.
 - Garage documentation recommends SSD-backed metadata and HDD-backed data

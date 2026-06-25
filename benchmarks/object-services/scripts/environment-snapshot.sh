@@ -47,6 +47,14 @@ memory_bytes="$(memory_bytes | first_line)"
 docker_version="$(value_or_unknown docker docker --version | first_line)"
 compose_version="$(value_or_unknown docker docker compose version | first_line)"
 aws_version="$(value_or_unknown aws aws --version | first_line)"
+aws_backend="local aws"
+if [ "$aws_version" = "unknown" ]; then
+  if command -v docker >/dev/null 2>&1; then
+    aws_backend="container: ${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}"
+  else
+    aws_backend="unavailable"
+  fi
+fi
 hash_tool="unknown"
 
 if command -v sha256sum >/dev/null 2>&1; then
@@ -68,6 +76,7 @@ cat <<EOF
 | Docker version | \`$docker_version\` |
 | Docker Compose version | \`$compose_version\` |
 | AWS CLI version | \`$aws_version\` |
+| AWS CLI backend | \`$aws_backend\` |
 | Hash tool | \`$hash_tool\` |
 | Benchmark output root | \`${DASOBJECTSTORE_BENCH_OUTPUT_DIR:-benchmarks/output/object-services}\` |
 | SSD ingest path | \`${DASOBJECTSTORE_SSD_INGEST_PATH:-/tmp/dasobjectstore-bench/ssd}\` |

@@ -42,7 +42,7 @@ if [ "$dry_run" = "1" ]; then
   exit 0
 fi
 
-require_command "aws" "aws CLI is required for S3 benchmark workloads"
+require_s3_cli
 require_compose_command "Docker Compose is required for crash/restart benchmarks"
 
 mkdir -p "$workload_dir"

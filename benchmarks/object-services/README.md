@@ -34,6 +34,10 @@ which is ignored by Git.
 Copy `config/example.toml` to a local file before running benchmarks. Keep local
 paths and generated output out of version control.
 
+S3 operations use the host `aws` CLI when available. If it is not installed, the
+workloads fall back to Docker with
+`${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}`.
+
 ```sh
 benchmarks/object-services/scripts/run.sh garage large-object
 ```

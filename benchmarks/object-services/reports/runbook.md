@@ -6,7 +6,8 @@ Milestone 8 provider-selection report.
 ## Preconditions
 
 - Docker with Compose support is installed and running.
-- AWS CLI is installed and available as `aws`.
+- AWS CLI is installed as `aws`, or Docker can run the default
+  `amazon/aws-cli:2` container image.
 - `sha256sum` or `shasum` is available for payload verification.
 - No previous benchmark provider containers are running on ports `3900`, `9000`,
   or `9001`.
@@ -30,6 +31,12 @@ benchmarks/object-services/scripts/preflight.sh
 
 If the local preflight fails, fix the missing command or Docker Compose issue
 before starting provider containers.
+
+When `aws` is not installed locally, the workload scripts run S3 commands via
+Docker using `${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}`. Local
+`127.0.0.1` endpoints are rewritten to `host.docker.internal` for the
+containerized CLI, and Docker's `host-gateway` mapping is added for Linux
+hosts.
 
 ## 2. Start Each Provider
 

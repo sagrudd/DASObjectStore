@@ -34,7 +34,7 @@ if [ "$dry_run" = "1" ]; then
   exit 0
 fi
 
-require_command "aws" "aws CLI is required for S3 benchmark workloads"
+require_s3_cli
 
 mkdir -p "$workload_dir" "$ssd_workload_dir" "$hdd_object_dir"
 ensure_sparse_file "$ssd_payload_path" "$object_bytes"
