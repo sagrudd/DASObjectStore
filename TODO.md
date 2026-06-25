@@ -61,7 +61,7 @@ developers
   hints, filesystem hints, removable/direct-attached hints, and transport.
 - [x] Add data model for observed enclosure identity: USB topology path, vendor,
   product, bridge hints, and user-assigned name.
-- [ ] Implement best-effort enclosure grouping from USB topology.
+- [x] Implement best-effort enclosure grouping from USB topology.
 - [ ] Add `dasobjectstore probe --json`.
 - [ ] Add `dasobjectstore probe --pretty`.
 - [ ] Add fixture-based tests for Linux probe parsing.
