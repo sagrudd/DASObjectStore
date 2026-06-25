@@ -124,6 +124,8 @@ impl DiskArgs {
 pub(crate) enum DiskCommand {
     /// Plan drain work for a disk without copying or deleting data.
     Drain(DiskDrainArgs),
+    /// Plan replacement work from an old disk onto a named new disk.
+    Replace(DiskReplaceArgs),
     /// Request retirement by moving a disk into draining state.
     Retire(DiskRetireArgs),
 }
@@ -143,6 +145,39 @@ pub(crate) struct DiskDrainArgs {
 impl DiskDrainArgs {
     pub(crate) fn disk_id(&self) -> &DiskId {
         &self.disk_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskReplaceArgs {
+    /// Disk identifier to replace.
+    old_disk_id: DiskId,
+    /// New disk identifier to receive replacement copies.
+    #[arg(long = "with")]
+    new_disk_id: DiskId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Emit replacement plan as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl DiskReplaceArgs {
+    pub(crate) fn old_disk_id(&self) -> &DiskId {
+        &self.old_disk_id
+    }
+
+    pub(crate) fn new_disk_id(&self) -> &DiskId {
+        &self.new_disk_id
     }
 
     pub(crate) fn live_sqlite_path(&self) -> &Path {
@@ -589,11 +624,41 @@ mod tests {
         };
         match args.command() {
             DiskCommand::Drain(_) => panic!("expected retire command"),
+            DiskCommand::Replace(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
                 assert_eq!(retire.disk_id().as_str(), "disk-a");
                 assert_eq!(retire.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
                 assert_eq!(retire.recorded_at_utc(), "2026-01-02T00:00:00Z");
             }
+        }
+    }
+
+    #[test]
+    fn parses_disk_replace() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "replace",
+            "disk-a",
+            "--with",
+            "disk-b",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--json",
+        ])
+        .expect("disk replace parses");
+
+        let Some(Command::Disk(args)) = cli.command() else {
+            panic!("expected disk command");
+        };
+        match args.command() {
+            DiskCommand::Replace(replace) => {
+                assert_eq!(replace.old_disk_id().as_str(), "disk-a");
+                assert_eq!(replace.new_disk_id().as_str(), "disk-b");
+                assert_eq!(replace.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert!(replace.json());
+            }
+            _ => panic!("expected replace command"),
         }
     }
 

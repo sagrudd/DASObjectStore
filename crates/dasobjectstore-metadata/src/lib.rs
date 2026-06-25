@@ -29,8 +29,8 @@ pub use copy::{
 };
 pub use disk::{request_disk_retirement, DiskRetirementError, DiskRetirementReport};
 pub use drain::{
-    read_disk_drain_plan, DiskDrainAction, DiskDrainError, DiskDrainObjectSummary,
-    DiskDrainPlanSummary,
+    read_disk_drain_plan, read_disk_replacement_plan, DiskDrainAction, DiskDrainError,
+    DiskDrainObjectSummary, DiskDrainPlanSummary, DiskReplacementPlanSummary,
 };
 pub use evacuation::{
     execute_evacuation_plan, DiskCopyRoot, EvacuationExecutionError, EvacuationExecutionReport,

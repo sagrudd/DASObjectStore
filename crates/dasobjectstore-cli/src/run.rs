@@ -1,17 +1,18 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, DiskCommand, DiskDrainArgs, DiskRetireArgs, IngestCommand, IngestQueueArgs,
-    IngestStatusArgs, ObjectCommand, ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs,
-    ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
-    StoreDefaultsArgs, StoreValidateArgs,
+    Cli, Command, DiskCommand, DiskDrainArgs, DiskReplaceArgs, DiskRetireArgs, IngestCommand,
+    IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectInspectArgs, PoolCommand,
+    PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs,
+    ServiceStatusArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan, read_ingest_queue,
-    read_object_inspect, request_disk_retirement, DiskDrainAction, DiskDrainError,
-    DiskDrainPlanSummary, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
-    ObjectInspectError, ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
+    inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan, read_disk_replacement_plan,
+    read_ingest_queue, read_object_inspect, request_disk_retirement, DiskDrainAction,
+    DiskDrainError, DiskDrainObjectSummary, DiskDrainPlanSummary, DiskReplacementPlanSummary,
+    DiskRetirementError, DiskRetirementReport, IngestQueueReadError, ObjectInspectError,
+    ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
     SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
 #[cfg(feature = "debug-commands")]
@@ -45,6 +46,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Disk(args)) => match args.command() {
             DiskCommand::Drain(args) => run_disk_drain(args, writer),
+            DiskCommand::Replace(args) => run_disk_replace(args, writer),
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
         Some(Command::Store(args)) => match args.command() {
@@ -220,6 +222,23 @@ fn run_disk_drain(args: &DiskDrainArgs, writer: &mut impl Write) -> Result<(), C
         writer.write_all(b"\n")?;
     } else {
         write_disk_drain_plan(&plan, writer)?;
+    }
+
+    Ok(())
+}
+
+fn run_disk_replace(args: &DiskReplaceArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let plan = read_disk_replacement_plan(
+        args.live_sqlite_path(),
+        args.old_disk_id(),
+        args.new_disk_id(),
+    )?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &plan)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_disk_replacement_plan(&plan, writer)?;
     }
 
     Ok(())
@@ -412,8 +431,53 @@ fn write_disk_drain_plan(
         "Cache redownload-required objects: {}",
         plan.cache_redownload_required_objects
     )?;
-    writeln!(writer, "Affected objects: {}", plan.affected_objects.len())?;
-    for object in &plan.affected_objects {
+    write_disk_plan_objects(&plan.affected_objects, writer)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        plan.live_sqlite_path.to_string_lossy()
+    )
+}
+
+fn write_disk_replacement_plan(
+    plan: &DiskReplacementPlanSummary,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(
+        writer,
+        "Disk replacement plan: {} -> {}",
+        plan.old_disk_id, plan.new_disk_id
+    )?;
+    writeln!(
+        writer,
+        "Protected copy tasks: {}",
+        plan.protected_copy_tasks
+    )?;
+    writeln!(
+        writer,
+        "Protected blocked objects: {}",
+        plan.protected_blocked_objects
+    )?;
+    writeln!(writer, "Cache copy tasks: {}", plan.cache_copy_tasks)?;
+    writeln!(
+        writer,
+        "Cache redownload-required objects: {}",
+        plan.cache_redownload_required_objects
+    )?;
+    write_disk_plan_objects(&plan.affected_objects, writer)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        plan.live_sqlite_path.to_string_lossy()
+    )
+}
+
+fn write_disk_plan_objects(
+    affected_objects: &[DiskDrainObjectSummary],
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Affected objects: {}", affected_objects.len())?;
+    for object in affected_objects {
         let destinations = if object.destination_disk_ids.is_empty() {
             "<none>".to_string()
         } else {
@@ -433,11 +497,8 @@ fn write_disk_drain_plan(
             destinations
         )?;
     }
-    writeln!(
-        writer,
-        "Live metadata: {}",
-        plan.live_sqlite_path.to_string_lossy()
-    )
+
+    Ok(())
 }
 
 fn disk_drain_action_name(action: DiskDrainAction) -> &'static str {
@@ -880,6 +941,67 @@ mod tests {
         let output: serde_json::Value =
             serde_json::from_slice(&output).expect("drain output is json");
         assert_eq!(output["disk_id"], "disk-a");
+        assert_eq!(output["protected_copy_tasks"], 1);
+        assert_eq!(output["affected_objects"][0]["action"], "copy_planned");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_replace_writes_pretty_plan() {
+        let root = temp_root("disk-replace-pretty");
+        let live_sqlite_path = create_live_sqlite_with_object(&root);
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        insert_disk(&connection, "disk-b", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "replace",
+            "disk-a",
+            "--with",
+            "disk-b",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+        ])
+        .expect("disk replace parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("disk replace runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Disk replacement plan: disk-a -> disk-b"));
+        assert!(output.contains("Protected copy tasks: 1"));
+        assert!(output.contains("- object-a store=store-a action=copy_planned destinations=disk-b"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_replace_writes_json_plan() {
+        let root = temp_root("disk-replace-json");
+        let live_sqlite_path = create_live_sqlite_with_object(&root);
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        insert_disk(&connection, "disk-b", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "replace",
+            "disk-a",
+            "--with",
+            "disk-b",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--json",
+        ])
+        .expect("disk replace parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("disk replace runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("replacement output is json");
+        assert_eq!(output["old_disk_id"], "disk-a");
+        assert_eq!(output["new_disk_id"], "disk-b");
         assert_eq!(output["protected_copy_tasks"], 1);
         assert_eq!(output["affected_objects"][0]["action"], "copy_planned");
 

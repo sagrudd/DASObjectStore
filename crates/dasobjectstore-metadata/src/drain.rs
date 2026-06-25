@@ -23,6 +23,18 @@ pub struct DiskDrainPlanSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DiskReplacementPlanSummary {
+    pub old_disk_id: DiskId,
+    pub new_disk_id: DiskId,
+    pub live_sqlite_path: PathBuf,
+    pub protected_copy_tasks: usize,
+    pub protected_blocked_objects: usize,
+    pub cache_copy_tasks: usize,
+    pub cache_redownload_required_objects: usize,
+    pub affected_objects: Vec<DiskDrainObjectSummary>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct DiskDrainObjectSummary {
     pub object_id: ObjectId,
     pub store_id: StoreId,
@@ -53,6 +65,9 @@ pub enum DiskDrainError {
         field: &'static str,
         value: i64,
     },
+    SameDiskReplacement {
+        disk_id: DiskId,
+    },
 }
 
 impl Display for DiskDrainError {
@@ -72,6 +87,9 @@ impl Display for DiskDrainError {
                     "invalid negative drain metadata {field}: {value}"
                 )
             }
+            Self::SameDiskReplacement { disk_id } => {
+                write!(formatter, "cannot replace disk {disk_id} with itself")
+            }
         }
     }
 }
@@ -83,7 +101,8 @@ impl std::error::Error for DiskDrainError {
             Self::Json(err) => Some(err),
             Self::DiskNotFound { .. }
             | Self::InvalidIdentifier { .. }
-            | Self::NegativeByteCount { .. } => None,
+            | Self::NegativeByteCount { .. }
+            | Self::SameDiskReplacement { .. } => None,
         }
     }
 }
@@ -110,9 +129,54 @@ pub fn read_disk_drain_plan(
 
     let objects = read_source_disk_objects(&connection, disk_id)?;
     let candidates = read_placement_candidates(&connection, disk_id)?;
-    let protected_plan = plan_protected_store_evacuation(disk_id, &objects, &candidates)
+    build_disk_drain_plan_summary(live_sqlite_path, disk_id, &objects, &candidates)
+}
+
+pub fn read_disk_replacement_plan(
+    live_sqlite_path: impl AsRef<Path>,
+    old_disk_id: &DiskId,
+    new_disk_id: &DiskId,
+) -> Result<DiskReplacementPlanSummary, DiskDrainError> {
+    if old_disk_id == new_disk_id {
+        return Err(DiskDrainError::SameDiskReplacement {
+            disk_id: old_disk_id.clone(),
+        });
+    }
+
+    let live_sqlite_path = live_sqlite_path.as_ref();
+    let connection = Connection::open(live_sqlite_path)?;
+    ensure_disk_exists(&connection, old_disk_id)?;
+    ensure_disk_exists(&connection, new_disk_id)?;
+
+    let objects = read_source_disk_objects(&connection, old_disk_id)?;
+    let candidates = read_placement_candidates(&connection, old_disk_id)?
+        .into_iter()
+        .filter(|candidate| &candidate.disk_id == new_disk_id)
+        .collect::<Vec<_>>();
+    let drain_plan =
+        build_disk_drain_plan_summary(live_sqlite_path, old_disk_id, &objects, &candidates)?;
+
+    Ok(DiskReplacementPlanSummary {
+        old_disk_id: old_disk_id.clone(),
+        new_disk_id: new_disk_id.clone(),
+        live_sqlite_path: drain_plan.live_sqlite_path,
+        protected_copy_tasks: drain_plan.protected_copy_tasks,
+        protected_blocked_objects: drain_plan.protected_blocked_objects,
+        cache_copy_tasks: drain_plan.cache_copy_tasks,
+        cache_redownload_required_objects: drain_plan.cache_redownload_required_objects,
+        affected_objects: drain_plan.affected_objects,
+    })
+}
+
+fn build_disk_drain_plan_summary(
+    live_sqlite_path: &Path,
+    disk_id: &DiskId,
+    objects: &[ProtectedObjectCopies],
+    candidates: &[PlacementCandidate],
+) -> Result<DiskDrainPlanSummary, DiskDrainError> {
+    let protected_plan = plan_protected_store_evacuation(disk_id, objects, candidates)
         .expect("store policies are validated before drain planning");
-    let cache_plan = plan_reproducible_cache_evacuation(disk_id, &objects, &candidates)
+    let cache_plan = plan_reproducible_cache_evacuation(disk_id, objects, candidates)
         .expect("store policies are validated before drain planning");
 
     let mut affected_objects = Vec::new();
@@ -333,7 +397,9 @@ fn optional_u64(field: &'static str, value: Option<i64>) -> Result<Option<u64>, 
 
 #[cfg(test)]
 mod tests {
-    use super::{read_disk_drain_plan, DiskDrainAction, DiskDrainError};
+    use super::{
+        read_disk_drain_plan, read_disk_replacement_plan, DiskDrainAction, DiskDrainError,
+    };
     use crate::schema::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::DiskId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
@@ -425,6 +491,94 @@ mod tests {
             .expect_err("missing disk fails");
 
         assert!(matches!(err, DiskDrainError::DiskNotFound { .. }));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn reads_disk_replacement_plan_for_named_destination() {
+        let root = temp_root("disk-replace");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = fixture_connection(&live_sqlite_path);
+        insert_store(
+            &connection,
+            "generated",
+            StorePolicy::defaults_for(StoreClass::GeneratedData),
+        );
+        insert_disk(&connection, "disk-a", "Healthy", 1_000);
+        insert_disk(&connection, "disk-b", "Healthy", 1_000);
+        insert_disk(&connection, "disk-c", "Healthy", 1_000);
+        insert_object(&connection, "object-protected", "generated", 100);
+        insert_placement(&connection, "placement-a", "object-protected", "disk-a");
+
+        let plan = read_disk_replacement_plan(
+            &live_sqlite_path,
+            &DiskId::new("disk-a").expect("old disk id"),
+            &DiskId::new("disk-b").expect("new disk id"),
+        )
+        .expect("replacement plan");
+
+        assert_eq!(plan.old_disk_id.as_str(), "disk-a");
+        assert_eq!(plan.new_disk_id.as_str(), "disk-b");
+        assert_eq!(plan.protected_copy_tasks, 1);
+        assert_eq!(plan.protected_blocked_objects, 0);
+        assert_eq!(plan.affected_objects.len(), 1);
+        assert_eq!(
+            plan.affected_objects[0].destination_disk_ids[0].as_str(),
+            "disk-b"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn replacement_plan_blocks_when_named_destination_cannot_take_copy() {
+        let root = temp_root("disk-replace-blocked");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = fixture_connection(&live_sqlite_path);
+        insert_store(
+            &connection,
+            "generated",
+            StorePolicy::defaults_for(StoreClass::GeneratedData),
+        );
+        insert_disk(&connection, "disk-a", "Healthy", 1_000);
+        insert_disk(&connection, "disk-b", "Failed", 1_000);
+        insert_disk(&connection, "disk-c", "Healthy", 1_000);
+        insert_object(&connection, "object-protected", "generated", 100);
+        insert_placement(&connection, "placement-a", "object-protected", "disk-a");
+
+        let plan = read_disk_replacement_plan(
+            &live_sqlite_path,
+            &DiskId::new("disk-a").expect("old disk id"),
+            &DiskId::new("disk-b").expect("new disk id"),
+        )
+        .expect("replacement plan");
+
+        assert_eq!(plan.protected_copy_tasks, 0);
+        assert_eq!(plan.protected_blocked_objects, 1);
+        assert_eq!(plan.affected_objects[0].action, DiskDrainAction::Blocked);
+        assert!(plan.affected_objects[0].destination_disk_ids.is_empty());
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn rejects_replacing_disk_with_itself() {
+        let root = temp_root("disk-replace-same");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let _connection = fixture_connection(&live_sqlite_path);
+
+        let err = read_disk_replacement_plan(
+            &live_sqlite_path,
+            &DiskId::new("disk-a").expect("old disk id"),
+            &DiskId::new("disk-a").expect("new disk id"),
+        )
+        .expect_err("same disk replacement fails");
+
+        assert!(matches!(err, DiskDrainError::SameDiskReplacement { .. }));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
