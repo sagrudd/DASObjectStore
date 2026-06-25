@@ -3,6 +3,7 @@
 use crate::ids::{DiskId, EnclosureId};
 use crate::lifecycle::HealthState;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PlacementCandidate {
@@ -42,8 +43,15 @@ impl PlacementCandidate {
     }
 
     pub fn is_candidate_for(&self, request: &PlacementRequest) -> bool {
-        self.has_capacity_for(request.object_size_bytes)
-            && (!request.protected_copy || self.accepts_new_protected_copy())
+        if !self.has_capacity_for(request.object_size_bytes) {
+            return false;
+        }
+
+        if !request.protected_copy {
+            return true;
+        }
+
+        self.accepts_new_protected_copy() && !request.has_existing_copy_on(&self.disk_id)
     }
 
     pub fn score_for(&self, request: &PlacementRequest) -> Option<PlacementScore> {
@@ -87,10 +95,11 @@ pub enum WriteLoad {
     Saturated,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlacementRequest {
     pub object_size_bytes: u64,
     pub protected_copy: bool,
+    pub existing_copy_disk_ids: Vec<DiskId>,
 }
 
 impl PlacementRequest {
@@ -98,6 +107,7 @@ impl PlacementRequest {
         Self {
             object_size_bytes,
             protected_copy: true,
+            existing_copy_disk_ids: Vec::new(),
         }
     }
 
@@ -105,7 +115,19 @@ impl PlacementRequest {
         Self {
             object_size_bytes,
             protected_copy: false,
+            existing_copy_disk_ids: Vec::new(),
         }
+    }
+
+    pub fn with_existing_copy_on(mut self, disk_id: DiskId) -> Self {
+        if !self.has_existing_copy_on(&disk_id) {
+            self.existing_copy_disk_ids.push(disk_id);
+        }
+        self
+    }
+
+    pub fn has_existing_copy_on(&self, disk_id: &DiskId) -> bool {
+        self.existing_copy_disk_ids.contains(disk_id)
     }
 }
 
@@ -168,8 +190,10 @@ pub fn plan_copies(
         return Err(CopyPlanError::UnsupportedCopyCount(requested_copies));
     }
 
+    let mut planned_disk_ids = BTreeSet::new();
     let planned_copies = score_candidates(candidates, request)
         .into_iter()
+        .filter(|score| planned_disk_ids.insert(score.disk_id.clone()))
         .take(requested_copies as usize)
         .enumerate()
         .map(|(index, score)| PlannedCopy {
@@ -298,6 +322,31 @@ mod tests {
 
             assert!(!candidate.is_candidate_for(&PlacementRequest::protected(1)));
         }
+    }
+
+    #[test]
+    fn protected_copy_rejects_disk_that_already_holds_object_copy() {
+        let existing_disk_id = DiskId::new("disk-existing").expect("disk id");
+        let request = PlacementRequest::protected(1_000).with_existing_copy_on(existing_disk_id);
+        let existing_candidate = candidate(
+            "disk-existing",
+            None,
+            10_000,
+            HealthState::Healthy,
+            PerformanceClass::Fast,
+            WriteLoad::Idle,
+        );
+        let new_candidate = candidate(
+            "disk-new",
+            None,
+            10_000,
+            HealthState::Healthy,
+            PerformanceClass::Fast,
+            WriteLoad::Idle,
+        );
+
+        assert!(!existing_candidate.is_candidate_for(&request));
+        assert!(new_candidate.is_candidate_for(&request));
     }
 
     #[test]
@@ -511,6 +560,72 @@ mod tests {
         assert_eq!(plan.planned_copies.len(), 1);
         assert_eq!(plan.missing_copies(), 2);
         assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-ok");
+    }
+
+    #[test]
+    fn copy_planner_skips_existing_protected_copy_disks() {
+        let candidates = vec![
+            candidate(
+                "disk-existing",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-new",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+        ];
+        let request = PlacementRequest::protected(1_000)
+            .with_existing_copy_on(DiskId::new("disk-existing").expect("disk id"));
+
+        let plan = plan_copies(&candidates, &request, 1).expect("plan");
+
+        assert!(plan.is_complete());
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-new");
+    }
+
+    #[test]
+    fn copy_planner_selects_each_disk_only_once() {
+        let candidates = vec![
+            candidate(
+                "disk-a",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-a",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-b",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+        ];
+
+        let plan =
+            plan_copies(&candidates, &PlacementRequest::protected(1_000), 2).expect("copy plan");
+
+        assert!(plan.is_complete());
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-a");
+        assert_eq!(plan.planned_copies[1].disk_id.as_str(), "disk-b");
     }
 
     #[test]

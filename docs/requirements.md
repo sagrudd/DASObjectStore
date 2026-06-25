@@ -188,7 +188,7 @@ copy planning, with stable ordering for equal scores.
 DASObjectStore SHALL produce explicit copy plans for one, two, and three requested
 copies from scored eligible placement candidates.
 
-DASObjectStore SHOULD avoid placing two copies of the same protected object on the
+DASObjectStore SHALL avoid placing two copies of the same protected object on the
 same disk.
 
 DASObjectStore SHOULD prefer distinct enclosures when required or preferred by store

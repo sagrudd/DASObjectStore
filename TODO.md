@@ -128,7 +128,7 @@ developers
   write load, and enclosure constraints.
 - [x] Implement weighted placement scorer.
 - [x] Implement copy planner for `copies = 1`, `copies = 2`, and `copies = 3`.
-- [ ] Implement duplicate-copy prevention on the same disk for protected
+- [x] Implement duplicate-copy prevention on the same disk for protected
   objects.
 - [ ] Implement HDD copy write and post-copy hash verification.
 - [ ] Implement object protection state update after policy-satisfying copies.
