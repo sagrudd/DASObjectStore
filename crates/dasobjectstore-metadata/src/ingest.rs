@@ -126,7 +126,9 @@ mod tests {
         IngestStagingLayout, INGEST_CONTENT_HASH_ALGORITHM, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
         INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
     };
-    use dasobjectstore_core::ids::IngestJobId;
+    use crate::{initialize_pool, read_ingest_queue, PoolInitOptions};
+    use dasobjectstore_core::ids::{IngestJobId, PoolId};
+    use rusqlite::Connection;
     use std::fs;
     use std::io::Cursor;
     use std::path::PathBuf;
@@ -217,6 +219,106 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn restart_preserves_pre_settlement_ingest_job_and_payload() {
+        let root = temp_root("ingest-restart-before-settlement");
+        let init = initialize_pool(&PoolInitOptions::new(
+            &root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-01T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        let layout = IngestStagingLayout::for_ssd_root(&root);
+        let job_id = IngestJobId::new("job-before-settlement").expect("job id");
+        let paths = layout.job_paths(&job_id);
+        let mut reader = Cursor::new(b"pre-settlement payload".repeat(4));
+        let report = paths
+            .write_payload_with_hash(&mut reader)
+            .expect("payload writes");
+        let staging_path = paths.payload_path.to_string_lossy().into_owned();
+
+        {
+            let connection = Connection::open(&init.live_sqlite_path).expect("open live sqlite");
+            insert_store(&connection);
+            insert_pre_settlement_job(&connection, job_id.as_str(), &staging_path, &report);
+        }
+
+        let queue = read_ingest_queue(&init.live_sqlite_path).expect("queue survives restart");
+
+        assert_eq!(queue.jobs.len(), 1);
+        assert_eq!(queue.jobs[0].ingest_job_id, job_id);
+        assert_eq!(queue.jobs[0].state, "ReadyForPlacement");
+        assert_eq!(queue.jobs[0].received_bytes, report.bytes_written);
+        assert_eq!(
+            queue.jobs[0].content_hash.as_deref(),
+            Some(report.content_hash.as_str())
+        );
+        assert_eq!(
+            fs::read(&paths.payload_path).expect("payload survives restart"),
+            b"pre-settlement payload".repeat(4)
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    fn insert_store(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO stores (
+                    store_id,
+                    pool_id,
+                    class,
+                    policy_json,
+                    created_at_utc,
+                    updated_at_utc
+                 ) VALUES (
+                    'store-a',
+                    'pool-a',
+                    'generated_data',
+                    '{}',
+                    '2026-01-01T00:00:00Z',
+                    '2026-01-01T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("store inserts");
+    }
+
+    fn insert_pre_settlement_job(
+        connection: &Connection,
+        ingest_job_id: &str,
+        staging_path: &str,
+        report: &super::IngestWriteReport,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO ingest_jobs (
+                    ingest_job_id,
+                    store_id,
+                    state,
+                    ingest_mode,
+                    acknowledgement_policy,
+                    priority,
+                    staging_path,
+                    expected_size_bytes,
+                    received_bytes,
+                    content_hash,
+                    content_hash_algorithm,
+                    created_at_utc,
+                    updated_at_utc
+                 ) VALUES (?1, 'store-a', 'ReadyForPlacement', 'SsdFirst', 'AfterHddPlacement', 10, ?2, ?3, ?3, ?4, ?5, ?6, ?6)",
+                (
+                    ingest_job_id,
+                    staging_path,
+                    report.bytes_written,
+                    report.content_hash.as_str(),
+                    report.content_hash_algorithm.as_str(),
+                    "2026-01-01T00:00:01Z",
+                ),
+            )
+            .expect("ingest job inserts");
     }
 
     fn temp_root(name: &str) -> PathBuf {

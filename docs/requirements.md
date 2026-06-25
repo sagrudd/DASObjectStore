@@ -302,6 +302,9 @@ DASObjectStore SHALL expose CLI ingest status for SSD capacity and pressure stat
 DASObjectStore SHALL expose the live ingest queue as JSON for CLI, daemon, and
 future Web UI consumers.
 
+DASObjectStore SHALL preserve committed pre-settlement ingest job metadata and
+staged SSD payload bytes across process restart.
+
 Per-store SSD budgets MAY be added later.
 
 ## 16. Performance Requirements
