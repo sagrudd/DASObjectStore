@@ -187,7 +187,7 @@ developers
 - [x] Block new protected placement on suspect disks.
 - [x] Implement protected-store evacuation planner.
 - [x] Implement evacuation executor with copy verification.
-- [ ] Implement reproducible-cache opportunistic evacuation.
+- [x] Implement reproducible-cache opportunistic evacuation.
 - [ ] Add `dasobjectstore disk retire <disk-id>`.
 - [ ] Add `dasobjectstore disk drain <disk-id>`.
 - [ ] Add `dasobjectstore disk replace <old-disk-id> --with <new-disk-id>`.

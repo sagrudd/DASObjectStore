@@ -5,7 +5,7 @@ use crate::placement::{
     plan_copy_count_for_store, CopyPlan, CopyPlanError, PlacementCandidate, PlacementRequest,
 };
 use crate::protection::VerifiedCopy;
-use crate::store::StorePolicy;
+use crate::store::{CapacityBehavior, StoreClass, StorePolicy};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtectedObjectCopies {
@@ -63,6 +63,26 @@ pub struct BlockedEvacuation {
     pub missing_replacement_copies: u8,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReproducibleCacheEvacuationPlan {
+    pub source_disk_id: DiskId,
+    pub tasks: Vec<EvacuationTask>,
+    pub redownload_required: Vec<RedownloadRequiredObject>,
+}
+
+impl ReproducibleCacheEvacuationPlan {
+    pub fn is_fully_copied(&self) -> bool {
+        self.redownload_required.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RedownloadRequiredObject {
+    pub object_id: ObjectId,
+    pub store_id: StoreId,
+    pub source_disk_id: DiskId,
+}
+
 pub fn plan_protected_store_evacuation(
     source_disk_id: &DiskId,
     objects: &[ProtectedObjectCopies],
@@ -111,6 +131,77 @@ pub fn plan_protected_store_evacuation(
     })
 }
 
+pub fn plan_reproducible_cache_evacuation(
+    source_disk_id: &DiskId,
+    objects: &[ProtectedObjectCopies],
+    candidates: &[PlacementCandidate],
+) -> Result<ReproducibleCacheEvacuationPlan, CopyPlanError> {
+    let mut tasks = Vec::new();
+    let mut redownload_required = Vec::new();
+
+    for object in objects {
+        if !allows_reproducible_cache_redownload(&object.policy) {
+            continue;
+        }
+
+        let replacement_copies = replacement_copy_count(source_disk_id, &object.verified_copies);
+        if replacement_copies == 0 {
+            continue;
+        }
+
+        let available_candidates =
+            candidates_without_existing_copies(candidates, &object.verified_copies);
+        let request = PlacementRequest::cache(object.object_size_bytes);
+        let replacement_plan = plan_copy_count_for_store(
+            &available_candidates,
+            &request,
+            &object.policy,
+            replacement_copies,
+        )?;
+
+        if replacement_plan.is_complete() {
+            tasks.push(EvacuationTask {
+                object_id: object.object_id.clone(),
+                store_id: object.store_id.clone(),
+                source_disk_id: source_disk_id.clone(),
+                replacement_plan,
+            });
+        } else {
+            redownload_required.push(RedownloadRequiredObject {
+                object_id: object.object_id.clone(),
+                store_id: object.store_id.clone(),
+                source_disk_id: source_disk_id.clone(),
+            });
+        }
+    }
+
+    Ok(ReproducibleCacheEvacuationPlan {
+        source_disk_id: source_disk_id.clone(),
+        tasks,
+        redownload_required,
+    })
+}
+
+fn allows_reproducible_cache_redownload(policy: &StorePolicy) -> bool {
+    policy.class == StoreClass::ReproducibleCache
+        && policy.capacity_behavior == CapacityBehavior::MarkRedownloadRequired
+}
+
+fn candidates_without_existing_copies(
+    candidates: &[PlacementCandidate],
+    verified_copies: &[VerifiedCopy],
+) -> Vec<PlacementCandidate> {
+    candidates
+        .iter()
+        .filter(|candidate| {
+            verified_copies
+                .iter()
+                .all(|copy| copy.disk_id != candidate.disk_id)
+        })
+        .cloned()
+        .collect()
+}
+
 fn replacement_copy_count(source_disk_id: &DiskId, verified_copies: &[VerifiedCopy]) -> u8 {
     verified_copies
         .iter()
@@ -128,7 +219,9 @@ fn placement_request_for_existing_copies(object: &ProtectedObjectCopies) -> Plac
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_protected_store_evacuation, ProtectedObjectCopies};
+    use super::{
+        plan_protected_store_evacuation, plan_reproducible_cache_evacuation, ProtectedObjectCopies,
+    };
     use crate::ids::{DiskId, EnclosureId, ObjectId, StoreId};
     use crate::lifecycle::HealthState;
     use crate::placement::{PerformanceClass, PlacementCandidate, WriteLoad};
@@ -198,6 +291,69 @@ mod tests {
         assert!(plan.tasks.is_empty());
         assert_eq!(plan.blocked_objects.len(), 1);
         assert_eq!(plan.blocked_objects[0].missing_replacement_copies, 1);
+    }
+
+    #[test]
+    fn plans_opportunistic_copy_for_reproducible_cache_object() {
+        let source_disk_id = disk("disk-a");
+        let objects = vec![protected_object(
+            "object-a",
+            StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+            vec![copy("disk-a", 1)],
+        )];
+        let candidates = vec![
+            candidate("disk-a", HealthState::Suspect),
+            candidate("disk-b", HealthState::Suspect),
+        ];
+
+        let plan = plan_reproducible_cache_evacuation(&source_disk_id, &objects, &candidates)
+            .expect("cache evacuation plan");
+
+        assert!(plan.is_fully_copied());
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(
+            plan.tasks[0].replacement_plan.planned_copies[0]
+                .disk_id
+                .as_str(),
+            "disk-b"
+        );
+        assert!(plan.redownload_required.is_empty());
+    }
+
+    #[test]
+    fn marks_reproducible_cache_object_redownload_required_when_copy_is_unavailable() {
+        let source_disk_id = disk("disk-a");
+        let objects = vec![protected_object(
+            "object-a",
+            StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+            vec![copy("disk-a", 1)],
+        )];
+        let candidates = vec![candidate("disk-a", HealthState::Suspect)];
+
+        let plan = plan_reproducible_cache_evacuation(&source_disk_id, &objects, &candidates)
+            .expect("cache evacuation plan");
+
+        assert!(!plan.is_fully_copied());
+        assert!(plan.tasks.is_empty());
+        assert_eq!(plan.redownload_required.len(), 1);
+        assert_eq!(plan.redownload_required[0].object_id.as_str(), "object-a");
+    }
+
+    #[test]
+    fn ignores_protected_store_in_reproducible_cache_evacuation() {
+        let source_disk_id = disk("disk-a");
+        let objects = vec![protected_object(
+            "object-a",
+            StorePolicy::defaults_for(StoreClass::GeneratedData),
+            vec![copy("disk-a", 1), copy("disk-b", 2)],
+        )];
+        let candidates = vec![candidate("disk-c", HealthState::Healthy)];
+
+        let plan = plan_reproducible_cache_evacuation(&source_disk_id, &objects, &candidates)
+            .expect("cache evacuation plan");
+
+        assert!(plan.tasks.is_empty());
+        assert!(plan.redownload_required.is_empty());
     }
 
     fn protected_object(
