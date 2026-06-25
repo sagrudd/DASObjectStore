@@ -92,6 +92,16 @@ provider_service_name() {
   esac
 }
 
+provider_data_path() {
+  output_root="$1"
+  provider="$2"
+
+  case "$provider" in
+    garage) echo "$output_root/garage/data" ;;
+    rustfs) echo "$output_root/rustfs/data" ;;
+  esac
+}
+
 file_size() {
   wc -c < "$1" | tr -d ' '
 }

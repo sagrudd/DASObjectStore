@@ -151,7 +151,7 @@ developers
 - [x] Implement interrupted-write benchmark.
 - [x] Implement metadata recovery benchmark.
 - [x] Implement disk-full behavior benchmark.
-- [ ] Implement simulated disk removal benchmark.
+- [x] Implement simulated disk removal benchmark.
 - [ ] Implement SSD ingest and HDD destage compatibility benchmark.
 - [ ] Define benchmark scoring rubric with reliability hard gates.
 - [ ] Write benchmark report template.

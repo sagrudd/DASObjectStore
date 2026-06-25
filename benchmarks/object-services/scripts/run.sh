@@ -47,6 +47,9 @@ case "$workload" in
   disk-full)
     exec "$(dirname "$0")/../workloads/disk-full.sh" "$provider"
     ;;
+  simulated-disk-removal)
+    exec "$(dirname "$0")/../workloads/simulated-disk-removal.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69

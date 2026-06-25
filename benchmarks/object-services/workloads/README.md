@@ -12,10 +12,10 @@ Implemented workloads:
 - `interrupted-write`
 - `metadata-recovery`
 - `disk-full`
+- `simulated-disk-removal`
 
 Planned workloads:
 
-- `simulated-disk-removal`
 - `ssd-ingest-hdd-destage`
 
 ## Large Object
@@ -67,3 +67,11 @@ expected SHA-256 hash.
 provider's benchmark output tree, then attempts an S3 upload/download under
 that pressure. A rejected write is recorded as acceptable behavior; an accepted
 write must download with the expected SHA-256 hash.
+
+## Simulated Disk Removal
+
+`simulated-disk-removal.sh` uploads a seed object, stops the selected provider,
+moves its benchmark data directory out of service view, restarts against an
+empty replacement directory, and verifies the provider never returns corrupt
+data. It then restores the original data directory and verifies the seed object
+is readable again.
