@@ -15,9 +15,9 @@ developers
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
-- [ ] Add Rust workspace `Cargo.toml` with placeholder crates for core, CLI,
+- [x] Add Rust workspace `Cargo.toml` with placeholder crates for core, CLI,
   platform, metadata, object service orchestration, and Mnemosyne adapter.
-- [ ] Add `.gitignore` for Rust, editor, macOS, test output, and generated
+- [x] Add `.gitignore` for Rust, editor, macOS, test output, and generated
   benchmark artifacts.
 - [ ] Add CI workflow for `cargo fmt --check`, `cargo clippy`, and
   `cargo test`.
@@ -33,7 +33,7 @@ developers
 
 - [ ] Create `dasobjectstore-core` crate for domain types and lifecycle state
   machines.
-- [ ] Create `dasobjectstore-cli` crate using `clap` with a minimal
+- [x] Create `dasobjectstore-cli` crate using `clap` with a minimal
   `dasobjectstore --help`.
 - [ ] Define domain IDs: pool ID, disk ID, enclosure ID, store ID, object ID,
   ingest job ID, and placement ID.
