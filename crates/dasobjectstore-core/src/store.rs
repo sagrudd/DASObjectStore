@@ -735,32 +735,43 @@ mod tests {
     }
 
     #[test]
-    fn rejects_protected_policy_with_unsafe_semantics() {
+    fn rejects_copy_count_above_supported_range() {
         let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
-        policy.ingest_mode = IngestMode::DirectToHdd;
-        policy.retention_policy = RetentionPolicy::ImmediateDelete;
-        policy.mutability_policy = MutabilityPolicy::Mutable;
-        policy.capacity_behavior = CapacityBehavior::MarkRedownloadRequired;
+        policy.copies = 4;
 
         let err = policy.validate().expect_err("policy should fail");
 
         assert_eq!(
             err.errors,
-            vec![
-                StorePolicyValidationError::ProtectedStoreDirectToHdd {
-                    class: StoreClass::GeneratedData
-                },
-                StorePolicyValidationError::ProtectedStoreImmediateDelete {
-                    class: StoreClass::GeneratedData
-                },
-                StorePolicyValidationError::ProtectedStoreMutable {
-                    class: StoreClass::GeneratedData
-                },
-                StorePolicyValidationError::ProtectedStoreMarksRedownloadRequired {
-                    class: StoreClass::GeneratedData
-                }
-            ]
+            vec![StorePolicyValidationError::InvalidCopyCount { copies: 4 }]
         );
+    }
+
+    #[test]
+    fn rejects_protected_policy_with_unsafe_semantics() {
+        for class in [
+            StoreClass::GeneratedData,
+            StoreClass::CriticalMetadata,
+            StoreClass::ExportBundle,
+        ] {
+            let mut policy = StorePolicy::defaults_for(class);
+            policy.ingest_mode = IngestMode::DirectToHdd;
+            policy.retention_policy = RetentionPolicy::ImmediateDelete;
+            policy.mutability_policy = MutabilityPolicy::Mutable;
+            policy.capacity_behavior = CapacityBehavior::MarkRedownloadRequired;
+
+            let err = policy.validate().expect_err("policy should fail");
+
+            assert_eq!(
+                err.errors,
+                vec![
+                    StorePolicyValidationError::ProtectedStoreDirectToHdd { class },
+                    StorePolicyValidationError::ProtectedStoreImmediateDelete { class },
+                    StorePolicyValidationError::ProtectedStoreMutable { class },
+                    StorePolicyValidationError::ProtectedStoreMarksRedownloadRequired { class }
+                ]
+            );
+        }
     }
 
     #[test]

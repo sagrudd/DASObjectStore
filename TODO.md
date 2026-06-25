@@ -104,7 +104,7 @@ developers
 - [x] Add tests for valid public cache policy.
 - [x] Add tests for valid generated data policy.
 - [x] Add tests for valid critical metadata policy.
-- [ ] Add tests for invalid and unsafe policy combinations.
+- [x] Add tests for invalid and unsafe policy combinations.
 
 ## Milestone 6: SSD Ingest Pipeline
 
