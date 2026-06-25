@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum StoreClass {
@@ -31,6 +32,40 @@ impl StoreClass {
         }
     }
 }
+
+impl FromStr for StoreClass {
+    type Err = StoreClassParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "reproducible_cache" => Ok(Self::ReproducibleCache),
+            "generated_data" => Ok(Self::GeneratedData),
+            "critical_metadata" => Ok(Self::CriticalMetadata),
+            "export_bundle" => Ok(Self::ExportBundle),
+            "ingest_staging" => Ok(Self::IngestStaging),
+            _ => Err(StoreClassParseError {
+                value: value.to_string(),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoreClassParseError {
+    value: String,
+}
+
+impl Display for StoreClassParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "unknown store class `{}`; expected one of: reproducible_cache, generated_data, critical_metadata, export_bundle, ingest_staging",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for StoreClassParseError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IngestMode {
@@ -470,6 +505,19 @@ mod tests {
         assert_eq!(StoreClass::CriticalMetadata.name(), "critical_metadata");
         assert_eq!(StoreClass::ExportBundle.name(), "export_bundle");
         assert_eq!(StoreClass::IngestStaging.name(), "ingest_staging");
+    }
+
+    #[test]
+    fn parses_store_class_from_stable_snake_case_name() {
+        assert_eq!(
+            "reproducible_cache".parse::<StoreClass>(),
+            Ok(StoreClass::ReproducibleCache)
+        );
+        assert_eq!(
+            "generated_data".parse::<StoreClass>(),
+            Ok(StoreClass::GeneratedData)
+        );
+        assert!("generated-data".parse::<StoreClass>().is_err());
     }
 
     #[test]

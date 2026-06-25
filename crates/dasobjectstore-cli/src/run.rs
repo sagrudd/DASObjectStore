@@ -1,7 +1,8 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, PoolCommand, PoolInspectArgs, ProbeArgs, StoreCommand, StoreValidateArgs,
+    Cli, Command, PoolCommand, PoolInspectArgs, ProbeArgs, StoreCommand, StoreDefaultsArgs,
+    StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
@@ -29,6 +30,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             PoolCommand::MarkDirty(args) => run_pool_mark_dirty(args, writer),
         },
         Some(Command::Store(args)) => match args.command() {
+            Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Ok(()),
         },
@@ -67,6 +69,15 @@ fn run_store_validate(args: &StoreValidateArgs, writer: &mut impl Write) -> Resu
 
     policy.validate()?;
     writeln!(writer, "Store policy is valid: {}", policy.class.name())?;
+
+    Ok(())
+}
+
+fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let policy = StorePolicy::defaults_for(args.class());
+
+    serde_json::to_writer_pretty(&mut *writer, &policy)?;
+    writer.write_all(b"\n")?;
 
     Ok(())
 }
@@ -408,6 +419,27 @@ mod tests {
         }
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_defaults_writes_policy_json() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "defaults",
+            "--class",
+            "critical_metadata",
+        ])
+        .expect("store defaults parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store defaults runs");
+
+        let policy: StorePolicy = serde_json::from_slice(&output).expect("policy json parses");
+        assert_eq!(
+            policy,
+            StorePolicy::defaults_for(StoreClass::CriticalMetadata)
+        );
     }
 
     #[cfg(feature = "debug-commands")]

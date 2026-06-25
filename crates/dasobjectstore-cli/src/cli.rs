@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
+use dasobjectstore_core::store::StoreClass;
 use std::path::{Path, PathBuf};
 
 /// Portable mixed-disk DAS object store.
@@ -115,8 +116,23 @@ impl StoreArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum StoreCommand {
+    /// Emit the built-in JSON policy defaults for a store class.
+    Defaults(StoreDefaultsArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreDefaultsArgs {
+    /// Store class to emit defaults for.
+    #[arg(long)]
+    class: StoreClass,
+}
+
+impl StoreDefaultsArgs {
+    pub(crate) fn class(&self) -> StoreClass {
+        self.class
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -155,6 +171,7 @@ impl ProbeArgs {
 mod tests {
     use super::{Cli, Command, PoolCommand, ProbeArgs, StoreArgs, StoreCommand};
     use clap::Parser;
+    use dasobjectstore_core::store::StoreClass;
     use std::path::Path;
 
     #[test]
@@ -194,7 +211,29 @@ mod tests {
             Some(StoreCommand::Validate(validate)) => {
                 assert_eq!(validate.policy_file(), Path::new("/tmp/policy.json"));
             }
-            None => panic!("expected validate command"),
+            _ => panic!("expected validate command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_defaults_class() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "defaults",
+            "--class",
+            "critical_metadata",
+        ])
+        .expect("store defaults parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Defaults(defaults)) => {
+                assert_eq!(defaults.class(), StoreClass::CriticalMetadata);
+            }
+            _ => panic!("expected defaults command"),
         }
     }
 
