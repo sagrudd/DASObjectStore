@@ -2,6 +2,7 @@
 
 pub mod ids;
 pub mod lifecycle;
+pub mod store;
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

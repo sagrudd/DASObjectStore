@@ -39,7 +39,7 @@ developers
   ingest job ID, and placement ID.
 - [x] Define lifecycle enums for pool, disk, store, object, ingest job, health,
   repair, and import mode.
-- [ ] Define store class and store policy structs matching
+- [x] Define store class and store policy structs matching
   `docs/requirements.md`.
 - [ ] Add serialization/deserialization tests for domain types.
 - [ ] Add lifecycle transition tests for valid and invalid object state
