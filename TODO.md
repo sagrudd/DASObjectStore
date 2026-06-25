@@ -194,7 +194,7 @@ developers
 - [x] Add force-retire flow with policy allowance and action-time
   confirmation.
 - [x] Add health summary, verbose, and JSON output.
-- [ ] Add tests for suspect disk evacuation.
+- [x] Add tests for suspect disk evacuation.
 - [ ] Add tests for insufficient capacity during drain.
 
 ## Milestone 11: macOS Development and Read/Export Path

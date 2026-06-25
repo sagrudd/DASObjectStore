@@ -481,6 +481,44 @@ mod tests {
     }
 
     #[test]
+    fn plans_protected_evacuation_from_suspect_disk() {
+        let root = temp_root("disk-drain-suspect");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = fixture_connection(&live_sqlite_path);
+        insert_store(
+            &connection,
+            "generated",
+            StorePolicy::defaults_for(StoreClass::GeneratedData),
+        );
+        insert_disk(&connection, "disk-a", "Suspect", 1_000);
+        insert_disk(&connection, "disk-b", "Healthy", 1_000);
+        insert_disk(&connection, "disk-c", "Healthy", 1_000);
+        insert_object(&connection, "object-protected", "generated", 100);
+        insert_placement(&connection, "placement-a", "object-protected", "disk-a");
+        insert_placement(&connection, "placement-b", "object-protected", "disk-b");
+
+        let plan =
+            read_disk_drain_plan(&live_sqlite_path, &DiskId::new("disk-a").expect("disk id"))
+                .expect("drain plan");
+
+        assert_eq!(plan.disk_id.as_str(), "disk-a");
+        assert_eq!(plan.protected_copy_tasks, 1);
+        assert_eq!(plan.protected_blocked_objects, 0);
+        assert_eq!(plan.affected_objects.len(), 1);
+        assert_eq!(
+            plan.affected_objects[0].action,
+            DiskDrainAction::CopyPlanned
+        );
+        assert_eq!(
+            plan.affected_objects[0].destination_disk_ids[0].as_str(),
+            "disk-c"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn rejects_missing_source_disk() {
         let root = temp_root("disk-drain-missing");
         fs::create_dir_all(&root).expect("create temp root");
