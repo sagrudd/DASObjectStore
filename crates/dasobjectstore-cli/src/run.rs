@@ -1,6 +1,9 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
-use crate::cli::{Cli, Command, PoolCommand, PoolInspectArgs, ProbeArgs};
+use crate::cli::{
+    Cli, Command, PoolCommand, PoolInspectArgs, ProbeArgs, StoreCommand, StoreValidateArgs,
+};
+use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -12,6 +15,7 @@ use dasobjectstore_platform::{
     group_enclosures, ObservedDisk, ObservedEnclosure, ProbeError, ProbeProvider, ProbeReport,
 };
 use std::fmt::{self, Display};
+use std::fs::File;
 use std::io::{self, Write};
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
@@ -23,6 +27,10 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             PoolCommand::MarkClean(args) => run_pool_mark_clean(args, writer),
             #[cfg(feature = "debug-commands")]
             PoolCommand::MarkDirty(args) => run_pool_mark_dirty(args, writer),
+        },
+        Some(Command::Store(args)) => match args.command() {
+            Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
+            None => Ok(()),
         },
         _ => Ok(()),
     }
@@ -49,6 +57,16 @@ fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> 
 fn run_pool_inspect(args: &PoolInspectArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let summary = inspect_pool_metadata(args.metadata_path())?;
     write_pool_inspect_summary(&summary, writer)?;
+
+    Ok(())
+}
+
+fn run_store_validate(args: &StoreValidateArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let file = File::open(args.policy_file())?;
+    let policy: StorePolicy = serde_json::from_reader(file)?;
+
+    policy.validate()?;
+    writeln!(writer, "Store policy is valid: {}", policy.class.name())?;
 
     Ok(())
 }
@@ -169,18 +187,20 @@ pub(crate) enum CliError {
     #[cfg(feature = "debug-commands")]
     MetadataMarker(String),
     Probe(ProbeError),
+    StorePolicyValidation(StorePolicyValidationErrors),
     UnsupportedProbeFormat,
 }
 
 impl Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(err) => write!(formatter, "failed to write command output: {err}"),
-            Self::Json(err) => write!(formatter, "failed to encode JSON output: {err}"),
+            Self::Io(err) => write!(formatter, "failed to access command input or output: {err}"),
+            Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
             Self::MetadataMarker(err) => write!(formatter, "failed to update pool metadata: {err}"),
             Self::Probe(err) => write!(formatter, "{err}"),
+            Self::StorePolicyValidation(err) => write!(formatter, "{err}"),
             Self::UnsupportedProbeFormat => formatter
                 .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
         }
@@ -207,6 +227,12 @@ impl From<PoolInspectError> for CliError {
     }
 }
 
+impl From<StorePolicyValidationErrors> for CliError {
+    fn from(err: StorePolicyValidationErrors) -> Self {
+        Self::StorePolicyValidation(err)
+    }
+}
+
 impl From<ProbeError> for CliError {
     fn from(err: ProbeError) -> Self {
         Self::Probe(err)
@@ -220,6 +246,9 @@ mod tests {
     use clap::Parser;
     use dasobjectstore_core::ids::{DiskId, PoolId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
+    use dasobjectstore_core::store::{
+        CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
+    };
     #[cfg(feature = "debug-commands")]
     use dasobjectstore_metadata::{initialize_pool, PoolInitOptions};
     use dasobjectstore_metadata::{
@@ -315,6 +344,68 @@ mod tests {
         assert!(output.contains("Pool: pool-a"));
         assert!(output.contains("State: Clean"));
         assert!(output.contains("Disks: 1"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_validate_accepts_valid_policy_file() {
+        let root = temp_root("store-validate-valid");
+        fs::create_dir_all(&root).expect("create temp root");
+        let policy_file = root.join("policy.json");
+        write_policy_file(
+            &policy_file,
+            &StorePolicy::defaults_for(StoreClass::GeneratedData),
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "validate",
+            policy_file.to_str().expect("utf8 policy path"),
+        ])
+        .expect("store validate parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store validate runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Store policy is valid: generated_data"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_validate_rejects_invalid_policy_file() {
+        let root = temp_root("store-validate-invalid");
+        fs::create_dir_all(&root).expect("create temp root");
+        let policy_file = root.join("policy.json");
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.capacity_behavior = CapacityBehavior::MarkRedownloadRequired;
+        write_policy_file(&policy_file, &policy);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "validate",
+            policy_file.to_str().expect("utf8 policy path"),
+        ])
+        .expect("store validate parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("store validate should fail");
+
+        match err {
+            CliError::StorePolicyValidation(err) => {
+                assert_eq!(
+                    err.errors,
+                    vec![
+                        StorePolicyValidationError::ProtectedStoreMarksRedownloadRequired {
+                            class: StoreClass::GeneratedData
+                        }
+                    ]
+                );
+            }
+            err => panic!("unexpected error: {err}"),
+        }
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -421,6 +512,11 @@ mod tests {
         serde_json::to_writer_pretty(file, &pool_manifest).expect("write pool manifest");
         let file = File::create(path.join(DISK_MANIFEST_FILE_NAME)).expect("create disk manifest");
         serde_json::to_writer_pretty(file, &disk_manifest).expect("write disk manifest");
+    }
+
+    fn write_policy_file(path: &Path, policy: &StorePolicy) {
+        let file = File::create(path).expect("create policy file");
+        serde_json::to_writer_pretty(file, policy).expect("write policy file");
     }
 
     fn temp_root(name: &str) -> PathBuf {

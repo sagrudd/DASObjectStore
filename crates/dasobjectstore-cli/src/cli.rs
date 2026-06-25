@@ -28,7 +28,7 @@ pub(crate) enum Command {
     /// Manage DAS member disks.
     Disk,
     /// Manage object stores and policy.
-    Store,
+    Store(StoreArgs),
     /// Inspect SSD ingest and destage work.
     Ingest,
     /// Export Mnemosyne/Synoptikon integration metadata.
@@ -102,6 +102,36 @@ impl PoolMarkerArgs {
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreArgs {
+    #[command(subcommand)]
+    command: Option<StoreCommand>,
+}
+
+impl StoreArgs {
+    pub(crate) fn command(&self) -> Option<&StoreCommand> {
+        self.command.as_ref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum StoreCommand {
+    /// Validate a JSON store policy file.
+    Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreValidateArgs {
+    /// Path to a JSON store policy file.
+    policy_file: PathBuf,
+}
+
+impl StoreValidateArgs {
+    pub(crate) fn policy_file(&self) -> &Path {
+        &self.policy_file
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct ProbeArgs {
     /// Emit probe results as JSON.
     #[arg(long)]
@@ -123,7 +153,7 @@ impl ProbeArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, PoolCommand, ProbeArgs};
+    use super::{Cli, Command, PoolCommand, ProbeArgs, StoreArgs, StoreCommand};
     use clap::Parser;
     use std::path::Path;
 
@@ -139,7 +169,7 @@ mod tests {
         let cases = [
             ("health", Command::Health),
             ("disk", Command::Disk),
-            ("store", Command::Store),
+            ("store", Command::Store(StoreArgs { command: None })),
             ("ingest", Command::Ingest),
             ("mnemosyne", Command::Mnemosyne),
         ];
@@ -149,6 +179,22 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_store_validate_policy_file() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "store", "validate", "/tmp/policy.json"])
+            .expect("store validate parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Validate(validate)) => {
+                assert_eq!(validate.policy_file(), Path::new("/tmp/policy.json"));
+            }
+            None => panic!("expected validate command"),
         }
     }
 

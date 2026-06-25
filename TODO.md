@@ -99,7 +99,7 @@ developers
   requirements.
 - [x] Implement risk-gating model for direct-to-HDD import, force retire, and
   force read-write import.
-- [ ] Add `dasobjectstore store validate <policy-file>`.
+- [x] Add `dasobjectstore store validate <policy-file>`.
 - [ ] Add `dasobjectstore store defaults --class <class>`.
 - [ ] Add tests for valid public cache policy.
 - [ ] Add tests for valid generated data policy.

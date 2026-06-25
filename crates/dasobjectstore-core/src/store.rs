@@ -1,6 +1,7 @@
 //! Store classes and policy.
 
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum StoreClass {
@@ -372,6 +373,22 @@ impl StorePolicyValidationErrors {
     }
 }
 
+impl Display for StorePolicyValidationErrors {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "store policy is invalid: {} validation error(s)",
+            self.errors.len()
+        )?;
+        for error in &self.errors {
+            write!(formatter, "; {error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for StorePolicyValidationErrors {}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StorePolicyValidationError {
     InvalidCopyCount {
@@ -395,6 +412,47 @@ pub enum StorePolicyValidationError {
         class: StoreClass,
     },
     IngestStagingExportEnabled,
+}
+
+impl Display for StorePolicyValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidCopyCount { copies } => {
+                write!(formatter, "copy count must be between 1 and 3, got {copies}")
+            }
+            Self::DistinctPlacementNeedsMultipleCopies => formatter.write_str(
+                "required distinct enclosure placement needs at least two copies",
+            ),
+            Self::RequiredEnclosureDiversityUnavailable {
+                copies,
+                available_enclosure_count,
+            } => write!(
+                formatter,
+                "required {copies} distinct enclosure(s), got {available_enclosure_count}"
+            ),
+            Self::ProtectedStoreDirectToHdd { class } => write!(
+                formatter,
+                "protected store class {} cannot use direct-to-HDD ingest",
+                class.name()
+            ),
+            Self::ProtectedStoreImmediateDelete { class } => write!(
+                formatter,
+                "protected store class {} cannot use immediate delete retention",
+                class.name()
+            ),
+            Self::ProtectedStoreMutable { class } => {
+                write!(formatter, "protected store class {} must be immutable", class.name())
+            }
+            Self::ProtectedStoreMarksRedownloadRequired { class } => write!(
+                formatter,
+                "protected store class {} cannot mark data redownload-required on capacity pressure",
+                class.name()
+            ),
+            Self::IngestStagingExportEnabled => {
+                formatter.write_str("ingest staging store export policy must be disabled")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
