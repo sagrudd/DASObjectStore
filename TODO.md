@@ -181,7 +181,7 @@ developers
 - [x] Implement SMART ingestion where available on Linux.
 - [x] Implement best-effort SMART/health ingestion on macOS.
 - [x] Implement IO error and checksum failure health signals.
-- [ ] Implement USB reset/disconnect event ingestion where feasible.
+- [x] Implement USB reset/disconnect event ingestion where feasible.
 - [ ] Implement benchmark drift signal ingestion.
 - [ ] Implement disk health state transitions.
 - [ ] Block new protected placement on suspect disks.

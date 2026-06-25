@@ -55,6 +55,14 @@ impl HealthSignals {
         self.checksum_failures = self.checksum_failures.saturating_add(1);
     }
 
+    pub fn record_usb_reset(&mut self) {
+        self.usb_resets = self.usb_resets.saturating_add(1);
+    }
+
+    pub fn record_usb_disconnect(&mut self) {
+        self.record_usb_reset();
+    }
+
     pub fn with_io_error(mut self) -> Self {
         self.record_io_error();
         self
@@ -62,6 +70,16 @@ impl HealthSignals {
 
     pub fn with_checksum_failure(mut self) -> Self {
         self.record_checksum_failure();
+        self
+    }
+
+    pub fn with_usb_reset(mut self) -> Self {
+        self.record_usb_reset();
+        self
+    }
+
+    pub fn with_usb_disconnect(mut self) -> Self {
+        self.record_usb_disconnect();
         self
     }
 }
@@ -211,6 +229,43 @@ mod tests {
     }
 
     #[test]
+    fn records_usb_reset_health_signal() {
+        let signals = HealthSignals::default().with_usb_reset();
+
+        assert_eq!(signals.usb_resets, 1);
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 90);
+        assert_eq!(score.state, HealthState::Healthy);
+    }
+
+    #[test]
+    fn records_usb_disconnect_as_usb_reset_signal() {
+        let signals = HealthSignals::default().with_usb_disconnect();
+
+        assert_eq!(signals.usb_resets, 1);
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 90);
+        assert_eq!(score.state, HealthState::Healthy);
+    }
+
+    #[test]
+    fn repeated_usb_events_can_drive_watch_state() {
+        let mut signals = HealthSignals::default();
+        signals.record_usb_reset();
+        signals.record_usb_disconnect();
+        signals.record_usb_reset();
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 70);
+        assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
     fn io_and_checksum_signals_can_drive_suspect_state() {
         let mut signals = HealthSignals::default();
         signals.record_io_error();
@@ -228,14 +283,17 @@ mod tests {
         let mut signals = HealthSignals {
             io_errors: u16::MAX,
             checksum_failures: u16::MAX,
+            usb_resets: u16::MAX,
             ..HealthSignals::default()
         };
 
         signals.record_io_error();
         signals.record_checksum_failure();
+        signals.record_usb_reset();
 
         assert_eq!(signals.io_errors, u16::MAX);
         assert_eq!(signals.checksum_failures, u16::MAX);
+        assert_eq!(signals.usb_resets, u16::MAX);
     }
 
     #[test]
