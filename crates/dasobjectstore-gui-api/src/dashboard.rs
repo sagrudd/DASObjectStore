@@ -1,5 +1,6 @@
-use dasobjectstore_core::ids::PoolId;
-use dasobjectstore_core::lifecycle::PoolState;
+use dasobjectstore_core::health::{HealthScore, HealthSignals};
+use dasobjectstore_core::ids::{DiskId, PoolId};
+use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -107,11 +108,110 @@ fn pool_warnings(state: PoolState) -> Vec<DashboardWarning> {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiskHealthView {
+    pub disk_id: String,
+    pub state: HealthStateView,
+    pub score: u8,
+    pub placement_eligible: bool,
+    pub signals: HealthSignalsView,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+impl DiskHealthView {
+    pub fn from_health(disk_id: &DiskId, score: HealthScore, signals: &HealthSignals) -> Self {
+        Self {
+            disk_id: disk_id.to_string(),
+            state: HealthStateView::from(score.state),
+            score: score.value,
+            placement_eligible: placement_eligible(score.state),
+            signals: HealthSignalsView::from(signals),
+            warnings: disk_warnings(score.state, signals),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthStateView {
+    Healthy,
+    Watch,
+    Suspect,
+    Draining,
+    Retired,
+    Failed,
+}
+
+impl From<HealthState> for HealthStateView {
+    fn from(state: HealthState) -> Self {
+        match state {
+            HealthState::Healthy => Self::Healthy,
+            HealthState::Watch => Self::Watch,
+            HealthState::Suspect => Self::Suspect,
+            HealthState::Draining => Self::Draining,
+            HealthState::Retired => Self::Retired,
+            HealthState::Failed => Self::Failed,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HealthSignalsView {
+    pub smart_warnings: u16,
+    pub io_errors: u16,
+    pub checksum_failures: u16,
+    pub usb_resets: u16,
+    pub temperature_celsius: Option<u8>,
+    pub benchmark_drift_percent: Option<u8>,
+}
+
+impl From<&HealthSignals> for HealthSignalsView {
+    fn from(signals: &HealthSignals) -> Self {
+        Self {
+            smart_warnings: signals.smart_warnings,
+            io_errors: signals.io_errors,
+            checksum_failures: signals.checksum_failures,
+            usb_resets: signals.usb_resets,
+            temperature_celsius: signals.temperature_celsius,
+            benchmark_drift_percent: signals.benchmark_drift_percent,
+        }
+    }
+}
+
+fn placement_eligible(state: HealthState) -> bool {
+    matches!(state, HealthState::Healthy | HealthState::Watch)
+}
+
+fn disk_warnings(state: HealthState, signals: &HealthSignals) -> Vec<DashboardWarning> {
+    let mut warnings = Vec::new();
+    if !placement_eligible(state) {
+        warnings.push(DashboardWarning::new(
+            "disk_not_placement_eligible",
+            "Disk health state blocks new protected placement.",
+        ));
+    }
+    if signals.smart_warnings > 0 {
+        warnings.push(DashboardWarning::new(
+            "disk_smart_warning",
+            "SMART warnings have been observed for this disk.",
+        ));
+    }
+    if signals.io_errors > 0 || signals.checksum_failures > 0 {
+        warnings.push(DashboardWarning::new(
+            "disk_data_integrity_warning",
+            "IO errors or checksum failures have been observed for this disk.",
+        ));
+    }
+
+    warnings
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PoolAccessMode, PoolStateView, PoolStatusView};
-    use dasobjectstore_core::ids::PoolId;
-    use dasobjectstore_core::lifecycle::PoolState;
+    use super::{DiskHealthView, HealthStateView, PoolAccessMode, PoolStateView, PoolStatusView};
+    use dasobjectstore_core::health::{HealthScore, HealthSignals};
+    use dasobjectstore_core::ids::{DiskId, PoolId};
+    use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 
     #[test]
     fn builds_pool_status_view_from_core_state() {
@@ -151,6 +251,48 @@ mod tests {
                 .expect("warnings array")
                 .len(),
             0
+        );
+    }
+
+    #[test]
+    fn builds_disk_health_view_from_core_health() {
+        let disk_id = DiskId::new("disk-a").expect("disk id");
+        let signals = HealthSignals {
+            smart_warnings: 1,
+            ..HealthSignals::default()
+        };
+        let score = HealthScore::from_signals(&signals);
+
+        let view = DiskHealthView::from_health(&disk_id, score, &signals);
+
+        assert_eq!(view.disk_id, "disk-a");
+        assert_eq!(view.state, HealthStateView::Watch);
+        assert_eq!(view.score, 75);
+        assert!(view.placement_eligible);
+        assert_eq!(view.signals.smart_warnings, 1);
+        assert_eq!(view.warnings[0].code, "disk_smart_warning");
+    }
+
+    #[test]
+    fn serializes_disk_health_for_dashboard_contract() {
+        let disk_id = DiskId::new("disk-a").expect("disk id");
+        let signals = HealthSignals::default();
+        let view = DiskHealthView::from_health(
+            &disk_id,
+            HealthScore {
+                value: 0,
+                state: HealthState::Failed,
+            },
+            &signals,
+        );
+
+        let encoded = serde_json::to_value(view).expect("disk health serializes");
+
+        assert_eq!(encoded["state"], "failed");
+        assert_eq!(encoded["placement_eligible"], false);
+        assert_eq!(
+            encoded["warnings"][0]["code"],
+            "disk_not_placement_eligible"
         );
     }
 }

@@ -218,7 +218,7 @@ developers
 - [x] Create `yew` frontend scaffold intended for delivery through `../monas`
   and Synoptikon in `../mnemosyne`.
 - [x] Add dashboard view model for pool status.
-- [ ] Add dashboard view model for disk health.
+- [x] Add dashboard view model for disk health.
 - [ ] Add dashboard view model for ingest and destage queues.
 - [ ] Add dashboard view model for warnings and required actions.
 - [ ] Add safe Web UI actions for health check, service start/stop, and read-only
