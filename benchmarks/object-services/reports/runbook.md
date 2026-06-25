@@ -83,6 +83,13 @@ Generate a Markdown input inventory for the report appendix:
 benchmarks/object-services/scripts/report-input-index.sh
 ```
 
+Generate a draft report from the template and raw input inventory:
+
+```sh
+benchmarks/object-services/scripts/draft-report.sh \
+  > benchmarks/object-services/reports/YYYY-MM-DD-provider-selection.md
+```
+
 ## 5. Stop Providers
 
 Garage:
@@ -101,6 +108,10 @@ docker compose -f benchmarks/object-services/providers/rustfs/compose.yml down
 
 Use `benchmarks/object-services/reports/report-template.md` and the scoring
 rules in `benchmarks/object-services/reports/scoring-rubric.md`.
+
+`benchmarks/object-services/scripts/draft-report.sh` can produce the initial
+Markdown shell, but the recommendation, scoring, workload notes, and residual
+risks must still be reviewed and completed by a developer.
 
 The report must:
 

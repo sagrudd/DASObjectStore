@@ -72,5 +72,11 @@ Generate a Markdown inventory of raw report inputs:
 benchmarks/object-services/scripts/report-input-index.sh
 ```
 
+Generate a draft provider-selection report:
+
+```sh
+benchmarks/object-services/scripts/draft-report.sh
+```
+
 Provider-specific setup is intentionally added in separate tasks so Garage and
 RustFS remain comparable.

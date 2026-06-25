@@ -160,6 +160,7 @@ developers
 - [x] Add local benchmark preflight check.
 - [x] Add benchmark execution runbook.
 - [x] Add benchmark report input index generator.
+- [x] Add benchmark report draft generator.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
   `benchmarks/output/object-services/`.
