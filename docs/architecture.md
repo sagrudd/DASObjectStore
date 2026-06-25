@@ -113,6 +113,19 @@ Responsibilities:
 
 Must not duplicate core storage rules or mutate persistent metadata directly.
 
+### `dasobjectstore-gui-web`
+
+Owns Yew frontend scaffolding for GUI delivery.
+
+Responsibilities:
+
+- Yew root components;
+- Monas and Synoptikon mount-path metadata;
+- frontend-facing view composition over GUI API contracts.
+
+Must stay deployable through sibling Monas and Synoptikon surfaces rather than
+introducing an unrelated frontend host.
+
 ### `dasobjectstore-mnemosyne`
 
 Owns optional Mnemosyne, Monas, and Synoptikon integration.

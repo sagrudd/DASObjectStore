@@ -215,7 +215,7 @@ developers
 
 - [x] Create `axum` GUI API scaffold with clear separation from core domain
   logic.
-- [ ] Create `yew` frontend scaffold intended for delivery through `../monas`
+- [x] Create `yew` frontend scaffold intended for delivery through `../monas`
   and Synoptikon in `../mnemosyne`.
 - [ ] Add dashboard view model for pool status.
 - [ ] Add dashboard view model for disk health.

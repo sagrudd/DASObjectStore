@@ -3,6 +3,7 @@ members = [
     "crates/dasobjectstore-cli",
     "crates/dasobjectstore-core",
     "crates/dasobjectstore-gui-api",
+    "crates/dasobjectstore-gui-web",
     "crates/dasobjectstore-metadata",
     "crates/dasobjectstore-mnemosyne",
     "crates/dasobjectstore-object-service",
@@ -20,6 +21,7 @@ axum = "0.8.9"
 clap = { version = "4.5.48", features = ["derive"] }
 dasobjectstore-core = { path = "crates/dasobjectstore-core" }
 dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api" }
+dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web" }
 dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
 dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
 dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
@@ -30,3 +32,4 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 sha2 = "0.10.9"
+yew = { version = "0.23.0", features = ["csr"] }
