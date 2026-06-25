@@ -51,13 +51,14 @@ developers
 ## Milestone 3: Cross-Platform Disk and Enclosure Probe
 
 - [x] Create `dasobjectstore-platform` crate with trait-based probe interfaces.
-- [ ] Implement Linux disk inventory using stable command/API choices and
-  structured parsing.
+- [x] Define Linux disk inventory command contract using `lsblk --json`.
+- [x] Add structured Linux `lsblk --json` disk inventory parser.
+- [ ] Wire Linux disk inventory parser to command execution.
 - [ ] Implement macOS disk inventory using native command/API choices and
   structured parsing.
-- [ ] Add data model for observed disk identity: size, serial hints, partition
+- [x] Add data model for observed disk identity: size, serial hints, partition
   hints, filesystem hints, removable/direct-attached hints, and transport.
-- [ ] Add data model for observed enclosure identity: USB topology path, vendor,
+- [x] Add data model for observed enclosure identity: USB topology path, vendor,
   product, bridge hints, and user-assigned name.
 - [ ] Implement best-effort enclosure grouping from USB topology.
 - [ ] Add `dasobjectstore probe --json`.

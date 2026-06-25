@@ -1,5 +1,6 @@
 //! Platform probing boundary for macOS and Linux.
 
+pub mod linux;
 pub mod model;
 pub mod probe;
 
