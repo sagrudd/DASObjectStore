@@ -2,10 +2,12 @@
 
 use crate::provider::ObjectServiceError;
 use dasobjectstore_core::ids::StoreId;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
+use std::path::Path;
 
 const ACCESS_KEY_RANDOM_BYTES: usize = 10;
 const SECRET_KEY_RANDOM_BYTES: usize = 32;
@@ -23,6 +25,48 @@ pub struct StoreServiceCredential {
     pub credential_reference: String,
     pub access_key_id: String,
     pub secret_access_key: SecretAccessKey,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CredentialReferenceManifest {
+    pub format_version: u16,
+    pub generated_at_utc: String,
+    pub references: Vec<StoreCredentialReference>,
+}
+
+impl CredentialReferenceManifest {
+    pub fn from_credentials(
+        generated_at_utc: impl Into<String>,
+        credentials: &[StoreServiceCredential],
+    ) -> Self {
+        Self {
+            format_version: 1,
+            generated_at_utc: generated_at_utc.into(),
+            references: credentials
+                .iter()
+                .map(StoreCredentialReference::from_credential)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StoreCredentialReference {
+    pub store_id: StoreId,
+    pub bucket_name: String,
+    pub credential_reference: String,
+    pub access_key_id: String,
+}
+
+impl StoreCredentialReference {
+    pub fn from_credential(credential: &StoreServiceCredential) -> Self {
+        Self {
+            store_id: credential.store_id.clone(),
+            bucket_name: credential.bucket_name.clone(),
+            credential_reference: credential.credential_reference.clone(),
+            access_key_id: credential.access_key_id.clone(),
+        }
+    }
 }
 
 impl fmt::Debug for StoreServiceCredential {
@@ -81,6 +125,18 @@ pub fn generate_per_store_credentials(
         .iter()
         .map(|request| generate_store_credential(request, entropy))
         .collect()
+}
+
+pub fn write_credential_reference_manifest(
+    path: impl AsRef<Path>,
+    manifest: &CredentialReferenceManifest,
+) -> Result<(), ObjectServiceError> {
+    let file = File::create(path.as_ref()).map_err(|error| {
+        ObjectServiceError::CommandFailed(format!("create credential reference manifest: {error}"))
+    })?;
+    serde_json::to_writer_pretty(file, manifest).map_err(|error| {
+        ObjectServiceError::CommandFailed(format!("write credential reference manifest: {error}"))
+    })
 }
 
 fn validate_requests(requests: &[StoreCredentialRequest]) -> Result<(), ObjectServiceError> {
@@ -165,10 +221,13 @@ fn hex_encode(bytes: &[u8], table: &[u8; 16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        generate_per_store_credentials, CredentialEntropy, ObjectServiceError,
+        generate_per_store_credentials, write_credential_reference_manifest, CredentialEntropy,
+        CredentialReferenceManifest, ObjectServiceError, StoreCredentialReference,
         StoreCredentialRequest,
     };
     use dasobjectstore_core::ids::StoreId;
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn generates_distinct_per_store_credentials() {
@@ -212,6 +271,59 @@ mod tests {
     }
 
     #[test]
+    fn credential_reference_manifest_excludes_secret_material() {
+        let mut entropy = FixedEntropy::new();
+        let credentials =
+            generate_per_store_credentials(&[request("generated", "generated-data")], &mut entropy)
+                .expect("credentials generated");
+        let secret = credentials[0].secret_access_key.expose_secret().to_string();
+
+        let manifest =
+            CredentialReferenceManifest::from_credentials("2026-01-01T00:00:00Z", &credentials);
+        let encoded = serde_json::to_string(&manifest).expect("manifest serializes");
+
+        assert!(encoded.contains(&credentials[0].credential_reference));
+        assert!(encoded.contains(&credentials[0].access_key_id));
+        assert!(!encoded.contains(&secret));
+    }
+
+    #[test]
+    fn credential_reference_round_trips_without_secret() {
+        let mut entropy = FixedEntropy::new();
+        let credential =
+            generate_per_store_credentials(&[request("generated", "generated-data")], &mut entropy)
+                .expect("credentials generated")
+                .remove(0);
+
+        let reference = StoreCredentialReference::from_credential(&credential);
+        let encoded = serde_json::to_string(&reference).expect("reference serializes");
+        let decoded: StoreCredentialReference =
+            serde_json::from_str(&encoded).expect("reference deserializes");
+
+        assert_eq!(decoded, reference);
+        assert!(!encoded.contains(credential.secret_access_key.expose_secret()));
+    }
+
+    #[test]
+    fn writes_credential_reference_manifest_without_secret() {
+        let mut entropy = FixedEntropy::new();
+        let credentials =
+            generate_per_store_credentials(&[request("generated", "generated-data")], &mut entropy)
+                .expect("credentials generated");
+        let secret = credentials[0].secret_access_key.expose_secret().to_string();
+        let manifest =
+            CredentialReferenceManifest::from_credentials("2026-01-01T00:00:00Z", &credentials);
+        let path = temp_manifest_path("credential-reference-manifest");
+
+        write_credential_reference_manifest(&path, &manifest).expect("manifest writes");
+        let written = fs::read_to_string(&path).expect("manifest reads");
+        fs::remove_file(&path).expect("temp manifest removed");
+
+        assert!(written.contains("secret://dasobjectstore/stores/generated/s3"));
+        assert!(!written.contains(&secret));
+    }
+
+    #[test]
     fn rejects_duplicate_store_requests() {
         let mut entropy = FixedEntropy::new();
 
@@ -252,6 +364,21 @@ mod tests {
             store_id: StoreId::new(store_id).expect("store id"),
             bucket_name: bucket_name.to_string(),
         }
+    }
+
+    fn temp_manifest_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-{name}-{}-{}.json",
+            std::process::id(),
+            unique_suffix()
+        ))
+    }
+
+    fn unique_suffix() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
     }
 
     struct FixedEntropy {

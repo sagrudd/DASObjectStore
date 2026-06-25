@@ -6,7 +6,8 @@ pub mod provider;
 
 pub use compose::{render_compose, ComposeServiceConfig};
 pub use credentials::{
-    generate_per_store_credentials, CredentialEntropy, SecretAccessKey, StoreCredentialRequest,
+    generate_per_store_credentials, write_credential_reference_manifest, CredentialEntropy,
+    CredentialReferenceManifest, SecretAccessKey, StoreCredentialReference, StoreCredentialRequest,
     StoreServiceCredential, SystemCredentialEntropy,
 };
 pub use provider::{
