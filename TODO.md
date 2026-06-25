@@ -120,7 +120,7 @@ developers
 - [x] Add `dasobjectstore ingest queue --json`.
 - [x] Add crash/restart test for an ingest job before HDD settlement.
 - [x] Add crash/restart test for an ingest job after metadata commit.
-- [ ] Document exactly what is lost if SSD fails before settlement.
+- [x] Document exactly what is lost if SSD fails before settlement.
 
 ## Milestone 7: HDD Placement and Copy Verification
 

@@ -152,8 +152,9 @@ DASObjectStore pools must not depend on hidden state from one host.
 
 The live metadata database lives on the mandatory SSD. Recovery snapshots live
 on HDD metadata areas. If the SSD fails, the MVP target is recovery of committed
-HDD objects, with loss of pending SSD-only ingest data. A later target is full
-live metadata reconstruction from HDD snapshots.
+HDD objects. Pending SSD-only ingest data, including writes acknowledged before
+HDD settlement, may be lost. A later target is full live metadata reconstruction
+from HDD snapshots.
 
 Metadata compatibility and recovery boundaries are documented in
 [Metadata Compatibility and Recovery](docs/metadata-compatibility.md).

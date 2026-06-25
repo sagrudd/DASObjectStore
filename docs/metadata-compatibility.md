@@ -72,7 +72,35 @@ The MVP recovery target is conservative:
   default.
 
 DASObjectStore does not guarantee recovery of pending SSD-only ingest objects if
-the SSD fails before settlement to HDD.
+the SSD fails before settlement to HDD. In this context, "pending SSD-only"
+means object bytes that have been accepted into the SSD ingest area but do not
+yet have policy-satisfying verified HDD copies.
+
+If the SSD fails before settlement, DASObjectStore may lose:
+
+- staged payload bytes under `.dasobjectstore/ingest/jobs/...`;
+- live ingest job rows that only existed in SSD `live.sqlite`;
+- object rows whose bytes were still SSD-only;
+- content hash and byte-count evidence that had not yet been replicated through
+  HDD metadata snapshots;
+- acknowledgement records for stores configured as `AfterSsdIngest`.
+
+If the SSD fails before settlement, DASObjectStore should still be able to
+recover:
+
+- objects with policy-satisfying verified HDD copies represented in replicated
+  HDD metadata snapshots;
+- pool, disk, and store identity available from HDD metadata directories;
+- placement log records already exported to HDD metadata directories;
+- enough metadata to mark unresolved SSD-only ingest work as lost, failed, or
+  redownload-required once recovery tooling exists.
+
+Store acknowledgement policy controls client-visible risk. For
+`AfterSsdIngest`, a client may have received success for data that was still
+SSD-only and is therefore not recoverable after SSD loss. For
+`AfterHddPlacement`, success should not be returned until store policy is
+satisfied by verified HDD placement, so SSD loss before acknowledgement should
+behave as an incomplete write rather than durable data loss.
 
 DASObjectStore does not claim that local metadata snapshots are a backup. Users
 still need independent backup for data that cannot be redownloaded or

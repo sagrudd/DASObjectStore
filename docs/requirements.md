@@ -127,7 +127,8 @@ Metadata SHALL be checksummed.
 Metadata SHALL support recovery of committed HDD objects if the SSD fails.
 
 The MVP MAY lose pending SSD-only ingest objects if the SSD fails before
-settlement.
+settlement. This loss boundary SHALL be documented in
+[Metadata Compatibility and Recovery](metadata-compatibility.md).
 
 Metadata compatibility and recovery guarantees are documented in
 [Metadata Compatibility and Recovery](metadata-compatibility.md).
