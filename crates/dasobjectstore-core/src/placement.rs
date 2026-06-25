@@ -552,6 +552,82 @@ mod tests {
     }
 
     #[test]
+    fn protected_copy_plan_excludes_degraded_and_suspect_disks() {
+        let candidates = vec![
+            candidate(
+                "disk-healthy",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+            candidate(
+                "disk-watch",
+                None,
+                10_000,
+                HealthState::Watch,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+            candidate(
+                "disk-suspect",
+                None,
+                10_000,
+                HealthState::Suspect,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-draining",
+                None,
+                10_000,
+                HealthState::Draining,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let plan =
+            plan_copies(&candidates, &PlacementRequest::protected(1_000), 3).expect("copy plan");
+
+        assert!(!plan.is_complete());
+        assert_eq!(plan.missing_copies(), 1);
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-healthy");
+        assert_eq!(plan.planned_copies[1].disk_id.as_str(), "disk-watch");
+    }
+
+    #[test]
+    fn cache_scores_suspect_disk_but_prefers_healthy_disk() {
+        let candidates = vec![
+            candidate(
+                "disk-suspect",
+                None,
+                10_000,
+                HealthState::Suspect,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-healthy",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let scores = score_candidates(&candidates, &PlacementRequest::cache(1_000));
+
+        assert_eq!(scores.len(), 2);
+        assert_eq!(scores[0].disk_id.as_str(), "disk-healthy");
+        assert_eq!(scores[0].health_score, 100);
+        assert_eq!(scores[1].disk_id.as_str(), "disk-suspect");
+        assert_eq!(scores[1].health_score, 20);
+    }
+
+    #[test]
     fn copy_planner_supports_one_two_and_three_copies() {
         let candidates = vec![
             candidate(

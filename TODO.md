@@ -135,7 +135,7 @@ developers
 - [x] Implement redownload-required state for reproducible cache objects.
 - [x] Add `dasobjectstore object inspect <object-id>`.
 - [x] Add placement tests for mixed disk sizes.
-- [ ] Add placement tests for degraded/suspect disks.
+- [x] Add placement tests for degraded/suspect disks.
 - [ ] Add placement tests for enclosure-aware store policy.
 - [ ] Add copy verification tests with deliberate checksum mismatch.
 
