@@ -19,7 +19,7 @@ developers
   platform, metadata, object service orchestration, and Mnemosyne adapter.
 - [x] Add `.gitignore` for Rust, editor, macOS, test output, and generated
   benchmark artifacts.
-- [ ] Add CI workflow for `cargo fmt --check`, `cargo clippy`, and
+- [x] Add CI workflow for `cargo fmt --check`, `cargo clippy`, and
   `cargo test`.
 - [ ] Add `docs/versioning.md` describing semantic versioning, pre-1.0
   compatibility expectations, and metadata format version policy.
