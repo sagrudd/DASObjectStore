@@ -46,6 +46,26 @@ pub struct HealthSignals {
     pub user_trust: UserTrust,
 }
 
+impl HealthSignals {
+    pub fn record_io_error(&mut self) {
+        self.io_errors = self.io_errors.saturating_add(1);
+    }
+
+    pub fn record_checksum_failure(&mut self) {
+        self.checksum_failures = self.checksum_failures.saturating_add(1);
+    }
+
+    pub fn with_io_error(mut self) -> Self {
+        self.record_io_error();
+        self
+    }
+
+    pub fn with_checksum_failure(mut self) -> Self {
+        self.record_checksum_failure();
+        self
+    }
+}
+
 impl Default for HealthSignals {
     fn default() -> Self {
         Self {
@@ -164,6 +184,58 @@ mod tests {
 
         assert_eq!(score.value, 65);
         assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
+    fn records_io_error_health_signal() {
+        let signals = HealthSignals::default().with_io_error();
+
+        assert_eq!(signals.io_errors, 1);
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 80);
+        assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
+    fn records_checksum_failure_health_signal() {
+        let signals = HealthSignals::default().with_checksum_failure();
+
+        assert_eq!(signals.checksum_failures, 1);
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 65);
+        assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
+    fn io_and_checksum_signals_can_drive_suspect_state() {
+        let mut signals = HealthSignals::default();
+        signals.record_io_error();
+        signals.record_io_error();
+        signals.record_checksum_failure();
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 25);
+        assert_eq!(score.state, HealthState::Suspect);
+    }
+
+    #[test]
+    fn direct_health_signal_counters_saturate() {
+        let mut signals = HealthSignals {
+            io_errors: u16::MAX,
+            checksum_failures: u16::MAX,
+            ..HealthSignals::default()
+        };
+
+        signals.record_io_error();
+        signals.record_checksum_failure();
+
+        assert_eq!(signals.io_errors, u16::MAX);
+        assert_eq!(signals.checksum_failures, u16::MAX);
     }
 
     #[test]
