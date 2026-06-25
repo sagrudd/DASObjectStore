@@ -25,5 +25,12 @@ case "$workload" in
     ;;
 esac
 
-echo "provider setup is not implemented yet: $provider / $workload" >&2
-exit 69
+case "$workload" in
+  large-object)
+    exec "$(dirname "$0")/../workloads/large-object.sh" "$provider"
+    ;;
+  *)
+    echo "workload is not implemented yet: $provider / $workload" >&2
+    exit 69
+    ;;
+esac
