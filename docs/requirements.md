@@ -198,6 +198,9 @@ Write acknowledgement policy SHALL be configurable per store:
 - acknowledge after SSD ingest;
 - acknowledge after HDD placement satisfies store policy.
 
+The store policy model represents these modes as `AfterSsdIngest` and
+`AfterHddPlacement`.
+
 DASObjectStore SHALL support CLI-managed direct-to-HDD imports as an initial bypass
 for large reproducible downloads.
 

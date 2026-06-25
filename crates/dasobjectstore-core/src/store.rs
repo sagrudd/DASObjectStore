@@ -74,6 +74,12 @@ pub enum IngestMode {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum AcknowledgementPolicy {
+    AfterSsdIngest,
+    AfterHddPlacement,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PlacementStrategy {
     WeightedHealthCapacityPerformance,
 }
@@ -127,6 +133,7 @@ pub enum ExportPolicy {
 pub struct StorePolicy {
     pub class: StoreClass,
     pub ingest_mode: IngestMode,
+    pub acknowledgement_policy: AcknowledgementPolicy,
     pub copies: u8,
     pub placement_strategy: PlacementStrategy,
     pub enclosure_placement: EnclosurePlacement,
@@ -154,6 +161,7 @@ impl EnclosurePlacementContext {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PoolPolicyDefaults {
     pub ingest_mode: IngestMode,
+    pub acknowledgement_policy: AcknowledgementPolicy,
     pub copies: u8,
     pub placement_strategy: PlacementStrategy,
     pub enclosure_placement: EnclosurePlacement,
@@ -178,6 +186,9 @@ impl PoolPolicyDefaults {
         StorePolicy {
             class,
             ingest_mode: overrides.ingest_mode.unwrap_or(self.ingest_mode),
+            acknowledgement_policy: overrides
+                .acknowledgement_policy
+                .unwrap_or(self.acknowledgement_policy),
             copies: overrides.copies.unwrap_or(self.copies),
             placement_strategy: overrides
                 .placement_strategy
@@ -203,6 +214,7 @@ impl PoolPolicyDefaults {
     fn from_policy(policy: StorePolicy) -> Self {
         Self {
             ingest_mode: policy.ingest_mode,
+            acknowledgement_policy: policy.acknowledgement_policy,
             copies: policy.copies,
             placement_strategy: policy.placement_strategy,
             enclosure_placement: policy.enclosure_placement,
@@ -219,6 +231,7 @@ impl PoolPolicyDefaults {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StorePolicyOverrides {
     pub ingest_mode: Option<IngestMode>,
+    pub acknowledgement_policy: Option<AcknowledgementPolicy>,
     pub copies: Option<u8>,
     pub placement_strategy: Option<PlacementStrategy>,
     pub enclosure_placement: Option<EnclosurePlacement>,
@@ -243,6 +256,7 @@ impl StorePolicy {
             StoreClass::ReproducibleCache => Self {
                 class,
                 ingest_mode: IngestMode::SsdFirst,
+                acknowledgement_policy: AcknowledgementPolicy::AfterSsdIngest,
                 copies: 1,
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::Ignore,
@@ -256,6 +270,7 @@ impl StorePolicy {
             StoreClass::GeneratedData => Self {
                 class,
                 ingest_mode: IngestMode::SsdFirst,
+                acknowledgement_policy: AcknowledgementPolicy::AfterHddPlacement,
                 copies: 2,
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::PreferDistinct,
@@ -269,6 +284,7 @@ impl StorePolicy {
             StoreClass::CriticalMetadata => Self {
                 class,
                 ingest_mode: IngestMode::SsdFirst,
+                acknowledgement_policy: AcknowledgementPolicy::AfterHddPlacement,
                 copies: 3,
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::PreferDistinct,
@@ -282,6 +298,7 @@ impl StorePolicy {
             StoreClass::ExportBundle => Self {
                 class,
                 ingest_mode: IngestMode::SsdFirst,
+                acknowledgement_policy: AcknowledgementPolicy::AfterHddPlacement,
                 copies: 2,
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::PreferDistinct,
@@ -295,6 +312,7 @@ impl StorePolicy {
             StoreClass::IngestStaging => Self {
                 class,
                 ingest_mode: IngestMode::SsdFirst,
+                acknowledgement_policy: AcknowledgementPolicy::AfterSsdIngest,
                 copies: 1,
                 placement_strategy: PlacementStrategy::WeightedHealthCapacityPerformance,
                 enclosure_placement: EnclosurePlacement::Ignore,
@@ -493,9 +511,9 @@ impl Display for StorePolicyValidationError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CapacityBehavior, EnclosurePlacement, EnclosurePlacementContext, ExportPolicy, IngestMode,
-        MutabilityPolicy, PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass,
-        StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
+        AcknowledgementPolicy, CapacityBehavior, EnclosurePlacement, EnclosurePlacementContext,
+        ExportPolicy, IngestMode, MutabilityPolicy, PoolPolicyDefaults, RepairPolicy,
+        RetentionPolicy, StoreClass, StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
     };
 
     #[test]
@@ -542,6 +560,10 @@ mod tests {
 
         assert_eq!(policy.class, StoreClass::ReproducibleCache);
         assert_eq!(policy.ingest_mode, IngestMode::SsdFirst);
+        assert_eq!(
+            policy.acknowledgement_policy,
+            AcknowledgementPolicy::AfterSsdIngest
+        );
         assert_eq!(policy.copies, 1);
         assert_eq!(policy.retention_policy, RetentionPolicy::ImmediateDelete);
         assert_eq!(policy.mutability_policy, MutabilityPolicy::Immutable);
@@ -579,6 +601,10 @@ mod tests {
 
         assert_eq!(policy.class, StoreClass::GeneratedData);
         assert_eq!(policy.ingest_mode, IngestMode::SsdFirst);
+        assert_eq!(
+            policy.acknowledgement_policy,
+            AcknowledgementPolicy::AfterHddPlacement
+        );
         assert_eq!(policy.copies, 2);
         assert_eq!(
             policy.enclosure_placement,
@@ -616,6 +642,10 @@ mod tests {
 
         assert_eq!(policy.class, StoreClass::CriticalMetadata);
         assert_eq!(policy.ingest_mode, IngestMode::SsdFirst);
+        assert_eq!(
+            policy.acknowledgement_policy,
+            AcknowledgementPolicy::AfterHddPlacement
+        );
         assert_eq!(policy.copies, 3);
         assert_eq!(
             policy.enclosure_placement,
@@ -696,6 +726,7 @@ mod tests {
         let defaults = PoolPolicyDefaults::generated_data_defaults();
         let overrides = StorePolicyOverrides {
             copies: Some(3),
+            acknowledgement_policy: Some(AcknowledgementPolicy::AfterSsdIngest),
             capacity_behavior: Some(CapacityBehavior::RejectWrites),
             export_policy: Some(ExportPolicy::ReadOnlyFileExport),
             ..StorePolicyOverrides::default()
@@ -705,6 +736,10 @@ mod tests {
 
         assert_eq!(policy.class, StoreClass::CriticalMetadata);
         assert_eq!(policy.copies, 3);
+        assert_eq!(
+            policy.acknowledgement_policy,
+            AcknowledgementPolicy::AfterSsdIngest
+        );
         assert_eq!(policy.capacity_behavior, CapacityBehavior::RejectWrites);
         assert_eq!(policy.export_policy, ExportPolicy::ReadOnlyFileExport);
         assert_eq!(policy.repair_policy, RepairPolicy::RestoreFromCopy);
