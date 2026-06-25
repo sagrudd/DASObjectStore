@@ -1,15 +1,16 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, DiskCommand, DiskRetireArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs,
-    ObjectCommand, ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand,
-    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
+    Cli, Command, DiskCommand, DiskDrainArgs, DiskRetireArgs, IngestCommand, IngestQueueArgs,
+    IngestStatusArgs, ObjectCommand, ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs,
+    ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
     StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    inspect_pool_metadata, measure_ssd_capacity, read_ingest_queue, read_object_inspect,
-    request_disk_retirement, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
+    inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan, read_ingest_queue,
+    read_object_inspect, request_disk_retirement, DiskDrainAction, DiskDrainError,
+    DiskDrainPlanSummary, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
     ObjectInspectError, ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
     SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
@@ -43,6 +44,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             PoolCommand::MarkDirty(args) => run_pool_mark_dirty(args, writer),
         },
         Some(Command::Disk(args)) => match args.command() {
+            DiskCommand::Drain(args) => run_disk_drain(args, writer),
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
         Some(Command::Store(args)) => match args.command() {
@@ -206,6 +208,19 @@ fn run_disk_retire(args: &DiskRetireArgs, writer: &mut impl Write) -> Result<(),
         args.recorded_at_utc().to_string(),
     )?;
     write_disk_retirement_report(&report, writer)?;
+
+    Ok(())
+}
+
+fn run_disk_drain(args: &DiskDrainArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let plan = read_disk_drain_plan(args.live_sqlite_path(), args.disk_id())?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &plan)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_disk_drain_plan(&plan, writer)?;
+    }
 
     Ok(())
 }
@@ -376,6 +391,63 @@ fn write_disk_retirement_report(
     )
 }
 
+fn write_disk_drain_plan(
+    plan: &DiskDrainPlanSummary,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Disk drain plan: {}", plan.disk_id)?;
+    writeln!(
+        writer,
+        "Protected copy tasks: {}",
+        plan.protected_copy_tasks
+    )?;
+    writeln!(
+        writer,
+        "Protected blocked objects: {}",
+        plan.protected_blocked_objects
+    )?;
+    writeln!(writer, "Cache copy tasks: {}", plan.cache_copy_tasks)?;
+    writeln!(
+        writer,
+        "Cache redownload-required objects: {}",
+        plan.cache_redownload_required_objects
+    )?;
+    writeln!(writer, "Affected objects: {}", plan.affected_objects.len())?;
+    for object in &plan.affected_objects {
+        let destinations = if object.destination_disk_ids.is_empty() {
+            "<none>".to_string()
+        } else {
+            object
+                .destination_disk_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        writeln!(
+            writer,
+            "- {} store={} action={} destinations={}",
+            object.object_id,
+            object.store_id,
+            disk_drain_action_name(object.action),
+            destinations
+        )?;
+    }
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        plan.live_sqlite_path.to_string_lossy()
+    )
+}
+
+fn disk_drain_action_name(action: DiskDrainAction) -> &'static str {
+    match action {
+        DiskDrainAction::CopyPlanned => "copy_planned",
+        DiskDrainAction::Blocked => "blocked",
+        DiskDrainAction::RedownloadRequired => "redownload_required",
+    }
+}
+
 fn write_object_inspect_summary(
     summary: &ObjectInspectSummary,
     writer: &mut impl Write,
@@ -494,6 +566,7 @@ pub(crate) enum CliError {
     Json(serde_json::Error),
     IngestQueueRead(IngestQueueReadError),
     MetadataInspect(PoolInspectError),
+    DiskDrain(DiskDrainError),
     DiskRetirement(DiskRetirementError),
     ObjectInspect(ObjectInspectError),
     ObjectService(ObjectServiceError),
@@ -516,6 +589,7 @@ impl Display for CliError {
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
+            Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
@@ -567,6 +641,12 @@ impl From<PoolInspectError> for CliError {
 impl From<DiskRetirementError> for CliError {
     fn from(err: DiskRetirementError) -> Self {
         Self::DiskRetirement(err)
+    }
+}
+
+impl From<DiskDrainError> for CliError {
+    fn from(err: DiskDrainError) -> Self {
+        Self::DiskDrain(err)
     }
 }
 
@@ -746,6 +826,62 @@ mod tests {
         assert!(output.contains("Previous state: Healthy"));
         assert!(output.contains("Next state: Draining"));
         assert_eq!(disk_state(&connection, "disk-a"), "Draining");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_drain_writes_pretty_plan() {
+        let root = temp_root("disk-drain-pretty");
+        let live_sqlite_path = create_live_sqlite_with_object(&root);
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        insert_disk(&connection, "disk-b", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "drain",
+            "disk-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+        ])
+        .expect("disk drain parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("disk drain runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Disk drain plan: disk-a"));
+        assert!(output.contains("Protected copy tasks: 1"));
+        assert!(output.contains("- object-a store=store-a action=copy_planned destinations=disk-b"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_drain_writes_json_plan() {
+        let root = temp_root("disk-drain-json");
+        let live_sqlite_path = create_live_sqlite_with_object(&root);
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        insert_disk(&connection, "disk-b", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "drain",
+            "disk-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--json",
+        ])
+        .expect("disk drain parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("disk drain runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("drain output is json");
+        assert_eq!(output["disk_id"], "disk-a");
+        assert_eq!(output["protected_copy_tasks"], 1);
+        assert_eq!(output["affected_objects"][0]["action"], "copy_planned");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -1231,6 +1367,8 @@ mod tests {
     }
 
     fn insert_store(connection: &Connection) {
+        let policy = serde_json::to_string(&StorePolicy::defaults_for(StoreClass::GeneratedData))
+            .expect("policy serializes");
         connection
             .execute(
                 "INSERT INTO pools (pool_id, state, created_at_utc, updated_at_utc)
@@ -1251,11 +1389,11 @@ mod tests {
                     'store-a',
                     'pool-a',
                     'generated_data',
-                    '{}',
+                    ?1,
                     '2026-01-01T00:00:00Z',
                     '2026-01-01T00:00:00Z'
                  )",
-                [],
+                [policy],
             )
             .expect("store inserts");
     }

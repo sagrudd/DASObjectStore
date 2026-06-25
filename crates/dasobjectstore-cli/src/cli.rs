@@ -122,8 +122,36 @@ impl DiskArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum DiskCommand {
+    /// Plan drain work for a disk without copying or deleting data.
+    Drain(DiskDrainArgs),
     /// Request retirement by moving a disk into draining state.
     Retire(DiskRetireArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskDrainArgs {
+    /// Disk identifier to drain.
+    disk_id: DiskId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Emit drain plan as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl DiskDrainArgs {
+    pub(crate) fn disk_id(&self) -> &DiskId {
+        &self.disk_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -517,6 +545,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_disk_drain() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "drain",
+            "disk-a",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--json",
+        ])
+        .expect("disk drain parses");
+
+        let Some(Command::Disk(args)) = cli.command() else {
+            panic!("expected disk command");
+        };
+        match args.command() {
+            DiskCommand::Drain(drain) => {
+                assert_eq!(drain.disk_id().as_str(), "disk-a");
+                assert_eq!(drain.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert!(drain.json());
+            }
+            _ => panic!("expected drain command"),
+        }
+    }
+
+    #[test]
     fn parses_disk_retire() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
@@ -534,6 +588,7 @@ mod tests {
             panic!("expected disk command");
         };
         match args.command() {
+            DiskCommand::Drain(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
                 assert_eq!(retire.disk_id().as_str(), "disk-a");
                 assert_eq!(retire.live_sqlite_path(), Path::new("/tmp/live.sqlite"));

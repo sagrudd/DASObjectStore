@@ -189,7 +189,7 @@ developers
 - [x] Implement evacuation executor with copy verification.
 - [x] Implement reproducible-cache opportunistic evacuation.
 - [x] Add `dasobjectstore disk retire <disk-id>`.
-- [ ] Add `dasobjectstore disk drain <disk-id>`.
+- [x] Add `dasobjectstore disk drain <disk-id>`.
 - [ ] Add `dasobjectstore disk replace <old-disk-id> --with <new-disk-id>`.
 - [ ] Add force-retire flow with policy allowance and action-time
   confirmation.

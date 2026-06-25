@@ -3,6 +3,7 @@
 pub mod capacity;
 pub mod copy;
 pub mod disk;
+pub mod drain;
 pub mod evacuation;
 pub mod format;
 mod hash;
@@ -27,6 +28,10 @@ pub use copy::{
     HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use disk::{request_disk_retirement, DiskRetirementError, DiskRetirementReport};
+pub use drain::{
+    read_disk_drain_plan, DiskDrainAction, DiskDrainError, DiskDrainObjectSummary,
+    DiskDrainPlanSummary,
+};
 pub use evacuation::{
     execute_evacuation_plan, DiskCopyRoot, EvacuationExecutionError, EvacuationExecutionReport,
     EvacuationExecutionRequest, EvacuationObjectSource,
