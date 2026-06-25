@@ -146,7 +146,7 @@ developers
 - [x] Add Docker/Compose setup for RustFS benchmark runs.
 - [x] Implement large-object upload/download benchmark.
 - [x] Implement small-object upload/download benchmark.
-- [ ] Implement concurrent-client benchmark.
+- [x] Implement concurrent-client benchmark.
 - [ ] Implement crash/restart during ingest benchmark.
 - [ ] Implement interrupted-write benchmark.
 - [ ] Implement metadata recovery benchmark.

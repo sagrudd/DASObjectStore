@@ -32,6 +32,9 @@ case "$workload" in
   small-object)
     exec "$(dirname "$0")/../workloads/small-object.sh" "$provider"
     ;;
+  concurrent-client)
+    exec "$(dirname "$0")/../workloads/concurrent-client.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69

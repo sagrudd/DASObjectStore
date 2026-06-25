@@ -7,10 +7,10 @@ Implemented workloads:
 
 - `large-object`
 - `small-object`
+- `concurrent-client`
 
 Planned workloads:
 
-- `concurrent-client`
 - `crash-restart-ingest`
 - `interrupted-write`
 - `metadata-recovery`
@@ -33,3 +33,9 @@ variables for local runs.
 `small-object.sh` uploads and downloads many small objects through the same
 provider-neutral S3 round-trip helper. It verifies each downloaded object with
 SHA-256 and writes one TSV row per object.
+
+## Concurrent Client
+
+`concurrent-client.sh` starts multiple provider-neutral S3 round-trip clients in
+parallel. Each client writes distinct object keys and an isolated per-client
+report directory under `benchmarks/output/object-services/<provider>/`.

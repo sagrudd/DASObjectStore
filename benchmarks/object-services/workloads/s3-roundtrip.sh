@@ -11,22 +11,7 @@ object_prefix="${6:?object prefix required}"
 output_root="${DASOBJECTSTORE_BENCH_OUTPUT_DIR:-benchmarks/output/object-services}"
 dry_run="${DASOBJECTSTORE_BENCH_DRY_RUN:-0}"
 
-require_positive_integer() {
-  name="$1"
-  value="$2"
-
-  case "$value" in
-    ''|*[!0-9]*)
-      echo "$name must be a positive integer" >&2
-      exit 64
-      ;;
-  esac
-
-  if [ "$value" -eq 0 ]; then
-    echo "$name must be greater than zero" >&2
-    exit 64
-  fi
-}
+. "$(dirname "$0")/lib.sh"
 
 require_positive_integer "object size" "$object_bytes"
 require_positive_integer "object count" "$object_count"
