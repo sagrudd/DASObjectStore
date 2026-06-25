@@ -26,7 +26,7 @@ developers
 - [x] Add `docs/architecture.md` with the high-level crate/module boundaries.
 - [x] Add `CONTRIBUTING.md` pointing contributors to `AGENTS.md`,
   `ROADMAP.md`, and this TODO.
-- [ ] Verify repository text uses `DASObjectStore` for project name and
+- [x] Verify repository text uses `DASObjectStore` for project name and
   `dasobjectstore` for CLI examples.
 
 ## Milestone 2: Rust Workspace and Domain Skeleton
