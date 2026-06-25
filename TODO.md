@@ -233,7 +233,7 @@ developers
 - [x] Add `dasobjectstore mnemosyne export`.
 - [x] Document a bioinformatics reference workflow using `reproducible_cache`
   and `generated_data`.
-- [ ] Add README section linking to the reference workflow.
+- [x] Add README section linking to the reference workflow.
 
 ## Cross-Cutting Tasks
 

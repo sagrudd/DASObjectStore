@@ -120,6 +120,17 @@ prefer_distinct_enclosures = true
 retention = "tombstone_then_gc"
 ```
 
+## Bioinformatics Workflow
+
+The first reference workflow is a local bioinformatics object store that keeps
+public, reproducible inputs separate from generated outputs. It uses
+`reproducible_cache` for public reference datasets and `generated_data` for
+pipeline artefacts that need stronger protection.
+
+See [Bioinformatics Reference Workflow](docs/bioinformatics-reference-workflow.md)
+for the draft object boundaries, ingest path, disk-failure behavior, and
+Mnemosyne adapter boundary.
+
 ## Ingest Model
 
 Normal writes go to the mandatory SSD first. Background workers then copy data
