@@ -220,7 +220,7 @@ developers
 - [x] Add dashboard view model for pool status.
 - [x] Add dashboard view model for disk health.
 - [x] Add dashboard view model for ingest and destage queues.
-- [ ] Add dashboard view model for warnings and required actions.
+- [x] Add dashboard view model for warnings and required actions.
 - [ ] Add safe Web UI actions for health check, service start/stop, and read-only
   import where supported.
 - [ ] Add read-only SMB export recipe generation.

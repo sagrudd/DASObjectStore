@@ -3,9 +3,15 @@ use dasobjectstore_core::ids::{DiskId, PoolId};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use serde::{Deserialize, Serialize};
 
+mod attention;
 mod destage_queue;
 mod ingest_queue;
 
+pub use attention::{
+    DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
+    DashboardAttentionSourceView, DashboardAttentionView, DashboardRequiredActionView,
+    DashboardSeverity, DashboardWarningItemView,
+};
 pub use destage_queue::{DestageQueueObjectView, DestageQueueView, ObjectStateView};
 pub use ingest_queue::{
     IngestJobStateView, IngestProgressView, IngestQueueJobView, IngestQueueView, QueuePressureView,

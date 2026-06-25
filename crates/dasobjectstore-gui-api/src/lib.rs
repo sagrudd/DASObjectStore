@@ -5,9 +5,12 @@ pub mod routes;
 pub mod view;
 
 pub use dashboard::{
-    DashboardWarning, DestageQueueObjectView, DestageQueueView, DiskHealthView, HealthSignalsView,
-    HealthStateView, IngestJobStateView, IngestProgressView, IngestQueueJobView, IngestQueueView,
-    ObjectStateView, PoolAccessMode, PoolStateView, PoolStatusView, QueuePressureView,
+    DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
+    DashboardAttentionSourceView, DashboardAttentionView, DashboardRequiredActionView,
+    DashboardSeverity, DashboardWarning, DashboardWarningItemView, DestageQueueObjectView,
+    DestageQueueView, DiskHealthView, HealthSignalsView, HealthStateView, IngestJobStateView,
+    IngestProgressView, IngestQueueJobView, IngestQueueView, ObjectStateView, PoolAccessMode,
+    PoolStateView, PoolStatusView, QueuePressureView,
 };
 pub use routes::gui_api_router;
 
