@@ -102,6 +102,19 @@ pub struct StorePolicy {
     pub export_policy: ExportPolicy,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnclosurePlacementContext {
+    pub available_enclosure_count: u8,
+}
+
+impl EnclosurePlacementContext {
+    pub fn new(available_enclosure_count: u8) -> Self {
+        Self {
+            available_enclosure_count,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PoolPolicyDefaults {
     pub ingest_mode: IngestMode,
@@ -260,6 +273,20 @@ impl StorePolicy {
     }
 
     pub fn validate(&self) -> Result<(), StorePolicyValidationErrors> {
+        StorePolicyValidationErrors::from_errors(self.validation_errors())
+    }
+
+    pub fn validate_for_enclosures(
+        &self,
+        context: EnclosurePlacementContext,
+    ) -> Result<(), StorePolicyValidationErrors> {
+        let mut errors = self.validation_errors();
+        self.validate_enclosure_availability(context, &mut errors);
+
+        StorePolicyValidationErrors::from_errors(errors)
+    }
+
+    fn validation_errors(&self) -> Vec<StorePolicyValidationError> {
         let mut errors = Vec::new();
 
         if !(1..=3).contains(&self.copies) {
@@ -300,10 +327,25 @@ impl StorePolicy {
             errors.push(StorePolicyValidationError::IngestStagingExportEnabled);
         }
 
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(StorePolicyValidationErrors { errors })
+        errors
+    }
+
+    fn validate_enclosure_availability(
+        &self,
+        context: EnclosurePlacementContext,
+        errors: &mut Vec<StorePolicyValidationError>,
+    ) {
+        if self.enclosure_placement == EnclosurePlacement::RequireDistinct
+            && (1..=3).contains(&self.copies)
+            && self.copies >= 2
+            && context.available_enclosure_count < self.copies
+        {
+            errors.push(
+                StorePolicyValidationError::RequiredEnclosureDiversityUnavailable {
+                    copies: self.copies,
+                    available_enclosure_count: context.available_enclosure_count,
+                },
+            );
         }
     }
 
@@ -320,23 +362,47 @@ pub struct StorePolicyValidationErrors {
     pub errors: Vec<StorePolicyValidationError>,
 }
 
+impl StorePolicyValidationErrors {
+    fn from_errors(errors: Vec<StorePolicyValidationError>) -> Result<(), Self> {
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Self { errors })
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StorePolicyValidationError {
-    InvalidCopyCount { copies: u8 },
+    InvalidCopyCount {
+        copies: u8,
+    },
     DistinctPlacementNeedsMultipleCopies,
-    ProtectedStoreDirectToHdd { class: StoreClass },
-    ProtectedStoreImmediateDelete { class: StoreClass },
-    ProtectedStoreMutable { class: StoreClass },
-    ProtectedStoreMarksRedownloadRequired { class: StoreClass },
+    RequiredEnclosureDiversityUnavailable {
+        copies: u8,
+        available_enclosure_count: u8,
+    },
+    ProtectedStoreDirectToHdd {
+        class: StoreClass,
+    },
+    ProtectedStoreImmediateDelete {
+        class: StoreClass,
+    },
+    ProtectedStoreMutable {
+        class: StoreClass,
+    },
+    ProtectedStoreMarksRedownloadRequired {
+        class: StoreClass,
+    },
     IngestStagingExportEnabled,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CapacityBehavior, EnclosurePlacement, ExportPolicy, IngestMode, MutabilityPolicy,
-        PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass, StorePolicy,
-        StorePolicyOverrides, StorePolicyValidationError,
+        CapacityBehavior, EnclosurePlacement, EnclosurePlacementContext, ExportPolicy, IngestMode,
+        MutabilityPolicy, PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass,
+        StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
     };
 
     #[test]
@@ -517,5 +583,44 @@ mod tests {
             err.errors,
             vec![StorePolicyValidationError::IngestStagingExportEnabled]
         );
+    }
+
+    #[test]
+    fn rejects_required_distinct_enclosures_when_unavailable() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.enclosure_placement = EnclosurePlacement::RequireDistinct;
+
+        let err = policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(1))
+            .expect_err("required enclosure diversity should fail");
+
+        assert_eq!(
+            err.errors,
+            vec![
+                StorePolicyValidationError::RequiredEnclosureDiversityUnavailable {
+                    copies: 2,
+                    available_enclosure_count: 1
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn accepts_required_distinct_enclosures_when_available() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::CriticalMetadata);
+        policy.enclosure_placement = EnclosurePlacement::RequireDistinct;
+
+        policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(3))
+            .expect("required enclosure diversity should pass");
+    }
+
+    #[test]
+    fn accepts_preferred_distinct_enclosures_when_unavailable() {
+        let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+
+        policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(1))
+            .expect("preferred enclosure diversity should remain best effort");
     }
 }

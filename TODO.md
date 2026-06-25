@@ -95,7 +95,7 @@ developers
   `ingest_staging`.
 - [x] Implement policy validation for copy count, mutability, retention,
   placement, ingest mode, and capacity behavior.
-- [ ] Implement policy validation for enclosure-aware placement preferences and
+- [x] Implement policy validation for enclosure-aware placement preferences and
   requirements.
 - [ ] Implement risk-gating model for direct-to-HDD import, force retire, and
   force read-write import.
