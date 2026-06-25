@@ -137,7 +137,7 @@ developers
 - [x] Add placement tests for mixed disk sizes.
 - [x] Add placement tests for degraded/suspect disks.
 - [x] Add placement tests for enclosure-aware store policy.
-- [ ] Add copy verification tests with deliberate checksum mismatch.
+- [x] Add copy verification tests with deliberate checksum mismatch.
 
 ## Milestone 8: Object Service Benchmark and Selection
 
