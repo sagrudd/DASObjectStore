@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn inspects_macos_fixture_metadata_directory() {
-        let metadata_path = macos_fixture_root()
+        let metadata_path = portable_fixture_root("macos")
             .join(".dasobjectstore")
             .join("metadata");
 
@@ -184,12 +184,29 @@ mod tests {
 
     #[test]
     fn inspects_macos_fixture_portable_pool_root() {
-        let root = macos_fixture_root();
+        let root = portable_fixture_root("macos");
 
         let summary = inspect_pool_metadata(&root).expect("macos fixture root inspects");
 
         assert_eq!(summary.pool_id.as_str(), "macos-pool-a");
         assert_eq!(summary.state, PoolState::Clean);
+        assert_eq!(summary.disk_count, 2);
+        assert_eq!(
+            summary.metadata_path,
+            root.join(".dasobjectstore").join("metadata")
+        );
+    }
+
+    #[test]
+    fn inspects_linux_fixture_portable_pool_root_with_macos_read_path() {
+        let root = portable_fixture_root("linux");
+
+        let summary = inspect_pool_metadata(&root).expect("linux fixture root inspects");
+
+        assert_eq!(summary.pool_id.as_str(), "linux-pool-a");
+        assert_eq!(summary.state, PoolState::Dirty);
+        assert_eq!(summary.created_at_utc, "2026-01-04T00:00:00Z");
+        assert_eq!(summary.updated_at_utc, "2026-01-05T00:00:00Z");
         assert_eq!(summary.disk_count, 2);
         assert_eq!(
             summary.metadata_path,
@@ -239,10 +256,10 @@ mod tests {
         serde_json::to_writer_pretty(file, value).expect("write json");
     }
 
-    fn macos_fixture_root() -> PathBuf {
+    fn portable_fixture_root(platform: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("fixtures")
-            .join("macos")
+            .join(platform)
             .join("portable-pool-root")
     }
 
