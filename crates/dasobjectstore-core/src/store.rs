@@ -11,6 +11,26 @@ pub enum StoreClass {
     IngestStaging,
 }
 
+impl StoreClass {
+    pub const ALL: [Self; 5] = [
+        Self::ReproducibleCache,
+        Self::GeneratedData,
+        Self::CriticalMetadata,
+        Self::ExportBundle,
+        Self::IngestStaging,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ReproducibleCache => "reproducible_cache",
+            Self::GeneratedData => "generated_data",
+            Self::CriticalMetadata => "critical_metadata",
+            Self::ExportBundle => "export_bundle",
+            Self::IngestStaging => "ingest_staging",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IngestMode {
     SsdFirst,
@@ -149,6 +169,13 @@ pub struct StorePolicyOverrides {
 }
 
 impl StorePolicy {
+    pub fn built_in_defaults() -> Vec<Self> {
+        StoreClass::ALL
+            .into_iter()
+            .map(Self::defaults_for)
+            .collect()
+    }
+
     pub fn defaults_for(class: StoreClass) -> Self {
         match class {
             StoreClass::ReproducibleCache => Self {
@@ -223,6 +250,15 @@ mod tests {
     };
 
     #[test]
+    fn store_class_names_are_stable_snake_case() {
+        assert_eq!(StoreClass::ReproducibleCache.name(), "reproducible_cache");
+        assert_eq!(StoreClass::GeneratedData.name(), "generated_data");
+        assert_eq!(StoreClass::CriticalMetadata.name(), "critical_metadata");
+        assert_eq!(StoreClass::ExportBundle.name(), "export_bundle");
+        assert_eq!(StoreClass::IngestStaging.name(), "ingest_staging");
+    }
+
+    #[test]
     fn reproducible_cache_defaults_to_single_copy_cache_behavior() {
         let policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
 
@@ -266,6 +302,30 @@ mod tests {
         let decoded: StorePolicy = serde_json::from_str(&encoded).expect("policy deserializes");
 
         assert_eq!(decoded, policy);
+    }
+
+    #[test]
+    fn built_in_defaults_cover_all_store_classes() {
+        let defaults = StorePolicy::built_in_defaults();
+        let classes: Vec<StoreClass> = defaults.iter().map(|policy| policy.class).collect();
+
+        assert_eq!(classes, StoreClass::ALL);
+        assert_eq!(
+            defaults
+                .iter()
+                .find(|policy| policy.class == StoreClass::ReproducibleCache)
+                .expect("reproducible cache default")
+                .copies,
+            1
+        );
+        assert_eq!(
+            defaults
+                .iter()
+                .find(|policy| policy.class == StoreClass::CriticalMetadata)
+                .expect("critical metadata default")
+                .copies,
+            3
+        );
     }
 
     #[test]
