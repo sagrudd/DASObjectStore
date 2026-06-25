@@ -149,7 +149,7 @@ developers
 - [x] Implement concurrent-client benchmark.
 - [x] Implement crash/restart during ingest benchmark.
 - [x] Implement interrupted-write benchmark.
-- [ ] Implement metadata recovery benchmark.
+- [x] Implement metadata recovery benchmark.
 - [ ] Implement disk-full behavior benchmark.
 - [ ] Implement simulated disk removal benchmark.
 - [ ] Implement SSD ingest and HDD destage compatibility benchmark.

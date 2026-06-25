@@ -10,10 +10,10 @@ Implemented workloads:
 - `concurrent-client`
 - `crash-restart-ingest`
 - `interrupted-write`
+- `metadata-recovery`
 
 Planned workloads:
 
-- `metadata-recovery`
 - `disk-full`
 - `simulated-disk-removal`
 - `ssd-ingest-hdd-destage`
@@ -53,3 +53,10 @@ reports success, the script also downloads and verifies that object.
 process without restarting the service. A retrievable interrupted object is
 allowed only if its checksum matches the source payload. The script then proves
 the service still accepts a clean post-interruption upload/download round trip.
+
+## Metadata Recovery
+
+`metadata-recovery.sh` uploads and verifies a seed object, stops the selected
+provider, snapshots its benchmark bind-mounted state, restores that state, then
+restarts the provider and verifies the object remains readable with the
+expected SHA-256 hash.

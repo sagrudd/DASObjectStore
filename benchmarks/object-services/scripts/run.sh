@@ -41,6 +41,9 @@ case "$workload" in
   interrupted-write)
     exec "$(dirname "$0")/../workloads/interrupted-write.sh" "$provider"
     ;;
+  metadata-recovery)
+    exec "$(dirname "$0")/../workloads/metadata-recovery.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69

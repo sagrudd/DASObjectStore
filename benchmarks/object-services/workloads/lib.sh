@@ -38,6 +38,24 @@ require_command() {
   fi
 }
 
+safe_rm_rf_benchmark_path() {
+  path="$1"
+
+  case "$path" in
+    ''|/|.)
+      echo "refusing to remove unsafe benchmark path: $path" >&2
+      exit 70
+      ;;
+    benchmarks/output/object-services/*|*/object-services/*)
+      rm -rf "$path"
+      ;;
+    *)
+      echo "refusing to remove path outside object-services benchmark output: $path" >&2
+      exit 70
+      ;;
+  esac
+}
+
 configure_provider_s3() {
   provider="$1"
   workload="$2"
