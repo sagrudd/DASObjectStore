@@ -100,6 +100,19 @@ Must not hide object placement or protection state from core/metadata.
 Docker/Compose behavior, including macOS Docker Desktop limits, is documented in
 [Service Orchestration Notes](service-orchestration.md).
 
+### `dasobjectstore-gui-api`
+
+Owns GUI-facing HTTP/API scaffolding.
+
+Responsibilities:
+
+- `axum` router construction;
+- GUI view models for pool, disk, ingest, health, queue, and warning views;
+- safe API action boundaries for operations exposed through the GUI;
+- serialization contracts consumed by future Yew views.
+
+Must not duplicate core storage rules or mutate persistent metadata directly.
+
 ### `dasobjectstore-mnemosyne`
 
 Owns optional Mnemosyne, Monas, and Synoptikon integration.

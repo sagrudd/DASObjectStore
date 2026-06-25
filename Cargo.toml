@@ -2,6 +2,7 @@
 members = [
     "crates/dasobjectstore-cli",
     "crates/dasobjectstore-core",
+    "crates/dasobjectstore-gui-api",
     "crates/dasobjectstore-metadata",
     "crates/dasobjectstore-mnemosyne",
     "crates/dasobjectstore-object-service",
@@ -15,8 +16,10 @@ license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
 
 [workspace.dependencies]
+axum = "0.8.9"
 clap = { version = "4.5.48", features = ["derive"] }
 dasobjectstore-core = { path = "crates/dasobjectstore-core" }
+dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api" }
 dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
 dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
 dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
