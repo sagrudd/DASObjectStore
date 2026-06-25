@@ -131,6 +131,60 @@ pub fn score_candidates(
     scores
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CopyPlan {
+    pub requested_copies: u8,
+    pub planned_copies: Vec<PlannedCopy>,
+}
+
+impl CopyPlan {
+    pub fn missing_copies(&self) -> u8 {
+        self.requested_copies - self.planned_copies.len() as u8
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.missing_copies() == 0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlannedCopy {
+    pub copy_number: u8,
+    pub disk_id: DiskId,
+    pub score: PlacementScore,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CopyPlanError {
+    UnsupportedCopyCount(u8),
+}
+
+pub fn plan_copies(
+    candidates: &[PlacementCandidate],
+    request: &PlacementRequest,
+    requested_copies: u8,
+) -> Result<CopyPlan, CopyPlanError> {
+    if !(1..=3).contains(&requested_copies) {
+        return Err(CopyPlanError::UnsupportedCopyCount(requested_copies));
+    }
+
+    let planned_copies = score_candidates(candidates, request)
+        .into_iter()
+        .take(requested_copies as usize)
+        .enumerate()
+        .map(|(index, score)| PlannedCopy {
+            copy_number: index as u8 + 1,
+            disk_id: score.disk_id.clone(),
+            score,
+        })
+        .collect();
+
+    Ok(CopyPlan {
+        requested_copies,
+        planned_copies,
+    })
+}
+
 fn compare_scores(left: &PlacementScore, right: &PlacementScore) -> std::cmp::Ordering {
     right
         .total
@@ -178,7 +232,8 @@ fn write_load_score(write_load: WriteLoad) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        score_candidates, PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad,
+        plan_copies, score_candidates, CopyPlanError, PerformanceClass, PlacementCandidate,
+        PlacementRequest, WriteLoad,
     };
     use crate::ids::{DiskId, EnclosureId};
     use crate::lifecycle::HealthState;
@@ -366,6 +421,117 @@ mod tests {
 
         assert_eq!(scores[0].disk_id.as_str(), "disk-a");
         assert_eq!(scores[1].disk_id.as_str(), "disk-b");
+    }
+
+    #[test]
+    fn copy_planner_supports_one_two_and_three_copies() {
+        let candidates = vec![
+            candidate(
+                "disk-slow",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Slow,
+                WriteLoad::Busy,
+            ),
+            candidate(
+                "disk-fast",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-watch",
+                None,
+                20_000,
+                HealthState::Watch,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+        ];
+        let request = PlacementRequest::protected(1_000);
+
+        let one_copy = plan_copies(&candidates, &request, 1).expect("one-copy plan");
+        let two_copies = plan_copies(&candidates, &request, 2).expect("two-copy plan");
+        let three_copies = plan_copies(&candidates, &request, 3).expect("three-copy plan");
+
+        assert!(one_copy.is_complete());
+        assert!(two_copies.is_complete());
+        assert!(three_copies.is_complete());
+        assert_eq!(one_copy.planned_copies.len(), 1);
+        assert_eq!(two_copies.planned_copies.len(), 2);
+        assert_eq!(three_copies.planned_copies.len(), 3);
+        assert_eq!(three_copies.planned_copies[0].copy_number, 1);
+        assert_eq!(three_copies.planned_copies[0].disk_id.as_str(), "disk-fast");
+        assert_eq!(three_copies.planned_copies[1].copy_number, 2);
+        assert_eq!(
+            three_copies.planned_copies[1].disk_id.as_str(),
+            "disk-watch"
+        );
+        assert_eq!(three_copies.planned_copies[2].copy_number, 3);
+        assert_eq!(three_copies.planned_copies[2].disk_id.as_str(), "disk-slow");
+    }
+
+    #[test]
+    fn copy_planner_reports_missing_copies_when_candidates_are_insufficient() {
+        let candidates = vec![
+            candidate(
+                "disk-too-small",
+                None,
+                999,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-suspect",
+                None,
+                10_000,
+                HealthState::Suspect,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-ok",
+                None,
+                10_000,
+                HealthState::Watch,
+                PerformanceClass::Standard,
+                WriteLoad::Light,
+            ),
+        ];
+
+        let plan =
+            plan_copies(&candidates, &PlacementRequest::protected(1_000), 3).expect("partial plan");
+
+        assert!(!plan.is_complete());
+        assert_eq!(plan.requested_copies, 3);
+        assert_eq!(plan.planned_copies.len(), 1);
+        assert_eq!(plan.missing_copies(), 2);
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-ok");
+    }
+
+    #[test]
+    fn copy_planner_rejects_unsupported_copy_counts() {
+        let candidates = vec![candidate(
+            "disk-a",
+            None,
+            10_000,
+            HealthState::Healthy,
+            PerformanceClass::Fast,
+            WriteLoad::Idle,
+        )];
+
+        assert_eq!(
+            plan_copies(&candidates, &PlacementRequest::protected(1_000), 0),
+            Err(CopyPlanError::UnsupportedCopyCount(0))
+        );
+        assert_eq!(
+            plan_copies(&candidates, &PlacementRequest::protected(1_000), 4),
+            Err(CopyPlanError::UnsupportedCopyCount(4))
+        );
     }
 
     fn candidate(

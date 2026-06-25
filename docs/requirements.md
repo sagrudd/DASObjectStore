@@ -185,6 +185,9 @@ DASObjectStore SHALL support placement weighting by:
 DASObjectStore SHALL score eligible placement candidates deterministically before
 copy planning, with stable ordering for equal scores.
 
+DASObjectStore SHALL produce explicit copy plans for one, two, and three requested
+copies from scored eligible placement candidates.
+
 DASObjectStore SHOULD avoid placing two copies of the same protected object on the
 same disk.
 
