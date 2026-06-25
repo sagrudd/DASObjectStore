@@ -25,7 +25,7 @@ pub(crate) enum Command {
     /// Inspect candidate DAS disks and enclosures.
     Probe(ProbeArgs),
     /// Report pool, disk, and service health.
-    Health,
+    Health(HealthArgs),
     /// Manage portable storage pools.
     Pool(PoolArgs),
     /// Manage DAS member disks.
@@ -40,6 +40,33 @@ pub(crate) enum Command {
     Service(ServiceArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
     Mnemosyne,
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct HealthArgs {
+    /// Emit one-line pool and disk health summary.
+    #[arg(long)]
+    summary: bool,
+    /// Emit per-disk health details.
+    #[arg(long)]
+    verbose: bool,
+    /// Emit health report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl HealthArgs {
+    pub(crate) fn summary(&self) -> bool {
+        self.summary
+    }
+
+    pub(crate) fn verbose(&self) -> bool {
+        self.verbose
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -607,7 +634,6 @@ mod tests {
     #[test]
     fn parses_top_level_command_skeletons() {
         let cases = [
-            ("health", Command::Health),
             ("store", Command::Store(StoreArgs { command: None })),
             ("ingest", Command::Ingest(IngestArgs { command: None })),
             ("mnemosyne", Command::Mnemosyne),
@@ -618,6 +644,39 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_health_summary_default() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "health"]).expect("health parses");
+
+        let Some(Command::Health(args)) = cli.command() else {
+            panic!("expected health command");
+        };
+        assert!(!args.summary());
+        assert!(!args.verbose());
+        assert!(!args.json());
+    }
+
+    #[test]
+    fn parses_health_output_flags() {
+        let cases = [
+            ("--summary", true, false, false),
+            ("--verbose", false, true, false),
+            ("--json", false, false, true),
+        ];
+
+        for (flag, summary, verbose, json) in cases {
+            let cli =
+                Cli::try_parse_from(["dasobjectstore", "health", flag]).expect("health parses");
+
+            let Some(Command::Health(args)) = cli.command() else {
+                panic!("expected health command");
+            };
+            assert_eq!(args.summary(), summary);
+            assert_eq!(args.verbose(), verbose);
+            assert_eq!(args.json(), json);
         }
     }
 

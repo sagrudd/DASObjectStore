@@ -2,11 +2,12 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
-    IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectInspectArgs,
+    HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectInspectArgs,
     PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
     StoreValidateArgs,
 };
+use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::risk::{ActionConfirmation, RiskPolicy};
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
@@ -25,10 +26,15 @@ use dasobjectstore_object_service::{
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
+#[cfg(target_os = "linux")]
+use dasobjectstore_platform::linux_smart::read_smartctl_health;
 #[cfg(target_os = "macos")]
 use dasobjectstore_platform::macos::MacosProbeProvider;
+#[cfg(target_os = "macos")]
+use dasobjectstore_platform::macos_health::read_diskutil_health;
 use dasobjectstore_platform::{
-    group_enclosures, ObservedDisk, ObservedEnclosure, ProbeError, ProbeProvider, ProbeReport,
+    group_enclosures, health::DiskHealthReport, probe::SystemCommandRunner, HostPlatform,
+    ObservedDisk, ObservedEnclosure, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -39,6 +45,7 @@ use std::process::Command as ProcessCommand;
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
         Some(Command::Probe(args)) => run_probe(args, writer),
+        Some(Command::Health(args)) => run_health(args, writer),
         Some(Command::Pool(args)) => match args.command() {
             PoolCommand::Inspect(args) => run_pool_inspect(args, writer),
             #[cfg(feature = "debug-commands")]
@@ -197,6 +204,156 @@ fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> 
     }
 
     Ok(())
+}
+
+fn run_health(args: &HealthArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let selected_modes = [args.summary(), args.verbose(), args.json()]
+        .into_iter()
+        .filter(|selected| *selected)
+        .count();
+    if selected_modes > 1 {
+        return Err(CliError::UnsupportedHealthFormat);
+    }
+
+    let report = read_current_platform_health()?;
+    if args.json() {
+        write_health_json(&report, writer)?;
+    } else if args.verbose() {
+        write_health_verbose(&report, writer)?;
+    } else {
+        write_health_summary(&report, writer)?;
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HealthReport {
+    platform: HostPlatform,
+    disks: Vec<DiskHealthSummary>,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DiskHealthSummary {
+    device_path: Option<String>,
+    model_hint: Option<String>,
+    serial_hint: Option<String>,
+    size_bytes: Option<u64>,
+    transport: Transport,
+    smart_passed: Option<bool>,
+    signals: HealthSignals,
+    score: HealthScore,
+    warnings: Vec<String>,
+}
+
+impl DiskHealthSummary {
+    fn from_observed(
+        observed: &ObservedDisk,
+        health_report: Result<DiskHealthReport, ProbeError>,
+    ) -> Self {
+        let mut warnings = Vec::new();
+        let mut health = None;
+
+        if observed.device_path.is_none() {
+            warnings.push("disk has no device path; SMART health was not queried".to_string());
+        }
+
+        match health_report {
+            Ok(report) => {
+                warnings.extend(report.warnings.clone());
+                health = Some(report);
+            }
+            Err(err) => warnings.push(err.to_string()),
+        }
+
+        let signals = health
+            .as_ref()
+            .map(|report| report.signals)
+            .unwrap_or_default();
+        let score = HealthScore::from_signals(&signals);
+
+        Self {
+            device_path: health
+                .as_ref()
+                .and_then(|report| report.device_path.clone())
+                .or_else(|| observed.device_path.clone()),
+            model_hint: health
+                .as_ref()
+                .and_then(|report| report.model_hint.clone())
+                .or_else(|| observed.model_hint.clone()),
+            serial_hint: health
+                .as_ref()
+                .and_then(|report| report.serial_hint.clone())
+                .or_else(|| observed.serial_hint.clone()),
+            size_bytes: observed.size_bytes,
+            transport: observed.transport,
+            smart_passed: health.as_ref().and_then(|report| report.smart_passed),
+            signals,
+            score,
+            warnings,
+        }
+    }
+}
+
+fn read_current_platform_health() -> Result<HealthReport, CliError> {
+    let mut probe = probe_current_platform()?;
+    probe.enclosures = group_enclosures(&probe.disks);
+
+    let runner = SystemCommandRunner;
+    let disks = probe
+        .disks
+        .iter()
+        .map(|disk| {
+            let health_report = disk
+                .device_path
+                .as_deref()
+                .map(|device_path| read_disk_health_for_current_platform(&runner, device_path))
+                .unwrap_or_else(|| {
+                    Err(ProbeError::ParseFailed {
+                        source: "health".to_string(),
+                        message: "disk has no device path".to_string(),
+                    })
+                });
+            DiskHealthSummary::from_observed(disk, health_report)
+        })
+        .collect();
+
+    Ok(HealthReport {
+        platform: probe.platform,
+        disks,
+        warnings: probe
+            .warnings
+            .into_iter()
+            .map(|warning| format!("{}: {}", warning.code, warning.message))
+            .collect(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn read_disk_health_for_current_platform(
+    runner: &SystemCommandRunner,
+    device_path: &str,
+) -> Result<DiskHealthReport, ProbeError> {
+    read_smartctl_health(runner, device_path)
+}
+
+#[cfg(target_os = "macos")]
+fn read_disk_health_for_current_platform(
+    runner: &SystemCommandRunner,
+    device_path: &str,
+) -> Result<DiskHealthReport, ProbeError> {
+    read_diskutil_health(runner, device_path)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_disk_health_for_current_platform(
+    _runner: &SystemCommandRunner,
+    _device_path: &str,
+) -> Result<DiskHealthReport, ProbeError> {
+    Err(ProbeError::UnsupportedPlatform {
+        platform: std::env::consts::OS.to_string(),
+    })
 }
 
 fn run_pool_inspect(args: &PoolInspectArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -415,6 +572,156 @@ fn write_pool_inspect_summary(
         "Metadata path: {}",
         summary.metadata_path.to_string_lossy()
     )
+}
+
+fn write_health_summary(report: &HealthReport, writer: &mut impl Write) -> Result<(), io::Error> {
+    writeln!(writer, "Platform: {:?}", report.platform)?;
+    writeln!(writer, "Disks: {}", report.disks.len())?;
+    for state in ["Healthy", "Watch", "Suspect", "Failed"] {
+        let count = report
+            .disks
+            .iter()
+            .filter(|disk| health_state_name(disk) == state)
+            .count();
+        writeln!(writer, "{state}: {count}")?;
+    }
+    writeln!(writer, "Warnings: {}", health_warning_count(report))?;
+    for disk in &report.disks {
+        writeln!(
+            writer,
+            "- {} state={} score={} smart={} warnings={}",
+            disk.device_path.as_deref().unwrap_or("<unknown>"),
+            health_state_name(disk),
+            disk.score.value,
+            smart_status_name(disk.smart_passed),
+            disk.warnings.len()
+        )?;
+    }
+
+    Ok(())
+}
+
+fn write_health_verbose(report: &HealthReport, writer: &mut impl Write) -> Result<(), io::Error> {
+    write_health_summary(report, writer)?;
+    for disk in &report.disks {
+        writeln!(
+            writer,
+            "Disk {}",
+            disk.device_path.as_deref().unwrap_or("<unknown>")
+        )?;
+        writeln!(
+            writer,
+            "  Model: {}",
+            disk.model_hint.as_deref().unwrap_or("<unknown>")
+        )?;
+        writeln!(
+            writer,
+            "  Serial: {}",
+            disk.serial_hint.as_deref().unwrap_or("<unknown>")
+        )?;
+        writeln!(
+            writer,
+            "  Size bytes: {}",
+            disk.size_bytes
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )?;
+        writeln!(writer, "  Transport: {:?}", disk.transport)?;
+        writeln!(writer, "  SMART: {}", smart_status_name(disk.smart_passed))?;
+        writeln!(writer, "  Smart warnings: {}", disk.signals.smart_warnings)?;
+        writeln!(writer, "  IO errors: {}", disk.signals.io_errors)?;
+        writeln!(
+            writer,
+            "  Checksum failures: {}",
+            disk.signals.checksum_failures
+        )?;
+        writeln!(writer, "  USB resets: {}", disk.signals.usb_resets)?;
+        writeln!(
+            writer,
+            "  Temperature C: {}",
+            disk.signals
+                .temperature_celsius
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )?;
+        writeln!(
+            writer,
+            "  Benchmark drift percent: {}",
+            disk.signals
+                .benchmark_drift_percent
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )?;
+        for warning in &disk.warnings {
+            writeln!(writer, "  Warning: {warning}")?;
+        }
+    }
+    for warning in &report.warnings {
+        writeln!(writer, "Report warning: {warning}")?;
+    }
+
+    Ok(())
+}
+
+fn write_health_json(report: &HealthReport, writer: &mut impl Write) -> Result<(), CliError> {
+    serde_json::to_writer_pretty(
+        &mut *writer,
+        &serde_json::json!({
+            "platform": format!("{:?}", report.platform),
+            "disk_count": report.disks.len(),
+            "warning_count": health_warning_count(report),
+            "warnings": report.warnings.clone(),
+            "disks": report.disks.iter().map(health_disk_json).collect::<Vec<_>>(),
+        }),
+    )?;
+    writer.write_all(b"\n")?;
+
+    Ok(())
+}
+
+fn health_disk_json(disk: &DiskHealthSummary) -> serde_json::Value {
+    serde_json::json!({
+        "device_path": disk.device_path.clone(),
+        "model_hint": disk.model_hint.clone(),
+        "serial_hint": disk.serial_hint.clone(),
+        "size_bytes": disk.size_bytes,
+        "transport": format!("{:?}", disk.transport),
+        "smart_passed": disk.smart_passed,
+        "score": {
+            "value": disk.score.value,
+            "state": health_state_name(disk),
+        },
+        "signals": disk.signals,
+        "warnings": disk.warnings.clone(),
+    })
+}
+
+fn health_warning_count(report: &HealthReport) -> usize {
+    report.warnings.len()
+        + report
+            .disks
+            .iter()
+            .map(|disk| disk.warnings.len())
+            .sum::<usize>()
+}
+
+fn health_state_name(disk: &DiskHealthSummary) -> &'static str {
+    match disk.score.state {
+        dasobjectstore_core::lifecycle::HealthState::Healthy => "Healthy",
+        dasobjectstore_core::lifecycle::HealthState::Watch => "Watch",
+        dasobjectstore_core::lifecycle::HealthState::Suspect => "Suspect",
+        dasobjectstore_core::lifecycle::HealthState::Draining => "Draining",
+        dasobjectstore_core::lifecycle::HealthState::Retired => "Retired",
+        dasobjectstore_core::lifecycle::HealthState::Failed => "Failed",
+    }
+}
+
+fn smart_status_name(smart_passed: Option<bool>) -> &'static str {
+    match smart_passed {
+        Some(true) => "passed",
+        Some(false) => "failing",
+        None => "unknown",
+    }
 }
 
 fn write_disk_retirement_report(
@@ -675,6 +982,7 @@ pub(crate) enum CliError {
     MetadataMarker(String),
     Probe(ProbeError),
     StorePolicyValidation(StorePolicyValidationErrors),
+    UnsupportedHealthFormat,
     UnsupportedIngestQueueFormat,
     UnsupportedProbeFormat,
     UnsupportedServiceStatusFormat,
@@ -698,6 +1006,9 @@ impl Display for CliError {
             Self::MetadataMarker(err) => write!(formatter, "failed to update pool metadata: {err}"),
             Self::Probe(err) => write!(formatter, "{err}"),
             Self::StorePolicyValidation(err) => write!(formatter, "{err}"),
+            Self::UnsupportedHealthFormat => formatter.write_str(
+                "health requires at most one output format; use `--summary`, `--verbose`, or `--json`",
+            ),
             Self::UnsupportedIngestQueueFormat => {
                 formatter.write_str("ingest queue requires JSON output; use `--json`")
             }
@@ -786,9 +1097,13 @@ impl From<ProbeError> for CliError {
 
 #[cfg(test)]
 mod tests {
-    use super::{run, write_pretty_report, CliError};
+    use super::{
+        run, write_health_json, write_health_summary, write_health_verbose, write_pretty_report,
+        CliError, DiskHealthSummary, HealthReport,
+    };
     use crate::cli::Cli;
     use clap::Parser;
+    use dasobjectstore_core::health::{HealthScore, HealthSignals};
     use dasobjectstore_core::ids::{DiskId, PoolId, StoreId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
     use dasobjectstore_core::store::{
@@ -832,6 +1147,17 @@ mod tests {
     }
 
     #[test]
+    fn health_with_multiple_formats_returns_clear_error() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "health", "--json", "--verbose"])
+            .expect("health parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("only one format is allowed");
+
+        assert!(matches!(err, CliError::UnsupportedHealthFormat));
+    }
+
+    #[test]
     fn writes_pretty_probe_report() {
         let report = ProbeReport {
             platform: HostPlatform::Macos,
@@ -867,6 +1193,50 @@ mod tests {
         assert!(output.contains("Platform: Macos"));
         assert!(output.contains("- /dev/disk4 size=1000 transport=Usb serial=SERIAL-1"));
         assert!(output.contains("- topology=usb@001/002 disks=/dev/disk4"));
+    }
+
+    #[test]
+    fn writes_health_summary() {
+        let report = health_report_fixture();
+        let mut output = Vec::new();
+
+        write_health_summary(&report, &mut output).expect("summary writes");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Platform: Macos"));
+        assert!(output.contains("Disks: 1"));
+        assert!(output.contains("Watch: 1"));
+        assert!(output.contains("- /dev/disk4 state=Watch score=75 smart=failing warnings=1"));
+    }
+
+    #[test]
+    fn writes_health_verbose() {
+        let report = health_report_fixture();
+        let mut output = Vec::new();
+
+        write_health_verbose(&report, &mut output).expect("verbose writes");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Disk /dev/disk4"));
+        assert!(output.contains("  Model: Old SATA HDD"));
+        assert!(output.contains("  Smart warnings: 1"));
+        assert!(output.contains("  Warning: macOS reports SMART failure"));
+    }
+
+    #[test]
+    fn writes_health_json() {
+        let report = health_report_fixture();
+        let mut output = Vec::new();
+
+        write_health_json(&report, &mut output).expect("json writes");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("health output is json");
+        assert_eq!(output["platform"], "Macos");
+        assert_eq!(output["disk_count"], 1);
+        assert_eq!(output["warning_count"], 2);
+        assert_eq!(output["disks"][0]["score"]["state"], "Watch");
+        assert_eq!(output["disks"][0]["signals"]["smart_warnings"], 1);
     }
 
     #[test]
@@ -1712,6 +2082,30 @@ mod tests {
             .expect("object fixture inserts");
 
         live_sqlite_path
+    }
+
+    fn health_report_fixture() -> HealthReport {
+        let signals = HealthSignals {
+            smart_warnings: 1,
+            ..HealthSignals::default()
+        };
+        let score = HealthScore::from_signals(&signals);
+
+        HealthReport {
+            platform: HostPlatform::Macos,
+            disks: vec![DiskHealthSummary {
+                device_path: Some("/dev/disk4".to_string()),
+                model_hint: Some("Old SATA HDD".to_string()),
+                serial_hint: Some("WD-OLD-001".to_string()),
+                size_bytes: Some(1_000),
+                transport: Transport::Usb,
+                smart_passed: Some(false),
+                signals,
+                score,
+                warnings: vec!["macOS reports SMART failure".to_string()],
+            }],
+            warnings: vec!["probe warning".to_string()],
+        }
     }
 
     fn temp_root(name: &str) -> PathBuf {
