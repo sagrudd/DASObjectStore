@@ -1,17 +1,17 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand,
-    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
-    StoreValidateArgs,
+    Cli, Command, DiskCommand, DiskRetireArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs,
+    ObjectCommand, ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand,
+    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
+    StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
     inspect_pool_metadata, measure_ssd_capacity, read_ingest_queue, read_object_inspect,
-    IngestQueueReadError, ObjectInspectError, ObjectInspectSummary, PoolInspectError,
-    PoolInspectSummary, SsdCapacity, SsdCapacityMeasurementError, SsdCapacityPolicy,
-    SsdCapacityPolicyError, SsdPressure,
+    request_disk_retirement, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
+    ObjectInspectError, ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
+    SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -41,6 +41,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             PoolCommand::MarkClean(args) => run_pool_mark_clean(args, writer),
             #[cfg(feature = "debug-commands")]
             PoolCommand::MarkDirty(args) => run_pool_mark_dirty(args, writer),
+        },
+        Some(Command::Disk(args)) => match args.command() {
+            DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
         Some(Command::Store(args)) => match args.command() {
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
@@ -196,6 +199,17 @@ fn run_pool_inspect(args: &PoolInspectArgs, writer: &mut impl Write) -> Result<(
     Ok(())
 }
 
+fn run_disk_retire(args: &DiskRetireArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let report = request_disk_retirement(
+        args.live_sqlite_path(),
+        args.disk_id(),
+        args.recorded_at_utc().to_string(),
+    )?;
+    write_disk_retirement_report(&report, writer)?;
+
+    Ok(())
+}
+
 fn run_store_validate(args: &StoreValidateArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let file = File::open(args.policy_file())?;
     let policy: StorePolicy = serde_json::from_reader(file)?;
@@ -347,6 +361,21 @@ fn write_pool_inspect_summary(
     )
 }
 
+fn write_disk_retirement_report(
+    report: &DiskRetirementReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Disk retirement requested: {}", report.disk_id)?;
+    writeln!(writer, "Previous state: {}", report.previous_state)?;
+    writeln!(writer, "Next state: {:?}", report.next_state)?;
+    writeln!(writer, "Updated: {}", report.updated_at_utc)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        report.live_sqlite_path.to_string_lossy()
+    )
+}
+
 fn write_object_inspect_summary(
     summary: &ObjectInspectSummary,
     writer: &mut impl Write,
@@ -465,6 +494,7 @@ pub(crate) enum CliError {
     Json(serde_json::Error),
     IngestQueueRead(IngestQueueReadError),
     MetadataInspect(PoolInspectError),
+    DiskRetirement(DiskRetirementError),
     ObjectInspect(ObjectInspectError),
     ObjectService(ObjectServiceError),
     CommandFailed(String),
@@ -486,6 +516,7 @@ impl Display for CliError {
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
+            Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
             Self::CommandFailed(err) => write!(formatter, "{err}"),
@@ -530,6 +561,12 @@ impl From<IngestQueueReadError> for CliError {
 impl From<PoolInspectError> for CliError {
     fn from(err: PoolInspectError) -> Self {
         Self::MetadataInspect(err)
+    }
+}
+
+impl From<DiskRetirementError> for CliError {
+    fn from(err: DiskRetirementError) -> Self {
+        Self::DiskRetirement(err)
     }
 }
 
@@ -674,6 +711,41 @@ mod tests {
         assert!(output.contains("Pool: pool-a"));
         assert!(output.contains("State: Clean"));
         assert!(output.contains("Disks: 1"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_retire_marks_disk_draining() {
+        let root = temp_root("disk-retire");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_disk(&connection, "disk-a", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "retire",
+            "disk-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--recorded-at-utc",
+            "2026-01-02T00:00:00Z",
+        ])
+        .expect("disk retire parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("disk retire runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Disk retirement requested: disk-a"));
+        assert!(output.contains("Previous state: Healthy"));
+        assert!(output.contains("Next state: Draining"));
+        assert_eq!(disk_state(&connection, "disk-a"), "Draining");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -1220,6 +1292,27 @@ mod tests {
             .expect("ingest job inserts");
     }
 
+    fn insert_disk(connection: &Connection, disk_id: &str, state: &str) {
+        connection
+            .execute(
+                "INSERT INTO disks (
+                    disk_id, pool_id, role, state, created_at_utc, updated_at_utc
+                 ) VALUES (?1, 'pool-a', 'hdd_capacity', ?2, ?3, ?3)",
+                (disk_id, state, "2026-01-01T00:00:00Z"),
+            )
+            .expect("disk inserts");
+    }
+
+    fn disk_state(connection: &Connection, disk_id: &str) -> String {
+        connection
+            .query_row(
+                "SELECT state FROM disks WHERE disk_id = ?1",
+                [disk_id],
+                |row| row.get(0),
+            )
+            .expect("disk state")
+    }
+
     fn create_live_sqlite_with_object(root: &Path) -> PathBuf {
         fs::create_dir_all(root).expect("create temp root");
         let live_sqlite_path = root.join("live.sqlite");
@@ -1228,15 +1321,10 @@ mod tests {
             .execute_batch(LIVE_SCHEMA_SQL)
             .expect("schema applies");
         insert_store(&connection);
+        insert_disk(&connection, "disk-a", "Healthy");
         connection
             .execute_batch(
-                "INSERT INTO disks (
-                    disk_id, pool_id, role, state, created_at_utc, updated_at_utc
-                 ) VALUES (
-                    'disk-a', 'pool-a', 'hdd_capacity', 'Healthy',
-                    '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
-                 );
-                 INSERT INTO objects (
+                "INSERT INTO objects (
                     object_id, store_id, state, size_bytes, content_hash,
                     created_at_utc, updated_at_utc
                  ) VALUES (

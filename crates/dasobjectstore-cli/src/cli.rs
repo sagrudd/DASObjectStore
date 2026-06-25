@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
-use dasobjectstore_core::ids::ObjectId;
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
+use dasobjectstore_core::ids::{DiskId, ObjectId};
 use dasobjectstore_core::store::StoreClass;
 use dasobjectstore_object_service::ObjectServiceProviderId;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ pub(crate) enum Command {
     /// Manage portable storage pools.
     Pool(PoolArgs),
     /// Manage DAS member disks.
-    Disk,
+    Disk(DiskArgs),
     /// Manage object stores and policy.
     Store(StoreArgs),
     /// Inspect SSD ingest and destage work.
@@ -101,6 +101,50 @@ impl PoolMarkerArgs {
 
     pub(crate) fn pool_id(&self) -> &PoolId {
         &self.pool_id
+    }
+
+    pub(crate) fn recorded_at_utc(&self) -> &str {
+        &self.recorded_at_utc
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskArgs {
+    #[command(subcommand)]
+    command: DiskCommand,
+}
+
+impl DiskArgs {
+    pub(crate) fn command(&self) -> &DiskCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum DiskCommand {
+    /// Request retirement by moving a disk into draining state.
+    Retire(DiskRetireArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskRetireArgs {
+    /// Disk identifier to retire.
+    disk_id: DiskId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Timestamp to record in metadata.
+    #[arg(long)]
+    recorded_at_utc: String,
+}
+
+impl DiskRetireArgs {
+    pub(crate) fn disk_id(&self) -> &DiskId {
+        &self.disk_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
     }
 
     pub(crate) fn recorded_at_utc(&self) -> &str {
@@ -441,8 +485,8 @@ impl ProbeArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, IngestArgs, IngestCommand, ObjectCommand, PoolCommand, ProbeArgs,
-        ServiceCommand, StoreArgs, StoreCommand,
+        Cli, Command, DiskCommand, IngestArgs, IngestCommand, ObjectCommand, PoolCommand,
+        ProbeArgs, ServiceCommand, StoreArgs, StoreCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -459,7 +503,6 @@ mod tests {
     fn parses_top_level_command_skeletons() {
         let cases = [
             ("health", Command::Health),
-            ("disk", Command::Disk),
             ("store", Command::Store(StoreArgs { command: None })),
             ("ingest", Command::Ingest(IngestArgs { command: None })),
             ("mnemosyne", Command::Mnemosyne),
@@ -470,6 +513,32 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_disk_retire() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "retire",
+            "disk-a",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--recorded-at-utc",
+            "2026-01-02T00:00:00Z",
+        ])
+        .expect("disk retire parses");
+
+        let Some(Command::Disk(args)) = cli.command() else {
+            panic!("expected disk command");
+        };
+        match args.command() {
+            DiskCommand::Retire(retire) => {
+                assert_eq!(retire.disk_id().as_str(), "disk-a");
+                assert_eq!(retire.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert_eq!(retire.recorded_at_utc(), "2026-01-02T00:00:00Z");
+            }
         }
     }
 
