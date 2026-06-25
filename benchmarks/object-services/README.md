@@ -56,6 +56,10 @@ Run the complete provider/workload matrix:
 benchmarks/object-services/scripts/run-matrix.sh
 ```
 
+Follow the full execution procedure in
+`benchmarks/object-services/reports/runbook.md` before producing a selection
+report.
+
 Check whether the raw outputs are sufficient for a selection report:
 
 ```sh

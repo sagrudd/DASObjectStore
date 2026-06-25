@@ -10,6 +10,8 @@ Reports must separate hard-gate reliability results from performance results.
   provider comparison.
 - `report-template.md`: fill-in template for comparable Garage and RustFS
   benchmark reports.
+- `runbook.md`: ordered procedure for producing the complete workload set and
+  selection report inputs.
 
 Before producing a provider selection report, run:
 
