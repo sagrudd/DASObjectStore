@@ -537,6 +537,31 @@ mod tests {
     }
 
     #[test]
+    fn accepts_valid_public_cache_policy() {
+        let policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+
+        assert_eq!(policy.class, StoreClass::ReproducibleCache);
+        assert_eq!(policy.ingest_mode, IngestMode::SsdFirst);
+        assert_eq!(policy.copies, 1);
+        assert_eq!(policy.retention_policy, RetentionPolicy::ImmediateDelete);
+        assert_eq!(policy.mutability_policy, MutabilityPolicy::Immutable);
+        assert_eq!(
+            policy.repair_policy,
+            RepairPolicy::EvacuateIfCapacityAvailable
+        );
+        assert_eq!(
+            policy.capacity_behavior,
+            CapacityBehavior::MarkRedownloadRequired
+        );
+        assert_eq!(policy.export_policy, ExportPolicy::S3);
+
+        policy.validate().expect("public cache policy is valid");
+        policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(1))
+            .expect("public cache policy ignores enclosure diversity");
+    }
+
+    #[test]
     fn generated_data_defaults_to_two_copies() {
         let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
 
