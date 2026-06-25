@@ -163,6 +163,8 @@ impl IngestArgs {
 pub(crate) enum IngestCommand {
     /// Report SSD ingest capacity and pressure state.
     Status(IngestStatusArgs),
+    /// Emit live ingest queue entries as JSON.
+    Queue(IngestQueueArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -196,6 +198,26 @@ impl IngestStatusArgs {
 
     pub(crate) fn minimum_free_bytes(&self) -> u64 {
         self.minimum_free_bytes
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestQueueArgs {
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Emit queue entries as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl IngestQueueArgs {
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
     }
 }
 
@@ -281,6 +303,30 @@ mod tests {
                 assert_eq!(status.minimum_free_bytes(), 1024);
             }
             _ => panic!("expected status command"),
+        }
+    }
+
+    #[test]
+    fn parses_ingest_queue_json() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "queue",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--json",
+        ])
+        .expect("ingest queue parses");
+
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        match args.command() {
+            Some(IngestCommand::Queue(queue)) => {
+                assert_eq!(queue.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert!(queue.json());
+            }
+            _ => panic!("expected queue command"),
         }
     }
 

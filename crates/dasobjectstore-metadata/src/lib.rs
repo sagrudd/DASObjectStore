@@ -36,7 +36,8 @@ pub use markers::{
 };
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use queue::{
-    IngestAdmission, IngestBackpressurePolicy, IngestQueueEntry, IngestQueuePlan,
+    read_ingest_queue, IngestAdmission, IngestBackpressurePolicy, IngestQueueEntry, IngestQueueJob,
+    IngestQueuePlan, IngestQueueReadError, IngestQueueSnapshot,
     DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY, DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
 };
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};

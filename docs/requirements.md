@@ -299,6 +299,9 @@ completed or failed ingest jobs when planning runnable queue work.
 
 DASObjectStore SHALL expose CLI ingest status for SSD capacity and pressure state.
 
+DASObjectStore SHALL expose the live ingest queue as JSON for CLI, daemon, and
+future Web UI consumers.
+
 Per-store SSD budgets MAY be added later.
 
 ## 16. Performance Requirements

@@ -1,13 +1,14 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, IngestCommand, IngestStatusArgs, PoolCommand, PoolInspectArgs, ProbeArgs,
-    StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
+    Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, PoolCommand, PoolInspectArgs,
+    ProbeArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    inspect_pool_metadata, measure_ssd_capacity, PoolInspectError, PoolInspectSummary, SsdCapacity,
-    SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
+    inspect_pool_metadata, measure_ssd_capacity, read_ingest_queue, IngestQueueReadError,
+    PoolInspectError, PoolInspectSummary, SsdCapacity, SsdCapacityMeasurementError,
+    SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -39,6 +40,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Ingest(args)) => match args.command() {
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
+            Some(IngestCommand::Queue(args)) => run_ingest_queue(args, writer),
             None => Ok(()),
         },
         _ => Ok(()),
@@ -99,6 +101,18 @@ fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result
     let pressure = policy.evaluate(&capacity)?;
 
     write_ingest_status(&capacity, &policy, pressure, writer)?;
+
+    Ok(())
+}
+
+fn run_ingest_queue(args: &IngestQueueArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    if !args.json() {
+        return Err(CliError::UnsupportedIngestQueueFormat);
+    }
+
+    let snapshot = read_ingest_queue(args.live_sqlite_path())?;
+    serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
+    writer.write_all(b"\n")?;
 
     Ok(())
 }
@@ -244,6 +258,7 @@ fn probe_current_platform() -> Result<ProbeReport, ProbeError> {
 pub(crate) enum CliError {
     Io(io::Error),
     Json(serde_json::Error),
+    IngestQueueRead(IngestQueueReadError),
     MetadataInspect(PoolInspectError),
     SsdCapacityMeasurement(SsdCapacityMeasurementError),
     SsdCapacityPolicy(SsdCapacityPolicyError),
@@ -251,6 +266,7 @@ pub(crate) enum CliError {
     MetadataMarker(String),
     Probe(ProbeError),
     StorePolicyValidation(StorePolicyValidationErrors),
+    UnsupportedIngestQueueFormat,
     UnsupportedProbeFormat,
 }
 
@@ -259,6 +275,7 @@ impl Display for CliError {
         match self {
             Self::Io(err) => write!(formatter, "failed to access command input or output: {err}"),
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
+            Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
             Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
@@ -266,6 +283,9 @@ impl Display for CliError {
             Self::MetadataMarker(err) => write!(formatter, "failed to update pool metadata: {err}"),
             Self::Probe(err) => write!(formatter, "{err}"),
             Self::StorePolicyValidation(err) => write!(formatter, "{err}"),
+            Self::UnsupportedIngestQueueFormat => {
+                formatter.write_str("ingest queue requires JSON output; use `--json`")
+            }
             Self::UnsupportedProbeFormat => formatter
                 .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
         }
@@ -283,6 +303,12 @@ impl From<io::Error> for CliError {
 impl From<serde_json::Error> for CliError {
     fn from(err: serde_json::Error) -> Self {
         Self::Json(err)
+    }
+}
+
+impl From<IngestQueueReadError> for CliError {
+    fn from(err: IngestQueueReadError) -> Self {
+        Self::IngestQueueRead(err)
     }
 }
 
@@ -330,13 +356,12 @@ mod tests {
     use dasobjectstore_metadata::{initialize_pool, PoolInitOptions};
     use dasobjectstore_metadata::{
         manifest::DiskRole, ArtifactReference, DiskManifest, DiskManifestEntry, FormatVersion,
-        MetadataArtifact, PoolManifest, DISK_MANIFEST_FILE_NAME, PLACEMENT_LOG_FILE_NAME,
-        POOL_MANIFEST_FILE_NAME,
+        MetadataArtifact, PoolManifest, DISK_MANIFEST_FILE_NAME, LIVE_SCHEMA_SQL,
+        PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
     };
     use dasobjectstore_platform::{
         EnclosureIdentity, HostPlatform, ObservedDisk, ObservedEnclosure, ProbeReport, Transport,
     };
-    #[cfg(feature = "debug-commands")]
     use rusqlite::Connection;
     use std::fs::{self, File};
     use std::path::{Path, PathBuf};
@@ -533,6 +558,63 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn ingest_queue_writes_json_snapshot() {
+        let root = temp_root("ingest-queue");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_ingest_job(&connection, "job-low", "Queued", 0, "2026-01-01T00:00:00Z");
+        insert_ingest_job(
+            &connection,
+            "job-high",
+            "Receiving",
+            10,
+            "2026-01-01T00:00:01Z",
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "queue",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--json",
+        ])
+        .expect("ingest queue parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("ingest queue runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("queue output is json");
+        assert_eq!(output["jobs"][0]["ingest_job_id"], "job-high");
+        assert_eq!(output["jobs"][0]["priority"], 10);
+        assert_eq!(output["jobs"][1]["ingest_job_id"], "job-low");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ingest_queue_requires_json_flag() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "queue",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+        ])
+        .expect("ingest queue parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("json flag is required");
+
+        assert!(matches!(err, CliError::UnsupportedIngestQueueFormat));
+    }
+
     #[cfg(feature = "debug-commands")]
     #[test]
     fn pool_debug_marker_commands_update_live_metadata() {
@@ -640,6 +722,68 @@ mod tests {
     fn write_policy_file(path: &Path, policy: &StorePolicy) {
         let file = File::create(path).expect("create policy file");
         serde_json::to_writer_pretty(file, policy).expect("write policy file");
+    }
+
+    fn insert_store(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO pools (pool_id, state, created_at_utc, updated_at_utc)
+                 VALUES ('pool-a', 'Clean', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("pool inserts");
+        connection
+            .execute(
+                "INSERT INTO stores (
+                    store_id,
+                    pool_id,
+                    class,
+                    policy_json,
+                    created_at_utc,
+                    updated_at_utc
+                 ) VALUES (
+                    'store-a',
+                    'pool-a',
+                    'generated_data',
+                    '{}',
+                    '2026-01-01T00:00:00Z',
+                    '2026-01-01T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("store inserts");
+    }
+
+    fn insert_ingest_job(
+        connection: &Connection,
+        ingest_job_id: &str,
+        state: &str,
+        priority: i32,
+        created_at_utc: &str,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO ingest_jobs (
+                    ingest_job_id,
+                    store_id,
+                    state,
+                    ingest_mode,
+                    acknowledgement_policy,
+                    priority,
+                    staging_path,
+                    received_bytes,
+                    created_at_utc,
+                    updated_at_utc
+                 ) VALUES (?1, 'store-a', ?2, 'SsdFirst', 'AfterHddPlacement', ?3, ?4, 0, ?5, ?5)",
+                (
+                    ingest_job_id,
+                    state,
+                    priority,
+                    format!("/ssd/.dasobjectstore/ingest/jobs/{ingest_job_id}"),
+                    created_at_utc,
+                ),
+            )
+            .expect("ingest job inserts");
     }
 
     fn temp_root(name: &str) -> PathBuf {
