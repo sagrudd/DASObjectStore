@@ -114,7 +114,7 @@ developers
 - [x] Implement object state transitions from `received_on_ssd` to
   `ssd_eviction_eligible`.
 - [x] Implement store-configurable acknowledgement policy.
-- [ ] Implement SSD capacity measurement and high-watermark policy.
+- [x] Implement SSD capacity measurement and high-watermark policy.
 - [ ] Implement priority queue and backpressure behavior for SSD pressure.
 - [ ] Add `dasobjectstore ingest status`.
 - [ ] Add `dasobjectstore ingest queue --json`.

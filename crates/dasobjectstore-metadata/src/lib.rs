@@ -1,5 +1,6 @@
 //! Portable metadata boundary for DASObjectStore pools.
 
+pub mod capacity;
 pub mod format;
 pub mod ingest;
 pub mod initialize;
@@ -10,6 +11,11 @@ pub mod placement_log;
 pub mod schema;
 pub mod snapshot;
 
+pub use capacity::{
+    measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError, SsdCapacityPolicy,
+    SsdCapacityPolicyError, SsdPressure, DEFAULT_SSD_CRITICAL_WATERMARK_PERCENT,
+    DEFAULT_SSD_HIGH_WATERMARK_PERCENT,
+};
 pub use format::{FormatVersion, MetadataArtifact};
 pub use ingest::{
     IngestJobPaths, IngestStagingLayout, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,

@@ -291,6 +291,9 @@ DASObjectStore SHALL implement SSD ingest backpressure and priority queue behavi
 DASObjectStore SHALL pause or reject lower-priority writes before allowing SSD
 pressure to jeopardize critical work.
 
+DASObjectStore SHALL measure SSD ingest filesystem capacity and evaluate it
+against explicit high and critical watermarks before accepting new ingest work.
+
 Per-store SSD budgets MAY be added later.
 
 ## 16. Performance Requirements
