@@ -1,6 +1,6 @@
 # Bioinformatics Reference Workflow
 
-Status: Draft  
+Status: Draft
 Scope: MVP reference workflow for `reproducible_cache` and `generated_data`
 stores
 
