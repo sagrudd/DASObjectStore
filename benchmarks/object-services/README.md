@@ -38,5 +38,11 @@ paths and generated output out of version control.
 benchmarks/object-services/scripts/run.sh garage large-object
 ```
 
+Check whether the raw outputs are sufficient for a selection report:
+
+```sh
+benchmarks/object-services/scripts/check-report-inputs.sh
+```
+
 Provider-specific setup is intentionally added in separate tasks so Garage and
 RustFS remain comparable.

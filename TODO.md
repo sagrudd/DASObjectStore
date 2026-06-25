@@ -155,8 +155,12 @@ developers
 - [x] Implement SSD ingest and HDD destage compatibility benchmark.
 - [x] Define benchmark scoring rubric with reliability hard gates.
 - [x] Write benchmark report template.
-- [ ] Produce first benchmark report and recommend MVP object service.
+- [x] Add benchmark report input readiness check.
+- [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
+  `benchmarks/output/object-services/`.
+- [ ] Produce first benchmark report and recommend MVP object service.
+  Blocked until the complete Garage and RustFS workload set exists under
   `benchmarks/output/object-services/`.
 
 ## Milestone 9: S3 Service Orchestration

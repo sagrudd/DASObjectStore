@@ -10,3 +10,12 @@ Reports must separate hard-gate reliability results from performance results.
   provider comparison.
 - `report-template.md`: fill-in template for comparable Garage and RustFS
   benchmark reports.
+
+Before producing a provider selection report, run:
+
+```sh
+benchmarks/object-services/scripts/check-report-inputs.sh
+```
+
+The check fails until each required Garage and RustFS workload has generated its
+expected TSV report under `benchmarks/output/object-services/`.
