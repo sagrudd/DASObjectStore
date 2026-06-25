@@ -1,9 +1,14 @@
 //! Axum API boundary for GUI-facing DASObjectStore views.
 
+pub mod actions;
 pub mod dashboard;
 pub mod routes;
 pub mod view;
 
+pub use actions::{
+    action_catalog, plan_action, GuiActionCatalog, GuiActionDescriptor, GuiActionExecution,
+    GuiActionKind, GuiActionPlan, GuiActionPlanError, GuiActionPlanRequest, GuiActionSafety,
+};
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
     DashboardAttentionSourceView, DashboardAttentionView, DashboardRequiredActionView,
