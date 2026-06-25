@@ -23,7 +23,7 @@ developers
   `cargo test`.
 - [x] Add `docs/versioning.md` describing semantic versioning, pre-1.0
   compatibility expectations, and metadata format version policy.
-- [ ] Add `docs/architecture.md` with the high-level crate/module boundaries.
+- [x] Add `docs/architecture.md` with the high-level crate/module boundaries.
 - [ ] Add `CONTRIBUTING.md` pointing contributors to `AGENTS.md`,
   `ROADMAP.md`, and this TODO.
 - [ ] Verify repository text uses `DASObjectStore` for project name and
