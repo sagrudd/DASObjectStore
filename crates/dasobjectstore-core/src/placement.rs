@@ -2,6 +2,7 @@
 
 use crate::ids::{DiskId, EnclosureId};
 use crate::lifecycle::HealthState;
+use crate::store::{EnclosurePlacement, StorePolicy};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -145,12 +146,10 @@ pub fn score_candidates(
     candidates: &[PlacementCandidate],
     request: &PlacementRequest,
 ) -> Vec<PlacementScore> {
-    let mut scores: Vec<_> = candidates
-        .iter()
-        .filter_map(|candidate| candidate.score_for(request))
-        .collect();
-    scores.sort_by(compare_scores);
-    scores
+    scored_candidates(candidates, request)
+        .into_iter()
+        .map(|(_, score)| score)
+        .collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -190,8 +189,36 @@ pub fn plan_copies(
         return Err(CopyPlanError::UnsupportedCopyCount(requested_copies));
     }
 
+    let scores = score_candidates(candidates, request);
+
+    Ok(build_copy_plan(requested_copies, scores))
+}
+
+pub fn plan_copies_for_store(
+    candidates: &[PlacementCandidate],
+    request: &PlacementRequest,
+    policy: &StorePolicy,
+) -> Result<CopyPlan, CopyPlanError> {
+    if !(1..=3).contains(&policy.copies) {
+        return Err(CopyPlanError::UnsupportedCopyCount(policy.copies));
+    }
+
+    let scored_candidates = scored_candidates(candidates, request);
+    let scores = match policy.enclosure_placement {
+        EnclosurePlacement::Ignore => scored_candidates
+            .into_iter()
+            .map(|(_, score)| score)
+            .collect(),
+        EnclosurePlacement::PreferDistinct => prefer_distinct_enclosure_scores(scored_candidates),
+        EnclosurePlacement::RequireDistinct => require_distinct_enclosure_scores(scored_candidates),
+    };
+
+    Ok(build_copy_plan(policy.copies, scores))
+}
+
+fn build_copy_plan(requested_copies: u8, scores: Vec<PlacementScore>) -> CopyPlan {
     let mut planned_disk_ids = BTreeSet::new();
-    let planned_copies = score_candidates(candidates, request)
+    let planned_copies = scores
         .into_iter()
         .filter(|score| planned_disk_ids.insert(score.disk_id.clone()))
         .take(requested_copies as usize)
@@ -203,10 +230,61 @@ pub fn plan_copies(
         })
         .collect();
 
-    Ok(CopyPlan {
+    CopyPlan {
         requested_copies,
         planned_copies,
-    })
+    }
+}
+
+fn scored_candidates<'a>(
+    candidates: &'a [PlacementCandidate],
+    request: &PlacementRequest,
+) -> Vec<(&'a PlacementCandidate, PlacementScore)> {
+    let mut scores: Vec<_> = candidates
+        .iter()
+        .filter_map(|candidate| candidate.score_for(request).map(|score| (candidate, score)))
+        .collect();
+    scores.sort_by(|(_, left), (_, right)| compare_scores(left, right));
+    scores
+}
+
+fn prefer_distinct_enclosure_scores(
+    scored_candidates: Vec<(&PlacementCandidate, PlacementScore)>,
+) -> Vec<PlacementScore> {
+    let mut selected = Vec::new();
+    let mut deferred = Vec::new();
+    let mut selected_enclosures = BTreeSet::new();
+
+    for (candidate, score) in scored_candidates {
+        match candidate.enclosure_id.as_ref() {
+            Some(enclosure_id) if selected_enclosures.insert(enclosure_id.clone()) => {
+                selected.push(score);
+            }
+            _ => deferred.push(score),
+        }
+    }
+
+    selected.extend(deferred);
+    selected
+}
+
+fn require_distinct_enclosure_scores(
+    scored_candidates: Vec<(&PlacementCandidate, PlacementScore)>,
+) -> Vec<PlacementScore> {
+    let mut selected = Vec::new();
+    let mut selected_enclosures = BTreeSet::new();
+
+    for (candidate, score) in scored_candidates {
+        if candidate
+            .enclosure_id
+            .as_ref()
+            .is_some_and(|enclosure_id| selected_enclosures.insert(enclosure_id.clone()))
+        {
+            selected.push(score);
+        }
+    }
+
+    selected
 }
 
 fn compare_scores(left: &PlacementScore, right: &PlacementScore) -> std::cmp::Ordering {
@@ -256,11 +334,12 @@ fn write_load_score(write_load: WriteLoad) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_copies, score_candidates, CopyPlanError, PerformanceClass, PlacementCandidate,
-        PlacementRequest, WriteLoad,
+        plan_copies, plan_copies_for_store, score_candidates, CopyPlanError, PerformanceClass,
+        PlacementCandidate, PlacementRequest, WriteLoad,
     };
     use crate::ids::{DiskId, EnclosureId};
     use crate::lifecycle::HealthState;
+    use crate::store::{EnclosurePlacement, StoreClass, StorePolicy};
 
     #[test]
     fn candidate_captures_placement_inputs() {
@@ -625,6 +704,86 @@ mod tests {
         assert_eq!(scores[0].health_score, 100);
         assert_eq!(scores[1].disk_id.as_str(), "disk-suspect");
         assert_eq!(scores[1].health_score, 20);
+    }
+
+    #[test]
+    fn preferred_enclosure_policy_spreads_copies_when_possible() {
+        let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        let candidates = vec![
+            candidate(
+                "disk-a-fast",
+                Some("enclosure-a"),
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-a-standard",
+                Some("enclosure-a"),
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-b-slow",
+                Some("enclosure-b"),
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Slow,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let plan = plan_copies_for_store(&candidates, &PlacementRequest::protected(1_000), &policy)
+            .expect("copy plan");
+
+        assert!(plan.is_complete());
+        assert_eq!(plan.requested_copies, 2);
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-a-fast");
+        assert_eq!(plan.planned_copies[1].disk_id.as_str(), "disk-b-slow");
+    }
+
+    #[test]
+    fn required_enclosure_policy_reports_missing_copies_when_diversity_unavailable() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.enclosure_placement = EnclosurePlacement::RequireDistinct;
+        let candidates = vec![
+            candidate(
+                "disk-a-fast",
+                Some("enclosure-a"),
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-a-standard",
+                Some("enclosure-a"),
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-unknown",
+                None,
+                10_000,
+                HealthState::Healthy,
+                PerformanceClass::Fast,
+                WriteLoad::Idle,
+            ),
+        ];
+
+        let plan = plan_copies_for_store(&candidates, &PlacementRequest::protected(1_000), &policy)
+            .expect("copy plan");
+
+        assert!(!plan.is_complete());
+        assert_eq!(plan.requested_copies, 2);
+        assert_eq!(plan.planned_copies.len(), 1);
+        assert_eq!(plan.planned_copies[0].disk_id.as_str(), "disk-a-fast");
+        assert_eq!(plan.missing_copies(), 1);
     }
 
     #[test]
