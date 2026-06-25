@@ -611,6 +611,37 @@ mod tests {
     }
 
     #[test]
+    fn accepts_valid_critical_metadata_policy() {
+        let policy = StorePolicy::defaults_for(StoreClass::CriticalMetadata);
+
+        assert_eq!(policy.class, StoreClass::CriticalMetadata);
+        assert_eq!(policy.ingest_mode, IngestMode::SsdFirst);
+        assert_eq!(policy.copies, 3);
+        assert_eq!(
+            policy.enclosure_placement,
+            EnclosurePlacement::PreferDistinct
+        );
+        assert_eq!(policy.retention_policy, RetentionPolicy::TombstoneThenGc);
+        assert_eq!(policy.mutability_policy, MutabilityPolicy::Immutable);
+        assert_eq!(policy.repair_policy, RepairPolicy::RestoreFromCopy);
+        assert_eq!(policy.capacity_behavior, CapacityBehavior::RejectWrites);
+        assert_eq!(policy.export_policy, ExportPolicy::S3);
+
+        policy
+            .validate()
+            .expect("critical metadata policy is valid");
+        policy
+            .validate_for_enclosures(EnclosurePlacementContext::new(1))
+            .expect("preferred enclosure diversity remains best effort");
+
+        let mut required = policy;
+        required.enclosure_placement = EnclosurePlacement::RequireDistinct;
+        required
+            .validate_for_enclosures(EnclosurePlacementContext::new(3))
+            .expect("required enclosure diversity is valid with three enclosures");
+    }
+
+    #[test]
     fn round_trips_store_policy() {
         let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
 
