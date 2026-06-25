@@ -50,6 +50,9 @@ case "$workload" in
   simulated-disk-removal)
     exec "$(dirname "$0")/../workloads/simulated-disk-removal.sh" "$provider"
     ;;
+  ssd-ingest-hdd-destage)
+    exec "$(dirname "$0")/../workloads/ssd-ingest-hdd-destage.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69

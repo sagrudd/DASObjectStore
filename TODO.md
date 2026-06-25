@@ -152,7 +152,7 @@ developers
 - [x] Implement metadata recovery benchmark.
 - [x] Implement disk-full behavior benchmark.
 - [x] Implement simulated disk removal benchmark.
-- [ ] Implement SSD ingest and HDD destage compatibility benchmark.
+- [x] Implement SSD ingest and HDD destage compatibility benchmark.
 - [ ] Define benchmark scoring rubric with reliability hard gates.
 - [ ] Write benchmark report template.
 - [ ] Produce first benchmark report and recommend MVP object service.

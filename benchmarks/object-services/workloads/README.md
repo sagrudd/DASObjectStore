@@ -13,9 +13,6 @@ Implemented workloads:
 - `metadata-recovery`
 - `disk-full`
 - `simulated-disk-removal`
-
-Planned workloads:
-
 - `ssd-ingest-hdd-destage`
 
 ## Large Object
@@ -75,3 +72,10 @@ moves its benchmark data directory out of service view, restarts against an
 empty replacement directory, and verifies the provider never returns corrupt
 data. It then restores the original data directory and verifies the seed object
 is readable again.
+
+## SSD Ingest and HDD Destage
+
+`ssd-ingest-hdd-destage.sh` creates its upload payload under
+`DASOBJECTSTORE_SSD_INGEST_PATH`, uploads it through the selected provider, then
+downloads the settled object into `DASOBJECTSTORE_HDD_ROOT_PATH`. The destaged
+copy must match the SSD ingest payload by SHA-256.
