@@ -200,8 +200,17 @@ pub fn plan_copies_for_store(
     request: &PlacementRequest,
     policy: &StorePolicy,
 ) -> Result<CopyPlan, CopyPlanError> {
-    if !(1..=3).contains(&policy.copies) {
-        return Err(CopyPlanError::UnsupportedCopyCount(policy.copies));
+    plan_copy_count_for_store(candidates, request, policy, policy.copies)
+}
+
+pub fn plan_copy_count_for_store(
+    candidates: &[PlacementCandidate],
+    request: &PlacementRequest,
+    policy: &StorePolicy,
+    requested_copies: u8,
+) -> Result<CopyPlan, CopyPlanError> {
+    if !(1..=3).contains(&requested_copies) {
+        return Err(CopyPlanError::UnsupportedCopyCount(requested_copies));
     }
 
     let scored_candidates = scored_candidates(candidates, request);
@@ -214,7 +223,7 @@ pub fn plan_copies_for_store(
         EnclosurePlacement::RequireDistinct => require_distinct_enclosure_scores(scored_candidates),
     };
 
-    Ok(build_copy_plan(policy.copies, scores))
+    Ok(build_copy_plan(requested_copies, scores))
 }
 
 fn build_copy_plan(requested_copies: u8, scores: Vec<PlacementScore>) -> CopyPlan {
@@ -326,8 +335,8 @@ fn write_load_score(write_load: WriteLoad) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_copies, plan_copies_for_store, score_candidates, CopyPlanError, PerformanceClass,
-        PlacementCandidate, PlacementRequest, WriteLoad,
+        plan_copies, plan_copies_for_store, plan_copy_count_for_store, score_candidates,
+        CopyPlanError, PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad,
     };
     use crate::ids::{DiskId, EnclosureId};
     use crate::lifecycle::HealthState;
@@ -856,6 +865,36 @@ mod tests {
         );
         assert_eq!(three_copies.planned_copies[2].copy_number, 3);
         assert_eq!(three_copies.planned_copies[2].disk_id.as_str(), "disk-slow");
+    }
+
+    #[test]
+    fn store_policy_planner_supports_lower_replacement_copy_count() {
+        let candidates = vec![
+            candidate(
+                "disk-b",
+                Some("enclosure-b"),
+                1_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+            candidate(
+                "disk-c",
+                Some("enclosure-c"),
+                1_000,
+                HealthState::Healthy,
+                PerformanceClass::Standard,
+                WriteLoad::Idle,
+            ),
+        ];
+        let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        let request = PlacementRequest::protected(1_000);
+
+        let plan = plan_copy_count_for_store(&candidates, &request, &policy, 1).expect("copy plan");
+
+        assert!(plan.is_complete());
+        assert_eq!(plan.requested_copies, 1);
+        assert_eq!(plan.planned_copies.len(), 1);
     }
 
     #[test]

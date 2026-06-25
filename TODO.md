@@ -185,7 +185,7 @@ developers
 - [x] Implement benchmark drift signal ingestion.
 - [x] Implement disk health state transitions.
 - [x] Block new protected placement on suspect disks.
-- [ ] Implement protected-store evacuation planner.
+- [x] Implement protected-store evacuation planner.
 - [ ] Implement evacuation executor with copy verification.
 - [ ] Implement reproducible-cache opportunistic evacuation.
 - [ ] Add `dasobjectstore disk retire <disk-id>`.

@@ -5,6 +5,7 @@ pub mod ids;
 pub mod lifecycle;
 pub mod placement;
 pub mod protection;
+pub mod repair;
 pub mod risk;
 pub mod store;
 

@@ -403,7 +403,7 @@ impl StorePolicy {
         }
     }
 
-    fn is_protected_class(&self) -> bool {
+    pub fn is_protected_class(&self) -> bool {
         matches!(
             self.class,
             StoreClass::GeneratedData | StoreClass::CriticalMetadata | StoreClass::ExportBundle
