@@ -10,3 +10,4 @@ path = "src/lib.rs"
 
 [dependencies]
 dasobjectstore-core.workspace = true
+serde.workspace = true

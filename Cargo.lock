@@ -140,6 +140,7 @@ name = "dasobjectstore-platform"
 version = "0.0.0"
 dependencies = [
  "dasobjectstore-core",
+ "serde",
 ]
 
 [[package]]

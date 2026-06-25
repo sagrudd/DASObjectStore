@@ -50,7 +50,7 @@ developers
 
 ## Milestone 3: Cross-Platform Disk and Enclosure Probe
 
-- [ ] Create `dasobjectstore-platform` crate with trait-based probe interfaces.
+- [x] Create `dasobjectstore-platform` crate with trait-based probe interfaces.
 - [ ] Implement Linux disk inventory using stable command/API choices and
   structured parsing.
 - [ ] Implement macOS disk inventory using native command/API choices and
