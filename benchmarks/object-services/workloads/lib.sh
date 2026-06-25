@@ -50,6 +50,13 @@ require_s3_cli() {
   exit 69
 }
 
+load_garage_credentials() {
+  garage_env_path="$(benchmarks/object-services/scripts/garage-credentials.sh ensure)"
+  set -a
+  . "$garage_env_path"
+  set +a
+}
+
 require_compose_command() {
   message="$1"
 
@@ -107,10 +114,11 @@ configure_provider_s3() {
 
   case "$provider" in
     garage)
+      load_garage_credentials
       endpoint="${DASOBJECTSTORE_S3_ENDPOINT:-http://127.0.0.1:3900}"
       region="${AWS_DEFAULT_REGION:-garage}"
-      export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-garageadmin}"
-      export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-garageadmin}"
+      export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-$GARAGE_DEFAULT_ACCESS_KEY}"
+      export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$GARAGE_DEFAULT_SECRET_KEY}"
       ;;
     rustfs)
       endpoint="${DASOBJECTSTORE_S3_ENDPOINT:-http://127.0.0.1:9000}"

@@ -12,3 +12,8 @@ services:
       - ./garage.toml:/etc/garage.toml:ro
       - ../../../output/object-services/garage/meta:/var/lib/garage/meta
       - ../../../output/object-services/garage/data:/var/lib/garage/data
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:?}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:?}
+      GARAGE_DEFAULT_BUCKET: ${GARAGE_DEFAULT_BUCKET:?}
+    command: ["/garage", "server", "--single-node", "--default-bucket"]

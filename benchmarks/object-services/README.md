@@ -38,6 +38,14 @@ S3 operations use the host `aws` CLI when available. If it is not installed, the
 workloads fall back to Docker with
 `${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}`.
 
+Start providers through the wrapper so Garage benchmark credentials and bucket
+permissions are generated before workloads run:
+
+```sh
+benchmarks/object-services/scripts/provider.sh garage up
+benchmarks/object-services/scripts/provider.sh rustfs up
+```
+
 ```sh
 benchmarks/object-services/scripts/run.sh garage large-object
 ```
@@ -94,6 +102,3 @@ Run offline smoke tests for the benchmark harness:
 ```sh
 benchmarks/object-services/scripts/smoke-test.sh
 ```
-
-Provider-specific setup is intentionally added in separate tasks so Garage and
-RustFS remain comparable.

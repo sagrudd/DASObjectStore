@@ -46,15 +46,15 @@ single workload, it is fine to start only the provider under test.
 Garage:
 
 ```sh
-docker compose -f benchmarks/object-services/providers/garage/compose.yml up -d
-docker compose -f benchmarks/object-services/providers/garage/compose.yml ps
+benchmarks/object-services/scripts/provider.sh garage up
+benchmarks/object-services/scripts/provider.sh garage ps
 ```
 
 RustFS:
 
 ```sh
-docker compose -f benchmarks/object-services/providers/rustfs/compose.yml up -d
-docker compose -f benchmarks/object-services/providers/rustfs/compose.yml ps
+benchmarks/object-services/scripts/provider.sh rustfs up
+benchmarks/object-services/scripts/provider.sh rustfs ps
 ```
 
 ## 3. Run Workloads
@@ -109,13 +109,13 @@ benchmarks/object-services/scripts/environment-snapshot.sh
 Garage:
 
 ```sh
-docker compose -f benchmarks/object-services/providers/garage/compose.yml down
+benchmarks/object-services/scripts/provider.sh garage down
 ```
 
 RustFS:
 
 ```sh
-docker compose -f benchmarks/object-services/providers/rustfs/compose.yml down
+benchmarks/object-services/scripts/provider.sh rustfs down
 ```
 
 ## 6. Produce the Selection Report

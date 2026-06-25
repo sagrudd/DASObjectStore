@@ -5,12 +5,21 @@ script_dir="$(dirname "$0")"
 
 sh -n "$script_dir"/*.sh "$script_dir"/../workloads/*.sh
 
+provider_tmpdir="$(mktemp -d)"
+
 "$script_dir/preflight.sh" --offline >/dev/null
-DASOBJECTSTORE_BENCH_DRY_RUN=1 "$script_dir/run-matrix.sh" >/dev/null
+DASOBJECTSTORE_BENCH_DRY_RUN=1 \
+  DASOBJECTSTORE_BENCH_OUTPUT_DIR="$provider_tmpdir" \
+  "$script_dir/run-matrix.sh" >/dev/null
+
+DASOBJECTSTORE_BENCH_DRY_RUN=1 \
+  DASOBJECTSTORE_BENCH_OUTPUT_DIR="$provider_tmpdir" \
+  "$script_dir/provider.sh" garage up >/dev/null
+DASOBJECTSTORE_BENCH_DRY_RUN=1 "$script_dir/provider.sh" rustfs up >/dev/null
 
 empty_tmpdir="$(mktemp -d)"
 cleanup_empty() {
-  rm -rf "$empty_tmpdir"
+  rm -rf "$provider_tmpdir" "$empty_tmpdir"
 }
 trap cleanup_empty EXIT
 
@@ -22,7 +31,7 @@ fi
 
 tmpdir="$(mktemp -d)"
 cleanup() {
-  rm -rf "$empty_tmpdir" "$tmpdir"
+  rm -rf "$provider_tmpdir" "$empty_tmpdir" "$tmpdir"
 }
 trap cleanup EXIT
 

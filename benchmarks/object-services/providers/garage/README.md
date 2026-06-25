@@ -16,9 +16,9 @@ sit on larger HDD-backed storage.
 ## Local Run
 
 ```sh
-docker compose -f benchmarks/object-services/providers/garage/compose.yml up -d
-docker compose -f benchmarks/object-services/providers/garage/compose.yml ps
-docker compose -f benchmarks/object-services/providers/garage/compose.yml down
+benchmarks/object-services/scripts/provider.sh garage up
+benchmarks/object-services/scripts/provider.sh garage ps
+benchmarks/object-services/scripts/provider.sh garage down
 ```
 
 The service binds S3 API traffic to `127.0.0.1:3900` and stores generated data
@@ -26,9 +26,12 @@ under `benchmarks/output/object-services/garage/`.
 
 ## Notes
 
-- The benchmark client defaults to `garageadmin` / `garageadmin` when
-  `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are not set. Provision
-  matching Garage keys before running real S3 workloads.
+- `provider.sh garage up` creates `benchmarks/output/object-services/garage/garage.env`
+  with generated `GARAGE_DEFAULT_ACCESS_KEY` and `GARAGE_DEFAULT_SECRET_KEY`
+  values when the file does not exist.
+- Garage v2.3.0 starts with `--single-node --default-bucket`, then the provider
+  wrapper provisions the benchmark buckets and grants the generated key read,
+  write, and owner permissions.
 - The image is pinned to `dxflrs/garage:v2.3.0` for repeatable benchmark runs.
 - The Garage documentation recommends fixed image tags rather than `latest`.
 - Garage documentation recommends SSD-backed metadata and HDD-backed data

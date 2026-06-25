@@ -85,7 +85,15 @@ require_executable() {
 require_executable "$script_dir/run.sh"
 require_executable "$script_dir/run-matrix.sh"
 require_executable "$script_dir/check-report-inputs.sh"
+require_executable "$script_dir/garage-credentials.sh"
+require_executable "$script_dir/provider.sh"
 require_file "$script_dir/matrix.sh"
+
+dry_run_tmpdir="$(mktemp -d)"
+cleanup() {
+  rm -rf "$dry_run_tmpdir"
+}
+trap cleanup EXIT
 
 for provider in $providers; do
   require_file "benchmarks/object-services/providers/$provider/compose.yml"
@@ -93,7 +101,9 @@ done
 
 for provider in $providers; do
   for workload in $workloads; do
-    if ! DASOBJECTSTORE_BENCH_DRY_RUN=1 "$script_dir/run.sh" "$provider" "$workload" >/dev/null; then
+    if ! DASOBJECTSTORE_BENCH_DRY_RUN=1 \
+      DASOBJECTSTORE_BENCH_OUTPUT_DIR="$dry_run_tmpdir" \
+      "$script_dir/run.sh" "$provider" "$workload" >/dev/null; then
       record_failure "dry-run failed: provider=$provider workload=$workload"
     fi
   done
