@@ -21,7 +21,7 @@ developers
   benchmark artifacts.
 - [x] Add CI workflow for `cargo fmt --check`, `cargo clippy`, and
   `cargo test`.
-- [ ] Add `docs/versioning.md` describing semantic versioning, pre-1.0
+- [x] Add `docs/versioning.md` describing semantic versioning, pre-1.0
   compatibility expectations, and metadata format version policy.
 - [ ] Add `docs/architecture.md` with the high-level crate/module boundaries.
 - [ ] Add `CONTRIBUTING.md` pointing contributors to `AGENTS.md`,
