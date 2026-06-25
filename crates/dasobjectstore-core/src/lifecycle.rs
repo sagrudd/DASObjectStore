@@ -133,6 +133,56 @@ pub enum HealthState {
     Failed,
 }
 
+impl HealthState {
+    pub fn can_transition_to(self, next: Self) -> bool {
+        matches!(
+            (self, next),
+            (Self::Healthy, Self::Watch)
+                | (Self::Healthy, Self::Suspect)
+                | (Self::Healthy, Self::Draining)
+                | (Self::Healthy, Self::Failed)
+                | (Self::Watch, Self::Healthy)
+                | (Self::Watch, Self::Suspect)
+                | (Self::Watch, Self::Draining)
+                | (Self::Watch, Self::Failed)
+                | (Self::Suspect, Self::Watch)
+                | (Self::Suspect, Self::Draining)
+                | (Self::Suspect, Self::Failed)
+                | (Self::Draining, Self::Retired)
+                | (Self::Draining, Self::Failed)
+        )
+    }
+
+    pub fn transition_to(self, next: Self) -> Result<Self, HealthStateTransitionError> {
+        if self.can_transition_to(next) {
+            Ok(next)
+        } else {
+            Err(HealthStateTransitionError {
+                current: self,
+                next,
+            })
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HealthStateTransitionError {
+    pub current: HealthState,
+    pub next: HealthState,
+}
+
+impl Display for HealthStateTransitionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "invalid health state transition: {:?} -> {:?}",
+            self.current, self.next
+        )
+    }
+}
+
+impl std::error::Error for HealthStateTransitionError {}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RepairState {
     NotRequired,
@@ -153,7 +203,7 @@ pub enum ImportMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{HealthState, ObjectState, ObjectStateTransitionError};
+    use super::{HealthState, HealthStateTransitionError, ObjectState, ObjectStateTransitionError};
 
     const OBJECT_STATES: [ObjectState; 8] = [
         ObjectState::ReceivedOnSsd,
@@ -304,5 +354,70 @@ mod tests {
         let decoded: HealthState = serde_json::from_str(&encoded).expect("state deserializes");
 
         assert_eq!(decoded, HealthState::Suspect);
+    }
+
+    #[test]
+    fn permits_health_state_degradation_and_recovery_path() {
+        assert!(HealthState::Healthy.can_transition_to(HealthState::Watch));
+        assert!(HealthState::Watch.can_transition_to(HealthState::Suspect));
+        assert!(HealthState::Suspect.can_transition_to(HealthState::Draining));
+        assert!(HealthState::Draining.can_transition_to(HealthState::Retired));
+        assert!(HealthState::Watch.can_transition_to(HealthState::Healthy));
+        assert!(HealthState::Suspect.can_transition_to(HealthState::Watch));
+    }
+
+    #[test]
+    fn permits_health_state_failure_from_active_states() {
+        for current in [
+            HealthState::Healthy,
+            HealthState::Watch,
+            HealthState::Suspect,
+            HealthState::Draining,
+        ] {
+            assert!(
+                current.can_transition_to(HealthState::Failed),
+                "{current:?} should transition to failed"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_health_state_transitions() {
+        let transitions = [
+            (HealthState::Healthy, HealthState::Retired),
+            (HealthState::Suspect, HealthState::Healthy),
+            (HealthState::Draining, HealthState::Healthy),
+            (HealthState::Retired, HealthState::Healthy),
+            (HealthState::Retired, HealthState::Failed),
+            (HealthState::Failed, HealthState::Healthy),
+            (HealthState::Failed, HealthState::Retired),
+            (HealthState::Healthy, HealthState::Healthy),
+        ];
+
+        for (current, next) in transitions {
+            assert!(
+                !current.can_transition_to(next),
+                "{current:?} should not transition to {next:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn health_transition_to_returns_error_for_invalid_transition() {
+        let err = HealthState::Healthy
+            .transition_to(HealthState::Retired)
+            .expect_err("invalid transition fails");
+
+        assert_eq!(
+            err,
+            HealthStateTransitionError {
+                current: HealthState::Healthy,
+                next: HealthState::Retired
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "invalid health state transition: Healthy -> Retired"
+        );
     }
 }
