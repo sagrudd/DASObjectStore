@@ -9,10 +9,10 @@ Implemented workloads:
 - `small-object`
 - `concurrent-client`
 - `crash-restart-ingest`
+- `interrupted-write`
 
 Planned workloads:
 
-- `interrupted-write`
 - `metadata-recovery`
 - `disk-full`
 - `simulated-disk-removal`
@@ -46,3 +46,10 @@ report directory under `benchmarks/output/object-services/<provider>/`.
 provider's Compose service while that upload is in flight, then verifies that a
 post-restart upload/download round trip succeeds. If the interrupted upload
 reports success, the script also downloads and verifies that object.
+
+## Interrupted Write
+
+`interrupted-write.sh` starts a large S3 upload and interrupts the client
+process without restarting the service. A retrievable interrupted object is
+allowed only if its checksum matches the source payload. The script then proves
+the service still accepts a clean post-interruption upload/download round trip.

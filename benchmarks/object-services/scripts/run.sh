@@ -38,6 +38,9 @@ case "$workload" in
   crash-restart-ingest)
     exec "$(dirname "$0")/../workloads/crash-restart-ingest.sh" "$provider"
     ;;
+  interrupted-write)
+    exec "$(dirname "$0")/../workloads/interrupted-write.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69
