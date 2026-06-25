@@ -227,7 +227,7 @@ developers
 - [x] Add read-only NFS export recipe generation.
 - [x] Add optional managed read-only export task for Linux if safe and
   well-bounded.
-- [ ] Create `dasobjectstore-mnemosyne` adapter crate/module.
+- [x] Create `dasobjectstore-mnemosyne` adapter crate/module.
 - [ ] Implement Mneion-compatible storage definition export.
 - [ ] Implement Mneion-compatible binding snippet export.
 - [ ] Add `dasobjectstore mnemosyne export`.
