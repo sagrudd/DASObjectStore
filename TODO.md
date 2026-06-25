@@ -195,7 +195,7 @@ developers
   confirmation.
 - [x] Add health summary, verbose, and JSON output.
 - [x] Add tests for suspect disk evacuation.
-- [ ] Add tests for insufficient capacity during drain.
+- [x] Add tests for insufficient capacity during drain.
 
 ## Milestone 11: macOS Development and Read/Export Path
 
