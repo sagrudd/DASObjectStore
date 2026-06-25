@@ -249,7 +249,10 @@ development.
 
 Scope:
 
-- add Web UI dashboard for pool, disk, ingest, health, queue, and warnings;
+- add `axum` API scaffolding for GUI-facing pool, disk, ingest, health, queue,
+  and warning views;
+- add `yew` frontend scaffolding for dashboard views delivered through the
+  sibling Monas and Synoptikon surfaces;
 - support safe operations through the Web UI where appropriate;
 - provide read-only SMB/NFS export recipes or managed exports for settled data;
 - export Mneion-compatible storage definition snippets;

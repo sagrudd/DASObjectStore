@@ -208,9 +208,14 @@ MVP:
 
 - Rust CLI built with `clap`;
 - S3-compatible object API through an orchestrated object service;
-- Web UI dashboard and safe operations;
+- eventual GUI dashboard and safe operations through `axum` and `yew`;
 - local admin credential;
 - per-store service credentials.
+
+The GUI stack should stay Rust-native: `axum` for HTTP/API serving and `yew`
+for the browser frontend. DASObjectStore should not grow a separate ad hoc UI
+framework; GUI delivery should be aligned with the sibling Monas and Synoptikon
+surfaces in `../monas` and `../mnemosyne`.
 
 Initial SMB/NFS scope:
 

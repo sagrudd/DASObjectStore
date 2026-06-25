@@ -55,6 +55,9 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - Keep the implementation Rust-first unless an integration boundary clearly
   requires another language or tool.
 - Use `clap` for CLI parsing and command documentation.
+- Use `axum` for GUI-facing HTTP/API surfaces and `yew` for frontend GUI work.
+- Keep eventual GUI delivery aligned with sibling Monas and Synoptikon surfaces
+  rather than introducing an unrelated UI stack.
 - Keep Mnemosyne/Synoptikon integration in an adapter layer.
 - Keep storage profiles and object-service providers abstract enough to evolve
   without breaking pool metadata.

@@ -339,7 +339,7 @@ DASObjectStore SHALL provide CLI and S3-compatible access from the outset.
 
 The CLI SHALL be implemented in Rust using `clap`.
 
-DASObjectStore SHALL provide a Web UI that initially supports:
+DASObjectStore SHALL provide a GUI/Web UI that initially supports:
 
 - dashboard;
 - disk health;
@@ -348,6 +348,13 @@ DASObjectStore SHALL provide a Web UI that initially supports:
 - warnings;
 - safe operations;
 - logs.
+
+The GUI/Web UI SHALL use `axum` for the Rust HTTP/API layer and `yew` for the
+Rust frontend layer.
+
+The GUI/Web UI SHALL be designed for delivery through the sibling Monas and
+Synoptikon surfaces in `../monas` and `../mnemosyne`, rather than as an
+unrelated standalone UI stack.
 
 Full setup wizard MAY come later.
 

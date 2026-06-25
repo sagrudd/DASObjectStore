@@ -208,11 +208,14 @@ developers
 
 ## Milestone 12: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
 
-- [ ] Create Web UI scaffold with clear separation from core domain logic.
-- [ ] Add dashboard view for pool status.
-- [ ] Add dashboard view for disk health.
-- [ ] Add dashboard view for ingest and destage queues.
-- [ ] Add dashboard view for warnings and required actions.
+- [ ] Create `axum` GUI API scaffold with clear separation from core domain
+  logic.
+- [ ] Create `yew` frontend scaffold intended for delivery through `../monas`
+  and Synoptikon in `../mnemosyne`.
+- [ ] Add dashboard view model for pool status.
+- [ ] Add dashboard view model for disk health.
+- [ ] Add dashboard view model for ingest and destage queues.
+- [ ] Add dashboard view model for warnings and required actions.
 - [ ] Add safe Web UI actions for health check, service start/stop, and read-only
   import where supported.
 - [ ] Add read-only SMB export recipe generation.
