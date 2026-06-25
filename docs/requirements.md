@@ -228,6 +228,9 @@ DASObjectStore SHALL track object state through at least:
 - protected;
 - SSD eviction eligible.
 
+DASObjectStore SHALL expose object metadata inspection through
+`dasobjectstore object inspect <object-id>`.
+
 DASObjectStore SHALL support per-store object mutability policy.
 
 DASObjectStore SHALL support per-store deletion behavior:

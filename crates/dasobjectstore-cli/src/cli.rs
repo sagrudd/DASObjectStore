@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand};
+use dasobjectstore_core::ids::ObjectId;
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::store::StoreClass;
@@ -32,6 +33,8 @@ pub(crate) enum Command {
     Store(StoreArgs),
     /// Inspect SSD ingest and destage work.
     Ingest(IngestArgs),
+    /// Inspect object metadata.
+    Object(ObjectArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
     Mnemosyne,
 }
@@ -222,6 +225,50 @@ impl IngestQueueArgs {
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ObjectArgs {
+    #[command(subcommand)]
+    command: ObjectCommand,
+}
+
+impl ObjectArgs {
+    pub(crate) fn command(&self) -> &ObjectCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum ObjectCommand {
+    /// Inspect one object from live metadata.
+    Inspect(ObjectInspectArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ObjectInspectArgs {
+    /// Object identifier to inspect.
+    object_id: ObjectId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Emit object metadata as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl ObjectInspectArgs {
+    pub(crate) fn object_id(&self) -> &ObjectId {
+        &self.object_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct ProbeArgs {
     /// Emit probe results as JSON.
     #[arg(long)]
@@ -244,7 +291,8 @@ impl ProbeArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, IngestArgs, IngestCommand, PoolCommand, ProbeArgs, StoreArgs, StoreCommand,
+        Cli, Command, IngestArgs, IngestCommand, ObjectCommand, PoolCommand, ProbeArgs, StoreArgs,
+        StoreCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -272,6 +320,31 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_object_inspect() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "inspect",
+            "object-a",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--json",
+        ])
+        .expect("object inspect parses");
+
+        let Some(Command::Object(args)) = cli.command() else {
+            panic!("expected object command");
+        };
+        match args.command() {
+            ObjectCommand::Inspect(inspect) => {
+                assert_eq!(inspect.object_id().as_str(), "object-a");
+                assert_eq!(inspect.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert!(inspect.json());
+            }
         }
     }
 

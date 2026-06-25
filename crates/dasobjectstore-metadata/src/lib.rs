@@ -9,6 +9,7 @@ pub mod initialize;
 pub mod inspect;
 pub mod manifest;
 pub mod markers;
+pub mod object;
 pub mod placement_log;
 pub mod queue;
 pub mod schema;
@@ -39,6 +40,9 @@ pub use manifest::{
 };
 pub use markers::{
     record_pool_state_marker, record_pool_state_marker_at, PoolStateMarker, PoolStateMarkerKind,
+};
+pub use object::{
+    read_object_inspect, ObjectInspectError, ObjectInspectSummary, ObjectPlacementSummary,
 };
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use queue::{

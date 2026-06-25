@@ -1,14 +1,16 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, PoolCommand, PoolInspectArgs,
-    ProbeArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
+    Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand,
+    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, StoreCommand, StoreDefaultsArgs,
+    StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    inspect_pool_metadata, measure_ssd_capacity, read_ingest_queue, IngestQueueReadError,
-    PoolInspectError, PoolInspectSummary, SsdCapacity, SsdCapacityMeasurementError,
-    SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
+    inspect_pool_metadata, measure_ssd_capacity, read_ingest_queue, read_object_inspect,
+    IngestQueueReadError, ObjectInspectError, ObjectInspectSummary, PoolInspectError,
+    PoolInspectSummary, SsdCapacity, SsdCapacityMeasurementError, SsdCapacityPolicy,
+    SsdCapacityPolicyError, SsdPressure,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -42,6 +44,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
             Some(IngestCommand::Queue(args)) => run_ingest_queue(args, writer),
             None => Ok(()),
+        },
+        Some(Command::Object(args)) => match args.command() {
+            ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
         },
         _ => Ok(()),
     }
@@ -117,6 +122,19 @@ fn run_ingest_queue(args: &IngestQueueArgs, writer: &mut impl Write) -> Result<(
     Ok(())
 }
 
+fn run_object_inspect(args: &ObjectInspectArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let summary = read_object_inspect(args.live_sqlite_path(), args.object_id())?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &summary)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_object_inspect_summary(&summary, writer)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(feature = "debug-commands")]
 fn run_pool_mark_clean(args: &PoolMarkerArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let marker =
@@ -181,6 +199,48 @@ fn write_pool_inspect_summary(
         writer,
         "Metadata path: {}",
         summary.metadata_path.to_string_lossy()
+    )
+}
+
+fn write_object_inspect_summary(
+    summary: &ObjectInspectSummary,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Object: {}", summary.object_id)?;
+    writeln!(writer, "Store: {}", summary.store_id)?;
+    writeln!(writer, "Store class: {}", summary.store_class)?;
+    writeln!(writer, "State: {}", summary.state)?;
+    writeln!(
+        writer,
+        "Size bytes: {}",
+        summary
+            .size_bytes
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string())
+    )?;
+    writeln!(
+        writer,
+        "Content hash: {}",
+        summary.content_hash.as_deref().unwrap_or("<unknown>")
+    )?;
+    writeln!(writer, "Placements: {}", summary.placements.len())?;
+    for placement in &summary.placements {
+        writeln!(
+            writer,
+            "- {} disk={} path={} verified_at={}",
+            placement.placement_id,
+            placement.disk_id,
+            placement.relative_path,
+            placement
+                .verified_at_utc
+                .as_deref()
+                .unwrap_or("<unverified>")
+        )?;
+    }
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        summary.live_sqlite_path.to_string_lossy()
     )
 }
 
@@ -260,6 +320,7 @@ pub(crate) enum CliError {
     Json(serde_json::Error),
     IngestQueueRead(IngestQueueReadError),
     MetadataInspect(PoolInspectError),
+    ObjectInspect(ObjectInspectError),
     SsdCapacityMeasurement(SsdCapacityMeasurementError),
     SsdCapacityPolicy(SsdCapacityPolicyError),
     #[cfg(feature = "debug-commands")]
@@ -277,6 +338,7 @@ impl Display for CliError {
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
+            Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
             Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
@@ -315,6 +377,12 @@ impl From<IngestQueueReadError> for CliError {
 impl From<PoolInspectError> for CliError {
     fn from(err: PoolInspectError) -> Self {
         Self::MetadataInspect(err)
+    }
+}
+
+impl From<ObjectInspectError> for CliError {
+    fn from(err: ObjectInspectError) -> Self {
+        Self::ObjectInspect(err)
     }
 }
 
@@ -615,6 +683,59 @@ mod tests {
         assert!(matches!(err, CliError::UnsupportedIngestQueueFormat));
     }
 
+    #[test]
+    fn object_inspect_writes_pretty_summary() {
+        let root = temp_root("object-inspect-pretty");
+        let live_sqlite_path = create_live_sqlite_with_object(&root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "inspect",
+            "object-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+        ])
+        .expect("object inspect parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("object inspect runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Object: object-a"));
+        assert!(output.contains("Store class: generated_data"));
+        assert!(output.contains("Placements: 1"));
+        assert!(output.contains("- placement-a disk=disk-a path=objects/aa/object-a"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn object_inspect_writes_json_summary() {
+        let root = temp_root("object-inspect-json");
+        let live_sqlite_path = create_live_sqlite_with_object(&root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "inspect",
+            "object-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--json",
+        ])
+        .expect("object inspect parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("object inspect runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("object output is json");
+        assert_eq!(output["object_id"], "object-a");
+        assert_eq!(output["store_id"], "store-a");
+        assert_eq!(output["placements"][0]["disk_id"], "disk-a");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     #[cfg(feature = "debug-commands")]
     #[test]
     fn pool_debug_marker_commands_update_live_metadata() {
@@ -784,6 +905,43 @@ mod tests {
                 ),
             )
             .expect("ingest job inserts");
+    }
+
+    fn create_live_sqlite_with_object(root: &Path) -> PathBuf {
+        fs::create_dir_all(root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        connection
+            .execute_batch(
+                "INSERT INTO disks (
+                    disk_id, pool_id, role, state, created_at_utc, updated_at_utc
+                 ) VALUES (
+                    'disk-a', 'pool-a', 'hdd_capacity', 'Healthy',
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+                 );
+                 INSERT INTO objects (
+                    object_id, store_id, state, size_bytes, content_hash,
+                    created_at_utc, updated_at_utc
+                 ) VALUES (
+                    'object-a', 'store-a', 'Protected', 128, 'sha256:object-a',
+                    '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z'
+                 );
+                 INSERT INTO placements (
+                    placement_id, object_id, disk_id, relative_path, content_hash,
+                    verified_at_utc, created_at_utc
+                 ) VALUES (
+                    'placement-a', 'object-a', 'disk-a', 'objects/aa/object-a',
+                    'sha256:object-a', '2026-01-03T00:00:00Z',
+                    '2026-01-02T00:00:00Z'
+                 );",
+            )
+            .expect("object fixture inserts");
+
+        live_sqlite_path
     }
 
     fn temp_root(name: &str) -> PathBuf {
