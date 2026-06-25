@@ -154,7 +154,7 @@ developers
 - [x] Implement simulated disk removal benchmark.
 - [x] Implement SSD ingest and HDD destage compatibility benchmark.
 - [x] Define benchmark scoring rubric with reliability hard gates.
-- [ ] Write benchmark report template.
+- [x] Write benchmark report template.
 - [ ] Produce first benchmark report and recommend MVP object service.
 
 ## Milestone 9: S3 Service Orchestration

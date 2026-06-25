@@ -8,3 +8,5 @@ Reports must separate hard-gate reliability results from performance results.
 
 - `scoring-rubric.md`: reliability hard gates and performance scoring rules for
   provider comparison.
+- `report-template.md`: fill-in template for comparable Garage and RustFS
+  benchmark reports.
