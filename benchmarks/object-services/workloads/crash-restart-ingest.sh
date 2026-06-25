@@ -43,7 +43,7 @@ if [ "$dry_run" = "1" ]; then
 fi
 
 require_command "aws" "aws CLI is required for S3 benchmark workloads"
-require_command "docker" "Docker Compose is required for crash/restart benchmarks"
+require_compose_command "Docker Compose is required for crash/restart benchmarks"
 
 mkdir -p "$workload_dir"
 ensure_sparse_file "$payload_path" "$object_bytes"
@@ -56,7 +56,7 @@ aws_s3 put-object --bucket "$bucket" --key "$interrupted_key" --body "$payload_p
 upload_pid="$!"
 
 sleep "$restart_delay_seconds"
-docker compose -f "$compose_file" restart "$service_name" >/dev/null
+docker_compose "$compose_file" restart "$service_name" >/dev/null
 sleep "$restart_settle_seconds"
 
 if wait "$upload_pid"; then

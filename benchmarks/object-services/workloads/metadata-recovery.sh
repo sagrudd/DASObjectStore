@@ -69,7 +69,7 @@ if [ "$dry_run" = "1" ]; then
 fi
 
 require_command "aws" "aws CLI is required for S3 benchmark workloads"
-require_command "docker" "Docker Compose is required for metadata recovery benchmarks"
+require_compose_command "Docker Compose is required for metadata recovery benchmarks"
 
 mkdir -p "$workload_dir"
 ensure_sparse_file "$payload_path" "$object_bytes"
@@ -85,10 +85,10 @@ if [ "$source_hash" != "$before_hash" ]; then
   exit 65
 fi
 
-docker compose -f "$compose_file" down >/dev/null
+docker_compose "$compose_file" down >/dev/null
 copy_state_to_snapshot
 restore_state_from_snapshot
-docker compose -f "$compose_file" up -d "$service_name" >/dev/null
+docker_compose "$compose_file" up -d "$service_name" >/dev/null
 sleep "$restart_settle_seconds"
 
 recovery_start="$(start_epoch)"

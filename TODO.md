@@ -162,6 +162,7 @@ developers
 - [x] Add benchmark report input index generator.
 - [x] Add benchmark report draft generator.
 - [x] Add benchmark environment snapshot generator.
+- [x] Add Docker Compose compatibility helper for benchmark workloads.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
   `benchmarks/output/object-services/`.

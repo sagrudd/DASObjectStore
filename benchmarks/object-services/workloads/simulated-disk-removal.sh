@@ -29,10 +29,10 @@ state_removed=0
 
 cleanup_removed_data() {
   if [ "$state_removed" = "1" ]; then
-    docker compose -f "$compose_file" down >/dev/null 2>&1 || true
+    docker_compose "$compose_file" down >/dev/null 2>&1 || true
     safe_rm_rf_benchmark_path "$data_path"
     mv "$removed_dir/data" "$data_path"
-    docker compose -f "$compose_file" up -d "$service_name" >/dev/null 2>&1 || true
+    docker_compose "$compose_file" up -d "$service_name" >/dev/null 2>&1 || true
     state_removed=0
   fi
 }
@@ -60,7 +60,7 @@ if [ "$dry_run" = "1" ]; then
 fi
 
 require_command "aws" "aws CLI is required for S3 benchmark workloads"
-require_command "docker" "Docker Compose is required for simulated disk removal benchmarks"
+require_compose_command "Docker Compose is required for simulated disk removal benchmarks"
 
 mkdir -p "$workload_dir"
 ensure_sparse_file "$payload_path" "$object_bytes"
@@ -70,12 +70,12 @@ aws_s3 create-bucket --bucket "$bucket" >/dev/null 2>&1 || true
 aws_s3 put-object --bucket "$bucket" --key "$object_key" --body "$payload_path" >/dev/null
 
 safe_rm_rf_benchmark_path "$removed_dir"
-docker compose -f "$compose_file" down >/dev/null
+docker_compose "$compose_file" down >/dev/null
 mkdir -p "$removed_dir"
 mv "$data_path" "$removed_dir/data"
 state_removed=1
 mkdir -p "$data_path"
-docker compose -f "$compose_file" up -d "$service_name" >/dev/null
+docker_compose "$compose_file" up -d "$service_name" >/dev/null
 sleep "$restart_settle_seconds"
 
 removed_read_state="absent"
@@ -88,7 +88,7 @@ if aws_s3 get-object --bucket "$bucket" --key "$object_key" "$removed_download_p
   removed_read_state="complete"
 fi
 
-docker compose -f "$compose_file" down >/dev/null
+docker_compose "$compose_file" down >/dev/null
 cleanup_removed_data
 sleep "$restart_settle_seconds"
 

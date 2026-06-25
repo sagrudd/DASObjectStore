@@ -38,6 +38,37 @@ require_command() {
   fi
 }
 
+require_compose_command() {
+  message="$1"
+
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    return
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "$message" >&2
+  exit 69
+}
+
+docker_compose() {
+  compose_file="$1"
+  shift
+
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    docker compose -f "$compose_file" "$@"
+    return
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose -f "$compose_file" "$@"
+    return
+  fi
+
+  echo "Docker Compose is required for this benchmark workload" >&2
+  exit 69
+}
+
 safe_rm_rf_benchmark_path() {
   path="$1"
 
