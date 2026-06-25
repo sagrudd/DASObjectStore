@@ -305,6 +305,9 @@ future Web UI consumers.
 DASObjectStore SHALL preserve committed pre-settlement ingest job metadata and
 staged SSD payload bytes across process restart.
 
+DASObjectStore SHALL preserve metadata-committed ingest jobs, their linked object
+rows, and staged SSD payload references across process restart.
+
 Per-store SSD budgets MAY be added later.
 
 ## 16. Performance Requirements

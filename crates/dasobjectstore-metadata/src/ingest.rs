@@ -263,6 +263,64 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn restart_preserves_ingest_job_after_metadata_commit() {
+        let root = temp_root("ingest-restart-after-metadata-commit");
+        let init = initialize_pool(&PoolInitOptions::new(
+            &root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-01T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        let layout = IngestStagingLayout::for_ssd_root(&root);
+        let job_id = IngestJobId::new("job-after-commit").expect("job id");
+        let paths = layout.job_paths(&job_id);
+        let mut reader = Cursor::new(b"post-commit payload".repeat(4));
+        let report = paths
+            .write_payload_with_hash(&mut reader)
+            .expect("payload writes");
+        let staging_path = paths.payload_path.to_string_lossy().into_owned();
+
+        {
+            let connection = Connection::open(&init.live_sqlite_path).expect("open live sqlite");
+            insert_store(&connection);
+            insert_committed_object(&connection, "object-after-commit", &report);
+            insert_post_commit_job(
+                &connection,
+                job_id.as_str(),
+                "object-after-commit",
+                &staging_path,
+                &report,
+            );
+        }
+
+        let queue = read_ingest_queue(&init.live_sqlite_path).expect("queue survives restart");
+        let connection = Connection::open(&init.live_sqlite_path).expect("reopen live sqlite");
+        let object_state: String = connection
+            .query_row(
+                "SELECT state FROM objects WHERE object_id = 'object-after-commit'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("object row survives restart");
+
+        assert_eq!(object_state, "HashVerified");
+        assert_eq!(queue.jobs.len(), 1);
+        assert_eq!(queue.jobs[0].ingest_job_id, job_id);
+        assert_eq!(
+            queue.jobs[0]
+                .object_id
+                .as_ref()
+                .expect("object id linked")
+                .as_str(),
+            "object-after-commit"
+        );
+        assert_eq!(queue.jobs[0].state, "ReadyForPlacement");
+        assert_eq!(queue.jobs[0].received_bytes, report.bytes_written);
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     fn insert_store(connection: &Connection) {
         connection
             .execute(
@@ -319,6 +377,70 @@ mod tests {
                 ),
             )
             .expect("ingest job inserts");
+    }
+
+    fn insert_committed_object(
+        connection: &Connection,
+        object_id: &str,
+        report: &super::IngestWriteReport,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO objects (
+                    object_id,
+                    store_id,
+                    state,
+                    size_bytes,
+                    content_hash,
+                    created_at_utc,
+                    updated_at_utc
+                 ) VALUES (?1, 'store-a', 'HashVerified', ?2, ?3, ?4, ?4)",
+                (
+                    object_id,
+                    report.bytes_written,
+                    report.content_hash.as_str(),
+                    "2026-01-01T00:00:01Z",
+                ),
+            )
+            .expect("object inserts");
+    }
+
+    fn insert_post_commit_job(
+        connection: &Connection,
+        ingest_job_id: &str,
+        object_id: &str,
+        staging_path: &str,
+        report: &super::IngestWriteReport,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO ingest_jobs (
+                    ingest_job_id,
+                    store_id,
+                    object_id,
+                    state,
+                    ingest_mode,
+                    acknowledgement_policy,
+                    priority,
+                    staging_path,
+                    expected_size_bytes,
+                    received_bytes,
+                    content_hash,
+                    content_hash_algorithm,
+                    created_at_utc,
+                    updated_at_utc
+                 ) VALUES (?1, 'store-a', ?2, 'ReadyForPlacement', 'SsdFirst', 'AfterHddPlacement', 10, ?3, ?4, ?4, ?5, ?6, ?7, ?7)",
+                (
+                    ingest_job_id,
+                    object_id,
+                    staging_path,
+                    report.bytes_written,
+                    report.content_hash.as_str(),
+                    report.content_hash_algorithm.as_str(),
+                    "2026-01-01T00:00:02Z",
+                ),
+            )
+            .expect("post-commit ingest job inserts");
     }
 
     fn temp_root(name: &str) -> PathBuf {
