@@ -21,3 +21,5 @@ dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
 dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
 dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
 dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"

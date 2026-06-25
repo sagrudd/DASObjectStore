@@ -1,6 +1,8 @@
 //! Domain lifecycle states.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PoolState {
     New,
     Clean,
@@ -10,7 +12,7 @@ pub enum PoolState {
     Degraded,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum DiskState {
     Candidate,
     Healthy,
@@ -21,7 +23,7 @@ pub enum DiskState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum StoreState {
     Draft,
     Active,
@@ -30,7 +32,7 @@ pub enum StoreState {
     Retired,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ObjectState {
     ReceivedOnSsd,
     HashVerified,
@@ -57,7 +59,7 @@ impl ObjectState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IngestJobState {
     Queued,
     Receiving,
@@ -69,7 +71,7 @@ pub enum IngestJobState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum HealthState {
     Healthy,
     Watch,
@@ -79,7 +81,7 @@ pub enum HealthState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RepairState {
     NotRequired,
     Pending,
@@ -89,7 +91,7 @@ pub enum RepairState {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ImportMode {
     ReadWrite,
     ReadOnly,
@@ -99,7 +101,7 @@ pub enum ImportMode {
 
 #[cfg(test)]
 mod tests {
-    use super::ObjectState;
+    use super::{HealthState, ObjectState};
 
     #[test]
     fn permits_expected_object_transition() {
@@ -109,5 +111,20 @@ mod tests {
     #[test]
     fn rejects_out_of_order_object_transition() {
         assert!(!ObjectState::ReceivedOnSsd.can_transition_to(ObjectState::Protected));
+    }
+
+    #[test]
+    fn serializes_lifecycle_state_as_variant_name() {
+        let encoded = serde_json::to_string(&ObjectState::Protected).expect("state serializes");
+
+        assert_eq!(encoded, "\"Protected\"");
+    }
+
+    #[test]
+    fn round_trips_lifecycle_state() {
+        let encoded = serde_json::to_string(&HealthState::Suspect).expect("state serializes");
+        let decoded: HealthState = serde_json::from_str(&encoded).expect("state deserializes");
+
+        assert_eq!(decoded, HealthState::Suspect);
     }
 }

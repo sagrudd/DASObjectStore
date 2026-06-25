@@ -1,6 +1,8 @@
 //! Store classes and policy.
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum StoreClass {
     ReproducibleCache,
     GeneratedData,
@@ -9,57 +11,57 @@ pub enum StoreClass {
     IngestStaging,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum IngestMode {
     SsdFirst,
     DirectToHdd,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PlacementStrategy {
     WeightedHealthCapacityPerformance,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum EnclosurePlacement {
     Ignore,
     PreferDistinct,
     RequireDistinct,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RetentionPolicy {
     ImmediateDelete,
     TombstoneThenGc,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RepairPolicy {
     RestoreFromCopy,
     RedownloadOrRehydrate,
     EvacuateIfCapacityAvailable,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum CapacityBehavior {
     RejectWrites,
     BackpressureByPriority,
     MarkRedownloadRequired,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum CredentialPolicy {
     PerStore,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ExportPolicy {
     S3,
     ReadOnlyFileExport,
     Disabled,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StorePolicy {
     pub class: StoreClass,
     pub ingest_mode: IngestMode,
@@ -178,5 +180,15 @@ mod tests {
 
         assert_eq!(policy.copies, 3);
         assert_eq!(policy.capacity_behavior, CapacityBehavior::RejectWrites);
+    }
+
+    #[test]
+    fn round_trips_store_policy() {
+        let policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+
+        let encoded = serde_json::to_string(&policy).expect("policy serializes");
+        let decoded: StorePolicy = serde_json::from_str(&encoded).expect("policy deserializes");
+
+        assert_eq!(decoded, policy);
     }
 }

@@ -1,5 +1,6 @@
 //! Strongly typed domain identifiers.
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
@@ -39,6 +40,25 @@ macro_rules! domain_id {
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
                 Self::new(value)
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                Self::new(value).map_err(serde::de::Error::custom)
             }
         }
     };
@@ -84,5 +104,28 @@ mod tests {
         let err = ObjectId::new("  ").expect_err("blank id must fail");
 
         assert_eq!(err, InvalidId::Empty);
+    }
+
+    #[test]
+    fn serializes_identifier_as_string() {
+        let id = DiskId::new("disk-a").expect("valid id");
+
+        let encoded = serde_json::to_string(&id).expect("id serializes");
+
+        assert_eq!(encoded, "\"disk-a\"");
+    }
+
+    #[test]
+    fn deserializes_identifier_from_string() {
+        let id: DiskId = serde_json::from_str("\"disk-a\"").expect("id deserializes");
+
+        assert_eq!(id.as_str(), "disk-a");
+    }
+
+    #[test]
+    fn rejects_blank_deserialized_identifier() {
+        let err = serde_json::from_str::<DiskId>("\"  \"").expect_err("blank id fails");
+
+        assert!(err.to_string().contains("identifier must not be empty"));
     }
 }
