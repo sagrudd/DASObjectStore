@@ -44,6 +44,31 @@ pub struct SnapshotExportReport {
     pub exported_dirs: Vec<PathBuf>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotImportOptions {
+    pub source_metadata_dir: PathBuf,
+    pub recovery_metadata_dir: PathBuf,
+}
+
+impl SnapshotImportOptions {
+    pub fn new(
+        source_metadata_dir: impl Into<PathBuf>,
+        recovery_metadata_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            source_metadata_dir: source_metadata_dir.into(),
+            recovery_metadata_dir: recovery_metadata_dir.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotImportReport {
+    pub pool_id: PoolId,
+    pub recovered_live_sqlite_path: PathBuf,
+    pub recovered_disk_count: usize,
+}
+
 pub fn export_metadata_snapshot(
     options: &SnapshotExportOptions,
 ) -> Result<SnapshotExportReport, SnapshotExportError> {
@@ -92,6 +117,45 @@ pub fn export_metadata_snapshot(
     })
 }
 
+pub fn import_metadata_snapshot(
+    options: &SnapshotImportOptions,
+) -> Result<SnapshotImportReport, SnapshotImportError> {
+    let pool_manifest: PoolManifest =
+        read_json(options.source_metadata_dir.join(POOL_MANIFEST_FILE_NAME))?;
+    let disk_manifest: DiskManifest =
+        read_json(options.source_metadata_dir.join(DISK_MANIFEST_FILE_NAME))?;
+
+    if pool_manifest.pool_id != disk_manifest.pool_id {
+        return Err(SnapshotImportError::ManifestPoolMismatch {
+            pool_manifest_pool_id: pool_manifest.pool_id.to_string(),
+            disk_manifest_pool_id: disk_manifest.pool_id.to_string(),
+        });
+    }
+
+    fs::create_dir_all(&options.recovery_metadata_dir)?;
+    let recovered_live_sqlite_path = options.recovery_metadata_dir.join(LIVE_SQLITE_FILE_NAME);
+    fs::copy(
+        options.source_metadata_dir.join(LIVE_SQLITE_FILE_NAME),
+        &recovered_live_sqlite_path,
+    )?;
+
+    let connection = Connection::open(&recovered_live_sqlite_path)?;
+    let recovered_pool = load_single_pool(&connection)?;
+    let recovered_disks = load_disks(&connection)?;
+    if recovered_pool.pool_id != pool_manifest.pool_id {
+        return Err(SnapshotImportError::RecoveredPoolMismatch {
+            manifest_pool_id: pool_manifest.pool_id.to_string(),
+            recovered_pool_id: recovered_pool.pool_id.to_string(),
+        });
+    }
+
+    Ok(SnapshotImportReport {
+        pool_id: recovered_pool.pool_id,
+        recovered_live_sqlite_path,
+        recovered_disk_count: recovered_disks.len(),
+    })
+}
+
 fn write_snapshot_dir(
     target: &Path,
     live_sqlite_path: &Path,
@@ -105,6 +169,15 @@ fn write_snapshot_dir(
     fs::copy(live_sqlite_path, target.join(LIVE_SQLITE_FILE_NAME))?;
 
     Ok(())
+}
+
+fn read_json<T>(path: PathBuf) -> Result<T, SnapshotImportError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let file = File::open(path)?;
+
+    Ok(serde_json::from_reader(file)?)
 }
 
 fn write_json(path: PathBuf, value: &impl serde::Serialize) -> Result<(), SnapshotExportError> {
@@ -285,6 +358,89 @@ impl From<rusqlite::Error> for SnapshotExportError {
 }
 
 #[derive(Debug)]
+pub enum SnapshotImportError {
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    Sqlite(rusqlite::Error),
+    ManifestPoolMismatch {
+        pool_manifest_pool_id: String,
+        disk_manifest_pool_id: String,
+    },
+    RecoveredPoolMismatch {
+        manifest_pool_id: String,
+        recovered_pool_id: String,
+    },
+    RecoveredMetadataInvalid {
+        reason: String,
+    },
+}
+
+impl Display for SnapshotImportError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(
+                formatter,
+                "metadata snapshot filesystem import failed: {err}"
+            ),
+            Self::Json(err) => write!(formatter, "metadata snapshot JSON import failed: {err}"),
+            Self::Sqlite(err) => write!(formatter, "metadata snapshot recovery failed: {err}"),
+            Self::ManifestPoolMismatch {
+                pool_manifest_pool_id,
+                disk_manifest_pool_id,
+            } => write!(
+                formatter,
+                "snapshot manifests disagree on pool id: pool manifest has `{pool_manifest_pool_id}`, disk manifest has `{disk_manifest_pool_id}`"
+            ),
+            Self::RecoveredPoolMismatch {
+                manifest_pool_id,
+                recovered_pool_id,
+            } => write!(
+                formatter,
+                "recovered live metadata pool id `{recovered_pool_id}` does not match manifest pool id `{manifest_pool_id}`"
+            ),
+            Self::RecoveredMetadataInvalid { reason } => {
+                write!(formatter, "recovered live metadata is invalid: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SnapshotImportError {}
+
+impl From<std::io::Error> for SnapshotImportError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for SnapshotImportError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json(err)
+    }
+}
+
+impl From<rusqlite::Error> for SnapshotImportError {
+    fn from(err: rusqlite::Error) -> Self {
+        Self::Sqlite(err)
+    }
+}
+
+impl From<SnapshotExportError> for SnapshotImportError {
+    fn from(err: SnapshotExportError) -> Self {
+        match err {
+            SnapshotExportError::Io(err) => Self::Io(err),
+            SnapshotExportError::Json(err) => Self::Json(err),
+            SnapshotExportError::Sqlite(err) => Self::Sqlite(err),
+            SnapshotExportError::NoTargets
+            | SnapshotExportError::MissingPool
+            | SnapshotExportError::MultiplePools { .. } => Self::RecoveredMetadataInvalid {
+                reason: err.to_string(),
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
 struct UnknownSnapshotValue {
     field: &'static str,
     value: String,
@@ -310,9 +466,9 @@ impl std::error::Error for UnknownSnapshotValue {}
 #[cfg(test)]
 mod tests {
     use super::{
-        export_metadata_snapshot, SnapshotExportError, SnapshotExportOptions,
-        DISK_MANIFEST_FILE_NAME, LIVE_SQLITE_FILE_NAME, PLACEMENT_LOG_FILE_NAME,
-        POOL_MANIFEST_FILE_NAME,
+        export_metadata_snapshot, import_metadata_snapshot, SnapshotExportError,
+        SnapshotExportOptions, SnapshotImportOptions, DISK_MANIFEST_FILE_NAME,
+        LIVE_SQLITE_FILE_NAME, PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
     };
     use crate::initialize::{initialize_pool, PoolInitOptions};
     use crate::manifest::{DiskManifest, PoolManifest};
@@ -388,6 +544,47 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn imports_snapshot_and_reconstructs_live_metadata() {
+        let root = temp_root("snapshot-import");
+        let ssd_root = root.join("ssd");
+        let hdd_metadata = root.join("hdd-a").join("metadata");
+        let recovery_metadata = root.join("recovered").join("metadata");
+        let init = initialize_pool(&PoolInitOptions::new(
+            &ssd_root,
+            PoolId::new("pool-a").expect("pool id"),
+            "2026-01-02T00:00:00Z",
+        ))
+        .expect("pool initializes");
+        insert_disk(&init.live_sqlite_path);
+        export_metadata_snapshot(&SnapshotExportOptions::new(
+            &init.live_sqlite_path,
+            vec![hdd_metadata.clone()],
+            "2026-01-03T00:00:00Z",
+        ))
+        .expect("snapshot exports");
+
+        let report = import_metadata_snapshot(&SnapshotImportOptions::new(
+            &hdd_metadata,
+            &recovery_metadata,
+        ))
+        .expect("snapshot imports");
+
+        assert_eq!(report.pool_id.as_str(), "pool-a");
+        assert_eq!(report.recovered_disk_count, 1);
+        assert_eq!(
+            report.recovered_live_sqlite_path,
+            recovery_metadata.join(LIVE_SQLITE_FILE_NAME)
+        );
+
+        let recovered =
+            Connection::open(&report.recovered_live_sqlite_path).expect("open recovered sqlite");
+        assert_eq!(pool_count(&recovered), 1);
+        assert_eq!(disk_count(&recovered), 1);
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     fn insert_disk(live_sqlite_path: &Path) {
         let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
         connection
@@ -418,6 +615,18 @@ mod tests {
                 ],
             )
             .expect("insert disk");
+    }
+
+    fn pool_count(connection: &Connection) -> i64 {
+        connection
+            .query_row("SELECT COUNT(*) FROM pools", [], |row| row.get(0))
+            .expect("count pools")
+    }
+
+    fn disk_count(connection: &Connection) -> i64 {
+        connection
+            .query_row("SELECT COUNT(*) FROM disks", [], |row| row.get(0))
+            .expect("count disks")
     }
 
     fn read_json<T>(path: &Path) -> T

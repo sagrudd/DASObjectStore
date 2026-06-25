@@ -79,7 +79,7 @@ developers
 - [x] Define append-only placement log format.
 - [x] Implement metadata initialization for a new pool on an SSD path.
 - [x] Implement metadata snapshot export to HDD metadata directories.
-- [ ] Implement metadata snapshot import/reconstruction tests.
+- [x] Implement metadata snapshot import/reconstruction tests.
 - [ ] Implement dirty-state markers for clean eject, dirty attach, read-only
   import, repair, and force import.
 - [ ] Add `dasobjectstore pool inspect --metadata-path`.

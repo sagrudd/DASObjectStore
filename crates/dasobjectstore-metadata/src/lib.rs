@@ -19,7 +19,8 @@ pub use manifest::{
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{
-    export_metadata_snapshot, SnapshotExportError, SnapshotExportOptions, SnapshotExportReport,
+    export_metadata_snapshot, import_metadata_snapshot, SnapshotExportError, SnapshotExportOptions,
+    SnapshotExportReport, SnapshotImportError, SnapshotImportOptions, SnapshotImportReport,
     DISK_MANIFEST_FILE_NAME, PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
 };
 
