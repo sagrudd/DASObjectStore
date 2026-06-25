@@ -229,7 +229,7 @@ developers
   well-bounded.
 - [x] Create `dasobjectstore-mnemosyne` adapter crate/module.
 - [x] Implement Mneion-compatible storage definition export.
-- [ ] Implement Mneion-compatible binding snippet export.
+- [x] Implement Mneion-compatible binding snippet export.
 - [ ] Add `dasobjectstore mnemosyne export`.
 - [ ] Document a bioinformatics reference workflow using `reproducible_cache`
   and `generated_data`.

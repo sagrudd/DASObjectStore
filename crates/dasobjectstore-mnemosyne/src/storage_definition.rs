@@ -1,4 +1,5 @@
 use crate::boundary::{synoptikon_object_store_boundary, HostStorageBoundary};
+use crate::validation::is_uuid_like;
 use dasobjectstore_object_service::ObjectServiceProviderId;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -140,16 +141,7 @@ fn validate_endpoint(value: &str) -> Result<(), MneionStorageDefinitionError> {
 
 fn validate_uuid_like(value: &str) -> Result<(), MneionStorageDefinitionError> {
     let trimmed = value.trim();
-    let parts = trimmed.split('-').collect::<Vec<_>>();
-    let valid = parts.len() == 5
-        && [8, 4, 4, 4, 12]
-            .iter()
-            .zip(parts.iter())
-            .all(|(expected_len, part)| {
-                part.len() == *expected_len && part.chars().all(|ch| ch.is_ascii_hexdigit())
-            });
-
-    if valid {
+    if is_uuid_like(trimmed) {
         Ok(())
     } else {
         Err(MneionStorageDefinitionError::InvalidIdentifier {
