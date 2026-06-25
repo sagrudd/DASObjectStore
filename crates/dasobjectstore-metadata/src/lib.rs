@@ -6,6 +6,7 @@ pub mod copy;
 pub mod disk;
 pub mod drain;
 pub mod evacuation;
+pub mod export;
 pub mod format;
 mod hash;
 pub mod ingest;
@@ -42,6 +43,9 @@ pub use drain::{
 pub use evacuation::{
     execute_evacuation_plan, DiskCopyRoot, EvacuationExecutionError, EvacuationExecutionReport,
     EvacuationExecutionRequest, EvacuationObjectSource,
+};
+pub use export::{
+    export_settled_object, ObjectExportError, ObjectExportReport, ObjectExportRequest,
 };
 pub use format::{FormatVersion, MetadataArtifact};
 pub use ingest::{

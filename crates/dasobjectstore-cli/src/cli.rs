@@ -417,8 +417,50 @@ impl ObjectArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum ObjectCommand {
+    /// Export one settled object from a verified HDD placement.
+    Export(ObjectExportArgs),
     /// Inspect one object from live metadata.
     Inspect(ObjectInspectArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ObjectExportArgs {
+    /// Object identifier to export.
+    object_id: ObjectId,
+    /// Path to live.sqlite for the attached read-only pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Destination file to write.
+    #[arg(long)]
+    destination: PathBuf,
+    /// Disk root mapping in the form disk-id=/mounted/disk/root.
+    #[arg(long = "disk-root")]
+    disk_roots: Vec<String>,
+    /// Emit export report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl ObjectExportArgs {
+    pub(crate) fn object_id(&self) -> &ObjectId {
+        &self.object_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn destination(&self) -> &Path {
+        &self.destination
+    }
+
+    pub(crate) fn disk_roots(&self) -> &[String] {
+        &self.disk_roots
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -940,11 +982,44 @@ mod tests {
             panic!("expected object command");
         };
         match args.command() {
+            ObjectCommand::Export(_) => panic!("expected inspect command"),
             ObjectCommand::Inspect(inspect) => {
                 assert_eq!(inspect.object_id().as_str(), "object-a");
                 assert_eq!(inspect.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
                 assert!(inspect.json());
             }
+        }
+    }
+
+    #[test]
+    fn parses_object_export() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "export",
+            "object-a",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--destination",
+            "/tmp/export/object-a",
+            "--disk-root",
+            "disk-a=/Volumes/disk-a",
+            "--json",
+        ])
+        .expect("object export parses");
+
+        let Some(Command::Object(args)) = cli.command() else {
+            panic!("expected object command");
+        };
+        match args.command() {
+            ObjectCommand::Export(export) => {
+                assert_eq!(export.object_id().as_str(), "object-a");
+                assert_eq!(export.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert_eq!(export.destination(), Path::new("/tmp/export/object-a"));
+                assert_eq!(export.disk_roots(), &["disk-a=/Volumes/disk-a".to_string()]);
+                assert!(export.json());
+            }
+            ObjectCommand::Inspect(_) => panic!("expected export command"),
         }
     }
 

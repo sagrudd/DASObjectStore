@@ -2,19 +2,21 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
-    HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectInspectArgs,
-    PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
+    HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectExportArgs,
+    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
     StoreValidateArgs,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
+use dasobjectstore_core::ids::DiskId;
 use dasobjectstore_core::risk::{ActionConfirmation, RiskPolicy};
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    force_retire_disk, inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan,
-    read_disk_replacement_plan, read_ingest_queue, read_object_inspect, request_disk_retirement,
-    DiskDrainAction, DiskDrainError, DiskDrainObjectSummary, DiskDrainPlanSummary,
-    DiskReplacementPlanSummary, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
+    export_settled_object, force_retire_disk, inspect_pool_metadata, measure_ssd_capacity,
+    read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue, read_object_inspect,
+    request_disk_retirement, DiskCopyRoot, DiskDrainAction, DiskDrainError, DiskDrainObjectSummary,
+    DiskDrainPlanSummary, DiskReplacementPlanSummary, DiskRetirementError, DiskRetirementReport,
+    IngestQueueReadError, ObjectExportError, ObjectExportReport, ObjectExportRequest,
     ObjectInspectError, ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
     SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
@@ -70,6 +72,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             None => Ok(()),
         },
         Some(Command::Object(args)) => match args.command() {
+            ObjectCommand::Export(args) => run_object_export(args, writer),
             ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
         },
         Some(Command::Service(args)) => match args.command() {
@@ -479,6 +482,50 @@ fn run_object_inspect(args: &ObjectInspectArgs, writer: &mut impl Write) -> Resu
     }
 
     Ok(())
+}
+
+fn run_object_export(args: &ObjectExportArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let disk_roots = parse_disk_roots(args.disk_roots())?;
+    let request = ObjectExportRequest::new(
+        args.live_sqlite_path(),
+        args.object_id().clone(),
+        args.destination(),
+        disk_roots,
+    );
+    let report = export_settled_object(&request)?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_object_export_report(&report, writer)?;
+    }
+
+    Ok(())
+}
+
+fn parse_disk_roots(values: &[String]) -> Result<Vec<DiskCopyRoot>, CliError> {
+    values
+        .iter()
+        .map(|value| {
+            let (disk_id, root_path) =
+                value
+                    .split_once('=')
+                    .ok_or_else(|| CliError::InvalidDiskRootMapping {
+                        value: value.clone(),
+                    })?;
+            let disk_id = DiskId::new(disk_id).map_err(|_| CliError::InvalidDiskRootMapping {
+                value: value.clone(),
+            })?;
+            if root_path.is_empty() {
+                return Err(CliError::InvalidDiskRootMapping {
+                    value: value.clone(),
+                });
+            }
+
+            Ok(DiskCopyRoot::new(disk_id, root_path))
+        })
+        .collect()
 }
 
 fn run_service_render_compose(
@@ -895,6 +942,22 @@ fn write_object_inspect_summary(
     )
 }
 
+fn write_object_export_report(
+    report: &ObjectExportReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Object: {}", report.object_id)?;
+    writeln!(writer, "Source disk: {}", report.source_disk_id)?;
+    writeln!(writer, "Source: {}", report.source_path.to_string_lossy())?;
+    writeln!(
+        writer,
+        "Destination: {}",
+        report.destination_path.to_string_lossy()
+    )?;
+    writeln!(writer, "Bytes written: {}", report.bytes_written)?;
+    writeln!(writer, "Content hash: {}", report.content_hash)
+}
+
 fn write_pretty_report(report: &ProbeReport, writer: &mut impl Write) -> Result<(), io::Error> {
     writeln!(writer, "Platform: {:?}", report.platform)?;
     writeln!(writer, "Disks: {}", report.disks.len())?;
@@ -973,9 +1036,13 @@ pub(crate) enum CliError {
     MetadataInspect(PoolInspectError),
     DiskDrain(DiskDrainError),
     DiskRetirement(DiskRetirementError),
+    ObjectExport(ObjectExportError),
     ObjectInspect(ObjectInspectError),
     ObjectService(ObjectServiceError),
     CommandFailed(String),
+    InvalidDiskRootMapping {
+        value: String,
+    },
     SsdCapacityMeasurement(SsdCapacityMeasurementError),
     SsdCapacityPolicy(SsdCapacityPolicyError),
     #[cfg(feature = "debug-commands")]
@@ -997,9 +1064,14 @@ impl Display for CliError {
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
+            Self::ObjectExport(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
             Self::CommandFailed(err) => write!(formatter, "{err}"),
+            Self::InvalidDiskRootMapping { value } => write!(
+                formatter,
+                "invalid disk root mapping `{value}`; expected disk-id=/mounted/disk/root"
+            ),
             Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
             Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
@@ -1062,6 +1134,12 @@ impl From<DiskDrainError> for CliError {
 impl From<ObjectInspectError> for CliError {
     fn from(err: ObjectInspectError) -> Self {
         Self::ObjectInspect(err)
+    }
+}
+
+impl From<ObjectExportError> for CliError {
+    fn from(err: ObjectExportError) -> Self {
+        Self::ObjectExport(err)
     }
 }
 
@@ -1706,6 +1784,45 @@ mod tests {
     }
 
     #[test]
+    fn object_export_writes_settled_payload() {
+        let root = temp_root("object-export");
+        let disk_root = root.join("disk-a");
+        let source_path = disk_root.join("objects").join("aa").join("object-a");
+        let destination_path = root.join("exports").join("object-a");
+        fs::create_dir_all(source_path.parent().expect("source parent"))
+            .expect("create source parent");
+        fs::write(&source_path, b"settled payload").expect("write settled payload");
+        let live_sqlite_path = create_live_sqlite_with_exportable_object(&root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "export",
+            "object-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--destination",
+            destination_path.to_str().expect("utf8 destination path"),
+            "--disk-root",
+            &format!("disk-a={}", disk_root.to_string_lossy()),
+        ])
+        .expect("object export parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("object export runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Object: object-a"));
+        assert!(output.contains("Source disk: disk-a"));
+        assert!(output.contains("Bytes written: 15"));
+        assert_eq!(
+            fs::read(&destination_path).expect("read exported payload"),
+            b"settled payload"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn service_render_compose_writes_store_aware_yaml() {
         let root = temp_root("service-render-compose");
         fs::create_dir_all(&root).expect("create temp root");
@@ -2080,6 +2197,56 @@ mod tests {
                  );",
             )
             .expect("object fixture inserts");
+
+        live_sqlite_path
+    }
+
+    fn create_live_sqlite_with_exportable_object(root: &Path) -> PathBuf {
+        const SETTLED_PAYLOAD_SHA256: &str =
+            "ab81c35abe1f9101fb40fd79aa397af816519eb5a3fe1fe0fd923f8e5d153a67";
+
+        fs::create_dir_all(root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_disk(&connection, "disk-a", "Healthy");
+        connection
+            .execute(
+                "INSERT INTO objects (
+                    object_id, store_id, state, size_bytes, content_hash,
+                    created_at_utc, updated_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "object-a",
+                    "store-a",
+                    "SsdEvictionEligible",
+                    15_i64,
+                    SETTLED_PAYLOAD_SHA256,
+                    "2026-01-02T00:00:00Z",
+                    "2026-01-03T00:00:00Z"
+                ],
+            )
+            .expect("object fixture inserts");
+        connection
+            .execute(
+                "INSERT INTO placements (
+                    placement_id, object_id, disk_id, relative_path, content_hash,
+                    verified_at_utc, created_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "placement-a",
+                    "object-a",
+                    "disk-a",
+                    "objects/aa/object-a",
+                    SETTLED_PAYLOAD_SHA256,
+                    "2026-01-03T00:00:00Z",
+                    "2026-01-02T00:00:00Z"
+                ],
+            )
+            .expect("placement fixture inserts");
 
         live_sqlite_path
     }
