@@ -156,10 +156,12 @@ developers
 - [x] Define benchmark scoring rubric with reliability hard gates.
 - [x] Write benchmark report template.
 - [ ] Produce first benchmark report and recommend MVP object service.
+  Blocked until Garage and RustFS workload reports exist under
+  `benchmarks/output/object-services/`.
 
 ## Milestone 9: S3 Service Orchestration
 
-- [ ] Create `dasobjectstore-object-service` crate with provider trait.
+- [x] Create `dasobjectstore-object-service` crate with provider trait.
 - [ ] Implement provider for selected MVP object service.
 - [ ] Generate Docker/Compose configuration from store and pool policy.
 - [ ] Generate per-store service credentials.
