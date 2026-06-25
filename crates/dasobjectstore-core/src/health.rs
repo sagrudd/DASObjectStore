@@ -63,6 +63,11 @@ impl HealthSignals {
         self.record_usb_reset();
     }
 
+    pub fn record_benchmark_drift(&mut self, drift_percent: u8) {
+        self.benchmark_drift_percent =
+            Some(self.benchmark_drift_percent.unwrap_or(0).max(drift_percent));
+    }
+
     pub fn with_io_error(mut self) -> Self {
         self.record_io_error();
         self
@@ -80,6 +85,11 @@ impl HealthSignals {
 
     pub fn with_usb_disconnect(mut self) -> Self {
         self.record_usb_disconnect();
+        self
+    }
+
+    pub fn with_benchmark_drift(mut self, drift_percent: u8) -> Self {
+        self.record_benchmark_drift(drift_percent);
         self
     }
 }
@@ -263,6 +273,43 @@ mod tests {
 
         assert_eq!(score.value, 70);
         assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
+    fn records_benchmark_drift_health_signal() {
+        let signals = HealthSignals::default().with_benchmark_drift(25);
+
+        assert_eq!(signals.benchmark_drift_percent, Some(25));
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 85);
+        assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
+    fn benchmark_drift_keeps_worst_observed_value() {
+        let mut signals = HealthSignals::default();
+        signals.record_benchmark_drift(30);
+        signals.record_benchmark_drift(10);
+        signals.record_benchmark_drift(45);
+
+        assert_eq!(signals.benchmark_drift_percent, Some(45));
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 85);
+        assert_eq!(score.state, HealthState::Watch);
+    }
+
+    #[test]
+    fn benchmark_drift_below_threshold_does_not_penalize_score() {
+        let signals = HealthSignals::default().with_benchmark_drift(24);
+
+        let score = HealthScore::from_signals(&signals);
+
+        assert_eq!(score.value, 100);
+        assert_eq!(score.state, HealthState::Healthy);
     }
 
     #[test]

@@ -182,7 +182,7 @@ developers
 - [x] Implement best-effort SMART/health ingestion on macOS.
 - [x] Implement IO error and checksum failure health signals.
 - [x] Implement USB reset/disconnect event ingestion where feasible.
-- [ ] Implement benchmark drift signal ingestion.
+- [x] Implement benchmark drift signal ingestion.
 - [ ] Implement disk health state transitions.
 - [ ] Block new protected placement on suspect disks.
 - [ ] Implement protected-store evacuation planner.
