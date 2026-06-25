@@ -297,6 +297,8 @@ against explicit high and critical watermarks before accepting new ingest work.
 DASObjectStore SHALL order ingest work by priority, then by age, and SHALL ignore
 completed or failed ingest jobs when planning runnable queue work.
 
+DASObjectStore SHALL expose CLI ingest status for SSD capacity and pressure state.
+
 Per-store SSD budgets MAY be added later.
 
 ## 16. Performance Requirements

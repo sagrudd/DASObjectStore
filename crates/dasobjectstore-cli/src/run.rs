@@ -1,11 +1,14 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, PoolCommand, PoolInspectArgs, ProbeArgs, StoreCommand, StoreDefaultsArgs,
-    StoreValidateArgs,
+    Cli, Command, IngestCommand, IngestStatusArgs, PoolCommand, PoolInspectArgs, ProbeArgs,
+    StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
-use dasobjectstore_metadata::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
+use dasobjectstore_metadata::{
+    inspect_pool_metadata, measure_ssd_capacity, PoolInspectError, PoolInspectSummary, SsdCapacity,
+    SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
+};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
 #[cfg(target_os = "linux")]
@@ -32,6 +35,10 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Store(args)) => match args.command() {
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
+            None => Ok(()),
+        },
+        Some(Command::Ingest(args)) => match args.command() {
+            Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
             None => Ok(()),
         },
         _ => Ok(()),
@@ -82,6 +89,20 @@ fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Resu
     Ok(())
 }
 
+fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let policy = SsdCapacityPolicy::new(
+        args.high_watermark_percent(),
+        args.critical_watermark_percent(),
+        args.minimum_free_bytes(),
+    )?;
+    let capacity = measure_ssd_capacity(args.ssd_root())?;
+    let pressure = policy.evaluate(&capacity)?;
+
+    write_ingest_status(&capacity, &policy, pressure, writer)?;
+
+    Ok(())
+}
+
 #[cfg(feature = "debug-commands")]
 fn run_pool_mark_clean(args: &PoolMarkerArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let marker =
@@ -102,6 +123,35 @@ fn run_pool_mark_dirty(args: &PoolMarkerArgs, writer: &mut impl Write) -> Result
     writeln!(writer, "Marked pool {} dirty", args.pool_id())?;
 
     Ok(())
+}
+
+fn write_ingest_status(
+    capacity: &SsdCapacity,
+    policy: &SsdCapacityPolicy,
+    pressure: SsdPressure,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(
+        writer,
+        "SSD ingest root: {}",
+        capacity.path.to_string_lossy()
+    )?;
+    writeln!(writer, "Pressure: {pressure:?}")?;
+    writeln!(writer, "Total bytes: {}", capacity.total_bytes)?;
+    writeln!(writer, "Available bytes: {}", capacity.available_bytes)?;
+    writeln!(writer, "Used bytes: {}", capacity.used_bytes())?;
+    writeln!(writer, "Used percent: {}", capacity.used_percent_floor())?;
+    writeln!(
+        writer,
+        "High watermark percent: {}",
+        policy.high_watermark_percent
+    )?;
+    writeln!(
+        writer,
+        "Critical watermark percent: {}",
+        policy.critical_watermark_percent
+    )?;
+    writeln!(writer, "Minimum free bytes: {}", policy.minimum_free_bytes)
 }
 
 fn write_pool_inspect_summary(
@@ -195,6 +245,8 @@ pub(crate) enum CliError {
     Io(io::Error),
     Json(serde_json::Error),
     MetadataInspect(PoolInspectError),
+    SsdCapacityMeasurement(SsdCapacityMeasurementError),
+    SsdCapacityPolicy(SsdCapacityPolicyError),
     #[cfg(feature = "debug-commands")]
     MetadataMarker(String),
     Probe(ProbeError),
@@ -208,6 +260,8 @@ impl Display for CliError {
             Self::Io(err) => write!(formatter, "failed to access command input or output: {err}"),
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
+            Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
+            Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
             Self::MetadataMarker(err) => write!(formatter, "failed to update pool metadata: {err}"),
             Self::Probe(err) => write!(formatter, "{err}"),
@@ -235,6 +289,18 @@ impl From<serde_json::Error> for CliError {
 impl From<PoolInspectError> for CliError {
     fn from(err: PoolInspectError) -> Self {
         Self::MetadataInspect(err)
+    }
+}
+
+impl From<SsdCapacityMeasurementError> for CliError {
+    fn from(err: SsdCapacityMeasurementError) -> Self {
+        Self::SsdCapacityMeasurement(err)
+    }
+}
+
+impl From<SsdCapacityPolicyError> for CliError {
+    fn from(err: SsdCapacityPolicyError) -> Self {
+        Self::SsdCapacityPolicy(err)
     }
 }
 
@@ -440,6 +506,31 @@ mod tests {
             policy,
             StorePolicy::defaults_for(StoreClass::CriticalMetadata)
         );
+    }
+
+    #[test]
+    fn ingest_status_writes_ssd_capacity_summary() {
+        let root = temp_root("ingest-status");
+        fs::create_dir_all(&root).expect("create temp root");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "status",
+            "--ssd-root",
+            root.to_str().expect("utf8 temp path"),
+        ])
+        .expect("ingest status parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("ingest status runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("SSD ingest root:"));
+        assert!(output.contains("Pressure:"));
+        assert!(output.contains("High watermark percent: 85"));
+        assert!(output.contains("Critical watermark percent: 95"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
     #[cfg(feature = "debug-commands")]

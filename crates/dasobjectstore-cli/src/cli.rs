@@ -31,7 +31,7 @@ pub(crate) enum Command {
     /// Manage object stores and policy.
     Store(StoreArgs),
     /// Inspect SSD ingest and destage work.
-    Ingest,
+    Ingest(IngestArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
     Mnemosyne,
 }
@@ -148,6 +148,58 @@ impl StoreValidateArgs {
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestArgs {
+    #[command(subcommand)]
+    command: Option<IngestCommand>,
+}
+
+impl IngestArgs {
+    pub(crate) fn command(&self) -> Option<&IngestCommand> {
+        self.command.as_ref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum IngestCommand {
+    /// Report SSD ingest capacity and pressure state.
+    Status(IngestStatusArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestStatusArgs {
+    /// Path to the mandatory SSD ingest root.
+    #[arg(long)]
+    ssd_root: PathBuf,
+    /// SSD used percentage at which lower-priority writes should pause.
+    #[arg(long, default_value_t = dasobjectstore_metadata::DEFAULT_SSD_HIGH_WATERMARK_PERCENT)]
+    high_watermark_percent: u8,
+    /// SSD used percentage at which non-critical writes should be rejected.
+    #[arg(long, default_value_t = dasobjectstore_metadata::DEFAULT_SSD_CRITICAL_WATERMARK_PERCENT)]
+    critical_watermark_percent: u8,
+    /// Minimum free bytes to preserve on the SSD ingest filesystem.
+    #[arg(long, default_value_t = 0)]
+    minimum_free_bytes: u64,
+}
+
+impl IngestStatusArgs {
+    pub(crate) fn ssd_root(&self) -> &Path {
+        &self.ssd_root
+    }
+
+    pub(crate) fn high_watermark_percent(&self) -> u8 {
+        self.high_watermark_percent
+    }
+
+    pub(crate) fn critical_watermark_percent(&self) -> u8 {
+        self.critical_watermark_percent
+    }
+
+    pub(crate) fn minimum_free_bytes(&self) -> u64 {
+        self.minimum_free_bytes
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct ProbeArgs {
     /// Emit probe results as JSON.
     #[arg(long)]
@@ -169,7 +221,9 @@ impl ProbeArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, PoolCommand, ProbeArgs, StoreArgs, StoreCommand};
+    use super::{
+        Cli, Command, IngestArgs, IngestCommand, PoolCommand, ProbeArgs, StoreArgs, StoreCommand,
+    };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
     use std::path::Path;
@@ -187,7 +241,7 @@ mod tests {
             ("health", Command::Health),
             ("disk", Command::Disk),
             ("store", Command::Store(StoreArgs { command: None })),
-            ("ingest", Command::Ingest),
+            ("ingest", Command::Ingest(IngestArgs { command: None })),
             ("mnemosyne", Command::Mnemosyne),
         ];
 
@@ -196,6 +250,37 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_ingest_status() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "status",
+            "--ssd-root",
+            "/tmp/pool-ssd",
+            "--high-watermark-percent",
+            "80",
+            "--critical-watermark-percent",
+            "90",
+            "--minimum-free-bytes",
+            "1024",
+        ])
+        .expect("ingest status parses");
+
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        match args.command() {
+            Some(IngestCommand::Status(status)) => {
+                assert_eq!(status.ssd_root(), Path::new("/tmp/pool-ssd"));
+                assert_eq!(status.high_watermark_percent(), 80);
+                assert_eq!(status.critical_watermark_percent(), 90);
+                assert_eq!(status.minimum_free_bytes(), 1024);
+            }
+            _ => panic!("expected status command"),
         }
     }
 
