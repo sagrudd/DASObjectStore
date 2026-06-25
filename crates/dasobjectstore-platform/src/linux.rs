@@ -1,9 +1,8 @@
 use crate::model::{
     FilesystemHint, HostPlatform, ObservedDisk, PartitionHint, ProbeReport, Transport,
 };
-use crate::probe::{ProbeError, ProbeProvider};
+use crate::probe::{CommandRunner, ProbeError, ProbeProvider, SystemCommandRunner};
 use serde::Deserialize;
-use std::process::Command;
 
 pub const LSBLK_COMMAND: &str = "lsblk";
 pub const LSBLK_ARGS: [&str; 6] = [
@@ -41,39 +40,6 @@ where
     fn probe(&self) -> Result<ProbeReport, ProbeError> {
         let output = self.runner.run(LSBLK_COMMAND, &LSBLK_ARGS)?;
         parse_lsblk_json(&output)
-    }
-}
-
-pub trait CommandRunner {
-    fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError>;
-}
-
-#[derive(Debug, Default)]
-pub struct SystemCommandRunner;
-
-impl CommandRunner for SystemCommandRunner {
-    fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
-        let output =
-            Command::new(command)
-                .args(args)
-                .output()
-                .map_err(|err| ProbeError::CommandFailed {
-                    command: command.to_string(),
-                    message: err.to_string(),
-                })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(ProbeError::CommandFailed {
-                command: command.to_string(),
-                message: stderr,
-            });
-        }
-
-        String::from_utf8(output.stdout).map_err(|err| ProbeError::ParseFailed {
-            source: command.to_string(),
-            message: err.to_string(),
-        })
     }
 }
 
@@ -177,9 +143,9 @@ fn transport_from_lsblk(value: &str) -> Transport {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_lsblk_json, CommandRunner, LinuxProbeProvider, LSBLK_ARGS, LSBLK_COMMAND};
+    use super::{parse_lsblk_json, LinuxProbeProvider, LSBLK_ARGS, LSBLK_COMMAND};
     use crate::model::{HostPlatform, Transport};
-    use crate::probe::{ProbeError, ProbeProvider};
+    use crate::probe::{CommandRunner, ProbeError, ProbeProvider};
 
     const LSBLK_FIXTURE: &str = r#"{
       "blockdevices": [

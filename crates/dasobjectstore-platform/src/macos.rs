@@ -1,11 +1,40 @@
 use crate::model::{
     FilesystemHint, HostPlatform, ObservedDisk, PartitionHint, ProbeReport, Transport,
 };
-use crate::probe::ProbeError;
+use crate::probe::{CommandRunner, ProbeError, ProbeProvider, SystemCommandRunner};
 use serde::Deserialize;
 
 pub const DISKUTIL_COMMAND: &str = "diskutil";
 pub const DISKUTIL_LIST_ARGS: [&str; 2] = ["list", "-plist"];
+
+#[derive(Debug, Default)]
+pub struct MacosProbeProvider<R = SystemCommandRunner> {
+    runner: R,
+}
+
+impl MacosProbeProvider<SystemCommandRunner> {
+    pub fn system() -> Self {
+        Self {
+            runner: SystemCommandRunner,
+        }
+    }
+}
+
+impl<R> MacosProbeProvider<R> {
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+}
+
+impl<R> ProbeProvider for MacosProbeProvider<R>
+where
+    R: CommandRunner,
+{
+    fn probe(&self) -> Result<ProbeReport, ProbeError> {
+        let output = self.runner.run(DISKUTIL_COMMAND, &DISKUTIL_LIST_ARGS)?;
+        parse_diskutil_list_plist(output.as_bytes())
+    }
+}
 
 pub fn parse_diskutil_list_plist(input: &[u8]) -> Result<ProbeReport, ProbeError> {
     let output: DiskutilList = plist::from_bytes(input).map_err(|err| ProbeError::ParseFailed {
@@ -103,8 +132,11 @@ fn filesystem_hint(partition: &DiskutilPartition) -> Option<FilesystemHint> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_diskutil_list_plist, DISKUTIL_COMMAND, DISKUTIL_LIST_ARGS};
+    use super::{
+        parse_diskutil_list_plist, MacosProbeProvider, DISKUTIL_COMMAND, DISKUTIL_LIST_ARGS,
+    };
     use crate::model::{HostPlatform, Transport};
+    use crate::probe::{CommandRunner, ProbeError, ProbeProvider};
 
     const DISKUTIL_LIST_FIXTURE: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -174,5 +206,50 @@ mod tests {
         let err = parse_diskutil_list_plist(b"not-plist").expect_err("invalid plist fails");
 
         assert!(err.to_string().contains("failed to parse diskutil"));
+    }
+
+    #[test]
+    fn macos_probe_provider_runs_diskutil_and_parses_output() {
+        let provider = MacosProbeProvider::new(FixtureRunner {
+            output: Ok(String::from_utf8(DISKUTIL_LIST_FIXTURE.to_vec()).expect("utf8 fixture")),
+        });
+
+        let report = provider.probe().expect("probe succeeds");
+
+        assert_eq!(report.platform, HostPlatform::Macos);
+        assert_eq!(report.disks.len(), 1);
+    }
+
+    #[test]
+    fn macos_probe_provider_propagates_command_failure() {
+        let provider = MacosProbeProvider::new(FixtureRunner {
+            output: Err(ProbeError::CommandFailed {
+                command: DISKUTIL_COMMAND.to_string(),
+                message: "missing command".to_string(),
+            }),
+        });
+
+        let err = provider.probe().expect_err("probe fails");
+
+        assert_eq!(
+            err,
+            ProbeError::CommandFailed {
+                command: DISKUTIL_COMMAND.to_string(),
+                message: "missing command".to_string()
+            }
+        );
+    }
+
+    struct FixtureRunner {
+        output: Result<String, ProbeError>,
+    }
+
+    impl CommandRunner for FixtureRunner {
+        fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
+            assert_eq!(command, DISKUTIL_COMMAND);
+            assert_eq!(args, DISKUTIL_LIST_ARGS);
+
+            self.output.clone()
+        }
     }
 }

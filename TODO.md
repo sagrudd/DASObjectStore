@@ -56,7 +56,7 @@ developers
 - [x] Wire Linux disk inventory parser to command execution.
 - [x] Define macOS disk inventory command contract using `diskutil list -plist`.
 - [x] Add structured macOS `diskutil list -plist` inventory parser.
-- [ ] Wire macOS disk inventory parser to command execution.
+- [x] Wire macOS disk inventory parser to command execution.
 - [x] Add data model for observed disk identity: size, serial hints, partition
   hints, filesystem hints, removable/direct-attached hints, and transport.
 - [x] Add data model for observed enclosure identity: USB topology path, vendor,

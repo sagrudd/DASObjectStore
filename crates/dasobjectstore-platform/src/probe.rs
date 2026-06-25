@@ -1,8 +1,42 @@
 use crate::model::ProbeReport;
 use std::fmt::{self, Display};
+use std::process::Command;
 
 pub trait ProbeProvider {
     fn probe(&self) -> Result<ProbeReport, ProbeError>;
+}
+
+pub trait CommandRunner {
+    fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError>;
+}
+
+#[derive(Debug, Default)]
+pub struct SystemCommandRunner;
+
+impl CommandRunner for SystemCommandRunner {
+    fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
+        let output =
+            Command::new(command)
+                .args(args)
+                .output()
+                .map_err(|err| ProbeError::CommandFailed {
+                    command: command.to_string(),
+                    message: err.to_string(),
+                })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(ProbeError::CommandFailed {
+                command: command.to_string(),
+                message: stderr,
+            });
+        }
+
+        String::from_utf8(output.stdout).map_err(|err| ProbeError::ParseFailed {
+            source: command.to_string(),
+            message: err.to_string(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
