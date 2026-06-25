@@ -44,6 +44,9 @@ case "$workload" in
   metadata-recovery)
     exec "$(dirname "$0")/../workloads/metadata-recovery.sh" "$provider"
     ;;
+  disk-full)
+    exec "$(dirname "$0")/../workloads/disk-full.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69

@@ -106,6 +106,20 @@ ensure_sparse_file() {
   fi
 }
 
+ensure_allocated_file() {
+  path="$1"
+  bytes="$2"
+
+  if [ ! -f "$path" ] || [ "$(file_size "$path")" != "$bytes" ]; then
+    rm -f "$path"
+    dd if=/dev/zero of="$path" bs=1048576 count="$((bytes / 1048576))" 2>/dev/null
+    remainder=$((bytes % 1048576))
+    if [ "$remainder" -gt 0 ]; then
+      dd if=/dev/zero bs=1 count="$remainder" 2>/dev/null >> "$path"
+    fi
+  fi
+}
+
 hash_file() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1" | awk '{print $1}'

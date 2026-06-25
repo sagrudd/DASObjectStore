@@ -11,10 +11,10 @@ Implemented workloads:
 - `crash-restart-ingest`
 - `interrupted-write`
 - `metadata-recovery`
+- `disk-full`
 
 Planned workloads:
 
-- `disk-full`
 - `simulated-disk-removal`
 - `ssd-ingest-hdd-destage`
 
@@ -60,3 +60,10 @@ the service still accepts a clean post-interruption upload/download round trip.
 provider, snapshots its benchmark bind-mounted state, restores that state, then
 restarts the provider and verifies the object remains readable with the
 expected SHA-256 hash.
+
+## Disk Full
+
+`disk-full.sh` creates a configurable allocated filler file inside the
+provider's benchmark output tree, then attempts an S3 upload/download under
+that pressure. A rejected write is recorded as acceptable behavior; an accepted
+write must download with the expected SHA-256 hash.
