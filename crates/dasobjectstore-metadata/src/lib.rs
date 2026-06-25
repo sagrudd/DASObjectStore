@@ -1,6 +1,7 @@
 //! Portable metadata boundary for DASObjectStore pools.
 
 pub mod format;
+pub mod ingest;
 pub mod initialize;
 pub mod inspect;
 pub mod manifest;
@@ -10,6 +11,10 @@ pub mod schema;
 pub mod snapshot;
 
 pub use format::{FormatVersion, MetadataArtifact};
+pub use ingest::{
+    IngestJobPaths, IngestStagingLayout, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
+    INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
+};
 pub use initialize::{
     initialize_pool, MetadataInitError, PoolInitOptions, PoolInitReport, LIVE_SQLITE_FILE_NAME,
     METADATA_DIR_NAME, SNAPSHOT_DIR_NAME,

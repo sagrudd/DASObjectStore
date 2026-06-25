@@ -1,4 +1,5 @@
 use crate::format::FormatVersion;
+use crate::ingest::IngestStagingLayout;
 use crate::manifest::{DISK_MANIFEST_FORMAT_VERSION, POOL_MANIFEST_FORMAT_VERSION};
 use crate::placement_log::PLACEMENT_LOG_FORMAT_VERSION;
 use crate::schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
@@ -48,6 +49,8 @@ pub fn initialize_pool(options: &PoolInitOptions) -> Result<PoolInitReport, Meta
     let metadata_root = options.ssd_root.join(METADATA_DIR_NAME);
     let snapshot_dir = metadata_root.join(SNAPSHOT_DIR_NAME);
     fs::create_dir_all(&snapshot_dir)?;
+    let ingest_layout = IngestStagingLayout::for_ssd_root(&options.ssd_root);
+    ingest_layout.create_base_directories()?;
 
     let live_sqlite_path = metadata_root.join(LIVE_SQLITE_FILE_NAME);
     if live_sqlite_path.exists() {
@@ -189,6 +192,11 @@ mod tests {
         assert_eq!(report.pool_id.as_str(), "pool-a");
         assert!(report.metadata_root.is_dir());
         assert!(report.snapshot_dir.is_dir());
+        assert!(root
+            .join(".dasobjectstore")
+            .join("ingest")
+            .join("jobs")
+            .is_dir());
         assert!(report.live_sqlite_path.is_file());
 
         let connection = Connection::open(&report.live_sqlite_path).expect("open live sqlite");
