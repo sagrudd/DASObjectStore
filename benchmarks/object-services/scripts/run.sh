@@ -3,55 +3,52 @@ set -eu
 
 provider="${1:-}"
 workload="${2:-}"
+script_dir="$(dirname "$0")"
+
+. "$script_dir/matrix.sh"
 
 if [ -z "$provider" ] || [ -z "$workload" ]; then
   echo "usage: $0 <provider> <workload>" >&2
   exit 64
 fi
 
-case "$provider" in
-  garage|rustfs) ;;
-  *)
-    echo "unsupported provider: $provider" >&2
-    exit 64
-    ;;
-esac
+if ! is_supported_provider "$provider"; then
+  echo "unsupported provider: $provider" >&2
+  exit 64
+fi
 
-case "$workload" in
-  large-object|small-object|concurrent-client|crash-restart-ingest|interrupted-write|metadata-recovery|disk-full|simulated-disk-removal|ssd-ingest-hdd-destage) ;;
-  *)
-    echo "unsupported workload: $workload" >&2
-    exit 64
-    ;;
-esac
+if ! is_supported_workload "$workload"; then
+  echo "unsupported workload: $workload" >&2
+  exit 64
+fi
 
 case "$workload" in
   large-object)
-    exec "$(dirname "$0")/../workloads/large-object.sh" "$provider"
+    exec "$script_dir/../workloads/large-object.sh" "$provider"
     ;;
   small-object)
-    exec "$(dirname "$0")/../workloads/small-object.sh" "$provider"
+    exec "$script_dir/../workloads/small-object.sh" "$provider"
     ;;
   concurrent-client)
-    exec "$(dirname "$0")/../workloads/concurrent-client.sh" "$provider"
+    exec "$script_dir/../workloads/concurrent-client.sh" "$provider"
     ;;
   crash-restart-ingest)
-    exec "$(dirname "$0")/../workloads/crash-restart-ingest.sh" "$provider"
+    exec "$script_dir/../workloads/crash-restart-ingest.sh" "$provider"
     ;;
   interrupted-write)
-    exec "$(dirname "$0")/../workloads/interrupted-write.sh" "$provider"
+    exec "$script_dir/../workloads/interrupted-write.sh" "$provider"
     ;;
   metadata-recovery)
-    exec "$(dirname "$0")/../workloads/metadata-recovery.sh" "$provider"
+    exec "$script_dir/../workloads/metadata-recovery.sh" "$provider"
     ;;
   disk-full)
-    exec "$(dirname "$0")/../workloads/disk-full.sh" "$provider"
+    exec "$script_dir/../workloads/disk-full.sh" "$provider"
     ;;
   simulated-disk-removal)
-    exec "$(dirname "$0")/../workloads/simulated-disk-removal.sh" "$provider"
+    exec "$script_dir/../workloads/simulated-disk-removal.sh" "$provider"
     ;;
   ssd-ingest-hdd-destage)
-    exec "$(dirname "$0")/../workloads/ssd-ingest-hdd-destage.sh" "$provider"
+    exec "$script_dir/../workloads/ssd-ingest-hdd-destage.sh" "$provider"
     ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2

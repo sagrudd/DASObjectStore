@@ -156,6 +156,7 @@ developers
 - [x] Define benchmark scoring rubric with reliability hard gates.
 - [x] Write benchmark report template.
 - [x] Add benchmark report input readiness check.
+- [x] Add full provider/workload matrix runner.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
   `benchmarks/output/object-services/`.

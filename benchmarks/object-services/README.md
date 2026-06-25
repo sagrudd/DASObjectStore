@@ -38,6 +38,12 @@ paths and generated output out of version control.
 benchmarks/object-services/scripts/run.sh garage large-object
 ```
 
+Run the complete provider/workload matrix:
+
+```sh
+benchmarks/object-services/scripts/run-matrix.sh
+```
+
 Check whether the raw outputs are sufficient for a selection report:
 
 ```sh
