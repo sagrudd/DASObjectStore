@@ -1,8 +1,10 @@
 //! Axum API boundary for GUI-facing DASObjectStore views.
 
+pub mod dashboard;
 pub mod routes;
 pub mod view;
 
+pub use dashboard::{DashboardWarning, PoolAccessMode, PoolStateView, PoolStatusView};
 pub use routes::gui_api_router;
 
 /// Returns the GUI API crate version.
