@@ -166,6 +166,37 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn inspects_macos_fixture_metadata_directory() {
+        let metadata_path = macos_fixture_root()
+            .join(".dasobjectstore")
+            .join("metadata");
+
+        let summary = inspect_pool_metadata(&metadata_path).expect("macos fixture inspects");
+
+        assert_eq!(summary.metadata_path, metadata_path);
+        assert_eq!(summary.pool_id.as_str(), "macos-pool-a");
+        assert_eq!(summary.state, PoolState::Clean);
+        assert_eq!(summary.created_at_utc, "2026-01-02T00:00:00Z");
+        assert_eq!(summary.updated_at_utc, "2026-01-03T00:00:00Z");
+        assert_eq!(summary.disk_count, 2);
+    }
+
+    #[test]
+    fn inspects_macos_fixture_portable_pool_root() {
+        let root = macos_fixture_root();
+
+        let summary = inspect_pool_metadata(&root).expect("macos fixture root inspects");
+
+        assert_eq!(summary.pool_id.as_str(), "macos-pool-a");
+        assert_eq!(summary.state, PoolState::Clean);
+        assert_eq!(summary.disk_count, 2);
+        assert_eq!(
+            summary.metadata_path,
+            root.join(".dasobjectstore").join("metadata")
+        );
+    }
+
     fn write_snapshot_manifests(path: &Path, pool_id: &str) {
         fs::create_dir_all(path).expect("create metadata dir");
         let pool_id = PoolId::new(pool_id).expect("pool id");
@@ -206,6 +237,13 @@ mod tests {
     fn write_json(path: &Path, value: &impl serde::Serialize) {
         let file = File::create(path).expect("create json");
         serde_json::to_writer_pretty(file, value).expect("write json");
+    }
+
+    fn macos_fixture_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join("macos")
+            .join("portable-pool-root")
     }
 
     fn temp_root(name: &str) -> PathBuf {

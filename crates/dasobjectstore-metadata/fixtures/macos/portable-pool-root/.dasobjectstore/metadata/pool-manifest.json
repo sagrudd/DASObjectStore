@@ -1,0 +1,31 @@
+{
+  "format_version": {
+    "artifact": "pool_manifest",
+    "major": 0,
+    "minor": 1
+  },
+  "pool_id": "macos-pool-a",
+  "state": "Clean",
+  "created_at_utc": "2026-01-02T00:00:00Z",
+  "updated_at_utc": "2026-01-03T00:00:00Z",
+  "disk_manifest": {
+    "artifact": "disk_manifest",
+    "format_version": {
+      "artifact": "disk_manifest",
+      "major": 0,
+      "minor": 1
+    },
+    "relative_path": "disk-manifest.json",
+    "checksum": null
+  },
+  "placement_log": {
+    "artifact": "placement_log",
+    "format_version": {
+      "artifact": "placement_log",
+      "major": 0,
+      "minor": 1
+    },
+    "relative_path": "placement-log.jsonl",
+    "checksum": null
+  }
+}

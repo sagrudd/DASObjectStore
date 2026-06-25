@@ -1,0 +1,39 @@
+{
+  "format_version": {
+    "artifact": "disk_manifest",
+    "major": 0,
+    "minor": 1
+  },
+  "pool_id": "macos-pool-a",
+  "generated_at_utc": "2026-01-03T00:00:00Z",
+  "disks": [
+    {
+      "disk_id": "disk-a",
+      "state": "Healthy",
+      "role": "hdd_capacity",
+      "size_bytes": 4000787030016,
+      "serial_hint": "MACOS-DAS-001",
+      "model_hint": "Old SATA HDD",
+      "enclosure_topology_path": "IOService:/AppleARMPE/usb@001/002",
+      "bay_hint": "bay-1",
+      "filesystem_fingerprint": "fs:apfs:disk-a",
+      "partition_fingerprint": "part:gpt:disk-a",
+      "created_at_utc": "2026-01-02T00:00:00Z",
+      "updated_at_utc": "2026-01-03T00:00:00Z"
+    },
+    {
+      "disk_id": "disk-b",
+      "state": "Watch",
+      "role": "hdd_capacity",
+      "size_bytes": 3000592982016,
+      "serial_hint": "MACOS-DAS-002",
+      "model_hint": "Older SATA HDD",
+      "enclosure_topology_path": "IOService:/AppleARMPE/usb@001/003",
+      "bay_hint": "bay-2",
+      "filesystem_fingerprint": "fs:apfs:disk-b",
+      "partition_fingerprint": "part:gpt:disk-b",
+      "created_at_utc": "2026-01-02T00:00:00Z",
+      "updated_at_utc": "2026-01-03T00:00:00Z"
+    }
+  ]
+}

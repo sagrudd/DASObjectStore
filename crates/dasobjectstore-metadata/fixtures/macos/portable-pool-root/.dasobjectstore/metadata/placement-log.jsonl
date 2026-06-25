@@ -1,0 +1,1 @@
+{"format_version":{"artifact":"placement_log","major":0,"minor":1},"pool_id":"macos-pool-a","sequence_number":1,"recorded_at_utc":"2026-01-03T00:00:00Z","event":{"event_type":"placement_planned","placement_id":"placement-a","object_id":"object-a","store_id":"generated-data","copy_index":0,"disk_id":"disk-a"}}
