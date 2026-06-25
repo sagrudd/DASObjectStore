@@ -241,6 +241,9 @@ DASObjectStore SHALL compute hashes on ingest.
 
 DASObjectStore SHALL verify each HDD copy before marking it valid.
 
+DASObjectStore SHALL read back each newly written HDD copy and compare its
+content hash against the expected ingest hash before reporting it verified.
+
 DASObjectStore SHALL support scheduled scrubs of stored copies.
 
 Read-time verification MAY be added later for critical stores.

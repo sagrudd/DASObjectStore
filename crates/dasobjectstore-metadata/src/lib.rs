@@ -1,7 +1,9 @@
 //! Portable metadata boundary for DASObjectStore pools.
 
 pub mod capacity;
+pub mod copy;
 pub mod format;
+mod hash;
 pub mod ingest;
 pub mod initialize;
 pub mod inspect;
@@ -16,6 +18,10 @@ pub use capacity::{
     measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError, SsdCapacityPolicy,
     SsdCapacityPolicyError, SsdPressure, DEFAULT_SSD_CRITICAL_WATERMARK_PERCENT,
     DEFAULT_SSD_HIGH_WATERMARK_PERCENT,
+};
+pub use copy::{
+    verify_hdd_copy_hash, write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest,
+    HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use format::{FormatVersion, MetadataArtifact};
 pub use ingest::{

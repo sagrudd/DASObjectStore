@@ -1,16 +1,16 @@
+use crate::hash::{copy_and_hash, SHA256_ALGORITHM};
 use crate::initialize::METADATA_DIR_NAME;
 use dasobjectstore_core::ids::IngestJobId;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub const INGEST_DIR_NAME: &str = "ingest";
 pub const INGEST_JOBS_DIR_NAME: &str = "jobs";
 pub const INGEST_PAYLOAD_FILE_NAME: &str = "payload";
 pub const INGEST_SCRATCH_DIR_NAME: &str = "scratch";
-pub const INGEST_CONTENT_HASH_ALGORITHM: &str = "sha256";
+pub const INGEST_CONTENT_HASH_ALGORITHM: &str = SHA256_ALGORITHM;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IngestStagingLayout {
@@ -66,26 +66,13 @@ impl IngestJobPaths {
         self.create_directories()?;
 
         let mut file = File::create(&self.payload_path)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; 64 * 1024];
-        let mut bytes_written = 0_u64;
-
-        loop {
-            let read = reader.read(&mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            let chunk = &buffer[..read];
-            file.write_all(chunk)?;
-            hasher.update(chunk);
-            bytes_written += read as u64;
-        }
+        let report = copy_and_hash(reader, &mut file)?;
         file.sync_all()?;
 
         Ok(IngestWriteReport {
-            bytes_written,
+            bytes_written: report.bytes_written,
             content_hash_algorithm: INGEST_CONTENT_HASH_ALGORITHM.to_string(),
-            content_hash: encode_hex(&hasher.finalize()),
+            content_hash: report.content_hash,
         })
     }
 }
@@ -106,16 +93,6 @@ fn encode_path_component(value: &str) -> String {
             }
             _ => encoded.push_str(&format!("%{byte:02X}")),
         }
-    }
-    encoded
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(HEX[(byte >> 4) as usize] as char);
-        encoded.push(HEX[(byte & 0x0f) as usize] as char);
     }
     encoded
 }

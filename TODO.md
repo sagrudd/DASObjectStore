@@ -130,7 +130,7 @@ developers
 - [x] Implement copy planner for `copies = 1`, `copies = 2`, and `copies = 3`.
 - [x] Implement duplicate-copy prevention on the same disk for protected
   objects.
-- [ ] Implement HDD copy write and post-copy hash verification.
+- [x] Implement HDD copy write and post-copy hash verification.
 - [ ] Implement object protection state update after policy-satisfying copies.
 - [ ] Implement redownload-required state for reproducible cache objects.
 - [ ] Add `dasobjectstore object inspect <object-id>`.
