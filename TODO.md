@@ -157,6 +157,7 @@ developers
 - [x] Write benchmark report template.
 - [x] Add benchmark report input readiness check.
 - [x] Add full provider/workload matrix runner.
+- [x] Add local benchmark preflight check.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
   `benchmarks/output/object-services/`.

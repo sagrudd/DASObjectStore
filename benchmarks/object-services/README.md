@@ -38,6 +38,18 @@ paths and generated output out of version control.
 benchmarks/object-services/scripts/run.sh garage large-object
 ```
 
+Check the benchmark script contract without external services:
+
+```sh
+benchmarks/object-services/scripts/preflight.sh --offline
+```
+
+Check local tools before running the real matrix:
+
+```sh
+benchmarks/object-services/scripts/preflight.sh
+```
+
 Run the complete provider/workload matrix:
 
 ```sh
