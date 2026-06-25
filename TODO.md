@@ -178,7 +178,7 @@ developers
 ## Milestone 10: Health, Drain, Repair, and Disk Retirement
 
 - [x] Define health score inputs and weighting.
-- [ ] Implement SMART ingestion where available on Linux.
+- [x] Implement SMART ingestion where available on Linux.
 - [ ] Implement best-effort SMART/health ingestion on macOS.
 - [ ] Implement IO error and checksum failure health signals.
 - [ ] Implement USB reset/disconnect event ingestion where feasible.

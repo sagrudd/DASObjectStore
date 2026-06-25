@@ -2,6 +2,7 @@
 
 pub mod enclosure;
 pub mod linux;
+pub mod linux_smart;
 pub mod macos;
 pub mod model;
 pub mod probe;

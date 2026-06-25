@@ -1,0 +1,54 @@
+{
+  "json_format_version": [1, 0],
+  "smartctl": {
+    "version": [7, 4],
+    "argv": [
+      "smartctl",
+      "--json",
+      "--health",
+      "--attributes",
+      "/dev/sda"
+    ],
+    "exit_status": 0
+  },
+  "device": {
+    "name": "/dev/sda",
+    "type": "sat"
+  },
+  "model_name": "WDC WD40EFRX-68N32N0",
+  "serial_number": "WD-OLD-001",
+  "smart_status": {
+    "passed": true
+  },
+  "temperature": {
+    "current": 57
+  },
+  "ata_smart_attributes": {
+    "table": [
+      {
+        "id": 5,
+        "name": "Reallocated_Sector_Ct",
+        "raw": {
+          "value": 2,
+          "string": "2"
+        }
+      },
+      {
+        "id": 197,
+        "name": "Current_Pending_Sector",
+        "raw": {
+          "value": 1,
+          "string": "1"
+        }
+      },
+      {
+        "id": 198,
+        "name": "Offline_Uncorrectable",
+        "raw": {
+          "value": 0,
+          "string": "0"
+        }
+      }
+    ]
+  }
+}
