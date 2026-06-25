@@ -2,10 +2,11 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
-    HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectExportArgs,
-    ObjectInspectArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
-    ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
-    StoreDefaultsArgs, StoreValidateArgs,
+    HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
+    MnemosyneExportArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs, PoolCommand,
+    PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
+    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
+    StoreValidateArgs,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -25,6 +26,10 @@ use dasobjectstore_metadata::{
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
+use dasobjectstore_mnemosyne::{
+    export_mneion_binding_snippet, export_mneion_storage_definition, MneionBindingSnippetError,
+    MneionBindingSnippetRequest, MneionStorageDefinitionError, MneionStorageDefinitionRequest,
+};
 use dasobjectstore_object_service::{
     plan_store_service_layout, render_compose, ComposeRenderRequest, ComposeServiceConfig,
     ObjectServiceError, StoreServiceDefinition,
@@ -85,6 +90,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             ServiceCommand::Up(args) => run_service_up(args, writer),
             ServiceCommand::Down(args) => run_service_down(args, writer),
             ServiceCommand::Status(args) => run_service_status(args, writer),
+        },
+        Some(Command::Mnemosyne(args)) => match args.command() {
+            MnemosyneCommand::Export(args) => run_mnemosyne_export(args, writer),
         },
         _ => Ok(()),
     }
@@ -588,6 +596,36 @@ fn run_service_render_compose(
     let rendered = render_compose(&request, &service)?;
 
     writer.write_all(rendered.compose_yaml.as_bytes())?;
+
+    Ok(())
+}
+
+fn run_mnemosyne_export(
+    args: &MnemosyneExportArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let storage_definition =
+        export_mneion_storage_definition(&MneionStorageDefinitionRequest::new(
+            args.object_store_id(),
+            args.display_name(),
+            args.provider(),
+            args.endpoint(),
+        ))?;
+    let mut binding_request =
+        MneionBindingSnippetRequest::new(args.object_store_id(), args.governance_domain_id());
+    if let Some(note) = args.note() {
+        binding_request = binding_request.with_note(note);
+    }
+    let binding_snippet = export_mneion_binding_snippet(&binding_request)?;
+
+    serde_json::to_writer_pretty(
+        &mut *writer,
+        &serde_json::json!({
+            "storage_definition": storage_definition,
+            "binding_snippet": binding_snippet,
+        }),
+    )?;
+    writer.write_all(b"\n")?;
 
     Ok(())
 }
@@ -1127,6 +1165,8 @@ pub(crate) enum CliError {
     ObjectExport(ObjectExportError),
     ObjectInspect(ObjectInspectError),
     ObjectService(ObjectServiceError),
+    MneionBindingSnippet(MneionBindingSnippetError),
+    MneionStorageDefinition(MneionStorageDefinitionError),
     CommandFailed(String),
     InvalidDiskRootMapping {
         value: String,
@@ -1161,6 +1201,8 @@ impl Display for CliError {
             Self::ObjectExport(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
+            Self::MneionBindingSnippet(err) => write!(formatter, "{err}"),
+            Self::MneionStorageDefinition(err) => write!(formatter, "{err}"),
             Self::CommandFailed(err) => write!(formatter, "{err}"),
             Self::InvalidDiskRootMapping { value } => write!(
                 formatter,
@@ -1256,6 +1298,18 @@ impl From<ObjectExportError> for CliError {
 impl From<ObjectServiceError> for CliError {
     fn from(err: ObjectServiceError) -> Self {
         Self::ObjectService(err)
+    }
+}
+
+impl From<MneionBindingSnippetError> for CliError {
+    fn from(err: MneionBindingSnippetError) -> Self {
+        Self::MneionBindingSnippet(err)
+    }
+}
+
+impl From<MneionStorageDefinitionError> for CliError {
+    fn from(err: MneionStorageDefinitionError) -> Self {
+        Self::MneionStorageDefinition(err)
     }
 }
 
@@ -2071,6 +2125,50 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn mnemosyne_export_writes_storage_definition_and_binding_json() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "mnemosyne",
+            "export",
+            "--object-store-id",
+            "4f0a1ba7-9f00-422b-bf18-87567b076daa",
+            "--display-name",
+            "DASObjectStore Development",
+            "--provider",
+            "garage",
+            "--endpoint",
+            "http://127.0.0.1:3900",
+            "--governance-domain-id",
+            "22222222-2222-2222-2222-222222222222",
+            "--note",
+            "DASObjectStore development store",
+        ])
+        .expect("mnemosyne export parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("mnemosyne export runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("mnemosyne output is json");
+        assert_eq!(
+            output["storage_definition"]["object_store_create_request"]["backend_kind"],
+            "S3-Compatible"
+        );
+        assert_eq!(
+            output["storage_definition"]["object_store_create_request"]["endpoint"],
+            "http://127.0.0.1:3900"
+        );
+        assert_eq!(
+            output["binding_snippet"]["endpoint_path"],
+            "/api/v1/admin/object-stores/4f0a1ba7-9f00-422b-bf18-87567b076daa/link"
+        );
+        assert_eq!(
+            output["binding_snippet"]["object_store_link_request"]["governance_domain_id"],
+            "22222222-2222-2222-2222-222222222222"
+        );
     }
 
     #[test]

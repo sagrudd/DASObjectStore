@@ -39,7 +39,7 @@ pub(crate) enum Command {
     /// Render and manage the S3-compatible object service.
     Service(ServiceArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
-    Mnemosyne,
+    Mnemosyne(MnemosyneArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -714,11 +714,77 @@ impl ProbeArgs {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct MnemosyneArgs {
+    #[command(subcommand)]
+    command: MnemosyneCommand,
+}
+
+impl MnemosyneArgs {
+    pub(crate) fn command(&self) -> &MnemosyneCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum MnemosyneCommand {
+    /// Export Mneion-compatible storage definition and binding JSON.
+    Export(MnemosyneExportArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct MnemosyneExportArgs {
+    /// Mneion object-store UUID to create or update.
+    #[arg(long)]
+    object_store_id: String,
+    /// Mneion object-store display name.
+    #[arg(long)]
+    display_name: String,
+    /// DASObjectStore object-service provider backing the endpoint.
+    #[arg(long)]
+    provider: ObjectServiceProviderId,
+    /// S3-compatible HTTP endpoint exposed to Mneion/Limen.
+    #[arg(long)]
+    endpoint: String,
+    /// Mneion governance-domain UUID to bind to the object store.
+    #[arg(long)]
+    governance_domain_id: String,
+    /// Optional operator note to include in the Mneion link request.
+    #[arg(long)]
+    note: Option<String>,
+}
+
+impl MnemosyneExportArgs {
+    pub(crate) fn object_store_id(&self) -> &str {
+        &self.object_store_id
+    }
+
+    pub(crate) fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub(crate) fn provider(&self) -> ObjectServiceProviderId {
+        self.provider
+    }
+
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub(crate) fn governance_domain_id(&self) -> &str {
+        &self.governance_domain_id
+    }
+
+    pub(crate) fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, DiskCommand, IngestArgs, IngestCommand, ObjectCommand, PoolCommand,
-        ProbeArgs, ServiceCommand, StoreArgs, StoreCommand,
+        Cli, Command, DiskCommand, IngestArgs, IngestCommand, MnemosyneCommand, ObjectCommand,
+        PoolCommand, ProbeArgs, ServiceCommand, StoreArgs, StoreCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -736,7 +802,6 @@ mod tests {
         let cases = [
             ("store", Command::Store(StoreArgs { command: None })),
             ("ingest", Command::Ingest(IngestArgs { command: None })),
-            ("mnemosyne", Command::Mnemosyne),
         ];
 
         for (name, expected) in cases {
@@ -744,6 +809,48 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_mnemosyne_export() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "mnemosyne",
+            "export",
+            "--object-store-id",
+            "4f0a1ba7-9f00-422b-bf18-87567b076daa",
+            "--display-name",
+            "DASObjectStore Development",
+            "--provider",
+            "garage",
+            "--endpoint",
+            "http://127.0.0.1:3900",
+            "--governance-domain-id",
+            "22222222-2222-2222-2222-222222222222",
+            "--note",
+            "DASObjectStore development store",
+        ])
+        .expect("mnemosyne export parses");
+
+        let Some(Command::Mnemosyne(args)) = cli.command() else {
+            panic!("expected mnemosyne command");
+        };
+        match args.command() {
+            MnemosyneCommand::Export(export) => {
+                assert_eq!(
+                    export.object_store_id(),
+                    "4f0a1ba7-9f00-422b-bf18-87567b076daa"
+                );
+                assert_eq!(export.display_name(), "DASObjectStore Development");
+                assert_eq!(export.provider().name(), "garage");
+                assert_eq!(export.endpoint(), "http://127.0.0.1:3900");
+                assert_eq!(
+                    export.governance_domain_id(),
+                    "22222222-2222-2222-2222-222222222222"
+                );
+                assert_eq!(export.note(), Some("DASObjectStore development store"));
+            }
         }
     }
 

@@ -250,6 +250,7 @@ dependencies = [
  "clap",
  "dasobjectstore-core",
  "dasobjectstore-metadata",
+ "dasobjectstore-mnemosyne",
  "dasobjectstore-object-service",
  "dasobjectstore-platform",
  "rusqlite",
