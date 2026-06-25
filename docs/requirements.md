@@ -317,6 +317,10 @@ DASObjectStore SHALL benchmark disks and pools.
 
 DASObjectStore SHALL use benchmark results in placement scoring.
 
+DASObjectStore SHALL model HDD placement candidates with available capacity,
+health state, performance class, write load, and enclosure identity before
+weighted scoring is applied.
+
 DASObjectStore SHALL not implement fine-grained HDD physical region placement in the
 MVP.
 

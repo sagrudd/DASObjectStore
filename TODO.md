@@ -124,7 +124,7 @@ developers
 
 ## Milestone 7: HDD Placement and Copy Verification
 
-- [ ] Define placement candidate model using capacity, health, performance,
+- [x] Define placement candidate model using capacity, health, performance,
   write load, and enclosure constraints.
 - [ ] Implement weighted placement scorer.
 - [ ] Implement copy planner for `copies = 1`, `copies = 2`, and `copies = 3`.

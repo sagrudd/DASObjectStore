@@ -2,6 +2,7 @@
 
 pub mod ids;
 pub mod lifecycle;
+pub mod placement;
 pub mod risk;
 pub mod store;
 
