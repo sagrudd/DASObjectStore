@@ -1,9 +1,14 @@
 //! Object service orchestration boundary.
 
 pub mod compose;
+pub mod credentials;
 pub mod provider;
 
 pub use compose::{render_compose, ComposeServiceConfig};
+pub use credentials::{
+    generate_per_store_credentials, CredentialEntropy, SecretAccessKey, StoreCredentialRequest,
+    StoreServiceCredential, SystemCredentialEntropy,
+};
 pub use provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus, StoreBucketBinding,
