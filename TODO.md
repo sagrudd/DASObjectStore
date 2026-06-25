@@ -228,7 +228,7 @@ developers
 - [x] Add optional managed read-only export task for Linux if safe and
   well-bounded.
 - [x] Create `dasobjectstore-mnemosyne` adapter crate/module.
-- [ ] Implement Mneion-compatible storage definition export.
+- [x] Implement Mneion-compatible storage definition export.
 - [ ] Implement Mneion-compatible binding snippet export.
 - [ ] Add `dasobjectstore mnemosyne export`.
 - [ ] Document a bioinformatics reference workflow using `reproducible_cache`

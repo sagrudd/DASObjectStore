@@ -300,6 +300,7 @@ name = "dasobjectstore-mnemosyne"
 version = "0.0.0"
 dependencies = [
  "dasobjectstore-core",
+ "dasobjectstore-object-service",
  "serde",
  "serde_json",
 ]
