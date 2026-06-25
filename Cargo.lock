@@ -161,6 +161,7 @@ dependencies = [
  "clap",
  "dasobjectstore-core",
  "dasobjectstore-metadata",
+ "dasobjectstore-object-service",
  "dasobjectstore-platform",
  "rusqlite",
  "serde_json",

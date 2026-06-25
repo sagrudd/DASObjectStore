@@ -4,12 +4,13 @@ use crate::credentials::{credential_reference_for_store, StoreCredentialRequest}
 use crate::provider::{ObjectServiceError, StoreBucketBinding};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::{ExportPolicy, StorePolicy};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 const BUCKET_PREFIX: &str = "dos";
 const MAX_BUCKET_NAME_LEN: usize = 63;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreServiceDefinition {
     pub store_id: StoreId,
     pub policy: StorePolicy,

@@ -3,6 +3,7 @@ use dasobjectstore_core::ids::ObjectId;
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::store::StoreClass;
+use dasobjectstore_object_service::ObjectServiceProviderId;
 use std::path::{Path, PathBuf};
 
 /// Portable mixed-disk DAS object store.
@@ -35,6 +36,8 @@ pub(crate) enum Command {
     Ingest(IngestArgs),
     /// Inspect object metadata.
     Object(ObjectArgs),
+    /// Render and manage the S3-compatible object service.
+    Service(ServiceArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
     Mnemosyne,
 }
@@ -278,6 +281,86 @@ pub(crate) struct ProbeArgs {
     pretty: bool,
 }
 
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ServiceArgs {
+    #[command(subcommand)]
+    command: ServiceCommand,
+}
+
+impl ServiceArgs {
+    pub(crate) fn command(&self) -> &ServiceCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum ServiceCommand {
+    /// Render Docker Compose YAML for store-aware object service access.
+    RenderCompose(ServiceRenderComposeArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ServiceRenderComposeArgs {
+    /// Path to a JSON array of store service definitions.
+    #[arg(long)]
+    stores_file: PathBuf,
+    /// Docker Compose project name.
+    #[arg(long)]
+    project_name: String,
+    /// SSD metadata path to mount into the service container.
+    #[arg(long)]
+    ssd_metadata_path: PathBuf,
+    /// HDD data path to mount into the service container.
+    #[arg(long)]
+    hdd_data_path: PathBuf,
+    /// Object service provider to render for.
+    #[arg(long)]
+    provider: ObjectServiceProviderId,
+    /// Compose service name.
+    #[arg(long, default_value = "object-service")]
+    service_name: String,
+    /// Container image for the selected object service.
+    #[arg(long)]
+    image: String,
+    /// API port to expose on 127.0.0.1.
+    #[arg(long)]
+    api_port: u16,
+}
+
+impl ServiceRenderComposeArgs {
+    pub(crate) fn stores_file(&self) -> &Path {
+        &self.stores_file
+    }
+
+    pub(crate) fn project_name(&self) -> &str {
+        &self.project_name
+    }
+
+    pub(crate) fn ssd_metadata_path(&self) -> &Path {
+        &self.ssd_metadata_path
+    }
+
+    pub(crate) fn hdd_data_path(&self) -> &Path {
+        &self.hdd_data_path
+    }
+
+    pub(crate) fn provider(&self) -> ObjectServiceProviderId {
+        self.provider
+    }
+
+    pub(crate) fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
+    pub(crate) fn image(&self) -> &str {
+        &self.image
+    }
+
+    pub(crate) fn api_port(&self) -> u16 {
+        self.api_port
+    }
+}
+
 impl ProbeArgs {
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -291,8 +374,8 @@ impl ProbeArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, IngestArgs, IngestCommand, ObjectCommand, PoolCommand, ProbeArgs, StoreArgs,
-        StoreCommand,
+        Cli, Command, IngestArgs, IngestCommand, ObjectCommand, PoolCommand, ProbeArgs,
+        ServiceCommand, StoreArgs, StoreCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -320,6 +403,48 @@ mod tests {
                 Cli::try_parse_from(["dasobjectstore", name]).expect("subcommand should parse");
 
             assert_eq!(cli.command(), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn parses_service_render_compose() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "render-compose",
+            "--stores-file",
+            "/tmp/stores.json",
+            "--project-name",
+            "dasobjectstore-dev",
+            "--ssd-metadata-path",
+            "/ssd/meta",
+            "--hdd-data-path",
+            "/hdd/data",
+            "--provider",
+            "garage",
+            "--service-name",
+            "garage",
+            "--image",
+            "garage:latest",
+            "--api-port",
+            "3900",
+        ])
+        .expect("service render-compose parses");
+
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command");
+        };
+        match args.command() {
+            ServiceCommand::RenderCompose(render) => {
+                assert_eq!(render.stores_file(), Path::new("/tmp/stores.json"));
+                assert_eq!(render.project_name(), "dasobjectstore-dev");
+                assert_eq!(render.ssd_metadata_path(), Path::new("/ssd/meta"));
+                assert_eq!(render.hdd_data_path(), Path::new("/hdd/data"));
+                assert_eq!(render.provider().name(), "garage");
+                assert_eq!(render.service_name(), "garage");
+                assert_eq!(render.image(), "garage:latest");
+                assert_eq!(render.api_port(), 3900);
+            }
         }
     }
 

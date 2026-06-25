@@ -168,7 +168,7 @@ developers
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.
 - [x] Map store definitions to bucket/service layout.
-- [ ] Add `dasobjectstore service render-compose`.
+- [x] Add `dasobjectstore service render-compose`.
 - [ ] Add `dasobjectstore service up`.
 - [ ] Add `dasobjectstore service down`.
 - [ ] Add `dasobjectstore service status --json`.

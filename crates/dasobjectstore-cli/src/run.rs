@@ -2,8 +2,8 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand,
-    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, StoreCommand, StoreDefaultsArgs,
-    StoreValidateArgs,
+    ObjectInspectArgs, PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand,
+    ServiceRenderComposeArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
@@ -14,6 +14,10 @@ use dasobjectstore_metadata::{
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
+use dasobjectstore_object_service::{
+    plan_store_service_layout, render_compose, ComposeRenderRequest, ComposeServiceConfig,
+    ObjectServiceError, StoreServiceDefinition,
+};
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
 #[cfg(target_os = "macos")]
@@ -47,6 +51,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Object(args)) => match args.command() {
             ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
+        },
+        Some(Command::Service(args)) => match args.command() {
+            ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
         },
         _ => Ok(()),
     }
@@ -131,6 +138,32 @@ fn run_object_inspect(args: &ObjectInspectArgs, writer: &mut impl Write) -> Resu
     } else {
         write_object_inspect_summary(&summary, writer)?;
     }
+
+    Ok(())
+}
+
+fn run_service_render_compose(
+    args: &ServiceRenderComposeArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let file = File::open(args.stores_file())?;
+    let definitions: Vec<StoreServiceDefinition> = serde_json::from_reader(file)?;
+    let layout = plan_store_service_layout(&definitions)?;
+    let request = ComposeRenderRequest {
+        project_name: args.project_name().to_string(),
+        ssd_metadata_path: args.ssd_metadata_path().to_string_lossy().to_string(),
+        hdd_data_path: args.hdd_data_path().to_string_lossy().to_string(),
+        store_bindings: layout.bucket_bindings,
+    };
+    let service = ComposeServiceConfig::new(
+        args.provider(),
+        args.service_name(),
+        args.image(),
+        args.api_port(),
+    );
+    let rendered = render_compose(&request, &service)?;
+
+    writer.write_all(rendered.compose_yaml.as_bytes())?;
 
     Ok(())
 }
@@ -321,6 +354,7 @@ pub(crate) enum CliError {
     IngestQueueRead(IngestQueueReadError),
     MetadataInspect(PoolInspectError),
     ObjectInspect(ObjectInspectError),
+    ObjectService(ObjectServiceError),
     SsdCapacityMeasurement(SsdCapacityMeasurementError),
     SsdCapacityPolicy(SsdCapacityPolicyError),
     #[cfg(feature = "debug-commands")]
@@ -339,6 +373,7 @@ impl Display for CliError {
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
+            Self::ObjectService(err) => write!(formatter, "{err}"),
             Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
             Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
@@ -386,6 +421,12 @@ impl From<ObjectInspectError> for CliError {
     }
 }
 
+impl From<ObjectServiceError> for CliError {
+    fn from(err: ObjectServiceError) -> Self {
+        Self::ObjectService(err)
+    }
+}
+
 impl From<SsdCapacityMeasurementError> for CliError {
     fn from(err: SsdCapacityMeasurementError) -> Self {
         Self::SsdCapacityMeasurement(err)
@@ -415,7 +456,7 @@ mod tests {
     use super::{run, write_pretty_report, CliError};
     use crate::cli::Cli;
     use clap::Parser;
-    use dasobjectstore_core::ids::{DiskId, PoolId};
+    use dasobjectstore_core::ids::{DiskId, PoolId, StoreId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
     use dasobjectstore_core::store::{
         CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
@@ -427,6 +468,7 @@ mod tests {
         MetadataArtifact, PoolManifest, DISK_MANIFEST_FILE_NAME, LIVE_SCHEMA_SQL,
         PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
     };
+    use dasobjectstore_object_service::StoreServiceDefinition;
     use dasobjectstore_platform::{
         EnclosureIdentity, HostPlatform, ObservedDisk, ObservedEnclosure, ProbeReport, Transport,
     };
@@ -736,6 +778,57 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn service_render_compose_writes_store_aware_yaml() {
+        let root = temp_root("service-render-compose");
+        fs::create_dir_all(&root).expect("create temp root");
+        let stores_file = root.join("stores.json");
+        write_store_definitions_file(
+            &stores_file,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("generated").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+                bucket_name: None,
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "render-compose",
+            "--stores-file",
+            stores_file.to_str().expect("utf8 stores path"),
+            "--project-name",
+            "dasobjectstore-dev",
+            "--ssd-metadata-path",
+            "/ssd/meta",
+            "--hdd-data-path",
+            "/hdd/data",
+            "--provider",
+            "garage",
+            "--service-name",
+            "garage",
+            "--image",
+            "garage:latest",
+            "--api-port",
+            "3900",
+        ])
+        .expect("service render-compose parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("service render-compose runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("name: dasobjectstore-dev"));
+        assert!(output.contains("image: garage:latest"));
+        assert!(output.contains("DASOBJECTSTORE_PROVIDER: garage"));
+        assert!(output.contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
+        assert!(
+            output.contains("credential_reference: secret://dasobjectstore/stores/generated/s3")
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     #[cfg(feature = "debug-commands")]
     #[test]
     fn pool_debug_marker_commands_update_live_metadata() {
@@ -843,6 +936,11 @@ mod tests {
     fn write_policy_file(path: &Path, policy: &StorePolicy) {
         let file = File::create(path).expect("create policy file");
         serde_json::to_writer_pretty(file, policy).expect("write policy file");
+    }
+
+    fn write_store_definitions_file(path: &Path, definitions: Vec<StoreServiceDefinition>) {
+        let file = File::create(path).expect("create store definitions file");
+        serde_json::to_writer_pretty(file, &definitions).expect("write store definitions file");
     }
 
     fn insert_store(connection: &Connection) {
