@@ -124,6 +124,8 @@ impl DiskArgs {
 pub(crate) enum DiskCommand {
     /// Plan drain work for a disk without copying or deleting data.
     Drain(DiskDrainArgs),
+    /// Force a disk into retired state after explicit risk confirmation.
+    ForceRetire(DiskForceRetireArgs),
     /// Plan replacement work from an old disk onto a named new disk.
     Replace(DiskReplaceArgs),
     /// Request retirement by moving a disk into draining state.
@@ -153,6 +155,46 @@ impl DiskDrainArgs {
 
     pub(crate) fn json(&self) -> bool {
         self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskForceRetireArgs {
+    /// Disk identifier to force retire.
+    disk_id: DiskId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Timestamp to record in metadata.
+    #[arg(long)]
+    recorded_at_utc: String,
+    /// Policy allowance for force retire.
+    #[arg(long)]
+    allow_force_retire: bool,
+    /// Action-time confirmation phrase: "confirm force retire".
+    #[arg(long)]
+    confirm: String,
+}
+
+impl DiskForceRetireArgs {
+    pub(crate) fn disk_id(&self) -> &DiskId {
+        &self.disk_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn recorded_at_utc(&self) -> &str {
+        &self.recorded_at_utc
+    }
+
+    pub(crate) fn allow_force_retire(&self) -> bool {
+        self.allow_force_retire
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
     }
 }
 
@@ -624,12 +666,48 @@ mod tests {
         };
         match args.command() {
             DiskCommand::Drain(_) => panic!("expected retire command"),
+            DiskCommand::ForceRetire(_) => panic!("expected retire command"),
             DiskCommand::Replace(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
                 assert_eq!(retire.disk_id().as_str(), "disk-a");
                 assert_eq!(retire.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
                 assert_eq!(retire.recorded_at_utc(), "2026-01-02T00:00:00Z");
             }
+        }
+    }
+
+    #[test]
+    fn parses_disk_force_retire() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "force-retire",
+            "disk-a",
+            "--live-sqlite-path",
+            "/tmp/live.sqlite",
+            "--recorded-at-utc",
+            "2026-01-02T00:00:00Z",
+            "--allow-force-retire",
+            "--confirm",
+            "confirm force retire",
+        ])
+        .expect("disk force-retire parses");
+
+        let Some(Command::Disk(args)) = cli.command() else {
+            panic!("expected disk command");
+        };
+        match args.command() {
+            DiskCommand::ForceRetire(force_retire) => {
+                assert_eq!(force_retire.disk_id().as_str(), "disk-a");
+                assert_eq!(
+                    force_retire.live_sqlite_path(),
+                    Path::new("/tmp/live.sqlite")
+                );
+                assert_eq!(force_retire.recorded_at_utc(), "2026-01-02T00:00:00Z");
+                assert!(force_retire.allow_force_retire());
+                assert_eq!(force_retire.confirm(), "confirm force retire");
+            }
+            _ => panic!("expected force-retire command"),
         }
     }
 

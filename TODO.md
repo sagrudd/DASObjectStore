@@ -191,7 +191,7 @@ developers
 - [x] Add `dasobjectstore disk retire <disk-id>`.
 - [x] Add `dasobjectstore disk drain <disk-id>`.
 - [x] Add `dasobjectstore disk replace <old-disk-id> --with <new-disk-id>`.
-- [ ] Add force-retire flow with policy allowance and action-time
+- [x] Add force-retire flow with policy allowance and action-time
   confirmation.
 - [ ] Add health summary, verbose, and JSON output.
 - [ ] Add tests for suspect disk evacuation.

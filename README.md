@@ -201,10 +201,13 @@ Explicit disk retirement is a first-class workflow:
 dasobjectstore disk retire <disk-id>
 dasobjectstore disk drain <disk-id>
 dasobjectstore disk replace <old-disk-id> --with <new-disk-id>
+dasobjectstore disk force-retire <disk-id> --allow-force-retire --confirm "confirm force retire"
 ```
 
 Protected stores must satisfy their policy before safe removal. Reproducible
-cache objects may be marked redownload-required.
+cache objects may be marked redownload-required. Force retirement bypasses the
+safe drain requirement and requires both policy allowance and action-time
+confirmation.
 
 ## Interfaces
 

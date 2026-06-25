@@ -1,6 +1,7 @@
 //! Risk gates for operations that can lose data or bypass normal safety paths.
 
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RiskyOperation {
@@ -115,6 +116,38 @@ pub enum RiskGateError {
         required_phrase: &'static str,
     },
 }
+
+impl Display for RiskGateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PolicyDoesNotAllow { operation } => {
+                write!(
+                    formatter,
+                    "risk policy does not allow operation {}",
+                    operation.name()
+                )
+            }
+            Self::MissingConfirmation {
+                required_phrase, ..
+            } => {
+                write!(
+                    formatter,
+                    "missing action confirmation; pass `{required_phrase}`"
+                )
+            }
+            Self::ConfirmationMismatch {
+                required_phrase, ..
+            } => {
+                write!(
+                    formatter,
+                    "action confirmation mismatch; pass `{required_phrase}`"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for RiskGateError {}
 
 #[cfg(test)]
 mod tests {

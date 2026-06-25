@@ -1,18 +1,20 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, DiskCommand, DiskDrainArgs, DiskReplaceArgs, DiskRetireArgs, IngestCommand,
-    IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectInspectArgs, PoolCommand,
-    PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs,
-    ServiceStatusArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
+    Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
+    IngestCommand, IngestQueueArgs, IngestStatusArgs, ObjectCommand, ObjectInspectArgs,
+    PoolCommand, PoolInspectArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
+    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
+    StoreValidateArgs,
 };
+use dasobjectstore_core::risk::{ActionConfirmation, RiskPolicy};
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
-    inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan, read_disk_replacement_plan,
-    read_ingest_queue, read_object_inspect, request_disk_retirement, DiskDrainAction,
-    DiskDrainError, DiskDrainObjectSummary, DiskDrainPlanSummary, DiskReplacementPlanSummary,
-    DiskRetirementError, DiskRetirementReport, IngestQueueReadError, ObjectInspectError,
-    ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
+    force_retire_disk, inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan,
+    read_disk_replacement_plan, read_ingest_queue, read_object_inspect, request_disk_retirement,
+    DiskDrainAction, DiskDrainError, DiskDrainObjectSummary, DiskDrainPlanSummary,
+    DiskReplacementPlanSummary, DiskRetirementError, DiskRetirementReport, IngestQueueReadError,
+    ObjectInspectError, ObjectInspectSummary, PoolInspectError, PoolInspectSummary, SsdCapacity,
     SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, SsdPressure,
 };
 #[cfg(feature = "debug-commands")]
@@ -46,6 +48,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Disk(args)) => match args.command() {
             DiskCommand::Drain(args) => run_disk_drain(args, writer),
+            DiskCommand::ForceRetire(args) => run_disk_force_retire(args, writer),
             DiskCommand::Replace(args) => run_disk_replace(args, writer),
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
@@ -210,6 +213,25 @@ fn run_disk_retire(args: &DiskRetireArgs, writer: &mut impl Write) -> Result<(),
         args.recorded_at_utc().to_string(),
     )?;
     write_disk_retirement_report(&report, writer)?;
+
+    Ok(())
+}
+
+fn run_disk_force_retire(
+    args: &DiskForceRetireArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let report = force_retire_disk(
+        args.live_sqlite_path(),
+        args.disk_id(),
+        args.recorded_at_utc().to_string(),
+        RiskPolicy {
+            allow_force_retire: args.allow_force_retire(),
+            ..RiskPolicy::default()
+        },
+        &ActionConfirmation::new(args.confirm()),
+    )?;
+    write_disk_force_retirement_report(&report, writer)?;
 
     Ok(())
 }
@@ -400,6 +422,21 @@ fn write_disk_retirement_report(
     writer: &mut impl Write,
 ) -> Result<(), io::Error> {
     writeln!(writer, "Disk retirement requested: {}", report.disk_id)?;
+    writeln!(writer, "Previous state: {}", report.previous_state)?;
+    writeln!(writer, "Next state: {:?}", report.next_state)?;
+    writeln!(writer, "Updated: {}", report.updated_at_utc)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        report.live_sqlite_path.to_string_lossy()
+    )
+}
+
+fn write_disk_force_retirement_report(
+    report: &DiskRetirementReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Disk force-retired: {}", report.disk_id)?;
     writeln!(writer, "Previous state: {}", report.previous_state)?;
     writeln!(writer, "Next state: {:?}", report.next_state)?;
     writeln!(writer, "Updated: {}", report.updated_at_utc)?;
@@ -887,6 +924,78 @@ mod tests {
         assert!(output.contains("Previous state: Healthy"));
         assert!(output.contains("Next state: Draining"));
         assert_eq!(disk_state(&connection, "disk-a"), "Draining");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_force_retire_requires_policy_allowance() {
+        let root = temp_root("disk-force-retire-denied");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_disk(&connection, "disk-a", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "force-retire",
+            "disk-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--recorded-at-utc",
+            "2026-01-02T00:00:00Z",
+            "--confirm",
+            "confirm force retire",
+        ])
+        .expect("disk force-retire parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("risk policy blocks force retire");
+
+        assert!(matches!(err, CliError::DiskRetirement(_)));
+        assert_eq!(disk_state(&connection, "disk-a"), "Healthy");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn disk_force_retire_marks_disk_retired_after_risk_confirmation() {
+        let root = temp_root("disk-force-retire");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_disk(&connection, "disk-a", "Healthy");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "force-retire",
+            "disk-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--recorded-at-utc",
+            "2026-01-02T00:00:00Z",
+            "--allow-force-retire",
+            "--confirm",
+            "confirm force retire",
+        ])
+        .expect("disk force-retire parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("disk force-retire runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Disk force-retired: disk-a"));
+        assert!(output.contains("Previous state: Healthy"));
+        assert!(output.contains("Next state: Retired"));
+        assert_eq!(disk_state(&connection, "disk-a"), "Retired");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

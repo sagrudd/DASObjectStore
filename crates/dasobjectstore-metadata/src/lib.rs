@@ -27,7 +27,9 @@ pub use copy::{
     verify_hdd_copy_hash, write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest,
     HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
-pub use disk::{request_disk_retirement, DiskRetirementError, DiskRetirementReport};
+pub use disk::{
+    force_retire_disk, request_disk_retirement, DiskRetirementError, DiskRetirementReport,
+};
 pub use drain::{
     read_disk_drain_plan, read_disk_replacement_plan, DiskDrainAction, DiskDrainError,
     DiskDrainObjectSummary, DiskDrainPlanSummary, DiskReplacementPlanSummary,
