@@ -37,11 +37,18 @@ pub(crate) struct ProbeArgs {
     /// Emit probe results as JSON.
     #[arg(long)]
     json: bool,
+    /// Emit probe results as human-readable text.
+    #[arg(long)]
+    pretty: bool,
 }
 
 impl ProbeArgs {
     pub(crate) fn json(&self) -> bool {
         self.json
+    }
+
+    pub(crate) fn pretty(&self) -> bool {
+        self.pretty
     }
 }
 
@@ -82,7 +89,24 @@ mod tests {
 
         assert_eq!(
             cli.command(),
-            Some(&Command::Probe(ProbeArgs { json: true }))
+            Some(&Command::Probe(ProbeArgs {
+                json: true,
+                pretty: false
+            }))
+        );
+    }
+
+    #[test]
+    fn parses_probe_pretty_flag() {
+        let cli =
+            Cli::try_parse_from(["dasobjectstore", "probe", "--pretty"]).expect("probe parses");
+
+        assert_eq!(
+            cli.command(),
+            Some(&Command::Probe(ProbeArgs {
+                json: false,
+                pretty: true
+            }))
         );
     }
 }

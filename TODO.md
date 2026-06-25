@@ -63,7 +63,7 @@ developers
   product, bridge hints, and user-assigned name.
 - [x] Implement best-effort enclosure grouping from USB topology.
 - [x] Add `dasobjectstore probe --json`.
-- [ ] Add `dasobjectstore probe --pretty`.
+- [x] Add `dasobjectstore probe --pretty`.
 - [ ] Add fixture-based tests for Linux probe parsing.
 - [ ] Add fixture-based tests for macOS probe parsing.
 - [ ] Document known SMART/USB identity limitations for common USB bridge
