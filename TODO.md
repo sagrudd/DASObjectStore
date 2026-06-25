@@ -44,9 +44,9 @@ developers
 - [x] Add serialization/deserialization tests for domain types.
 - [x] Add lifecycle transition tests for valid and invalid object state
   transitions.
-- [ ] Add CLI command skeletons for `probe`, `health`, `pool`, `disk`, `store`,
+- [x] Add CLI command skeletons for `probe`, `health`, `pool`, `disk`, `store`,
   `ingest`, and `mnemosyne`.
-- [ ] Keep `clap` CLI parsing separate from domain logic and persistence.
+- [x] Keep `clap` CLI parsing separate from domain logic and persistence.
 
 ## Milestone 3: Cross-Platform Disk and Enclosure Probe
 
