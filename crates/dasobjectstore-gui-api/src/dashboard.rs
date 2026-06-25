@@ -3,6 +3,14 @@ use dasobjectstore_core::ids::{DiskId, PoolId};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use serde::{Deserialize, Serialize};
 
+mod destage_queue;
+mod ingest_queue;
+
+pub use destage_queue::{DestageQueueObjectView, DestageQueueView, ObjectStateView};
+pub use ingest_queue::{
+    IngestJobStateView, IngestProgressView, IngestQueueJobView, IngestQueueView, QueuePressureView,
+};
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PoolStatusView {
     pub pool_id: String,
@@ -82,7 +90,7 @@ pub struct DashboardWarning {
 }
 
 impl DashboardWarning {
-    fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
