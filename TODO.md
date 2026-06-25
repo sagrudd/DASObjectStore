@@ -172,7 +172,7 @@ developers
 - [x] Add `dasobjectstore service up`.
 - [x] Add `dasobjectstore service down`.
 - [x] Add `dasobjectstore service status --json`.
-- [ ] Add integration test using local generated Compose where available.
+- [x] Add integration test using local generated Compose where available.
 - [ ] Document macOS Docker Desktop limitations for service orchestration.
 
 ## Milestone 10: Health, Drain, Repair, and Disk Retirement
