@@ -15,25 +15,7 @@ dry_run="${DASOBJECTSTORE_BENCH_DRY_RUN:-0}"
 
 require_positive_integer "object size" "$object_bytes"
 require_positive_integer "object count" "$object_count"
-
-case "$provider" in
-  garage)
-    endpoint="${DASOBJECTSTORE_S3_ENDPOINT:-http://127.0.0.1:3900}"
-    region="${AWS_DEFAULT_REGION:-garage}"
-    ;;
-  rustfs)
-    endpoint="${DASOBJECTSTORE_S3_ENDPOINT:-http://127.0.0.1:9000}"
-    region="${AWS_DEFAULT_REGION:-us-east-1}"
-    export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-rustfsadmin}"
-    export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-rustfsadmin}"
-    ;;
-  *)
-    echo "unsupported provider for $workload workload: $provider" >&2
-    exit 64
-    ;;
-esac
-
-export AWS_DEFAULT_REGION="$region"
+configure_provider_s3 "$provider" "$workload"
 payload_dir="$output_root/$provider/workloads/$workload"
 payload_path="$payload_dir/upload.bin"
 download_dir="$payload_dir/downloads"
@@ -52,37 +34,10 @@ if [ "$dry_run" = "1" ]; then
   exit 0
 fi
 
-if ! command -v aws >/dev/null 2>&1; then
-  echo "aws CLI is required for S3 benchmark workloads" >&2
-  exit 69
-fi
+require_command "aws" "aws CLI is required for S3 benchmark workloads"
 
 mkdir -p "$payload_dir" "$download_dir"
-
-file_size() {
-  wc -c < "$1" | tr -d ' '
-}
-
-if [ ! -f "$payload_path" ] || [ "$(file_size "$payload_path")" != "$object_bytes" ]; then
-  rm -f "$payload_path"
-  dd if=/dev/zero of="$payload_path" bs=1 count=0 seek="$object_bytes" 2>/dev/null
-fi
-
-hash_file() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    shasum -a 256 "$1" | awk '{print $1}'
-  fi
-}
-
-start_epoch() {
-  date +%s
-}
-
-aws_s3() {
-  aws --endpoint-url "$endpoint" s3api "$@"
-}
+ensure_sparse_file "$payload_path" "$object_bytes"
 
 object_key() {
   index="$1"

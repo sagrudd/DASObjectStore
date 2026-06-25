@@ -147,7 +147,7 @@ developers
 - [x] Implement large-object upload/download benchmark.
 - [x] Implement small-object upload/download benchmark.
 - [x] Implement concurrent-client benchmark.
-- [ ] Implement crash/restart during ingest benchmark.
+- [x] Implement crash/restart during ingest benchmark.
 - [ ] Implement interrupted-write benchmark.
 - [ ] Implement metadata recovery benchmark.
 - [ ] Implement disk-full behavior benchmark.

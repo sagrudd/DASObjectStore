@@ -35,6 +35,9 @@ case "$workload" in
   concurrent-client)
     exec "$(dirname "$0")/../workloads/concurrent-client.sh" "$provider"
     ;;
+  crash-restart-ingest)
+    exec "$(dirname "$0")/../workloads/crash-restart-ingest.sh" "$provider"
+    ;;
   *)
     echo "workload is not implemented yet: $provider / $workload" >&2
     exit 69

@@ -8,10 +8,10 @@ Implemented workloads:
 - `large-object`
 - `small-object`
 - `concurrent-client`
+- `crash-restart-ingest`
 
 Planned workloads:
 
-- `crash-restart-ingest`
 - `interrupted-write`
 - `metadata-recovery`
 - `disk-full`
@@ -39,3 +39,10 @@ SHA-256 and writes one TSV row per object.
 `concurrent-client.sh` starts multiple provider-neutral S3 round-trip clients in
 parallel. Each client writes distinct object keys and an isolated per-client
 report directory under `benchmarks/output/object-services/<provider>/`.
+
+## Crash/Restart During Ingest
+
+`crash-restart-ingest.sh` starts a large S3 upload, restarts the selected
+provider's Compose service while that upload is in flight, then verifies that a
+post-restart upload/download round trip succeeds. If the interrupted upload
+reports success, the script also downloads and verifies that object.

@@ -15,14 +15,7 @@ dry_run="${DASOBJECTSTORE_BENCH_DRY_RUN:-0}"
 require_positive_integer "client count" "$client_count"
 require_positive_integer "object size" "$object_bytes"
 require_positive_integer "object count" "$object_count"
-
-case "$provider" in
-  garage|rustfs) ;;
-  *)
-    echo "unsupported provider for concurrent-client workload: $provider" >&2
-    exit 64
-    ;;
-esac
+require_supported_provider "$provider" "concurrent-client"
 
 workload_dir="$output_root/$provider/workloads/concurrent-client"
 summary_path="$workload_dir/summary.tsv"
