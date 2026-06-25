@@ -146,16 +146,9 @@ received_on_ssd
   -> ssd_eviction_eligible
 ```
 
-CLI-managed public imports may bypass SSD ingest later:
-
-```bash
-dasobjectstore import-url \
-  --store public_reference_cache \
-  --sha256 <digest> \
-  https://example.org/dataset.tar.zst
-```
-
-That bypass is intentionally not the normal S3/API write path.
+CLI-managed public imports may bypass SSD ingest later for reproducible objects
+with an expected digest and source URL. That bypass is intentionally not the
+normal S3/API write path and is not exposed by the current CLI.
 
 ## Portability
 
@@ -209,10 +202,19 @@ opportunistically if capacity exists.
 Explicit disk retirement is a first-class workflow:
 
 ```bash
-dasobjectstore disk retire <disk-id>
-dasobjectstore disk drain <disk-id>
-dasobjectstore disk replace <old-disk-id> --with <new-disk-id>
-dasobjectstore disk force-retire <disk-id> --allow-force-retire --confirm "confirm force retire"
+dasobjectstore disk retire <disk-id> \
+  --live-sqlite-path <live.sqlite> \
+  --recorded-at-utc <timestamp>
+dasobjectstore disk drain <disk-id> \
+  --live-sqlite-path <live.sqlite>
+dasobjectstore disk replace <old-disk-id> \
+  --with <new-disk-id> \
+  --live-sqlite-path <live.sqlite>
+dasobjectstore disk force-retire <disk-id> \
+  --live-sqlite-path <live.sqlite> \
+  --recorded-at-utc <timestamp> \
+  --allow-force-retire \
+  --confirm "confirm force retire"
 ```
 
 Protected stores must satisfy their policy before safe removal. Reproducible

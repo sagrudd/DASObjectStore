@@ -454,11 +454,10 @@ The repository SHALL include or allow a separate adapter crate/module for
 Mnemosyne integration.
 
 Initial Mnemosyne support SHALL generate Mneion-compatible storage definition
-and binding snippets.
+and binding snippets through `dasobjectstore mnemosyne export`.
 
 Later Mnemosyne support MAY provide:
 
-- `dasobjectstore mnemosyne export`;
 - `dasobjectstore mnemosyne register`;
 - `dasobjectstore mnemosyne verify`.
 
