@@ -2,6 +2,7 @@
 
 pub mod capacity;
 pub mod copy;
+pub mod evacuation;
 pub mod format;
 mod hash;
 pub mod ingest;
@@ -23,6 +24,10 @@ pub use capacity::{
 pub use copy::{
     verify_hdd_copy_hash, write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest,
     HDD_COPY_CONTENT_HASH_ALGORITHM,
+};
+pub use evacuation::{
+    execute_evacuation_plan, DiskCopyRoot, EvacuationExecutionError, EvacuationExecutionReport,
+    EvacuationExecutionRequest, EvacuationObjectSource,
 };
 pub use format::{FormatVersion, MetadataArtifact};
 pub use ingest::{

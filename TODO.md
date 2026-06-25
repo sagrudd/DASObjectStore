@@ -186,7 +186,7 @@ developers
 - [x] Implement disk health state transitions.
 - [x] Block new protected placement on suspect disks.
 - [x] Implement protected-store evacuation planner.
-- [ ] Implement evacuation executor with copy verification.
+- [x] Implement evacuation executor with copy verification.
 - [ ] Implement reproducible-cache opportunistic evacuation.
 - [ ] Add `dasobjectstore disk retire <disk-id>`.
 - [ ] Add `dasobjectstore disk drain <disk-id>`.
