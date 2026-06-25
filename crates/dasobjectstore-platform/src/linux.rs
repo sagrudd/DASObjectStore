@@ -147,31 +147,7 @@ mod tests {
     use crate::model::{HostPlatform, Transport};
     use crate::probe::{CommandRunner, ProbeError, ProbeProvider};
 
-    const LSBLK_FIXTURE: &str = r#"{
-      "blockdevices": [
-        {
-          "name": "/dev/sda",
-          "path": "/dev/sda",
-          "size": 4000787030016,
-          "serial": "WD-OLD-001",
-          "model": "WDC WD40EFRX",
-          "type": "disk",
-          "tran": "usb",
-          "rm": false,
-          "hotplug": true,
-          "children": [
-            {
-              "name": "/dev/sda1",
-              "path": "/dev/sda1",
-              "size": 4000785997824,
-              "type": "part",
-              "fstype": "ext4",
-              "mountpoint": "/mnt/das/disk-a"
-            }
-          ]
-        }
-      ]
-    }"#;
+    const LSBLK_FIXTURE: &str = include_str!("../fixtures/linux/lsblk-usb-das.json");
 
     #[test]
     fn defines_stable_lsblk_json_command() {
