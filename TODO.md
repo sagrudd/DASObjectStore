@@ -143,7 +143,7 @@ developers
 
 - [x] Create `benchmarks/object-services` harness structure.
 - [x] Add Docker/Compose setup for Garage benchmark runs.
-- [ ] Add Docker/Compose setup for RustFS benchmark runs.
+- [x] Add Docker/Compose setup for RustFS benchmark runs.
 - [ ] Implement large-object upload/download benchmark.
 - [ ] Implement small-object upload/download benchmark.
 - [ ] Implement concurrent-client benchmark.

@@ -1,0 +1,26 @@
+services:
+  rustfs-perms:
+    image: alpine:3.20
+    user: root
+    restart: "no"
+    volumes:
+      - ../../../output/object-services/rustfs/data:/fix_path
+    command: chown -R 10001:10001 /fix_path
+
+  rustfs:
+    image: ${DASOBJECTSTORE_RUSTFS_IMAGE:-rustfs/rustfs:1.0.0-beta.8-glibc}
+    container_name: dasobjectstore-bench-rustfs
+    restart: "no"
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_CONSOLE_ENABLE: "true"
+    volumes:
+      - ../../../output/object-services/rustfs/data:/data
+    command: /data
