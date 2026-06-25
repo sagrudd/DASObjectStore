@@ -72,8 +72,8 @@ developers
 ## Milestone 4: Portable Metadata Format
 
 - [x] Create `dasobjectstore-metadata` crate.
-- [ ] Define SQLite schema for live SSD metadata.
-- [ ] Define metadata format version table and migration table.
+- [x] Define SQLite schema for live SSD metadata.
+- [x] Define metadata format version table and migration table.
 - [ ] Define canonical pool manifest format.
 - [ ] Define canonical disk manifest format.
 - [ ] Define append-only placement log format.

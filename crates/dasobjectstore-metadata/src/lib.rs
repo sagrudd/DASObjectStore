@@ -1,8 +1,10 @@
 //! Portable metadata boundary for DASObjectStore pools.
 
 pub mod format;
+pub mod schema;
 
 pub use format::{FormatVersion, MetadataArtifact};
+pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 
 /// Returns the metadata crate version.
 pub fn version() -> &'static str {

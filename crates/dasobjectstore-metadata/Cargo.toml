@@ -10,3 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 dasobjectstore-core.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
