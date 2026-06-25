@@ -184,7 +184,7 @@ developers
 - [x] Implement USB reset/disconnect event ingestion where feasible.
 - [x] Implement benchmark drift signal ingestion.
 - [x] Implement disk health state transitions.
-- [ ] Block new protected placement on suspect disks.
+- [x] Block new protected placement on suspect disks.
 - [ ] Implement protected-store evacuation planner.
 - [ ] Implement evacuation executor with copy verification.
 - [ ] Implement reproducible-cache opportunistic evacuation.

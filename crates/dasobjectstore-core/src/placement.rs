@@ -396,6 +396,35 @@ mod tests {
     }
 
     #[test]
+    fn protected_placement_gate_only_accepts_healthy_or_watch_disks() {
+        let expected = [
+            (HealthState::Healthy, true),
+            (HealthState::Watch, true),
+            (HealthState::Suspect, false),
+            (HealthState::Draining, false),
+            (HealthState::Retired, false),
+            (HealthState::Failed, false),
+        ];
+
+        for (health_state, accepts_protected_copy) in expected {
+            let candidate = candidate(
+                "disk-a",
+                None,
+                1_000,
+                health_state,
+                PerformanceClass::Unknown,
+                WriteLoad::Idle,
+            );
+
+            assert_eq!(
+                candidate.accepts_new_protected_copy(),
+                accepts_protected_copy,
+                "{health_state:?} protected placement gate mismatch"
+            );
+        }
+    }
+
+    #[test]
     fn protected_copy_rejects_disk_that_already_holds_object_copy() {
         let existing_disk_id = DiskId::new("disk-existing").expect("disk id");
         let request = PlacementRequest::protected(1_000).with_existing_copy_on(existing_disk_id);
