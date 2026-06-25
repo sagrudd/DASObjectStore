@@ -42,7 +42,7 @@ developers
 - [x] Define store class and store policy structs matching
   `docs/requirements.md`.
 - [x] Add serialization/deserialization tests for domain types.
-- [ ] Add lifecycle transition tests for valid and invalid object state
+- [x] Add lifecycle transition tests for valid and invalid object state
   transitions.
 - [ ] Add CLI command skeletons for `probe`, `health`, `pool`, `disk`, `store`,
   `ingest`, and `mnemosyne`.

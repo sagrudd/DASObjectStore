@@ -103,6 +103,17 @@ pub enum ImportMode {
 mod tests {
     use super::{HealthState, ObjectState};
 
+    const OBJECT_STATES: [ObjectState; 8] = [
+        ObjectState::ReceivedOnSsd,
+        ObjectState::HashVerified,
+        ObjectState::PlacementPlanned,
+        ObjectState::CopyingToHdd,
+        ObjectState::HddCopyVerified,
+        ObjectState::Protected,
+        ObjectState::SsdEvictionEligible,
+        ObjectState::RedownloadRequired,
+    ];
+
     #[test]
     fn permits_expected_object_transition() {
         assert!(ObjectState::ReceivedOnSsd.can_transition_to(ObjectState::HashVerified));
@@ -111,6 +122,69 @@ mod tests {
     #[test]
     fn rejects_out_of_order_object_transition() {
         assert!(!ObjectState::ReceivedOnSsd.can_transition_to(ObjectState::Protected));
+    }
+
+    #[test]
+    fn permits_full_object_settlement_path() {
+        let transitions = [
+            (ObjectState::ReceivedOnSsd, ObjectState::HashVerified),
+            (ObjectState::HashVerified, ObjectState::PlacementPlanned),
+            (ObjectState::PlacementPlanned, ObjectState::CopyingToHdd),
+            (ObjectState::CopyingToHdd, ObjectState::HddCopyVerified),
+            (ObjectState::HddCopyVerified, ObjectState::Protected),
+            (ObjectState::Protected, ObjectState::SsdEvictionEligible),
+        ];
+
+        for (current, next) in transitions {
+            assert!(
+                current.can_transition_to(next),
+                "{current:?} should transition to {next:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn permits_redownload_required_from_any_object_state() {
+        for current in OBJECT_STATES {
+            assert!(
+                current.can_transition_to(ObjectState::RedownloadRequired),
+                "{current:?} should transition to redownload-required"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_object_transition_skips_and_regressions() {
+        let transitions = [
+            (ObjectState::ReceivedOnSsd, ObjectState::PlacementPlanned),
+            (ObjectState::ReceivedOnSsd, ObjectState::Protected),
+            (ObjectState::HashVerified, ObjectState::ReceivedOnSsd),
+            (ObjectState::CopyingToHdd, ObjectState::Protected),
+            (ObjectState::Protected, ObjectState::HddCopyVerified),
+            (ObjectState::SsdEvictionEligible, ObjectState::Protected),
+            (ObjectState::RedownloadRequired, ObjectState::ReceivedOnSsd),
+        ];
+
+        for (current, next) in transitions {
+            assert!(
+                !current.can_transition_to(next),
+                "{current:?} should not transition to {next:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_object_state_replays_except_redownload_required_marker() {
+        for current in OBJECT_STATES {
+            if current == ObjectState::RedownloadRequired {
+                continue;
+            }
+
+            assert!(
+                !current.can_transition_to(current),
+                "{current:?} should not transition to itself"
+            );
+        }
     }
 
     #[test]
