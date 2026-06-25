@@ -66,7 +66,7 @@ developers
 - [x] Add `dasobjectstore probe --pretty`.
 - [x] Add fixture-based tests for Linux probe parsing.
 - [x] Add fixture-based tests for macOS probe parsing.
-- [ ] Document known SMART/USB identity limitations for common USB bridge
+- [x] Document known SMART/USB identity limitations for common USB bridge
   behavior.
 
 ## Milestone 4: Portable Metadata Format

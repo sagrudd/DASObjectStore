@@ -85,6 +85,10 @@ DASObjectStore SHALL identify disks using composite identity:
 DASObjectStore SHALL model enclosures using best-effort USB topology inference plus
 user confirmation and naming.
 
+DASObjectStore SHALL treat platform probe data as observed hints. USB bridge and
+SMART limitations SHALL be visible to users and are documented in
+[Platform Probing Notes](probing.md).
+
 ## 6. Portability Requirements
 
 DASObjectStore SHALL NOT rely on hidden host-local state as the sole authority for a

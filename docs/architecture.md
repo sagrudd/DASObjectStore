@@ -63,6 +63,9 @@ Responsibilities:
 Must not decide long-term placement policy or mutate persistent pool metadata
 directly.
 
+Probe results are best-effort observations. Known USB bridge and SMART
+limitations are documented in [Platform Probing Notes](probing.md).
+
 ### `dasobjectstore-metadata`
 
 Owns persistent pool metadata.
@@ -154,4 +157,3 @@ domain validation, persistence, service orchestration, or presentation.
 
 Small files with explicit names are preferred over broad modules with hidden
 cross-cutting behavior.
-
