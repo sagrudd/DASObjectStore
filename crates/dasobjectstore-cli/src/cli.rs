@@ -50,6 +50,9 @@ pub(crate) struct HealthArgs {
     /// Emit per-disk health details.
     #[arg(long)]
     verbose: bool,
+    /// Emit host connection and DAS transport warnings.
+    #[arg(long)]
+    connections: bool,
     /// Emit health report as JSON.
     #[arg(long)]
     json: bool,
@@ -62,6 +65,10 @@ impl HealthArgs {
 
     pub(crate) fn verbose(&self) -> bool {
         self.verbose
+    }
+
+    pub(crate) fn connections(&self) -> bool {
+        self.connections
     }
 
     pub(crate) fn json(&self) -> bool {
@@ -863,18 +870,20 @@ mod tests {
         };
         assert!(!args.summary());
         assert!(!args.verbose());
+        assert!(!args.connections());
         assert!(!args.json());
     }
 
     #[test]
     fn parses_health_output_flags() {
         let cases = [
-            ("--summary", true, false, false),
-            ("--verbose", false, true, false),
-            ("--json", false, false, true),
+            ("--summary", true, false, false, false),
+            ("--verbose", false, true, false, false),
+            ("--connections", false, false, true, false),
+            ("--json", false, false, false, true),
         ];
 
-        for (flag, summary, verbose, json) in cases {
+        for (flag, summary, verbose, connections, json) in cases {
             let cli =
                 Cli::try_parse_from(["dasobjectstore", "health", flag]).expect("health parses");
 
@@ -883,6 +892,7 @@ mod tests {
             };
             assert_eq!(args.summary(), summary);
             assert_eq!(args.verbose(), verbose);
+            assert_eq!(args.connections(), connections);
             assert_eq!(args.json(), json);
         }
     }

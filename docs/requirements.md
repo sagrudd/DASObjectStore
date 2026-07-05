@@ -443,6 +443,10 @@ Default health output SHALL provide a simple consumer summary.
 `dasobjectstore health --verbose` and `dasobjectstore health --json` SHALL provide
 detailed technical and machine-readable output.
 
+`dasobjectstore health --connections` SHALL report observed DAS host transport
+and SHALL warn when USB-attached storage may be using an unverified or slow link
+that will reduce object-service performance.
+
 DASObjectStore SHALL support configurable notification sinks.
 
 Initial notification support MAY be local logs only.

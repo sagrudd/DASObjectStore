@@ -197,6 +197,16 @@ Health inputs include:
 - latency and throughput drift;
 - user trust overrides.
 
+Connection health is exposed through:
+
+```bash
+dasobjectstore health --connections
+```
+
+USB-attached DAS devices are reported with an explicit performance warning when
+the host probe cannot verify the negotiated link speed. Users should prefer a
+fast USB-C, USB 3.x, USB4, or Thunderbolt path for object-service workloads.
+
 When a disk becomes suspect, DASObjectStore stops placing new protected data on it
 and automatically evacuates protected stores. Reproducible cache data is moved
 opportunistically if capacity exists.

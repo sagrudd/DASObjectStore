@@ -104,5 +104,10 @@ They should distinguish:
 - conflicting data;
 - unsupported platform or bridge behavior.
 
+`dasobjectstore health --connections` reports observed disk transport and warns
+when USB-attached DAS performance may be limited by an unverified or slow link.
+The warning is intentionally conservative because many platforms and USB bridge
+chips do not expose negotiated link speed reliably.
+
 Risky operations such as disk retirement, forced import, or protected-store
 placement should not depend on a single unstable hardware identifier.

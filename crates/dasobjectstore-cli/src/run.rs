@@ -13,9 +13,9 @@ mod output;
 use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
-    write_ingest_status, write_object_export_report, write_object_inspect_summary,
-    write_pool_import_report, write_pool_inspect_summary, write_pool_repair_dry_run,
-    write_pretty_report,
+    write_host_connection_status, write_ingest_status, write_object_export_report,
+    write_object_inspect_summary, write_pool_import_report, write_pool_inspect_summary,
+    write_pool_repair_dry_run, write_pretty_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -229,24 +229,134 @@ fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> 
 }
 
 fn run_health(args: &HealthArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let selected_modes = [args.summary(), args.verbose(), args.json()]
-        .into_iter()
-        .filter(|selected| *selected)
-        .count();
+    let selected_modes = [
+        args.summary(),
+        args.verbose(),
+        args.connections(),
+        args.json(),
+    ]
+    .into_iter()
+    .filter(|selected| *selected)
+    .count();
     if selected_modes > 1 {
         return Err(CliError::UnsupportedHealthFormat);
     }
 
-    let report = read_current_platform_health()?;
-    if args.json() {
+    if args.connections() {
+        let report = read_current_platform_connection_status()?;
+        write_host_connection_status(&report, writer)?;
+    } else if args.json() {
+        let report = read_current_platform_health()?;
         write_health_json(&report, writer)?;
     } else if args.verbose() {
+        let report = read_current_platform_health()?;
         write_health_verbose(&report, writer)?;
     } else {
+        let report = read_current_platform_health()?;
         write_health_summary(&report, writer)?;
     }
 
     Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HostConnectionStatus {
+    platform: HostPlatform,
+    disks: Vec<DiskConnectionStatus>,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DiskConnectionStatus {
+    device_path: Option<String>,
+    model_hint: Option<String>,
+    size_bytes: Option<u64>,
+    transport: Transport,
+    direct_attached_hint: Option<bool>,
+    removable_hint: Option<bool>,
+    enclosure_topology_path: Option<String>,
+    assessment: ConnectionAssessment,
+    warnings: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ConnectionAssessment {
+    Good,
+    Warning,
+    Unknown,
+}
+
+impl ConnectionAssessment {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Good => "good",
+            Self::Warning => "warning",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl DiskConnectionStatus {
+    fn from_observed(disk: &ObservedDisk) -> Self {
+        let mut warnings = Vec::new();
+        let assessment = match disk.transport {
+            Transport::Usb => {
+                warnings.push(
+                    "USB-attached DAS detected; this probe cannot verify negotiated USB link speed. Use a fast USB-C, USB 3.x, USB4, or Thunderbolt path because slow USB links will reduce ingest, destage, and object-service performance."
+                        .to_string(),
+                );
+                ConnectionAssessment::Warning
+            }
+            Transport::Thunderbolt | Transport::Sata | Transport::Nvme => {
+                ConnectionAssessment::Good
+            }
+            Transport::Unknown => {
+                warnings.push(
+                    "Disk transport is unknown; verify the DAS is not connected through a slow USB hub or fallback cable."
+                        .to_string(),
+                );
+                ConnectionAssessment::Unknown
+            }
+        };
+
+        Self {
+            device_path: disk.device_path.clone(),
+            model_hint: disk.model_hint.clone(),
+            size_bytes: disk.size_bytes,
+            transport: disk.transport,
+            direct_attached_hint: disk.direct_attached_hint,
+            removable_hint: disk.removable_hint,
+            enclosure_topology_path: disk.enclosure_topology_path.clone(),
+            assessment,
+            warnings,
+        }
+    }
+}
+
+fn read_current_platform_connection_status() -> Result<HostConnectionStatus, CliError> {
+    let mut probe = probe_current_platform()?;
+    probe.enclosures = group_enclosures(&probe.disks);
+
+    Ok(connection_status_from_probe(&probe))
+}
+
+fn connection_status_from_probe(probe: &ProbeReport) -> HostConnectionStatus {
+    let disks: Vec<DiskConnectionStatus> = probe
+        .disks
+        .iter()
+        .map(DiskConnectionStatus::from_observed)
+        .collect();
+    let warnings: Vec<String> = probe
+        .warnings
+        .iter()
+        .map(|warning| format!("{}: {}", warning.code, warning.message))
+        .collect();
+
+    HostConnectionStatus {
+        platform: probe.platform.clone(),
+        disks,
+        warnings,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -862,8 +972,9 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        run, write_health_json, write_health_summary, write_health_verbose, write_pretty_report,
-        CliError, DiskHealthSummary, HealthReport,
+        connection_status_from_probe, run, write_health_json, write_health_summary,
+        write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
+        ConnectionAssessment, DiskHealthSummary, HealthReport,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -918,6 +1029,73 @@ mod tests {
         let err = run(&cli, &mut output).expect_err("only one format is allowed");
 
         assert!(matches!(err, CliError::UnsupportedHealthFormat));
+    }
+
+    #[test]
+    fn health_connections_conflicts_with_other_health_formats() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "health", "--connections", "--json"])
+            .expect("health parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("only one format is allowed");
+
+        assert!(matches!(err, CliError::UnsupportedHealthFormat));
+    }
+
+    #[test]
+    fn connection_status_warns_for_usb_transport() {
+        let report = ProbeReport {
+            platform: HostPlatform::Macos,
+            disks: vec![ObservedDisk {
+                device_path: Some("/dev/disk4".to_string()),
+                size_bytes: Some(4_000_000_000_000),
+                serial_hint: Some("USB-DAS-1".to_string()),
+                model_hint: Some("QNAP DL800C".to_string()),
+                partition_hints: Vec::new(),
+                filesystem_hints: Vec::new(),
+                direct_attached_hint: Some(true),
+                removable_hint: Some(true),
+                transport: Transport::Usb,
+                enclosure_topology_path: Some("usb@001/002".to_string()),
+            }],
+            enclosures: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let status = connection_status_from_probe(&report);
+
+        assert_eq!(status.disks[0].assessment, ConnectionAssessment::Warning);
+        assert!(status.disks[0].warnings[0].contains("USB-attached DAS detected"));
+    }
+
+    #[test]
+    fn writes_connection_status_with_performance_warning() {
+        let report = ProbeReport {
+            platform: HostPlatform::Linux,
+            disks: vec![ObservedDisk {
+                device_path: Some("/dev/sdb".to_string()),
+                size_bytes: Some(1_000_000_000_000),
+                serial_hint: None,
+                model_hint: Some("ORICO 5 Bay".to_string()),
+                partition_hints: Vec::new(),
+                filesystem_hints: Vec::new(),
+                direct_attached_hint: Some(true),
+                removable_hint: Some(false),
+                transport: Transport::Usb,
+                enclosure_topology_path: Some("usb@003/004".to_string()),
+            }],
+            enclosures: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let status = connection_status_from_probe(&report);
+        let mut output = Vec::new();
+
+        write_host_connection_status(&status, &mut output).expect("status writes");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("transport=Usb"));
+        assert!(output.contains("assessment=warning"));
+        assert!(output.contains("slow USB links will reduce"));
     }
 
     #[test]

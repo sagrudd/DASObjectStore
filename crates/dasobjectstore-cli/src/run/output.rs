@@ -1,4 +1,4 @@
-use super::{CliError, DiskHealthSummary, HealthReport};
+use super::{CliError, DiskHealthSummary, HealthReport, HostConnectionStatus};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use dasobjectstore_metadata::{
     DiskDrainAction, DiskDrainObjectSummary, DiskDrainPlanSummary, DiskReplacementPlanSummary,
@@ -216,6 +216,53 @@ pub(super) fn write_health_json(
     Ok(())
 }
 
+pub(super) fn write_host_connection_status(
+    report: &HostConnectionStatus,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Platform: {:?}", report.platform)?;
+    writeln!(writer, "Disks: {}", report.disks.len())?;
+    writeln!(
+        writer,
+        "Connection warnings: {}",
+        connection_warning_count(report)
+    )?;
+    for disk in &report.disks {
+        writeln!(
+            writer,
+            "- {} transport={:?} assessment={} direct_attached={} removable={} size_bytes={}",
+            disk.device_path.as_deref().unwrap_or("<unknown>"),
+            disk.transport,
+            disk.assessment.as_str(),
+            optional_bool(disk.direct_attached_hint),
+            optional_bool(disk.removable_hint),
+            disk.size_bytes
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )?;
+        writeln!(
+            writer,
+            "  Model: {}",
+            disk.model_hint.as_deref().unwrap_or("<unknown>")
+        )?;
+        writeln!(
+            writer,
+            "  Enclosure topology: {}",
+            disk.enclosure_topology_path
+                .as_deref()
+                .unwrap_or("<unknown>")
+        )?;
+        for warning in &disk.warnings {
+            writeln!(writer, "  Warning: {warning}")?;
+        }
+    }
+    for warning in &report.warnings {
+        writeln!(writer, "Report warning: {warning}")?;
+    }
+
+    Ok(())
+}
+
 fn health_disk_json(disk: &DiskHealthSummary) -> serde_json::Value {
     serde_json::json!({
         "device_path": disk.device_path.clone(),
@@ -259,6 +306,23 @@ fn smart_status_name(smart_passed: Option<bool>) -> &'static str {
         Some(false) => "failing",
         None => "unknown",
     }
+}
+
+fn optional_bool(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "unknown",
+    }
+}
+
+fn connection_warning_count(report: &HostConnectionStatus) -> usize {
+    report.warnings.len()
+        + report
+            .disks
+            .iter()
+            .map(|disk| disk.warnings.len())
+            .sum::<usize>()
 }
 
 pub(super) fn write_disk_retirement_report(
