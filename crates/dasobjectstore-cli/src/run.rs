@@ -2,20 +2,20 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
-    HealthArgs, IngestCommand, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
-    MnemosyneExportArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs, PoolCommand,
-    PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
-    StoreValidateArgs,
+    HealthArgs, IngestCommand, IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs,
+    MnemosyneCommand, MnemosyneExportArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs,
+    PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
+    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
+    StoreDefaultsArgs, StoreValidateArgs,
 };
 mod output;
 
 use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
-    write_host_connection_status, write_ingest_status, write_object_export_report,
-    write_object_inspect_summary, write_pool_import_report, write_pool_inspect_summary,
-    write_pool_repair_dry_run, write_pretty_report,
+    write_host_connection_status, write_ingest_direct_import_report, write_ingest_status,
+    write_object_export_report, write_object_inspect_summary, write_pool_import_report,
+    write_pool_inspect_summary, write_pool_repair_dry_run, write_pretty_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -24,11 +24,13 @@ use dasobjectstore_core::risk::{ActionConfirmation, RiskPolicy};
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, force_retire_disk,
-    import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity, read_disk_drain_plan,
-    read_disk_replacement_plan, read_ingest_queue, read_object_inspect, request_disk_retirement,
-    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueReadError, ObjectExportError,
-    ObjectExportRequest, ObjectInspectError, PoolInspectError, ReadOnlyAttachError,
-    ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
+    import_dirty_pool_read_only, import_reproducible_object_direct_to_hdd, inspect_pool_metadata,
+    measure_ssd_capacity, read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue,
+    read_object_inspect, request_disk_retirement, DestagePriorityPolicy, DirectHddImportError,
+    DirectHddImportRequest, DiskCopyRoot, DiskDrainError, DiskRetirementError,
+    IngestQueueReadError, ObjectExportError, ObjectExportRequest, ObjectInspectError,
+    PoolInspectError, ReadOnlyAttachError, ReadOnlyAttachOptions, SsdCapacityMeasurementError,
+    SsdCapacityPolicy, SsdCapacityPolicyError,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -85,6 +87,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Ingest(args)) => match args.command() {
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
             Some(IngestCommand::Queue(args)) => run_ingest_queue(args, writer),
+            Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
             None => Ok(()),
         },
         Some(Command::Object(args)) => match args.command() {
@@ -615,8 +618,9 @@ fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result
     )?;
     let capacity = measure_ssd_capacity(args.ssd_root())?;
     let pressure = policy.evaluate(&capacity)?;
+    let destage_policy = DestagePriorityPolicy::default();
 
-    write_ingest_status(&capacity, &policy, pressure, writer)?;
+    write_ingest_status(&capacity, &policy, pressure, &destage_policy, writer)?;
 
     Ok(())
 }
@@ -629,6 +633,40 @@ fn run_ingest_queue(args: &IngestQueueArgs, writer: &mut impl Write) -> Result<(
     let snapshot = read_ingest_queue(args.live_sqlite_path())?;
     serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
     writer.write_all(b"\n")?;
+
+    Ok(())
+}
+
+fn run_ingest_direct_import(
+    args: &IngestDirectImportArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let file = File::open(args.policy_file())?;
+    let policy: StorePolicy = serde_json::from_reader(file)?;
+    let mut request = DirectHddImportRequest::new(
+        args.object_id().clone(),
+        args.disk_id().clone(),
+        args.source(),
+        args.destination(),
+        args.expected_sha256(),
+        policy,
+        RiskPolicy {
+            allow_direct_to_hdd_import: args.allow_direct_to_hdd_import(),
+            ..RiskPolicy::default()
+        },
+        ActionConfirmation::new(args.confirm()),
+    );
+    if let Some(source_uri) = args.source_uri() {
+        request = request.with_source_uri(source_uri);
+    }
+
+    let report = import_reproducible_object_direct_to_hdd(&request)?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_ingest_direct_import_report(&report, writer)?;
+    }
 
     Ok(())
 }
@@ -794,6 +832,7 @@ pub(crate) enum CliError {
     PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
     DiskRetirement(DiskRetirementError),
+    DirectHddImport(DirectHddImportError),
     ObjectExport(ObjectExportError),
     ObjectInspect(ObjectInspectError),
     ObjectService(ObjectServiceError),
@@ -830,6 +869,7 @@ impl Display for CliError {
             Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
+            Self::DirectHddImport(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
@@ -909,6 +949,12 @@ impl From<DiskRetirementError> for CliError {
     }
 }
 
+impl From<DirectHddImportError> for CliError {
+    fn from(err: DirectHddImportError) -> Self {
+        Self::DirectHddImport(err)
+    }
+}
+
 impl From<DiskDrainError> for CliError {
     fn from(err: DiskDrainError) -> Self {
         Self::DiskDrain(err)
@@ -982,7 +1028,7 @@ mod tests {
     use dasobjectstore_core::ids::{DiskId, PoolId, StoreId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
     use dasobjectstore_core::store::{
-        CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
+        CapacityBehavior, IngestMode, StoreClass, StorePolicy, StorePolicyValidationError,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -1668,6 +1714,90 @@ mod tests {
     }
 
     #[test]
+    fn ingest_direct_import_writes_verified_reproducible_object() {
+        let root = temp_root("ingest-direct-import");
+        fs::create_dir_all(&root).expect("create temp root");
+        let source_path = root.join("downloads").join("reference.fa.zst");
+        let destination_path = root.join("hdd-a").join("objects").join("reference.fa.zst");
+        let policy_file = root.join("reproducible-cache.json");
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source dir");
+        fs::write(&source_path, b"public reference payload").expect("write source payload");
+        write_policy_file(&policy_file, &direct_reproducible_policy());
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "direct-import",
+            "object-a",
+            "--disk-id",
+            "disk-a",
+            "--source",
+            source_path.to_str().expect("utf8 source path"),
+            "--destination",
+            destination_path.to_str().expect("utf8 destination path"),
+            "--expected-sha256",
+            "c13ac914d37ad9fd216d274f2fbeb0b936ac9275e27ff7003831701ccad71def",
+            "--source-uri",
+            "https://example.invalid/reference.fa.zst",
+            "--policy-file",
+            policy_file.to_str().expect("utf8 policy path"),
+            "--allow-direct-to-hdd-import",
+            "--confirm",
+            "confirm direct-to-hdd import",
+        ])
+        .expect("direct import parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("direct import runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Direct-to-HDD import complete"));
+        assert!(output.contains("Object: object-a"));
+        assert!(output.contains("Warning: SSD ingest was bypassed"));
+        assert_eq!(
+            fs::read(&destination_path).expect("read destination"),
+            b"public reference payload"
+        );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ingest_direct_import_requires_risk_allowance() {
+        let root = temp_root("ingest-direct-import-risk");
+        fs::create_dir_all(&root).expect("create temp root");
+        let source_path = root.join("source");
+        let policy_file = root.join("policy.json");
+        fs::write(&source_path, b"public reference payload").expect("write source payload");
+        write_policy_file(&policy_file, &direct_reproducible_policy());
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "direct-import",
+            "object-a",
+            "--disk-id",
+            "disk-a",
+            "--source",
+            source_path.to_str().expect("utf8 source path"),
+            "--destination",
+            root.join("dest").to_str().expect("utf8 destination path"),
+            "--expected-sha256",
+            "c13ac914d37ad9fd216d274f2fbeb0b936ac9275e27ff7003831701ccad71def",
+            "--policy-file",
+            policy_file.to_str().expect("utf8 policy path"),
+            "--confirm",
+            "confirm direct-to-hdd import",
+        ])
+        .expect("direct import parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("risk allowance required");
+
+        assert!(matches!(err, CliError::DirectHddImport(_)));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn ingest_queue_requires_json_flag() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
@@ -2097,6 +2227,12 @@ mod tests {
     fn write_policy_file(path: &Path, policy: &StorePolicy) {
         let file = File::create(path).expect("create policy file");
         serde_json::to_writer_pretty(file, policy).expect("write policy file");
+    }
+
+    fn direct_reproducible_policy() -> StorePolicy {
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        policy
     }
 
     fn write_store_definitions_file(path: &Path, definitions: Vec<StoreServiceDefinition>) {

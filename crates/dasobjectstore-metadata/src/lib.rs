@@ -3,6 +3,7 @@
 pub mod attach;
 pub mod capacity;
 pub mod copy;
+pub mod direct_import;
 pub mod disk;
 pub mod drain;
 pub mod evacuation;
@@ -32,6 +33,10 @@ pub use capacity::{
 pub use copy::{
     verify_hdd_copy_hash, write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest,
     HDD_COPY_CONTENT_HASH_ALGORITHM,
+};
+pub use direct_import::{
+    import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
+    DirectHddImportRequest,
 };
 pub use disk::{
     force_retire_disk, request_disk_retirement, DiskRetirementError, DiskRetirementReport,
@@ -69,9 +74,10 @@ pub use object::{
 };
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use queue::{
-    read_ingest_queue, IngestAdmission, IngestBackpressurePolicy, IngestQueueEntry, IngestQueueJob,
-    IngestQueuePlan, IngestQueueReadError, IngestQueueSnapshot,
-    DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY, DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
+    read_ingest_queue, DestagePriorityPolicy, DestageUrgency, IngestAdmission,
+    IngestBackpressurePolicy, IngestQueueEntry, IngestQueueJob, IngestQueuePlan,
+    IngestQueueReadError, IngestQueueSnapshot, DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY,
+    DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
 };
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{

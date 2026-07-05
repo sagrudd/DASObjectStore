@@ -212,7 +212,17 @@ The store policy model represents these modes as `AfterSsdIngest` and
 `AfterHddPlacement`.
 
 DASObjectStore SHALL support CLI-managed direct-to-HDD imports as an initial bypass
-for large reproducible downloads.
+for massive public or otherwise reproducible datasets.
+
+Direct-to-HDD import SHALL initially be limited to `reproducible_cache` stores
+whose policy explicitly uses `DirectToHdd` ingest.
+
+Direct-to-HDD import SHALL require an expected SHA-256 content hash before
+writing to HDD.
+
+Direct-to-HDD import SHOULD record source metadata such as URL, accession, or
+provenance URI when available so lost cache objects can be redownloaded or
+rehydrated.
 
 Direct-to-HDD bypass SHALL NOT be the default S3/API write path.
 
@@ -222,6 +232,9 @@ known source metadata and expected digests.
 
 Risky bypass behavior SHALL require both policy allowance and action-time
 confirmation.
+
+Direct-to-HDD import SHALL write to the selected HDD destination, verify the
+result against the expected hash, and only then report the import as successful.
 
 ## 11. Object Lifecycle Requirements
 
@@ -324,10 +337,22 @@ pressure to jeopardize critical work.
 DASObjectStore SHALL measure SSD ingest filesystem capacity and evaluate it
 against explicit high and critical watermarks before accepting new ingest work.
 
+When SSD pressure is below the high watermark, DASObjectStore SHALL treat HDD
+settlement/destage as opportunistic background work so SSD landing remains fast.
+
+When SSD pressure reaches the high watermark, DASObjectStore SHALL prioritize
+HDD settlement/destage over lower-priority new ingest work.
+
+When SSD pressure reaches the critical watermark, DASObjectStore SHALL treat
+HDD settlement/destage as urgent and reject or pause non-critical ingest.
+
 DASObjectStore SHALL order ingest work by priority, then by age, and SHALL ignore
 completed or failed ingest jobs when planning runnable queue work.
 
 DASObjectStore SHALL expose CLI ingest status for SSD capacity and pressure state.
+
+CLI ingest status SHALL report destage urgency so operators can see when SSD
+storage is stretched and settlement has been promoted.
 
 DASObjectStore SHALL expose the live ingest queue as JSON for CLI, daemon, and
 future Web UI consumers.

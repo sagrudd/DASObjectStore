@@ -412,6 +412,8 @@ pub(crate) enum IngestCommand {
     Status(IngestStatusArgs),
     /// Emit live ingest queue entries as JSON.
     Queue(IngestQueueArgs),
+    /// Import a reproducible object directly to HDD, bypassing SSD ingest.
+    DirectImport(IngestDirectImportArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -461,6 +463,81 @@ pub(crate) struct IngestQueueArgs {
 impl IngestQueueArgs {
     pub(crate) fn live_sqlite_path(&self) -> &Path {
         &self.live_sqlite_path
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestDirectImportArgs {
+    /// Object identifier to assign to the imported object.
+    object_id: ObjectId,
+    /// Disk receiving this direct import copy.
+    #[arg(long)]
+    disk_id: DiskId,
+    /// Local source file to import.
+    #[arg(long)]
+    source: PathBuf,
+    /// Final HDD destination path to write.
+    #[arg(long)]
+    destination: PathBuf,
+    /// Expected SHA-256 content hash for the source object.
+    #[arg(long)]
+    expected_sha256: String,
+    /// Optional public source URL, accession, or provenance URI.
+    #[arg(long)]
+    source_uri: Option<String>,
+    /// JSON store policy file; must be reproducible_cache with direct-to-HDD ingest.
+    #[arg(long)]
+    policy_file: PathBuf,
+    /// Allow bypassing SSD ingest for this import.
+    #[arg(long)]
+    allow_direct_to_hdd_import: bool,
+    /// Required confirmation phrase: confirm direct-to-hdd import.
+    #[arg(long)]
+    confirm: String,
+    /// Emit import report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl IngestDirectImportArgs {
+    pub(crate) fn object_id(&self) -> &ObjectId {
+        &self.object_id
+    }
+
+    pub(crate) fn disk_id(&self) -> &DiskId {
+        &self.disk_id
+    }
+
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
+    }
+
+    pub(crate) fn destination(&self) -> &Path {
+        &self.destination
+    }
+
+    pub(crate) fn expected_sha256(&self) -> &str {
+        &self.expected_sha256
+    }
+
+    pub(crate) fn source_uri(&self) -> Option<&str> {
+        self.source_uri.as_deref()
+    }
+
+    pub(crate) fn policy_file(&self) -> &Path {
+        &self.policy_file
+    }
+
+    pub(crate) fn allow_direct_to_hdd_import(&self) -> bool {
+        self.allow_direct_to_hdd_import
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
     }
 
     pub(crate) fn json(&self) -> bool {
@@ -1250,6 +1327,64 @@ mod tests {
                 assert!(queue.json());
             }
             _ => panic!("expected queue command"),
+        }
+    }
+
+    #[test]
+    fn parses_ingest_direct_import() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "direct-import",
+            "object-a",
+            "--disk-id",
+            "disk-a",
+            "--source",
+            "/tmp/downloads/reference.fa.zst",
+            "--destination",
+            "/mnt/disk-a/objects/reference.fa.zst",
+            "--expected-sha256",
+            "abc123",
+            "--source-uri",
+            "https://example.invalid/reference.fa.zst",
+            "--policy-file",
+            "/tmp/reproducible-cache.json",
+            "--allow-direct-to-hdd-import",
+            "--confirm",
+            "confirm direct-to-hdd import",
+            "--json",
+        ])
+        .expect("ingest direct-import parses");
+
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        match args.command() {
+            Some(IngestCommand::DirectImport(import)) => {
+                assert_eq!(import.object_id().as_str(), "object-a");
+                assert_eq!(import.disk_id().as_str(), "disk-a");
+                assert_eq!(
+                    import.source(),
+                    Path::new("/tmp/downloads/reference.fa.zst")
+                );
+                assert_eq!(
+                    import.destination(),
+                    Path::new("/mnt/disk-a/objects/reference.fa.zst")
+                );
+                assert_eq!(import.expected_sha256(), "abc123");
+                assert_eq!(
+                    import.source_uri(),
+                    Some("https://example.invalid/reference.fa.zst")
+                );
+                assert_eq!(
+                    import.policy_file(),
+                    Path::new("/tmp/reproducible-cache.json")
+                );
+                assert!(import.allow_direct_to_hdd_import());
+                assert_eq!(import.confirm(), "confirm direct-to-hdd import");
+                assert!(import.json());
+            }
+            _ => panic!("expected direct-import command"),
         }
     }
 

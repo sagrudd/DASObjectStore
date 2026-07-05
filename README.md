@@ -146,11 +146,28 @@ received_on_ssd
   -> ssd_eviction_eligible
 ```
 
-CLI-managed public imports may bypass SSD ingest later for reproducible objects
-with an expected digest and source URL. That bypass is intentionally not the
-normal S3/API write path and is not exposed by the current CLI. If implemented,
-it must remain limited to reproducible data because it bypasses the normal SSD
-capture and acknowledgement path.
+When SSD pressure is low, HDD settlement is opportunistic so landing new data on
+SSD stays fast. At the high watermark, destage/settlement is prioritized over
+lower-priority ingest. At the critical watermark, destage is urgent and normal
+ingest should pause or reject non-critical work.
+
+CLI-managed public imports may bypass SSD ingest for reproducible objects with
+an expected digest and source URL:
+
+```bash
+dasobjectstore ingest direct-import <object-id> \
+  --disk-id <disk-id> \
+  --source <downloaded-file> \
+  --destination <hdd-object-path> \
+  --expected-sha256 <sha256> \
+  --source-uri <url-or-accession> \
+  --policy-file <reproducible-cache-direct-policy.json> \
+  --allow-direct-to-hdd-import \
+  --confirm "confirm direct-to-hdd import"
+```
+
+That bypass is intentionally not the normal S3/API write path. It is limited to
+reproducible cache data because it bypasses SSD capture and acknowledgement.
 
 ## Portability
 

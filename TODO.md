@@ -116,8 +116,10 @@ developers
 - [x] Implement store-configurable acknowledgement policy.
 - [x] Implement SSD capacity measurement and high-watermark policy.
 - [x] Implement priority queue and backpressure behavior for SSD pressure.
+- [x] Promote HDD destage urgency as SSD pressure rises.
 - [x] Add `dasobjectstore ingest status`.
 - [x] Add `dasobjectstore ingest queue --json`.
+- [x] Add guarded direct-to-HDD import for reproducible cache objects.
 - [x] Add crash/restart test for an ingest job before HDD settlement.
 - [x] Add crash/restart test for an ingest job after metadata commit.
 - [x] Document exactly what is lost if SSD fails before settlement.

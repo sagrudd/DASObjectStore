@@ -106,6 +106,47 @@ pub enum IngestAdmission {
     Reject,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub enum DestageUrgency {
+    Opportunistic,
+    Prioritized,
+    Urgent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct DestagePriorityPolicy {
+    pub accepting_writes_urgency: DestageUrgency,
+    pub high_watermark_urgency: DestageUrgency,
+    pub critical_watermark_urgency: DestageUrgency,
+}
+
+impl DestagePriorityPolicy {
+    pub fn urgency(&self, pressure: SsdPressure) -> DestageUrgency {
+        match pressure {
+            SsdPressure::AcceptingWrites => self.accepting_writes_urgency,
+            SsdPressure::HighWatermark => self.high_watermark_urgency,
+            SsdPressure::Critical => self.critical_watermark_urgency,
+        }
+    }
+
+    pub fn prioritizes_destage(&self, pressure: SsdPressure) -> bool {
+        matches!(
+            self.urgency(pressure),
+            DestageUrgency::Prioritized | DestageUrgency::Urgent
+        )
+    }
+}
+
+impl Default for DestagePriorityPolicy {
+    fn default() -> Self {
+        Self {
+            accepting_writes_urgency: DestageUrgency::Opportunistic,
+            high_watermark_urgency: DestageUrgency::Prioritized,
+            critical_watermark_urgency: DestageUrgency::Urgent,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct IngestQueuePlan {
     pub pressure: SsdPressure,
@@ -285,7 +326,10 @@ fn optional_u64(field: &'static str, value: Option<i64>) -> Result<Option<u64>, 
 
 #[cfg(test)]
 mod tests {
-    use super::{read_ingest_queue, IngestAdmission, IngestBackpressurePolicy, IngestQueueEntry};
+    use super::{
+        read_ingest_queue, DestagePriorityPolicy, DestageUrgency, IngestAdmission,
+        IngestBackpressurePolicy, IngestQueueEntry,
+    };
     use crate::SsdPressure;
     use crate::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::IngestJobId;
@@ -404,6 +448,27 @@ mod tests {
             policy.admission(SsdPressure::Critical, 100),
             IngestAdmission::Accept
         );
+    }
+
+    #[test]
+    fn destage_policy_promotes_settlement_as_ssd_pressure_rises() {
+        let policy = DestagePriorityPolicy::default();
+
+        assert_eq!(
+            policy.urgency(SsdPressure::AcceptingWrites),
+            DestageUrgency::Opportunistic
+        );
+        assert_eq!(
+            policy.urgency(SsdPressure::HighWatermark),
+            DestageUrgency::Prioritized
+        );
+        assert_eq!(
+            policy.urgency(SsdPressure::Critical),
+            DestageUrgency::Urgent
+        );
+        assert!(!policy.prioritizes_destage(SsdPressure::AcceptingWrites));
+        assert!(policy.prioritizes_destage(SsdPressure::HighWatermark));
+        assert!(policy.prioritizes_destage(SsdPressure::Critical));
     }
 
     #[test]
