@@ -291,7 +291,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Implement TLS asset generation/loading for standalone HTTPS.
 - [x] Implement local auth store modeled on Mnematikon: users, registration
   tokens, password hashes, session token hashes, expiry, and logout.
-- [ ] Add standalone `axum` routes for `/api/register`, `/api/login`,
+- [x] Add standalone `axum` routes for `/api/register`, `/api/login`,
   `/api/logout`, and `/api/session`.
 - [ ] Disable local auth routes when host mode is `synoptikon_integrated`.
 - [ ] Add integrated-session issue/acceptance path for Synoptikon-provided

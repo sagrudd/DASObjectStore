@@ -2,6 +2,7 @@
 
 pub mod actions;
 pub mod auth;
+pub mod auth_routes;
 pub mod dashboard;
 pub mod routes;
 pub mod server_config;
@@ -16,6 +17,10 @@ pub use auth::{
     AuthRegistry, AuthTokenResetReport, AuthenticatedUser, LocalAuthStore, LocalAuthStoreError,
     LoginResponse, LogoutResponse, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
     SessionTokenRecord, UserSummary,
+};
+pub use auth_routes::{
+    standalone_auth_router, standalone_gui_api_router, AuthRouteError, LoginRequest, LogoutRequest,
+    RegisterRequest, SessionCheckRequest,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
