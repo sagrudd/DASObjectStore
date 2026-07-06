@@ -266,7 +266,7 @@ authentication-boundary, and Mneion endpoint integration work.
   Web UI design language.
 - [x] Create `product-manifest.json` for DASObjectStore using
   `mnemosyne.product.manifest.v1`.
-- [ ] Add manifest validation tests against the Mnemosyne product schema
+- [x] Add manifest validation tests against the Mnemosyne product schema
   expectations in `../mnemosyne`.
 - [ ] Add product UI bootstrap export support for `/products/dasobjectstore`
   and `/products/dasobjectstore/api`.
