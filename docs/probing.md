@@ -109,5 +109,11 @@ when USB-attached DAS performance may be limited by an unverified or slow link.
 The warning is intentionally conservative because many platforms and USB bridge
 chips do not expose negotiated link speed reliably.
 
+When the same probe observes a better attached path, such as a Thunderbolt DAS
+connection, connection health should point the user at that observed device and
+topology path. If no better path is visible, the command should say so and
+recommend trying a direct USB-C, USB4, or Thunderbolt host port without hubs or
+fallback cables rather than pretending it can enumerate unused physical ports.
+
 Risky operations such as disk retirement, forced import, or protected-store
 placement should not depend on a single unstable hardware identifier.

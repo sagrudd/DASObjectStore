@@ -292,6 +292,9 @@ pub(super) fn write_host_connection_status(
         for warning in &disk.warnings {
             writeln!(writer, "  Warning: {warning}")?;
         }
+        if let Some(recommendation) = &disk.recommendation {
+            writeln!(writer, "  Recommendation: {recommendation}")?;
+        }
     }
     for warning in &report.warnings {
         writeln!(writer, "Report warning: {warning}")?;

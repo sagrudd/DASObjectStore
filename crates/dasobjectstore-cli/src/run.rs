@@ -280,6 +280,7 @@ struct DiskConnectionStatus {
     enclosure_topology_path: Option<String>,
     assessment: ConnectionAssessment,
     warnings: Vec<String>,
+    recommendation: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -300,7 +301,7 @@ impl ConnectionAssessment {
 }
 
 impl DiskConnectionStatus {
-    fn from_observed(disk: &ObservedDisk) -> Self {
+    fn from_observed(disk: &ObservedDisk, preferred: Option<&PreferredConnectionPath>) -> Self {
         let mut warnings = Vec::new();
         let assessment = match disk.transport {
             Transport::Usb => {
@@ -321,6 +322,7 @@ impl DiskConnectionStatus {
                 ConnectionAssessment::Unknown
             }
         };
+        let recommendation = connection_recommendation(disk, assessment, preferred);
 
         Self {
             device_path: disk.device_path.clone(),
@@ -332,8 +334,16 @@ impl DiskConnectionStatus {
             enclosure_topology_path: disk.enclosure_topology_path.clone(),
             assessment,
             warnings,
+            recommendation,
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PreferredConnectionPath {
+    device_path: Option<String>,
+    transport: Transport,
+    enclosure_topology_path: Option<String>,
 }
 
 fn read_current_platform_connection_status() -> Result<HostConnectionStatus, CliError> {
@@ -344,10 +354,11 @@ fn read_current_platform_connection_status() -> Result<HostConnectionStatus, Cli
 }
 
 fn connection_status_from_probe(probe: &ProbeReport) -> HostConnectionStatus {
+    let preferred = preferred_connection_path(&probe.disks);
     let disks: Vec<DiskConnectionStatus> = probe
         .disks
         .iter()
-        .map(DiskConnectionStatus::from_observed)
+        .map(|disk| DiskConnectionStatus::from_observed(disk, preferred.as_ref()))
         .collect();
     let warnings: Vec<String> = probe
         .warnings
@@ -360,6 +371,62 @@ fn connection_status_from_probe(probe: &ProbeReport) -> HostConnectionStatus {
         disks,
         warnings,
     }
+}
+
+fn preferred_connection_path(disks: &[ObservedDisk]) -> Option<PreferredConnectionPath> {
+    disks
+        .iter()
+        .find(|disk| disk.transport == Transport::Thunderbolt)
+        .map(|disk| PreferredConnectionPath {
+            device_path: disk.device_path.clone(),
+            transport: disk.transport,
+            enclosure_topology_path: disk.enclosure_topology_path.clone(),
+        })
+}
+
+fn connection_recommendation(
+    disk: &ObservedDisk,
+    assessment: ConnectionAssessment,
+    preferred: Option<&PreferredConnectionPath>,
+) -> Option<String> {
+    if assessment == ConnectionAssessment::Good {
+        return None;
+    }
+
+    if let Some(preferred) = preferred {
+        if disk.device_path != preferred.device_path {
+            return Some(format!(
+                "Prefer the observed {} path used by {}{} for DAS workloads.",
+                transport_label(preferred.transport),
+                preferred
+                    .device_path
+                    .as_deref()
+                    .unwrap_or("<unknown device>"),
+                topology_suffix(preferred.enclosure_topology_path.as_deref())
+            ));
+        }
+    }
+
+    Some(
+        "No faster attached DAS path is visible in this probe; move the DAS directly to a host USB-C, USB4, or Thunderbolt port and avoid hubs or fallback cables."
+            .to_string(),
+    )
+}
+
+fn transport_label(transport: Transport) -> &'static str {
+    match transport {
+        Transport::Usb => "USB",
+        Transport::Thunderbolt => "Thunderbolt",
+        Transport::Sata => "SATA",
+        Transport::Nvme => "NVMe",
+        Transport::Unknown => "unknown",
+    }
+}
+
+fn topology_suffix(topology: Option<&str>) -> String {
+    topology
+        .map(|value| format!(" at topology {value}"))
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1112,6 +1179,58 @@ mod tests {
 
         assert_eq!(status.disks[0].assessment, ConnectionAssessment::Warning);
         assert!(status.disks[0].warnings[0].contains("USB-attached DAS detected"));
+        assert!(status.disks[0]
+            .recommendation
+            .as_deref()
+            .expect("recommendation")
+            .contains("No faster attached DAS path is visible"));
+    }
+
+    #[test]
+    fn connection_status_recommends_observed_thunderbolt_path_for_usb_disk() {
+        let report = ProbeReport {
+            platform: HostPlatform::Macos,
+            disks: vec![
+                ObservedDisk {
+                    device_path: Some("/dev/disk4".to_string()),
+                    size_bytes: Some(4_000_000_000_000),
+                    serial_hint: Some("USB-DAS-1".to_string()),
+                    model_hint: Some("QNAP DL800C".to_string()),
+                    partition_hints: Vec::new(),
+                    filesystem_hints: Vec::new(),
+                    direct_attached_hint: Some(true),
+                    removable_hint: Some(true),
+                    transport: Transport::Usb,
+                    enclosure_topology_path: Some("usb@001/002".to_string()),
+                },
+                ObservedDisk {
+                    device_path: Some("/dev/disk8".to_string()),
+                    size_bytes: Some(4_000_000_000_000),
+                    serial_hint: Some("TB-DAS-1".to_string()),
+                    model_hint: Some("Thunderbolt DAS".to_string()),
+                    partition_hints: Vec::new(),
+                    filesystem_hints: Vec::new(),
+                    direct_attached_hint: Some(true),
+                    removable_hint: Some(true),
+                    transport: Transport::Thunderbolt,
+                    enclosure_topology_path: Some("thunderbolt@0/1".to_string()),
+                },
+            ],
+            enclosures: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let status = connection_status_from_probe(&report);
+
+        assert_eq!(status.disks[0].assessment, ConnectionAssessment::Warning);
+        assert_eq!(status.disks[1].assessment, ConnectionAssessment::Good);
+        assert_eq!(
+            status.disks[0].recommendation.as_deref(),
+            Some(
+                "Prefer the observed Thunderbolt path used by /dev/disk8 at topology thunderbolt@0/1 for DAS workloads."
+            )
+        );
+        assert_eq!(status.disks[1].recommendation, None);
     }
 
     #[test]
@@ -1142,6 +1261,51 @@ mod tests {
         assert!(output.contains("transport=Usb"));
         assert!(output.contains("assessment=warning"));
         assert!(output.contains("slow USB links will reduce"));
+        assert!(output.contains("Recommendation: No faster attached DAS path is visible"));
+    }
+
+    #[test]
+    fn writes_connection_status_with_preferred_observed_path() {
+        let report = ProbeReport {
+            platform: HostPlatform::Linux,
+            disks: vec![
+                ObservedDisk {
+                    device_path: Some("/dev/sdb".to_string()),
+                    size_bytes: Some(1_000_000_000_000),
+                    serial_hint: None,
+                    model_hint: Some("ORICO 5 Bay".to_string()),
+                    partition_hints: Vec::new(),
+                    filesystem_hints: Vec::new(),
+                    direct_attached_hint: Some(true),
+                    removable_hint: Some(false),
+                    transport: Transport::Usb,
+                    enclosure_topology_path: Some("usb@003/004".to_string()),
+                },
+                ObservedDisk {
+                    device_path: Some("/dev/sdc".to_string()),
+                    size_bytes: Some(1_000_000_000_000),
+                    serial_hint: None,
+                    model_hint: Some("Thunderbolt DAS".to_string()),
+                    partition_hints: Vec::new(),
+                    filesystem_hints: Vec::new(),
+                    direct_attached_hint: Some(true),
+                    removable_hint: Some(false),
+                    transport: Transport::Thunderbolt,
+                    enclosure_topology_path: Some("thunderbolt@0/2".to_string()),
+                },
+            ],
+            enclosures: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let status = connection_status_from_probe(&report);
+        let mut output = Vec::new();
+
+        write_host_connection_status(&status, &mut output).expect("status writes");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains(
+            "Recommendation: Prefer the observed Thunderbolt path used by /dev/sdc at topology thunderbolt@0/2"
+        ));
     }
 
     #[test]

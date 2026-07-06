@@ -472,6 +472,14 @@ detailed technical and machine-readable output.
 and SHALL warn when USB-attached storage may be using an unverified or slow link
 that will reduce object-service performance.
 
+When a better attached DAS connection path is visible in the same probe,
+`dasobjectstore health --connections` SHALL recommend that observed path.
+
+When no better attached DAS connection path is visible, `dasobjectstore health
+--connections` SHALL say that the probe cannot identify a faster port and SHALL
+recommend direct USB-C, USB4, or Thunderbolt attachment without hubs or fallback
+cables.
+
 DASObjectStore SHALL support configurable notification sinks.
 
 Initial notification support MAY be local logs only.

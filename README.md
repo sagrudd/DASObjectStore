@@ -223,6 +223,9 @@ dasobjectstore health --connections
 USB-attached DAS devices are reported with an explicit performance warning when
 the host probe cannot verify the negotiated link speed. Users should prefer a
 fast USB-C, USB 3.x, USB4, or Thunderbolt path for object-service workloads.
+When the host probe can see a better attached path, the command recommends that
+observed device/topology path; otherwise it says that no faster path is visible
+and recommends a direct high-speed host port without hubs or fallback cables.
 
 When a disk becomes suspect, DASObjectStore stops placing new protected data on it
 and automatically evacuates protected stores. Reproducible cache data is moved
