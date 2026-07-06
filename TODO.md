@@ -299,7 +299,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Add auth middleware/extractors for protected API routes.
 - [x] Add tests for login, session expiry, logout, invalid sessions, and
   integrated mode route omission.
-- [ ] Document packaging/service behavior for `https://127.0.0.1:8448` and
+- [x] Document packaging/service behavior for `https://127.0.0.1:8448` and
   optional Linux appliance binding to `0.0.0.0:8448`.
 
 ## Milestone 15: Native Mneion Storage Endpoint and External NAS Support

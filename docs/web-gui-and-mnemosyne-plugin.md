@@ -56,6 +56,10 @@ The public product surface SHALL be mounted under:
 This keeps DASObjectStore compatible with Synoptikon packaging while preserving a
 stable standalone endpoint for customers and clients.
 
+Standalone packaging, TLS asset paths, service validation commands, and Linux
+appliance binding rules are defined in
+[Standalone Service and Packaging](standalone-service.md).
+
 ## Authentication Model
 
 The server SHALL use `axum` for HTTP/API routing and SHALL support two host
