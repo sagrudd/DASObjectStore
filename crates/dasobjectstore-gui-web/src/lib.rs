@@ -1,6 +1,7 @@
 //! Yew frontend scaffold for Monas and Synoptikon delivery surfaces.
 
 pub mod disks;
+pub mod endpoints;
 pub mod mount;
 pub mod objects;
 pub mod overview;
@@ -12,6 +13,7 @@ pub mod app;
 #[cfg(target_arch = "wasm32")]
 pub use app::App;
 pub use disks::{disks_workspace_api_path, DISKS_WORKSPACE_ROUTE};
+pub use endpoints::{endpoints_workspace_api_path, ENDPOINTS_WORKSPACE_ROUTE};
 pub use mount::{FrontendHost, FrontendMount};
 pub use objects::{objects_workspace_api_path, OBJECTS_WORKSPACE_ROUTE};
 pub use overview::{overview_workspace_api_path, OVERVIEW_WORKSPACE_ROUTE};

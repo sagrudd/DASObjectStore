@@ -250,6 +250,14 @@ pub struct EndpointsWorkspaceView {
     pub inventory: EndpointInventoryView,
 }
 
+impl EndpointsWorkspaceView {
+    pub fn empty() -> Self {
+        Self {
+            inventory: EndpointInventoryView::from_endpoints(Vec::new()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ActivityWorkspaceView {
     pub ingest: Option<IngestQueueView>,
@@ -474,5 +482,22 @@ mod tests {
         assert_eq!(encoded["filters"]["state"], serde_json::Value::Null);
         assert_eq!(encoded["filters"]["search"], serde_json::Value::Null);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+    }
+
+    #[test]
+    fn builds_empty_endpoints_workspace_for_api_bootstrap() {
+        let endpoints = EndpointsWorkspaceView::empty();
+        let encoded = serde_json::to_value(endpoints).expect("endpoints serializes");
+
+        assert_eq!(encoded["inventory"]["endpoint_count"], 0);
+        assert_eq!(encoded["inventory"]["degraded_endpoint_count"], 0);
+        assert_eq!(encoded["inventory"]["binding_count"], 0);
+        assert_eq!(
+            encoded["inventory"]["endpoints"]
+                .as_array()
+                .expect("endpoints")
+                .len(),
+            0
+        );
     }
 }

@@ -335,7 +335,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Implement Objects API route and Yew view for object inventory, hashes,
   copy locations, reproducibility source, export/download, repair, and
   redownload.
-- [ ] Implement Endpoints API route and Yew view for DAS pools, external NAS/NFS
+- [x] Implement Endpoints API route and Yew view for DAS pools, external NAS/NFS
   endpoints, S3 service state, Mneion export, and binding readiness.
 - [ ] Implement Activity API route and Yew view for ingest queue, destage queue,
   repair tasks, audit/provenance, and long-running operations.
