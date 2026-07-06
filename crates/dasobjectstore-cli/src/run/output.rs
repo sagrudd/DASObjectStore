@@ -6,6 +6,9 @@ use dasobjectstore_metadata::{
     ObjectInspectSummary, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity, SsdCapacityPolicy,
     SsdPressure,
 };
+use dasobjectstore_mnemosyne::{
+    MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
+};
 use dasobjectstore_platform::{ObservedDisk, ObservedEnclosure, ProbeReport};
 use std::io::{self, Write};
 
@@ -550,6 +553,54 @@ pub(super) fn write_object_export_report(
     )?;
     writeln!(writer, "Bytes written: {}", report.bytes_written)?;
     writeln!(writer, "Content hash: {}", report.content_hash)
+}
+
+pub(super) fn write_nas_nfs_endpoint_validation_report(
+    validated: &ValidatedNasNfsEndpointDefinition,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "NAS/NFS endpoint definition is valid")?;
+    writeln!(writer, "Endpoint: {}", validated.definition.identifier)?;
+    writeln!(
+        writer,
+        "Display name: {}",
+        validated.definition.display_name
+    )?;
+    writeln!(writer, "Status: {:?}", validated.definition.status)?;
+    writeln!(
+        writer,
+        "Object service endpoint: {}",
+        validated.definition.object_service_endpoint
+    )?;
+    writeln!(
+        writer,
+        "Mneion endpoint kind: {:?}",
+        validated.mneion_endpoint.endpoint_kind
+    )?;
+    match &validated.mneion_endpoint.location {
+        MneionDasObjectStoreEndpointLocation::Nfs {
+            export_id,
+            service_endpoint,
+        } => {
+            writeln!(writer, "Mneion NFS export ID: {export_id}")?;
+            writeln!(writer, "Mneion service endpoint: {service_endpoint}")?;
+        }
+        MneionDasObjectStoreEndpointLocation::Das {
+            pool_id,
+            service_endpoint,
+        } => {
+            writeln!(writer, "Mneion DAS pool ID: {pool_id}")?;
+            writeln!(writer, "Mneion service endpoint: {service_endpoint}")?;
+        }
+        MneionDasObjectStoreEndpointLocation::S3Compatible { endpoint, .. } => {
+            writeln!(writer, "Mneion S3 endpoint: {endpoint}")?;
+        }
+    }
+    writeln!(
+        writer,
+        "Tenant-facing contract: {:?}",
+        validated.mneion_endpoint.object_contract
+    )
 }
 
 pub(super) fn write_pretty_report(

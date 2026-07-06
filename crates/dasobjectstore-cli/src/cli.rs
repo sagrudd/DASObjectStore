@@ -814,6 +814,8 @@ impl MnemosyneArgs {
 pub(crate) enum MnemosyneCommand {
     /// Export Mneion-compatible storage definition and binding JSON.
     Export(MnemosyneExportArgs),
+    /// Validate a DASObjectStore-managed NAS/NFS endpoint definition.
+    ValidateNasNfsEndpoint(MnemosyneValidateNasNfsEndpointArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -861,6 +863,26 @@ impl MnemosyneExportArgs {
 
     pub(crate) fn note(&self) -> Option<&str> {
         self.note.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct MnemosyneValidateNasNfsEndpointArgs {
+    /// Path to a JSON NAS/NFS endpoint definition file.
+    #[arg(long)]
+    definition_file: PathBuf,
+    /// Emit validated endpoint details as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl MnemosyneValidateNasNfsEndpointArgs {
+    pub(crate) fn definition_file(&self) -> &Path {
+        &self.definition_file
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
     }
 }
 
@@ -935,6 +957,34 @@ mod tests {
                 );
                 assert_eq!(export.note(), Some("DASObjectStore development store"));
             }
+            MnemosyneCommand::ValidateNasNfsEndpoint(_) => panic!("expected export command"),
+        }
+    }
+
+    #[test]
+    fn parses_mnemosyne_validate_nas_nfs_endpoint() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "mnemosyne",
+            "validate-nas-nfs-endpoint",
+            "--definition-file",
+            "/tmp/nas-endpoint.json",
+            "--json",
+        ])
+        .expect("mnemosyne NAS/NFS endpoint validation parses");
+
+        let Some(Command::Mnemosyne(args)) = cli.command() else {
+            panic!("expected mnemosyne command");
+        };
+        match args.command() {
+            MnemosyneCommand::ValidateNasNfsEndpoint(validate) => {
+                assert_eq!(
+                    validate.definition_file(),
+                    Path::new("/tmp/nas-endpoint.json")
+                );
+                assert!(validate.json());
+            }
+            MnemosyneCommand::Export(_) => panic!("expected NAS/NFS endpoint validation command"),
         }
     }
 

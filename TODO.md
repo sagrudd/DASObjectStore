@@ -316,7 +316,7 @@ authentication-boundary, and Mneion endpoint integration work.
   storage-binding rules.
 - [x] Add API view models for endpoint inventory, validation status, active
   bindings, and degraded endpoint warnings.
-- [ ] Add CLI or API command to validate a NAS/NFS endpoint definition.
+- [x] Add CLI or API command to validate a NAS/NFS endpoint definition.
 - [ ] Document how DASObjectStore-native endpoints differ from generic Mneion
   `posix` storage definitions.
 - [ ] Identify required Mneion storage-definition schema changes, if any, and

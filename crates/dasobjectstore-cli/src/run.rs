@@ -3,10 +3,10 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
     HealthArgs, IngestCommand, IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs,
-    MnemosyneCommand, MnemosyneExportArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs,
-    PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
-    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand,
-    StoreDefaultsArgs, StoreValidateArgs,
+    MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand,
+    ObjectExportArgs, ObjectInspectArgs, PoolCommand, PoolImportArgs, PoolInspectArgs,
+    PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs,
+    ServiceStatusArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
 mod output;
 
@@ -14,8 +14,9 @@ use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
     write_host_connection_status, write_ingest_direct_import_report, write_ingest_status,
-    write_object_export_report, write_object_inspect_summary, write_pool_import_report,
-    write_pool_inspect_summary, write_pool_repair_dry_run, write_pretty_report,
+    write_nas_nfs_endpoint_validation_report, write_object_export_report,
+    write_object_inspect_summary, write_pool_import_report, write_pool_inspect_summary,
+    write_pool_repair_dry_run, write_pretty_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -35,8 +36,10 @@ use dasobjectstore_metadata::{
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
 use dasobjectstore_mnemosyne::{
-    export_mneion_binding_snippet, export_mneion_storage_definition, MneionBindingSnippetError,
-    MneionBindingSnippetRequest, MneionStorageDefinitionError, MneionStorageDefinitionRequest,
+    export_mneion_binding_snippet, export_mneion_storage_definition,
+    validate_nas_nfs_endpoint_definition, MneionBindingSnippetError, MneionBindingSnippetRequest,
+    MneionStorageDefinitionError, MneionStorageDefinitionRequest, NasNfsEndpointDefinition,
+    NasNfsEndpointValidationError,
 };
 use dasobjectstore_object_service::{
     plan_store_service_layout, render_compose, ComposeRenderRequest, ComposeServiceConfig,
@@ -102,6 +105,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Mnemosyne(args)) => match args.command() {
             MnemosyneCommand::Export(args) => run_mnemosyne_export(args, writer),
+            MnemosyneCommand::ValidateNasNfsEndpoint(args) => {
+                run_mnemosyne_validate_nas_nfs_endpoint(args, writer)
+            }
         },
         _ => Ok(()),
     }
@@ -851,6 +857,24 @@ fn run_mnemosyne_export(
     Ok(())
 }
 
+fn run_mnemosyne_validate_nas_nfs_endpoint(
+    args: &MnemosyneValidateNasNfsEndpointArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let file = File::open(args.definition_file())?;
+    let definition: NasNfsEndpointDefinition = serde_json::from_reader(file)?;
+    let validated = validate_nas_nfs_endpoint_definition(&definition)?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &validated)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_nas_nfs_endpoint_validation_report(&validated, writer)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(feature = "debug-commands")]
 fn run_pool_mark_clean(args: &PoolMarkerArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let marker =
@@ -905,6 +929,7 @@ pub(crate) enum CliError {
     ObjectService(ObjectServiceError),
     MneionBindingSnippet(MneionBindingSnippetError),
     MneionStorageDefinition(MneionStorageDefinitionError),
+    NasNfsEndpointValidation(NasNfsEndpointValidationError),
     CommandFailed(String),
     InvalidDiskRootMapping {
         value: String,
@@ -942,6 +967,7 @@ impl Display for CliError {
             Self::ObjectService(err) => write!(formatter, "{err}"),
             Self::MneionBindingSnippet(err) => write!(formatter, "{err}"),
             Self::MneionStorageDefinition(err) => write!(formatter, "{err}"),
+            Self::NasNfsEndpointValidation(err) => write!(formatter, "{err}"),
             Self::CommandFailed(err) => write!(formatter, "{err}"),
             Self::InvalidDiskRootMapping { value } => write!(
                 formatter,
@@ -1058,6 +1084,12 @@ impl From<MneionStorageDefinitionError> for CliError {
     }
 }
 
+impl From<NasNfsEndpointValidationError> for CliError {
+    fn from(err: NasNfsEndpointValidationError) -> Self {
+        Self::NasNfsEndpointValidation(err)
+    }
+}
+
 impl From<SsdCapacityMeasurementError> for CliError {
     fn from(err: SsdCapacityMeasurementError) -> Self {
         Self::SsdCapacityMeasurement(err)
@@ -1103,6 +1135,7 @@ mod tests {
         PoolManifest, SnapshotExportOptions, DISK_MANIFEST_FILE_NAME, LIVE_SCHEMA_SQL,
         PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
     };
+    use dasobjectstore_mnemosyne::NAS_NFS_ENDPOINT_DEFINITION_SCHEMA_VERSION;
     use dasobjectstore_object_service::StoreServiceDefinition;
     use dasobjectstore_platform::{
         EnclosureIdentity, HostPlatform, ObservedDisk, ObservedEnclosure, ProbeReport, Transport,
@@ -2166,6 +2199,109 @@ mod tests {
     }
 
     #[test]
+    fn mnemosyne_validate_nas_nfs_endpoint_writes_pretty_summary() {
+        let root = temp_root("mnemosyne-validate-nas-nfs");
+        fs::create_dir_all(&root).expect("create temp root");
+        let definition_file = root.join("nas-endpoint.json");
+        fs::write(
+            &definition_file,
+            serde_json::to_vec_pretty(&valid_nas_nfs_endpoint_definition())
+                .expect("endpoint definition serializes"),
+        )
+        .expect("write endpoint definition");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "mnemosyne",
+            "validate-nas-nfs-endpoint",
+            "--definition-file",
+            definition_file.to_str().expect("utf8 definition path"),
+        ])
+        .expect("NAS/NFS endpoint validation parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("NAS/NFS endpoint validation runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("NAS/NFS endpoint definition is valid"));
+        assert!(output.contains("Endpoint: ad255a8f-0058-4790-a640-758c573f2db1"));
+        assert!(output.contains("Mneion endpoint kind: DasobjectstoreNfs"));
+        assert!(output.contains("Tenant-facing contract: ObjectStyle"));
+        assert!(!output.contains("/exports/bioinformatics"));
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn mnemosyne_validate_nas_nfs_endpoint_writes_json() {
+        let root = temp_root("mnemosyne-validate-nas-nfs-json");
+        fs::create_dir_all(&root).expect("create temp root");
+        let definition_file = root.join("nas-endpoint.json");
+        fs::write(
+            &definition_file,
+            serde_json::to_vec_pretty(&valid_nas_nfs_endpoint_definition())
+                .expect("endpoint definition serializes"),
+        )
+        .expect("write endpoint definition");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "mnemosyne",
+            "validate-nas-nfs-endpoint",
+            "--definition-file",
+            definition_file.to_str().expect("utf8 definition path"),
+            "--json",
+        ])
+        .expect("NAS/NFS endpoint validation parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("NAS/NFS endpoint validation runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("validation output is json");
+        assert_eq!(
+            output["definition"]["identifier"],
+            "ad255a8f-0058-4790-a640-758c573f2db1"
+        );
+        assert_eq!(
+            output["mneion_endpoint"]["endpoint_kind"],
+            "dasobjectstore_nfs"
+        );
+        assert_eq!(
+            output["mneion_endpoint"]["location"]["location_kind"],
+            "nfs"
+        );
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn mnemosyne_validate_nas_nfs_endpoint_rejects_invalid_definition() {
+        let root = temp_root("mnemosyne-validate-nas-nfs-invalid");
+        fs::create_dir_all(&root).expect("create temp root");
+        let mut definition = valid_nas_nfs_endpoint_definition();
+        definition["nfs_export_path"] = serde_json::json!("relative/path");
+        let definition_file = root.join("nas-endpoint.json");
+        fs::write(
+            &definition_file,
+            serde_json::to_vec_pretty(&definition).expect("endpoint definition serializes"),
+        )
+        .expect("write endpoint definition");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "mnemosyne",
+            "validate-nas-nfs-endpoint",
+            "--definition-file",
+            definition_file.to_str().expect("utf8 definition path"),
+        ])
+        .expect("NAS/NFS endpoint validation parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("invalid endpoint is rejected");
+
+        assert!(err
+            .to_string()
+            .contains("nfs_export_path must be an absolute export path"));
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn service_up_dry_run_writes_docker_compose_command() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
@@ -2604,5 +2740,20 @@ mod tests {
             "dasobjectstore-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    fn valid_nas_nfs_endpoint_definition() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": NAS_NFS_ENDPOINT_DEFINITION_SCHEMA_VERSION,
+            "identifier": "ad255a8f-0058-4790-a640-758c573f2db1",
+            "display_name": "Shared NAS",
+            "nfs_server": "nas-01.local",
+            "nfs_export_path": "/exports/bioinformatics",
+            "object_service_endpoint": "https://nas-gateway.local:3900",
+            "credential_reference": "secret://dasobjectstore/nas/shared",
+            "tls_ca_reference": "secret://dasobjectstore/ca/nas",
+            "tls_server_name": "nas-gateway.local",
+            "status": "pending_validation"
+        })
     }
 }
