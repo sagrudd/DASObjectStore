@@ -6,6 +6,11 @@ Target platforms: Linux full support, macOS development/read-export support
 
 ## MVP Definition
 
+Priority: bringing DASObjectStore under the Synoptikon umbrella as a formal
+Mnemosyne product/plugin is now the primary planning priority. Standalone
+operation remains required, but the standalone monolith must not evolve in a way
+that conflicts with native Synoptikon/Mneion integration.
+
 The MVP is complete when DASObjectStore can run coherently on Linux and macOS
 development machines as a portable, SSD-ingest-first, mixed-disk object
 appliance:
@@ -20,6 +25,13 @@ appliance:
   workloads and one is selected as the MVP object-service target.
 - the project can export a Mnemosyne/Mneion-compatible storage definition
   without making Mnemosyne a hard dependency.
+- DASObjectStore is specified as a formal Synoptikon product/plugin and as a
+  standalone HTTPS application.
+- the Web GUI design language, host-mode authentication model, and Mneion
+  storage endpoint conventions are documented before implementation.
+- current Synoptikon and Mneion conventions are treated as mutable design inputs
+  when a better integrated storage architecture requires coordinated changes
+  across affected Mnemosyne software.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
@@ -268,6 +280,122 @@ Exit criteria:
 - the MVP can demonstrate a DAS-backed local object store for bioinformatics
   development.
 
+## Milestone 13: Formal Mnemosyne Product Plugin
+
+Goal: make DASObjectStore a first-class Synoptikon product/plugin while keeping
+the public core standalone.
+
+Priority: this is the next critical milestone. Product manifest, catalogue,
+host-mode, authentication-boundary, and Mneion endpoint compatibility work SHALL
+be favored over optional standalone-only enhancements.
+
+Scope:
+
+- add a `mnemosyne.product.manifest.v1` compatible product manifest;
+- define dual host support for standalone and `synoptikon_integrated` modes;
+- register product API and Web mounts under `/products/dasobjectstore`;
+- define required Synoptikon host capabilities, including accounts,
+  entitlements, central audit, object-store artifacts, and project context where
+  required;
+- define the internal product port as catalogue-assigned in Synoptikon;
+- keep Mnemosyne/Synoptikon integration isolated in `dasobjectstore-mnemosyne`;
+- identify where Synoptikon or Mneion contracts should evolve to make
+  DASObjectStore a native storage appliance rather than a bolt-on integration.
+
+Exit criteria:
+
+- the product manifest validates against Mnemosyne product schema expectations;
+- Synoptikon integration can generate product UI bootstrap metadata;
+- standalone builds do not require Mnemosyne runtime crates;
+- integration documentation identifies the exact catalogue entry required in
+  `../mnemosyne`;
+- any proposed Synoptikon/Mneion changes name the affected repositories,
+  contracts, migrations, and tests required to keep the platform coherent.
+
+## Milestone 14: Standalone HTTPS Application and Authentication
+
+Goal: deliver a coherent standalone monolith where needed, without diverging
+from Mnemosyne authentication conventions.
+
+Scope:
+
+- define standalone HTTPS default port `8448`;
+- implement `axum` server configuration and TLS asset handling;
+- add host-mode selection for `standalone` and `synoptikon_integrated`;
+- implement local standalone login, logout, session validation, and local user
+  storage using the Mnematikon pattern;
+- disable local auth routes in Synoptikon-integrated mode;
+- ensure risky operations still require operation-level confirmation after
+  login;
+- serve the Yew bundle from the standalone server.
+
+Exit criteria:
+
+- standalone HTTPS starts on `https://127.0.0.1:8448` by default;
+- integrated mode rejects local login endpoints and relies on host context;
+- authentication tests cover login, session expiry, logout, and integrated
+  session behavior;
+- package/service docs state the permanent port policy.
+
+## Milestone 15: Native Mneion Storage Endpoint and External NAS Support
+
+Goal: make DASObjectStore a native storage endpoint across Mneion for DAS-backed
+and external NAS-backed storage.
+
+Scope:
+
+- extend Mneion export contracts for DASObjectStore-backed endpoints;
+- model endpoint kinds for local DAS, external NAS/NFS, and S3-compatible
+  exports;
+- support external NAS/NFS endpoints as formal validated storage definitions;
+- preserve object-style contracts even when backing storage is NFS or local
+  filesystem;
+- map DASObjectStore endpoints to Mneion governance-domain storage bindings;
+- implement validation flows for NAS reachability, mount semantics, credential
+  references, and export safety;
+- document how DASObjectStore differs from generic POSIX storage definitions.
+
+Exit criteria:
+
+- `dasobjectstore mnemosyne export` can describe DAS, NFS/NAS, and
+  S3-compatible endpoint variants;
+- endpoint definitions can be validated without exposing raw paths to product
+  contracts;
+- governance-domain binding snippets match Mneion storage-binding conventions;
+- external NAS endpoints are visible as first-class managed endpoints in the
+  Web/API model.
+
+## Milestone 16: Web Operations Console and Design System
+
+Goal: create the contemporary GUI workbench for disk, store, object, and
+endpoint operations.
+
+Scope:
+
+- implement a post-login Overview workspace for capacity, ingest pressure,
+  destage urgency, endpoint state, and required actions;
+- implement Disks workspace for health, USB/SMART warnings, enclosure grouping,
+  benchmark drift, migrate, drain, replace, and retire flows;
+- implement Stores workspace for create, modify, resize, redundancy, retention,
+  endpoint export, and capacity behavior;
+- implement Objects workspace for inventory, hashes, copy locations,
+  reproducibility source, export/download, repair, and redownload actions;
+- implement Endpoints workspace for DAS pools, external NAS/NFS endpoints,
+  S3-compatible service state, Mneion export, and governance-domain binding
+  readiness;
+- define reusable Yew components for dense tables, inspector drawers, status
+  badges, capacity bars, segmented controls, and risky-operation confirmation;
+- align visual language with Mneion and Mnematikon while remaining usable as a
+  standalone customer application.
+
+Exit criteria:
+
+- a user can manage disks, stores, endpoints, and object state through the Web
+  UI without reading CLI JSON;
+- the UI follows `docs/web-gui-and-mnemosyne-plugin.md`;
+- Synoptikon and standalone hosting use the same domain view models;
+- risky flows are visibly gated and auditable.
+
 ## Post-MVP Direction
 
 Post-MVP work may include:
@@ -278,5 +406,4 @@ Post-MVP work may include:
 - DASObjectStore-native parity or erasure policies;
 - read/write SMB/NFS ingest semantics;
 - richer notifications and Prometheus-style metrics;
-- deeper `dasobjectstore-mnemosyne` registration and verification commands;
 - native service management where Docker/Compose is not ideal.

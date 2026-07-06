@@ -47,9 +47,13 @@ DASObjectStore is:
 - health-aware and evacuation-capable;
 - copy-policy based rather than classic RAID-first;
 - useful without Mnemosyne;
-- extensible through an optional Mnemosyne adapter.
+- a formal Synoptikon/Mnemosyne product plugin as the first-priority
+  integration path.
 
-The current MVP milestone plan is tracked in [ROADMAP.md](ROADMAP.md).
+The current MVP milestone plan is tracked in [ROADMAP.md](ROADMAP.md). The
+standalone Web application, Synoptikon plugin posture, Mneion endpoint model,
+and permanent HTTPS port policy are specified in
+[Web GUI and Mnemosyne Plugin Specification](docs/web-gui-and-mnemosyne-plugin.md).
 
 DASObjectStore is not:
 
@@ -71,7 +75,7 @@ USB-C DAS enclosure(s)
   -> object service selected by benchmark milestone
   -> S3 API and CLI
   -> read-only SMB/NFS exports later
-  -> optional Mnemosyne adapter
+  -> Synoptikon/Mnemosyne product plugin boundary
 ```
 
 The object service will initially be an existing service orchestrated by
@@ -291,19 +295,28 @@ Future:
 
 ## Mnemosyne Integration
 
-DASObjectStore is public-core first. Mnemosyne integration lives behind an adapter.
+DASObjectStore remains useful without Mnemosyne, but bringing it under the
+Synoptikon umbrella as a formal Mnemosyne product/plugin is now the priority
+integration path. The public core must stay clean, while
+`dasobjectstore-mnemosyne` owns product manifest, product catalogue, host-mode,
+authentication-boundary, and Mneion endpoint integration.
 
 Initial integration target:
 
-- export Mneion-compatible storage definition snippets;
-- support Synoptikon/Mneion development stores;
-- preserve the Mnemosyne boundary where Limen mediates artefact ingress/egress
-  and public contracts remain object-style.
+- provide a `mnemosyne.product.manifest.v1` product manifest;
+- mount Web and API surfaces at `/products/dasobjectstore` and
+  `/products/dasobjectstore/api` in Synoptikon;
+- export Mneion-compatible storage definition and governance-domain binding
+  snippets;
+- support DAS-backed, external NAS/NFS-backed, and S3-compatible endpoint
+  variants;
+- preserve object-style contracts even when backing storage is local filesystem
+  or NFS.
 
-Later integration target:
-
-- `dasobjectstore-mnemosyne` adapter crate/module;
-- CLI commands to export, register, and verify storage context against Mneion.
+Synoptikon and Mneion conventions are design inputs, not immutable limits. If a
+better integrated storage architecture requires platform changes, affected
+software, schemas, migrations, tests, and documentation must be updated
+coherently.
 
 ## Platform Plan
 

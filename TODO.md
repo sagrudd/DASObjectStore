@@ -5,6 +5,11 @@ Source roadmap: [ROADMAP.md](ROADMAP.md)
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
 developers
 
+Current priority: bring DASObjectStore under the Synoptikon umbrella as a formal
+Mnemosyne product/plugin. Standalone HTTPS operation remains required, but
+standalone-only polish is secondary to product manifest, catalogue, host-mode,
+authentication-boundary, and Mneion endpoint integration work.
+
 ## Working Rules
 
 - Keep changes surgical and tied to one task or closely related task group.
@@ -254,6 +259,94 @@ developers
   and `generated_data`.
 - [x] Add README section linking to the reference workflow.
 
+## Milestone 13: Formal Mnemosyne Product Plugin
+
+- [x] Add `docs/web-gui-and-mnemosyne-plugin.md` covering host modes,
+  standalone port policy, authentication posture, Mneion endpoint model, and
+  Web UI design language.
+- [ ] Create `product-manifest.json` for DASObjectStore using
+  `mnemosyne.product.manifest.v1`.
+- [ ] Add manifest validation tests against the Mnemosyne product schema
+  expectations in `../mnemosyne`.
+- [ ] Add product UI bootstrap export support for `/products/dasobjectstore`
+  and `/products/dasobjectstore/api`.
+- [ ] Add host-mode domain model for `standalone` and
+  `synoptikon_integrated`.
+- [ ] Add Synoptikon-integrated host boundary validation for account,
+  entitlement, central audit, correlation ID, project context, and storage
+  authority.
+- [ ] Add Monas/standalone host boundary validation for local product root,
+  local audit, local hardware workflows, and local state stores.
+- [ ] Draft the `../mnemosyne/synoptikon-products.toml` catalogue entry for
+  DASObjectStore without committing sibling changes from this repository.
+- [ ] Identify any Synoptikon/Mneion contract changes that would make
+  DASObjectStore cleaner as a native storage appliance.
+- [ ] When a contract change is justified, update DASObjectStore docs with the
+  coordinated change plan and affected repositories before implementation.
+
+## Milestone 14: Standalone HTTPS Application and Authentication
+
+- [ ] Add standalone server configuration model with default HTTPS port `8448`.
+- [ ] Add CLI/server entry point for `dasobjectstore-server`.
+- [ ] Implement TLS asset generation/loading for standalone HTTPS.
+- [ ] Implement local auth store modeled on Mnematikon: users, registration
+  tokens, password hashes, session token hashes, expiry, and logout.
+- [ ] Add standalone `axum` routes for `/api/register`, `/api/login`,
+  `/api/logout`, and `/api/session`.
+- [ ] Disable local auth routes when host mode is `synoptikon_integrated`.
+- [ ] Add integrated-session issue/acceptance path for Synoptikon-provided
+  actors.
+- [ ] Add auth middleware/extractors for protected API routes.
+- [ ] Add tests for login, session expiry, logout, invalid sessions, and
+  integrated mode route omission.
+- [ ] Document packaging/service behavior for `https://127.0.0.1:8448` and
+  optional Linux appliance binding to `0.0.0.0:8448`.
+
+## Milestone 15: Native Mneion Storage Endpoint and External NAS Support
+
+- [ ] Extend `dasobjectstore-mnemosyne` endpoint model with
+  `dasobjectstore_das`, `dasobjectstore_nfs`, and `s3_compatible` variants.
+- [ ] Add storage-definition export tests for DAS-backed endpoints.
+- [ ] Add storage-definition export tests for external NAS/NFS endpoints.
+- [ ] Add validation model for external NAS/NFS endpoint identity, export path,
+  credential reference, TLS/CA reference where relevant, and status.
+- [ ] Add runtime mount/probe plan types for NFS/NAS validation without making
+  raw paths tenant-facing contracts.
+- [ ] Add governance-domain binding export support aligned with Mneion
+  storage-binding rules.
+- [ ] Add API view models for endpoint inventory, validation status, active
+  bindings, and degraded endpoint warnings.
+- [ ] Add CLI or API command to validate a NAS/NFS endpoint definition.
+- [ ] Document how DASObjectStore-native endpoints differ from generic Mneion
+  `posix` storage definitions.
+- [ ] Identify required Mneion storage-definition schema changes, if any, and
+  record the coordinated implementation plan.
+
+## Milestone 16: Web Operations Console and Design System
+
+- [ ] Define shared GUI view models for Overview, Disks, Stores, Objects,
+  Endpoints, and Activity.
+- [ ] Implement Overview API route and Yew view for capacity, ingest pressure,
+  destage urgency, endpoint state, and required actions.
+- [ ] Implement Disks API route and Yew view for enclosure grouping, health,
+  USB/SMART warnings, benchmark drift, migrate, drain, replace, and retire.
+- [ ] Implement Stores API route and Yew view for policy creation, modification,
+  resizing, redundancy, retention, and export mode.
+- [ ] Implement Objects API route and Yew view for object inventory, hashes,
+  copy locations, reproducibility source, export/download, repair, and
+  redownload.
+- [ ] Implement Endpoints API route and Yew view for DAS pools, external NAS/NFS
+  endpoints, S3 service state, Mneion export, and binding readiness.
+- [ ] Implement Activity API route and Yew view for ingest queue, destage queue,
+  repair tasks, audit/provenance, and long-running operations.
+- [ ] Add reusable Yew components for dense tables, inspector drawers, status
+  badges, capacity bars, segmented controls, icon buttons, and risky-operation
+  confirmation panels.
+- [ ] Add visual regression/screenshot checks for the main workspaces on desktop
+  and mobile-width layouts.
+- [ ] Verify the UI does not use a landing-page pattern after login and opens
+  directly into the operations Overview.
+
 ## Cross-Cutting Tasks
 
 - [x] Keep CLI examples synchronized between `README.md`,
@@ -265,3 +358,6 @@ developers
   trigger those risks.
 - [x] Review file sizes before each milestone completion and split modules that
   have grown too broad.
+- [ ] Treat current Synoptikon/Mneion conventions as mutable design inputs when
+  DASObjectStore requires deeper integration, provided affected software,
+  schemas, migrations, tests, and docs are updated coherently.

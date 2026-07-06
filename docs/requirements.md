@@ -11,8 +11,12 @@ appliance.
 
 DASObjectStore SHALL be implemented primarily in Rust.
 
-DASObjectStore SHALL be useful to non-Mnemosyne users. Mnemosyne/Synoptikon support
-SHALL be implemented as an adapter over the public core model.
+DASObjectStore SHALL be useful to non-Mnemosyne users.
+
+Bringing DASObjectStore under the Synoptikon umbrella as a formal Mnemosyne
+product/plugin SHALL be the priority integration path. The standalone monolith
+SHALL reuse the same domain model and SHALL NOT fork into a separate
+non-Mnemosyne architecture.
 
 DASObjectStore SHALL NOT require equal-size disks.
 
@@ -32,18 +36,20 @@ DASObjectStore SHALL support these primary use cases:
 - support portable movement of the DAS between hosts;
 - support incremental addition and retirement of disks;
 - support per-store redundancy and retention policy;
-- export storage configuration for Mnemosyne/Mneion integration.
+- export storage configuration for Mnemosyne/Mneion integration;
+- run as a formal Synoptikon product/plugin and as a standalone HTTPS
+  application.
 
 ## 3. Non-Goals for MVP
 
 The MVP SHALL NOT include:
 
-- DASObjectStore-native parity or erasure coding;
 - read/write SMB or NFS as a primary write path;
 - fine-grained HDD physical zone placement;
 - a custom S3 implementation written by DASObjectStore;
 - production backup claims;
-- deep Synoptikon platform service integration.
+- DASObjectStore-native parity or erasure coding before object-copy policies
+  have shipped.
 
 ## 4. Platform Requirements
 
@@ -445,6 +451,10 @@ The GUI/Web UI SHALL be designed for delivery through the sibling Monas and
 Synoptikon surfaces in `../monas` and `../mnemosyne`, rather than as an
 unrelated standalone UI stack.
 
+Standalone HTTPS operation SHALL default to `https://127.0.0.1:8448`.
+Synoptikon-integrated operation SHALL be mounted behind the Synoptikon HTTPS
+listener and SHALL use a catalogue-assigned internal product port.
+
 Full setup wizard MAY come later.
 
 SMB/NFS SHALL initially be read-only exports of settled/protected data.
@@ -495,19 +505,31 @@ Future notification sinks MAY include:
 
 The public core SHALL not depend on Mnemosyne.
 
-The repository SHALL include or allow a separate adapter crate/module for
-Mnemosyne integration.
+The repository SHALL keep Mnemosyne/Synoptikon integration in a separate
+`dasobjectstore-mnemosyne` boundary crate/module.
 
-Initial Mnemosyne support SHALL generate Mneion-compatible storage definition
-and binding snippets through `dasobjectstore mnemosyne export`.
+Initial Mnemosyne support SHALL make DASObjectStore a formal Synoptikon
+product/plugin with:
 
-Later Mnemosyne support MAY provide:
+- a `mnemosyne.product.manifest.v1` product manifest;
+- Synoptikon product catalogue registration;
+- Web and API mounts at `/products/dasobjectstore` and
+  `/products/dasobjectstore/api`;
+- host-mode handling for `standalone` and `synoptikon_integrated`;
+- Synoptikon-integrated authentication, entitlement, audit, correlation, project
+  context, and storage-authority validation;
+- Mneion-compatible storage definition and governance-domain binding export.
 
-- `dasobjectstore mnemosyne register`;
-- `dasobjectstore mnemosyne verify`.
+`dasobjectstore mnemosyne export`, `register`, and `verify` MAY be CLI surfaces
+over the same integration model.
 
 The adapter SHALL respect the Mnemosyne storage boundary where Limen mediates
 artefact ingress and egress and public storage contracts remain object-style.
+
+Current Synoptikon and Mneion contracts SHALL be treated as mutable design
+inputs when a better integrated storage architecture requires it, provided every
+affected product, contract, schema, migration, test, and documentation surface
+is updated coherently.
 
 ## 22. License Requirement
 
