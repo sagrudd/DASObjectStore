@@ -296,7 +296,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Disable local auth routes when host mode is `synoptikon_integrated`.
 - [x] Add integrated-session issue/acceptance path for Synoptikon-provided
   actors.
-- [ ] Add auth middleware/extractors for protected API routes.
+- [x] Add auth middleware/extractors for protected API routes.
 - [ ] Add tests for login, session expiry, logout, invalid sessions, and
   integrated mode route omission.
 - [ ] Document packaging/service behavior for `https://127.0.0.1:8448` and

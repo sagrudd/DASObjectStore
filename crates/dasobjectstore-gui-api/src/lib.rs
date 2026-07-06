@@ -2,6 +2,7 @@
 
 pub mod actions;
 pub mod auth;
+pub mod auth_guard;
 pub mod auth_routes;
 pub mod dashboard;
 pub mod routes;
@@ -17,6 +18,10 @@ pub use auth::{
     AuthRegistry, AuthTokenResetReport, AuthenticatedUser, LocalAuthStore, LocalAuthStoreError,
     LoginResponse, LogoutResponse, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
     SessionTokenRecord, UserSummary,
+};
+pub use auth_guard::{
+    AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
+    STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
 };
 pub use auth_routes::{
     gui_api_router_for_host_mode, standalone_auth_router, standalone_gui_api_router,

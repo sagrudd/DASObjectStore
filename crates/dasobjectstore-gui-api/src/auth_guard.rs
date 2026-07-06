@@ -1,0 +1,349 @@
+use crate::{LocalAuthStore, LocalAuthStoreError};
+use axum::{
+    extract::FromRequestParts,
+    http::{header::AUTHORIZATION, request::Parts, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde::{Deserialize, Serialize};
+
+pub const STANDALONE_USERNAME_HEADER: &str = "x-dasobjectstore-username";
+pub const STANDALONE_SESSION_TOKEN_HEADER: &str = "x-dasobjectstore-session-token";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthenticatedActorAuthority {
+    LocalStandalone,
+    SynoptikonIntegrated,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuthenticatedGuiActor {
+    pub subject_id: String,
+    pub authority: AuthenticatedActorAuthority,
+    pub roles: Vec<String>,
+    pub expires_at_unix_seconds: Option<i64>,
+    pub correlation_id: Option<String>,
+}
+
+impl AuthenticatedGuiActor {
+    pub fn local_standalone(username: impl Into<String>, expires_at_unix_seconds: i64) -> Self {
+        Self {
+            subject_id: username.into(),
+            authority: AuthenticatedActorAuthority::LocalStandalone,
+            roles: Vec::new(),
+            expires_at_unix_seconds: Some(expires_at_unix_seconds),
+            correlation_id: None,
+        }
+    }
+
+    pub fn synoptikon_integrated(
+        user_id: impl Into<String>,
+        roles: Vec<String>,
+        correlation_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            subject_id: user_id.into(),
+            authority: AuthenticatedActorAuthority::SynoptikonIntegrated,
+            roles,
+            expires_at_unix_seconds: None,
+            correlation_id: Some(correlation_id.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuthGuardError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthGuardRejection {
+    pub status: StatusCode,
+    pub error: AuthGuardError,
+}
+
+impl IntoResponse for AuthGuardRejection {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.error)).into_response()
+    }
+}
+
+impl<S> FromRequestParts<S> for AuthenticatedGuiActor
+where
+    S: Send + Sync,
+{
+    type Rejection = AuthGuardRejection;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        if let Some(actor) = parts.extensions.get::<AuthenticatedGuiActor>() {
+            return Ok(actor.clone());
+        }
+
+        let auth_store = parts
+            .extensions
+            .get::<LocalAuthStore>()
+            .ok_or_else(missing_auth_context)?;
+        let username = required_header(&parts.headers, STANDALONE_USERNAME_HEADER)?;
+        let session_token = standalone_session_token(&parts.headers)?;
+        let session = auth_store
+            .verify_session(username, session_token)
+            .map_err(local_auth_rejection)?;
+
+        Ok(Self::local_standalone(
+            session.username,
+            session.expires_at_unix_seconds,
+        ))
+    }
+}
+
+fn standalone_session_token(headers: &HeaderMap) -> Result<&str, AuthGuardRejection> {
+    if let Some(session_token) = optional_header(headers, STANDALONE_SESSION_TOKEN_HEADER)? {
+        return Ok(session_token);
+    }
+
+    let authorization = required_header(headers, AUTHORIZATION.as_str())?;
+    authorization
+        .strip_prefix("Bearer ")
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(invalid_authorization_header)
+}
+
+fn required_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<&'a str, AuthGuardRejection> {
+    optional_header(headers, name)?.ok_or_else(missing_credentials)
+}
+
+fn optional_header<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+) -> Result<Option<&'a str>, AuthGuardRejection> {
+    headers
+        .get(name)
+        .map(|value| value.to_str().map_err(|_| invalid_header(name)))
+        .transpose()
+}
+
+fn local_auth_rejection(err: LocalAuthStoreError) -> AuthGuardRejection {
+    match err {
+        LocalAuthStoreError::Io { .. }
+        | LocalAuthStoreError::Json(_)
+        | LocalAuthStoreError::PasswordHash => rejection(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "auth_store_error",
+            "local authentication store failed",
+        ),
+        _ => rejection(
+            StatusCode::UNAUTHORIZED,
+            "invalid_session",
+            "authentication session is invalid or expired",
+        ),
+    }
+}
+
+fn missing_auth_context() -> AuthGuardRejection {
+    rejection(
+        StatusCode::UNAUTHORIZED,
+        "missing_auth_context",
+        "authenticated actor context is required",
+    )
+}
+
+fn missing_credentials() -> AuthGuardRejection {
+    rejection(
+        StatusCode::UNAUTHORIZED,
+        "missing_credentials",
+        "authentication credentials are required",
+    )
+}
+
+fn invalid_authorization_header() -> AuthGuardRejection {
+    rejection(
+        StatusCode::UNAUTHORIZED,
+        "invalid_authorization_header",
+        "authorization header must use Bearer authentication",
+    )
+}
+
+fn invalid_header(name: &str) -> AuthGuardRejection {
+    rejection(
+        StatusCode::BAD_REQUEST,
+        "invalid_header",
+        format!("header {name} must be valid UTF-8"),
+    )
+}
+
+fn rejection(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> AuthGuardRejection {
+    AuthGuardRejection {
+        status,
+        error: AuthGuardError {
+            code: code.into(),
+            message: message.into(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthenticatedActorAuthority, AuthenticatedGuiActor, STANDALONE_USERNAME_HEADER};
+    use crate::LocalAuthStore;
+    use axum::{
+        body::Body,
+        extract::Extension,
+        http::{header::AUTHORIZATION, Request, StatusCode},
+        response::Json,
+        routing::get,
+        Router,
+    };
+    use serde::{Deserialize, Serialize};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn extractor_accepts_valid_standalone_session() {
+        let root = temp_root("standalone-valid");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = protected_router().layer(Extension(auth_store));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(AUTHORIZATION, format!("Bearer {}", login.session_token))
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn extractor_rejects_missing_credentials() {
+        let root = temp_root("standalone-missing");
+        let auth_store = registered_auth_store(&root);
+        let app = protected_router().layer(Extension(auth_store));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn extractor_rejects_invalid_bearer_session() {
+        let root = temp_root("standalone-invalid");
+        let auth_store = registered_auth_store(&root);
+        let app = protected_router().layer(Extension(auth_store));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(AUTHORIZATION, "Bearer wrong")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn extractor_accepts_host_injected_synoptikon_actor() {
+        let actor = AuthenticatedGuiActor::synoptikon_integrated(
+            "user-1",
+            vec!["storage_operator".to_string()],
+            "corr-1",
+        );
+        let app = protected_router().layer(Extension(actor));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    async fn protected(actor: AuthenticatedGuiActor) -> Json<ProtectedResponse> {
+        Json(ProtectedResponse {
+            subject_id: actor.subject_id,
+            authority: actor.authority,
+        })
+    }
+
+    fn protected_router() -> Router {
+        Router::new().route("/protected", get(protected))
+    }
+
+    fn registered_auth_store(root: &Path) -> LocalAuthStore {
+        let auth_store = LocalAuthStore::new(root);
+        auth_store.create_user("admin").expect("user created");
+        let token = auth_store
+            .issue_registration_token("admin", Some(3_600))
+            .expect("registration token issued");
+        auth_store
+            .register_with_token("admin", &token, "secret")
+            .expect("user registered");
+        auth_store
+    }
+
+    #[derive(Debug, Deserialize, Serialize)]
+    struct ProtectedResponse {
+        subject_id: String,
+        authority: AuthenticatedActorAuthority,
+    }
+
+    fn temp_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-auth-guard-{label}-{}-{}",
+            std::process::id(),
+            unix_now_nanos()
+        ))
+    }
+
+    fn unix_now_nanos() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after unix epoch")
+            .as_nanos()
+    }
+
+    fn cleanup(root: &Path) {
+        let _ = fs::remove_dir_all(root);
+    }
+}
