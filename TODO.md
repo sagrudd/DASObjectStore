@@ -264,7 +264,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Add `docs/web-gui-and-mnemosyne-plugin.md` covering host modes,
   standalone port policy, authentication posture, Mneion endpoint model, and
   Web UI design language.
-- [ ] Create `product-manifest.json` for DASObjectStore using
+- [x] Create `product-manifest.json` for DASObjectStore using
   `mnemosyne.product.manifest.v1`.
 - [ ] Add manifest validation tests against the Mnemosyne product schema
   expectations in `../mnemosyne`.

@@ -1,0 +1,140 @@
+{
+  "schema_version": "mnemosyne.product.manifest.v1",
+  "product": {
+    "id": "dasobjectstore",
+    "name": "DASObjectStore",
+    "version": "0.0.0"
+  },
+  "compatibility": {
+    "min_synoptikon_version": "0.2.0",
+    "max_synoptikon_version": "0.31.44"
+  },
+  "modes": {
+    "standalone": true,
+    "synoptikon_integrated": true
+  },
+  "support": {
+    "standalone": {
+      "supported": true,
+      "package_formats": [
+        "deb",
+        "rpm",
+        "container",
+        "source"
+      ],
+      "local_authentication": true,
+      "local_hardware": true,
+      "package_behaviors": [
+        {
+          "host": "product_owned",
+          "layouts": [
+            "legacy_monolith",
+            "discrete_services"
+          ],
+          "product_root": "/opt/dasobjectstore",
+          "state_store": "json_files_with_optional_sqlite",
+          "requires_synoptikon": false,
+          "external_sql_allowed": false,
+          "object_store_required": false,
+          "migration_export_contract": "mnemosyne.dasobjectstore.storage_endpoint_export_bundle.v1"
+        },
+        {
+          "host": "monas_hosted",
+          "layouts": [
+            "discrete_services"
+          ],
+          "product_root": "/opt/dasobjectstore",
+          "state_store": "json_files_with_optional_sqlite",
+          "requires_synoptikon": false,
+          "external_sql_allowed": false,
+          "object_store_required": false,
+          "migration_export_contract": "mnemosyne.dasobjectstore.storage_endpoint_export_bundle.v1"
+        }
+      ]
+    },
+    "synoptikon_integrated": {
+      "supported": true,
+      "requires_entitlement": true,
+      "uses_synoptikon_accounts": true,
+      "uses_synoptikon_audit": true
+    },
+    "migration": {
+      "supported": true,
+      "directions": [
+        "standalone_to_synoptikon",
+        "synoptikon_to_standalone"
+      ],
+      "dry_run_required": true
+    }
+  },
+  "required_synoptikon_api": {
+    "min_version": "0.2.0",
+    "max_version": "0.31.44"
+  },
+  "surfaces": {
+    "api": {
+      "enabled": true,
+      "base_path": "/products/dasobjectstore/api",
+      "health_path": "/products/dasobjectstore/health"
+    },
+    "web": {
+      "enabled": true,
+      "base_path": "/products/dasobjectstore"
+    },
+    "cli": {
+      "enabled": true
+    }
+  },
+  "data_model": {
+    "persistence": "hybrid",
+    "owned_entities": [
+      "pool",
+      "disk",
+      "enclosure",
+      "store",
+      "object",
+      "ingest_job",
+      "placement",
+      "endpoint",
+      "health_event",
+      "operation_audit"
+    ],
+    "migration_support": true
+  },
+  "workflow_model": {
+    "enabled": true,
+    "workflow_kinds": [
+      "ssd_ingest",
+      "hdd_destage",
+      "disk_drain",
+      "disk_repair",
+      "endpoint_validation",
+      "storage_definition_export"
+    ],
+    "execution_providers": [
+      "local_hardware",
+      "external_service"
+    ]
+  },
+  "capabilities": [
+    "das_mixed_disk_object_store",
+    "ssd_ingest_pipeline",
+    "copy_policy_redundancy",
+    "disk_health_operations",
+    "external_nas_endpoint_management",
+    "s3_compatible_object_service",
+    "mneion_storage_endpoint_export",
+    "host_product_ui_adapter",
+    "monas_product_ui_adapter"
+  ],
+  "platform_dependencies": [
+    {
+      "id": "limen",
+      "required": true
+    },
+    {
+      "id": "keryx",
+      "required": true
+    }
+  ]
+}
