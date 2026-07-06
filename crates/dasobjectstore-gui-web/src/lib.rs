@@ -4,6 +4,7 @@ pub mod activity;
 pub mod components;
 pub mod disks;
 pub mod endpoints;
+pub mod entrypoint;
 pub mod mount;
 pub mod objects;
 pub mod overview;
@@ -17,6 +18,9 @@ pub use activity::{activity_workspace_api_path, ACTIVITY_WORKSPACE_ROUTE};
 pub use app::App;
 pub use disks::{disks_workspace_api_path, DISKS_WORKSPACE_ROUTE};
 pub use endpoints::{endpoints_workspace_api_path, ENDPOINTS_WORKSPACE_ROUTE};
+pub use entrypoint::{
+    post_login_workspace_api_path, POST_LOGIN_WORKSPACE_ID, POST_LOGIN_WORKSPACE_ROUTE,
+};
 pub use mount::{FrontendHost, FrontendMount};
 pub use objects::{objects_workspace_api_path, OBJECTS_WORKSPACE_ROUTE};
 pub use overview::{overview_workspace_api_path, OVERVIEW_WORKSPACE_ROUTE};

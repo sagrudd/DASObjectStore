@@ -79,6 +79,27 @@ fn monas_bootstrap_exposes_local_capabilities_for_standalone_host() {
 }
 
 #[test]
+fn post_login_navigation_starts_at_operations_overview_not_landing() {
+    let metadata = export_synoptikon_product_ui_bootstrap().expect("Synoptikon bootstrap exports");
+    let first_route = metadata.navigation.first().expect("navigation exists");
+
+    assert_eq!(first_route.route_id, "overview");
+    assert_eq!(first_route.label, "Overview");
+    assert_eq!(first_route.path, "/products/dasobjectstore/overview");
+
+    for forbidden in ["landing", "home", "welcome", "marketing"] {
+        assert!(
+            !first_route.route_id.contains(forbidden),
+            "post-login route must not be a {forbidden} surface"
+        );
+        assert!(
+            !first_route.path.contains(forbidden),
+            "post-login path must not be a {forbidden} surface"
+        );
+    }
+}
+
+#[test]
 fn derives_bootstrap_path_from_web_mount() {
     let path = bootstrap_path_for_web_mount("/products/dasobjectstore/").expect("path derives");
 

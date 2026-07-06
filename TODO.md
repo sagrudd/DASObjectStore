@@ -344,7 +344,7 @@ authentication-boundary, and Mneion endpoint integration work.
   confirmation panels.
 - [x] Add visual regression/screenshot checks for the main workspaces on desktop
   and mobile-width layouts.
-- [ ] Verify the UI does not use a landing-page pattern after login and opens
+- [x] Verify the UI does not use a landing-page pattern after login and opens
   directly into the operations Overview.
 
 ## Cross-Cutting Tasks
