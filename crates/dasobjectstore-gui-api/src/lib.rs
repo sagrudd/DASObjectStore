@@ -19,8 +19,9 @@ pub use auth::{
     SessionTokenRecord, UserSummary,
 };
 pub use auth_routes::{
-    standalone_auth_router, standalone_gui_api_router, AuthRouteError, LoginRequest, LogoutRequest,
-    RegisterRequest, SessionCheckRequest,
+    gui_api_router_for_host_mode, standalone_auth_router, standalone_gui_api_router,
+    AuthRouteError, GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest,
+    SessionCheckRequest,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,

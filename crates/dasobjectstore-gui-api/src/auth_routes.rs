@@ -5,8 +5,27 @@ use crate::{
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuiApiHostMode {
+    Standalone,
+    SynoptikonIntegrated,
+}
+
 pub fn standalone_gui_api_router(auth_store: LocalAuthStore) -> Router {
-    crate::gui_api_router().merge(standalone_auth_router(auth_store))
+    gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store)
+}
+
+pub fn gui_api_router_for_host_mode(
+    host_mode: GuiApiHostMode,
+    auth_store: LocalAuthStore,
+) -> Router {
+    match host_mode {
+        GuiApiHostMode::Standalone => {
+            crate::gui_api_router().merge(standalone_auth_router(auth_store))
+        }
+        GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
+    }
 }
 
 pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {
@@ -126,7 +145,8 @@ fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteErro
 #[cfg(test)]
 mod tests {
     use super::{
-        standalone_auth_router, LoginRequest, LogoutRequest, RegisterRequest, SessionCheckRequest,
+        gui_api_router_for_host_mode, standalone_auth_router, GuiApiHostMode, LoginRequest,
+        LogoutRequest, RegisterRequest, SessionCheckRequest,
     };
     use crate::{LocalAuthStore, LoginResponse};
     use axum::body::{to_bytes, Body};
@@ -228,6 +248,75 @@ mod tests {
             .expect("request completes");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_host_mode_mounts_local_auth_routes() {
+        let root = temp_root("standalone-host-mode");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/login")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn synoptikon_integrated_host_mode_omits_local_auth_routes() {
+        let root = temp_root("integrated-host-mode");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::SynoptikonIntegrated, auth_store);
+
+        for path in ["/api/register", "/api/login", "/api/logout", "/api/session"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request builds"),
+                )
+                .await
+                .expect("request completes");
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn synoptikon_integrated_host_mode_keeps_base_api_routes() {
+        let root = temp_root("integrated-base-api");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::SynoptikonIntegrated, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
 
         cleanup(&root);
     }
