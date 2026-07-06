@@ -324,7 +324,7 @@ authentication-boundary, and Mneion endpoint integration work.
 
 ## Milestone 16: Web Operations Console and Design System
 
-- [ ] Define shared GUI view models for Overview, Disks, Stores, Objects,
+- [x] Define shared GUI view models for Overview, Disks, Stores, Objects,
   Endpoints, and Activity.
 - [ ] Implement Overview API route and Yew view for capacity, ingest pressure,
   destage urgency, endpoint state, and required actions.

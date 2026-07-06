@@ -10,6 +10,7 @@ pub mod routes;
 pub mod server_config;
 pub mod tls_assets;
 pub mod view;
+pub mod workspaces;
 
 pub use actions::{
     action_catalog, plan_action, GuiActionCatalog, GuiActionDescriptor, GuiActionExecution,
@@ -51,6 +52,13 @@ pub use server_config::{
 pub use tls_assets::{
     ensure_standalone_tls_assets, load_standalone_tls_assets, StandaloneTlsAssetError,
     StandaloneTlsAssetReport, StandaloneTlsAssets,
+};
+pub use workspaces::{
+    workspace_navigation, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
+    ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, ObjectInventoryFiltersView,
+    ObjectInventoryRowView, ObjectsWorkspaceView, OperationsWorkspaceKindView,
+    OperationsWorkspacesView, OverviewWorkspaceView, StorePolicySummaryView, StoresWorkspaceView,
+    WorkspaceNavigationItemView, OPERATIONS_WORKSPACES_SCHEMA_VERSION,
 };
 
 /// Returns the GUI API crate version.
