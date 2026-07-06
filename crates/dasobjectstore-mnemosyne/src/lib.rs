@@ -13,9 +13,12 @@ pub mod storage_definition;
 mod validation;
 
 pub use binding::{
-    export_mneion_binding_snippet, MneionBindingSnippetError, MneionBindingSnippetExport,
-    MneionBindingSnippetRequest, MneionObjectStoreLinkRequest,
-    INTERNAL_MNEION_GOVERNANCE_DOMAIN_ID, MNEION_OBJECT_STORE_ADMIN_ENDPOINT,
+    export_mneion_binding_snippet, export_mneion_managed_storage_binding,
+    MneionBindingSnippetError, MneionBindingSnippetExport, MneionBindingSnippetRequest,
+    MneionManagedBindingReadiness, MneionManagedStorageBindingContract,
+    MneionManagedStorageBindingExport, MneionManagedStorageBindingRequest,
+    MneionObjectStoreLinkRequest, INTERNAL_MNEION_GOVERNANCE_DOMAIN_ID,
+    MNEION_OBJECT_STORE_ADMIN_ENDPOINT,
 };
 pub use boundary::{
     synoptikon_object_store_boundary, ArtefactAuthority, HostMode, HostStorageBoundary,

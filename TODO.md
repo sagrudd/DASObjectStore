@@ -312,7 +312,7 @@ authentication-boundary, and Mneion endpoint integration work.
   credential reference, TLS/CA reference where relevant, and status.
 - [x] Add runtime mount/probe plan types for NFS/NAS validation without making
   raw paths tenant-facing contracts.
-- [ ] Add governance-domain binding export support aligned with Mneion
+- [x] Add governance-domain binding export support aligned with Mneion
   storage-binding rules.
 - [ ] Add API view models for endpoint inventory, validation status, active
   bindings, and degraded endpoint warnings.
