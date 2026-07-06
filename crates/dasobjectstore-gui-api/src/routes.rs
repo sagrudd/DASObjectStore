@@ -4,8 +4,8 @@ use crate::actions::{
 };
 use crate::view::{api_health, ApiHealth};
 use crate::workspaces::{
-    DisksWorkspaceView, EndpointsWorkspaceView, ObjectsWorkspaceView, OverviewWorkspaceView,
-    StoresWorkspaceView,
+    ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, ObjectsWorkspaceView,
+    OverviewWorkspaceView, StoresWorkspaceView,
 };
 use axum::{http::StatusCode, routing::get, routing::post, Json, Router};
 
@@ -19,6 +19,7 @@ pub fn gui_api_router() -> Router {
         .route("/api/v1/workspaces/stores", get(stores_workspace))
         .route("/api/v1/workspaces/objects", get(objects_workspace))
         .route("/api/v1/workspaces/endpoints", get(endpoints_workspace))
+        .route("/api/v1/workspaces/activity", get(activity_workspace))
 }
 
 async fn health() -> Json<ApiHealth> {
@@ -47,6 +48,10 @@ async fn objects_workspace() -> Json<ObjectsWorkspaceView> {
 
 async fn endpoints_workspace() -> Json<EndpointsWorkspaceView> {
     Json(EndpointsWorkspaceView::empty())
+}
+
+async fn activity_workspace() -> Json<ActivityWorkspaceView> {
+    Json(ActivityWorkspaceView::empty())
 }
 
 async fn plan_action(
@@ -182,5 +187,29 @@ mod tests {
         assert_eq!(encoded["inventory"]["endpoint_count"], 0);
         assert_eq!(encoded["inventory"]["degraded_endpoint_count"], 0);
         assert_eq!(encoded["inventory"]["binding_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn activity_route_returns_workspace_payload() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/activity")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("activity response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(encoded["ingest"], serde_json::Value::Null);
+        assert_eq!(encoded["destage"], serde_json::Value::Null);
+        assert_eq!(encoded["tasks"].as_array().expect("tasks").len(), 0);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
 }

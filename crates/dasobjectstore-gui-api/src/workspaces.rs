@@ -267,6 +267,10 @@ pub struct ActivityWorkspaceView {
 }
 
 impl ActivityWorkspaceView {
+    pub fn empty() -> Self {
+        Self::from_sections(None, None, Vec::new())
+    }
+
     pub fn from_sections(
         ingest: Option<IngestQueueView>,
         destage: Option<DestageQueueView>,
@@ -499,5 +503,16 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn builds_empty_activity_workspace_for_api_bootstrap() {
+        let activity = ActivityWorkspaceView::empty();
+        let encoded = serde_json::to_value(activity).expect("activity serializes");
+
+        assert_eq!(encoded["ingest"], serde_json::Value::Null);
+        assert_eq!(encoded["destage"], serde_json::Value::Null);
+        assert_eq!(encoded["tasks"].as_array().expect("tasks").len(), 0);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
 }
