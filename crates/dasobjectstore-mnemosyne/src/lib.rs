@@ -2,6 +2,7 @@
 
 pub mod binding;
 pub mod boundary;
+pub mod product_ui;
 pub mod storage_definition;
 mod validation;
 
@@ -14,6 +15,15 @@ pub use boundary::{
     synoptikon_object_store_boundary, ArtefactAuthority, HostMode, HostStorageBoundary,
     LocalRootPolicy, LocalRootTemplate, ObjectStorePolicy, RegistrationContract, SqlPolicy,
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
+};
+pub use product_ui::{
+    bootstrap_path_for_web_mount, export_product_ui_bootstrap,
+    export_synoptikon_product_ui_bootstrap, operations_navigation, ProductUiBootstrapError,
+    ProductUiBootstrapMetadata, ProductUiCorrelationMode, ProductUiCorrelationPolicy,
+    ProductUiHostCapability, ProductUiNavigationItem, ProductUiVisibility,
+    ProductUiVisibilityState, CORRELATION_ID_HEADER, DASOBJECTSTORE_API_MOUNT,
+    DASOBJECTSTORE_PRODUCT_ID, DASOBJECTSTORE_PRODUCT_NAME, DASOBJECTSTORE_WEB_MOUNT,
+    PRODUCT_UI_BOOTSTRAP_SCHEMA_VERSION, PRODUCT_UI_BOOTSTRAP_WELL_KNOWN_SUFFIX,
 };
 pub use storage_definition::{
     export_mneion_storage_definition, MneionObjectStoreCreateRequest, MneionStorageDefinitionError,

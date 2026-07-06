@@ -268,7 +268,7 @@ authentication-boundary, and Mneion endpoint integration work.
   `mnemosyne.product.manifest.v1`.
 - [x] Add manifest validation tests against the Mnemosyne product schema
   expectations in `../mnemosyne`.
-- [ ] Add product UI bootstrap export support for `/products/dasobjectstore`
+- [x] Add product UI bootstrap export support for `/products/dasobjectstore`
   and `/products/dasobjectstore/api`.
 - [ ] Add host-mode domain model for `standalone` and
   `synoptikon_integrated`.
