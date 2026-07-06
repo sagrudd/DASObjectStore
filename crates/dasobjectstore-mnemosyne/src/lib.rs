@@ -50,7 +50,9 @@ pub use product_ui::{
     PRODUCT_UI_BOOTSTRAP_SCHEMA_VERSION, PRODUCT_UI_BOOTSTRAP_WELL_KNOWN_SUFFIX,
 };
 pub use storage_definition::{
-    export_mneion_storage_definition, MneionObjectStoreCreateRequest, MneionStorageDefinitionError,
+    export_mneion_storage_definition, MneionDasObjectStoreEndpoint,
+    MneionDasObjectStoreEndpointKind, MneionDasObjectStoreEndpointLocation,
+    MneionEndpointObjectContract, MneionObjectStoreCreateRequest, MneionStorageDefinitionError,
     MneionStorageDefinitionExport, MneionStorageDefinitionRequest, MNEION_S3_BACKEND_KIND,
 };
 

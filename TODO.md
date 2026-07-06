@@ -304,7 +304,7 @@ authentication-boundary, and Mneion endpoint integration work.
 
 ## Milestone 15: Native Mneion Storage Endpoint and External NAS Support
 
-- [ ] Extend `dasobjectstore-mnemosyne` endpoint model with
+- [x] Extend `dasobjectstore-mnemosyne` endpoint model with
   `dasobjectstore_das`, `dasobjectstore_nfs`, and `s3_compatible` variants.
 - [ ] Add storage-definition export tests for DAS-backed endpoints.
 - [ ] Add storage-definition export tests for external NAS/NFS endpoints.

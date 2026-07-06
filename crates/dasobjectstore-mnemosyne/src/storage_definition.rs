@@ -6,6 +6,106 @@ use std::fmt::{self, Display};
 
 pub const MNEION_S3_BACKEND_KIND: &str = "S3-Compatible";
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MneionDasObjectStoreEndpointKind {
+    DasobjectstoreDas,
+    DasobjectstoreNfs,
+    S3Compatible,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MneionDasObjectStoreEndpoint {
+    pub identifier: String,
+    pub display_name: String,
+    pub endpoint_kind: MneionDasObjectStoreEndpointKind,
+    pub manager_product_id: String,
+    pub object_contract: MneionEndpointObjectContract,
+    pub location: MneionDasObjectStoreEndpointLocation,
+}
+
+impl MneionDasObjectStoreEndpoint {
+    pub fn das_backed(
+        identifier: impl Into<String>,
+        display_name: impl Into<String>,
+        pool_id: impl Into<String>,
+        service_endpoint: impl Into<String>,
+    ) -> Self {
+        Self {
+            identifier: identifier.into(),
+            display_name: display_name.into(),
+            endpoint_kind: MneionDasObjectStoreEndpointKind::DasobjectstoreDas,
+            manager_product_id: crate::DASOBJECTSTORE_PRODUCT_ID.to_string(),
+            object_contract: MneionEndpointObjectContract::ObjectStyle,
+            location: MneionDasObjectStoreEndpointLocation::Das {
+                pool_id: pool_id.into(),
+                service_endpoint: service_endpoint.into(),
+            },
+        }
+    }
+
+    pub fn nfs_backed(
+        identifier: impl Into<String>,
+        display_name: impl Into<String>,
+        export_id: impl Into<String>,
+        service_endpoint: impl Into<String>,
+    ) -> Self {
+        Self {
+            identifier: identifier.into(),
+            display_name: display_name.into(),
+            endpoint_kind: MneionDasObjectStoreEndpointKind::DasobjectstoreNfs,
+            manager_product_id: crate::DASOBJECTSTORE_PRODUCT_ID.to_string(),
+            object_contract: MneionEndpointObjectContract::ObjectStyle,
+            location: MneionDasObjectStoreEndpointLocation::Nfs {
+                export_id: export_id.into(),
+                service_endpoint: service_endpoint.into(),
+            },
+        }
+    }
+
+    pub fn s3_compatible(
+        identifier: impl Into<String>,
+        display_name: impl Into<String>,
+        provider_id: ObjectServiceProviderId,
+        endpoint: impl Into<String>,
+    ) -> Self {
+        Self {
+            identifier: identifier.into(),
+            display_name: display_name.into(),
+            endpoint_kind: MneionDasObjectStoreEndpointKind::S3Compatible,
+            manager_product_id: crate::DASOBJECTSTORE_PRODUCT_ID.to_string(),
+            object_contract: MneionEndpointObjectContract::ObjectStyle,
+            location: MneionDasObjectStoreEndpointLocation::S3Compatible {
+                provider_id,
+                endpoint: endpoint.into(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MneionEndpointObjectContract {
+    ObjectStyle,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "location_kind", rename_all = "snake_case")]
+pub enum MneionDasObjectStoreEndpointLocation {
+    Das {
+        pool_id: String,
+        service_endpoint: String,
+    },
+    Nfs {
+        export_id: String,
+        service_endpoint: String,
+    },
+    S3Compatible {
+        provider_id: ObjectServiceProviderId,
+        endpoint: String,
+    },
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MneionStorageDefinitionRequest {
     pub identifier: String,
@@ -153,13 +253,89 @@ fn validate_uuid_like(value: &str) -> Result<(), MneionStorageDefinitionError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        export_mneion_storage_definition, MneionStorageDefinitionError,
-        MneionStorageDefinitionRequest, MNEION_S3_BACKEND_KIND,
+        export_mneion_storage_definition, MneionDasObjectStoreEndpoint,
+        MneionDasObjectStoreEndpointKind, MneionEndpointObjectContract,
+        MneionStorageDefinitionError, MneionStorageDefinitionRequest, MNEION_S3_BACKEND_KIND,
     };
     use dasobjectstore_object_service::ObjectServiceProviderId;
     use serde_json::json;
 
     const STORE_UUID: &str = "4f0a1ba7-9f00-422b-bf18-87567b076daa";
+
+    #[test]
+    fn models_das_backed_endpoint_variant() {
+        let endpoint = MneionDasObjectStoreEndpoint::das_backed(
+            STORE_UUID,
+            "DAS pool endpoint",
+            "pool-1",
+            "http://127.0.0.1:3900",
+        );
+
+        assert_eq!(
+            endpoint.endpoint_kind,
+            MneionDasObjectStoreEndpointKind::DasobjectstoreDas
+        );
+        assert_eq!(
+            endpoint.object_contract,
+            MneionEndpointObjectContract::ObjectStyle
+        );
+
+        let serialized = serde_json::to_value(endpoint).expect("endpoint serializes");
+        assert_eq!(serialized["endpoint_kind"], "dasobjectstore_das");
+        assert_eq!(serialized["manager_product_id"], "dasobjectstore");
+        assert_eq!(serialized["object_contract"], "object_style");
+        assert_eq!(serialized["location"]["location_kind"], "das");
+        assert_eq!(serialized["location"]["pool_id"], "pool-1");
+        assert_eq!(
+            serialized["location"]["service_endpoint"],
+            "http://127.0.0.1:3900"
+        );
+    }
+
+    #[test]
+    fn models_nfs_backed_endpoint_variant() {
+        let endpoint = MneionDasObjectStoreEndpoint::nfs_backed(
+            STORE_UUID,
+            "NAS endpoint",
+            "nas-export-1",
+            "http://nas-gateway.local:3900",
+        );
+
+        assert_eq!(
+            endpoint.endpoint_kind,
+            MneionDasObjectStoreEndpointKind::DasobjectstoreNfs
+        );
+
+        let serialized = serde_json::to_value(endpoint).expect("endpoint serializes");
+        assert_eq!(serialized["endpoint_kind"], "dasobjectstore_nfs");
+        assert_eq!(serialized["location"]["location_kind"], "nfs");
+        assert_eq!(serialized["location"]["export_id"], "nas-export-1");
+        assert_eq!(
+            serialized["location"]["service_endpoint"],
+            "http://nas-gateway.local:3900"
+        );
+    }
+
+    #[test]
+    fn models_s3_compatible_endpoint_variant() {
+        let endpoint = MneionDasObjectStoreEndpoint::s3_compatible(
+            STORE_UUID,
+            "S3 endpoint",
+            ObjectServiceProviderId::Garage,
+            "http://127.0.0.1:3900",
+        );
+
+        assert_eq!(
+            endpoint.endpoint_kind,
+            MneionDasObjectStoreEndpointKind::S3Compatible
+        );
+
+        let serialized = serde_json::to_value(endpoint).expect("endpoint serializes");
+        assert_eq!(serialized["endpoint_kind"], "s3_compatible");
+        assert_eq!(serialized["location"]["location_kind"], "s3_compatible");
+        assert_eq!(serialized["location"]["provider_id"], "Garage");
+        assert_eq!(serialized["location"]["endpoint"], "http://127.0.0.1:3900");
+    }
 
     #[test]
     fn exports_mneion_s3_compatible_storage_definition() {
