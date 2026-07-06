@@ -7,6 +7,7 @@ pub mod host_mode;
 pub mod integrated_session;
 pub mod monas_host_boundary;
 pub mod nas_nfs_endpoint;
+pub mod nas_nfs_runtime;
 pub mod product_ui;
 pub mod storage_definition;
 mod validation;
@@ -45,6 +46,12 @@ pub use nas_nfs_endpoint::{
     validate_nas_nfs_endpoint_definition, NasNfsEndpointDefinition, NasNfsEndpointValidationError,
     NasNfsEndpointValidationStatus, ValidatedNasNfsEndpointDefinition,
     NAS_NFS_ENDPOINT_DEFINITION_SCHEMA_VERSION,
+};
+pub use nas_nfs_runtime::{
+    plan_nas_nfs_runtime_validation, NasNfsMountMode, NasNfsMountProbePlan, NasNfsMountScope,
+    NasNfsObjectServiceProbePlan, NasNfsRuntimeProbeStep, NasNfsRuntimeValidationPlan,
+    NasNfsRuntimeValidationPlanError, NasNfsTenantContractBoundary,
+    NAS_NFS_RUNTIME_VALIDATION_PLAN_SCHEMA_VERSION,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,
