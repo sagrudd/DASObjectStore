@@ -342,7 +342,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Add reusable Yew components for dense tables, inspector drawers, status
   badges, capacity bars, segmented controls, icon buttons, and risky-operation
   confirmation panels.
-- [ ] Add visual regression/screenshot checks for the main workspaces on desktop
+- [x] Add visual regression/screenshot checks for the main workspaces on desktop
   and mobile-width layouts.
 - [ ] Verify the UI does not use a landing-page pattern after login and opens
   directly into the operations Overview.

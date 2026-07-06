@@ -13,3 +13,8 @@
 # Local automation and benchmark output
 /benchmarks/output/
 /tmp/
+
+# Node and browser test output
+/node_modules/
+/playwright-report/
+/test-results/

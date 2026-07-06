@@ -1,0 +1,12 @@
+{
+  "name": "dasobjectstore",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "visual:check": "playwright test --config tests/visual/playwright.config.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0"
+  }
+}
