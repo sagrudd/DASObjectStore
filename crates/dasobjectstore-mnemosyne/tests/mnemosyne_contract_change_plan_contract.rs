@@ -58,6 +58,32 @@ fn plugin_spec_links_to_contract_change_plan() {
     assert_contains(&spec, "mnemosyne-contract-change-plan.md");
 }
 
+#[test]
+fn platform_convention_mutability_rule_is_documented() {
+    for relative_path in [
+        "README.md",
+        "ROADMAP.md",
+        "docs/requirements.md",
+        "docs/web-gui-and-mnemosyne-plugin.md",
+    ] {
+        let document = fs::read_to_string(repo_root().join(relative_path))
+            .unwrap_or_else(|_| panic!("read {relative_path}"));
+
+        assert_contains(&document, "Synoptikon");
+        assert_contains(&document, "Mneion");
+        assert!(
+            document.contains("design input")
+                || document.contains("immutable")
+                || document.contains("mutable"),
+            "{relative_path} should describe Synoptikon/Mneion conventions as design inputs or not immutable"
+        );
+        assert_contains(&document, "migration");
+        assert_contains(&document, "test");
+        assert_contains(&document, "documentation");
+        assert_contains(&document, "coherent");
+    }
+}
+
 fn contract_change_plan() -> String {
     fs::read_to_string(repo_root().join("docs/mnemosyne-contract-change-plan.md"))
         .expect("read contract change plan")

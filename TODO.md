@@ -358,6 +358,6 @@ authentication-boundary, and Mneion endpoint integration work.
   trigger those risks.
 - [x] Review file sizes before each milestone completion and split modules that
   have grown too broad.
-- [ ] Treat current Synoptikon/Mneion conventions as mutable design inputs when
+- [x] Treat current Synoptikon/Mneion conventions as mutable design inputs when
   DASObjectStore requires deeper integration, provided affected software,
   schemas, migrations, tests, and docs are updated coherently.
