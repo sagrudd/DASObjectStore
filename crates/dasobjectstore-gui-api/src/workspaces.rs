@@ -206,6 +206,10 @@ pub struct ObjectsWorkspaceView {
 }
 
 impl ObjectsWorkspaceView {
+    pub fn empty() -> Self {
+        Self::from_objects(Vec::new())
+    }
+
     pub fn from_objects(objects: Vec<ObjectInventoryRowView>) -> Self {
         let warnings = objects
             .iter()
@@ -456,6 +460,19 @@ mod tests {
 
         assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
         assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+    }
+
+    #[test]
+    fn builds_empty_objects_workspace_for_api_bootstrap() {
+        let objects = ObjectsWorkspaceView::empty();
+        let encoded = serde_json::to_value(objects).expect("objects serializes");
+
+        assert_eq!(encoded["objects"].as_array().expect("objects").len(), 0);
+        assert_eq!(encoded["selected_object_id"], serde_json::Value::Null);
+        assert_eq!(encoded["filters"]["store_id"], serde_json::Value::Null);
+        assert_eq!(encoded["filters"]["state"], serde_json::Value::Null);
+        assert_eq!(encoded["filters"]["search"], serde_json::Value::Null);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
 }

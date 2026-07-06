@@ -332,7 +332,7 @@ authentication-boundary, and Mneion endpoint integration work.
   USB/SMART warnings, benchmark drift, migrate, drain, replace, and retire.
 - [x] Implement Stores API route and Yew view for policy creation, modification,
   resizing, redundancy, retention, and export mode.
-- [ ] Implement Objects API route and Yew view for object inventory, hashes,
+- [x] Implement Objects API route and Yew view for object inventory, hashes,
   copy locations, reproducibility source, export/download, repair, and
   redownload.
 - [ ] Implement Endpoints API route and Yew view for DAS pools, external NAS/NFS

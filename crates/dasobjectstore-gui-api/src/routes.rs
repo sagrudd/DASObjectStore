@@ -3,7 +3,9 @@ use crate::actions::{
     GuiActionPlanError, GuiActionPlanRequest,
 };
 use crate::view::{api_health, ApiHealth};
-use crate::workspaces::{DisksWorkspaceView, OverviewWorkspaceView, StoresWorkspaceView};
+use crate::workspaces::{
+    DisksWorkspaceView, ObjectsWorkspaceView, OverviewWorkspaceView, StoresWorkspaceView,
+};
 use axum::{http::StatusCode, routing::get, routing::post, Json, Router};
 
 pub fn gui_api_router() -> Router {
@@ -14,6 +16,7 @@ pub fn gui_api_router() -> Router {
         .route("/api/v1/workspaces/overview", get(overview_workspace))
         .route("/api/v1/workspaces/disks", get(disks_workspace))
         .route("/api/v1/workspaces/stores", get(stores_workspace))
+        .route("/api/v1/workspaces/objects", get(objects_workspace))
 }
 
 async fn health() -> Json<ApiHealth> {
@@ -34,6 +37,10 @@ async fn disks_workspace() -> Json<DisksWorkspaceView> {
 
 async fn stores_workspace() -> Json<StoresWorkspaceView> {
     Json(StoresWorkspaceView::empty())
+}
+
+async fn objects_workspace() -> Json<ObjectsWorkspaceView> {
+    Json(ObjectsWorkspaceView::empty())
 }
 
 async fn plan_action(
@@ -121,6 +128,30 @@ mod tests {
 
         assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
         assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+    }
+
+    #[tokio::test]
+    async fn objects_route_returns_workspace_payload() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/objects")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("objects response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(encoded["objects"].as_array().expect("objects").len(), 0);
+        assert_eq!(encoded["selected_object_id"], serde_json::Value::Null);
+        assert_eq!(encoded["filters"]["store_id"], serde_json::Value::Null);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
 }

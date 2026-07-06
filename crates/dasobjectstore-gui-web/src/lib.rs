@@ -2,6 +2,7 @@
 
 pub mod disks;
 pub mod mount;
+pub mod objects;
 pub mod overview;
 pub mod stores;
 
@@ -12,6 +13,7 @@ pub mod app;
 pub use app::App;
 pub use disks::{disks_workspace_api_path, DISKS_WORKSPACE_ROUTE};
 pub use mount::{FrontendHost, FrontendMount};
+pub use objects::{objects_workspace_api_path, OBJECTS_WORKSPACE_ROUTE};
 pub use overview::{overview_workspace_api_path, OVERVIEW_WORKSPACE_ROUTE};
 pub use stores::{stores_workspace_api_path, STORES_WORKSPACE_ROUTE};
 
