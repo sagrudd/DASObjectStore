@@ -145,6 +145,10 @@ pub struct DisksWorkspaceView {
 }
 
 impl DisksWorkspaceView {
+    pub fn empty() -> Self {
+        Self::from_disks(Vec::new())
+    }
+
     pub fn from_disks(disks: Vec<DiskHealthView>) -> Self {
         let warnings = disks
             .iter()
@@ -429,5 +433,15 @@ mod tests {
         assert_eq!(encoded["destage"], serde_json::Value::Null);
         assert_eq!(encoded["endpoints"]["endpoint_count"], 0);
         assert_eq!(encoded["attention"]["warning_count"], 0);
+    }
+
+    #[test]
+    fn builds_empty_disks_workspace_for_api_bootstrap() {
+        let disks = DisksWorkspaceView::empty();
+        let encoded = serde_json::to_value(disks).expect("disks serializes");
+
+        assert_eq!(encoded["disks"].as_array().expect("disks").len(), 0);
+        assert_eq!(encoded["selected_disk_id"], serde_json::Value::Null);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
 }
