@@ -3,6 +3,7 @@
 pub mod disks;
 pub mod mount;
 pub mod overview;
+pub mod stores;
 
 #[cfg(target_arch = "wasm32")]
 pub mod app;
@@ -12,6 +13,7 @@ pub use app::App;
 pub use disks::{disks_workspace_api_path, DISKS_WORKSPACE_ROUTE};
 pub use mount::{FrontendHost, FrontendMount};
 pub use overview::{overview_workspace_api_path, OVERVIEW_WORKSPACE_ROUTE};
+pub use stores::{stores_workspace_api_path, STORES_WORKSPACE_ROUTE};
 
 /// Returns the GUI web crate version.
 pub fn version() -> &'static str {

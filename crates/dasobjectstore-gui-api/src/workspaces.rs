@@ -171,6 +171,10 @@ pub struct StoresWorkspaceView {
 }
 
 impl StoresWorkspaceView {
+    pub fn empty() -> Self {
+        Self::from_stores(Vec::new())
+    }
+
     pub fn from_stores(stores: Vec<StorePolicySummaryView>) -> Self {
         Self {
             stores,
@@ -442,6 +446,16 @@ mod tests {
 
         assert_eq!(encoded["disks"].as_array().expect("disks").len(), 0);
         assert_eq!(encoded["selected_disk_id"], serde_json::Value::Null);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+    }
+
+    #[test]
+    fn builds_empty_stores_workspace_for_api_bootstrap() {
+        let stores = StoresWorkspaceView::empty();
+        let encoded = serde_json::to_value(stores).expect("stores serializes");
+
+        assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
+        assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
 }
