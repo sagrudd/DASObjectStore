@@ -2,6 +2,7 @@
 
 pub mod binding;
 pub mod boundary;
+pub mod host_mode;
 pub mod product_ui;
 pub mod storage_definition;
 mod validation;
@@ -15,6 +16,12 @@ pub use boundary::{
     synoptikon_object_store_boundary, ArtefactAuthority, HostMode, HostStorageBoundary,
     LocalRootPolicy, LocalRootTemplate, ObjectStorePolicy, RegistrationContract, SqlPolicy,
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
+};
+pub use host_mode::{
+    host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,
+    AuditAuthority, AuthenticationAuthority, HostModeProfile, HostModeProfileError,
+    ProductHostMode, StorageAuthority, DASOBJECTSTORE_PRODUCT_ROOT,
+    DASOBJECTSTORE_STANDALONE_HTTPS_PORT,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,

@@ -270,7 +270,7 @@ authentication-boundary, and Mneion endpoint integration work.
   expectations in `../mnemosyne`.
 - [x] Add product UI bootstrap export support for `/products/dasobjectstore`
   and `/products/dasobjectstore/api`.
-- [ ] Add host-mode domain model for `standalone` and
+- [x] Add host-mode domain model for `standalone` and
   `synoptikon_integrated`.
 - [ ] Add Synoptikon-integrated host boundary validation for account,
   entitlement, central audit, correlation ID, project context, and storage
