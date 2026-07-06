@@ -157,3 +157,9 @@ DASObjectStore SHALL provide a product manifest aligned with
 The repository SHALL keep Mnemosyne-specific integration in the
 `dasobjectstore-mnemosyne` boundary crate and avoid making the public core depend
 on Mnemosyne runtime crates.
+
+Contract changes required to make DASObjectStore a native Mneion storage
+appliance are tracked in
+[Mnemosyne Contract Change Plan](mnemosyne-contract-change-plan.md). That plan
+is the coordination gate before changing Mneion storage-definition,
+storage-binding, product SDK, or Limen contracts.

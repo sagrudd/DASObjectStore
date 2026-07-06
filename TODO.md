@@ -279,9 +279,9 @@ authentication-boundary, and Mneion endpoint integration work.
   local audit, local hardware workflows, and local state stores.
 - [x] Draft the `../mnemosyne/synoptikon-products.toml` catalogue entry for
   DASObjectStore without committing sibling changes from this repository.
-- [ ] Identify any Synoptikon/Mneion contract changes that would make
+- [x] Identify any Synoptikon/Mneion contract changes that would make
   DASObjectStore cleaner as a native storage appliance.
-- [ ] When a contract change is justified, update DASObjectStore docs with the
+- [x] When a contract change is justified, update DASObjectStore docs with the
   coordinated change plan and affected repositories before implementation.
 
 ## Milestone 14: Standalone HTTPS Application and Authentication
