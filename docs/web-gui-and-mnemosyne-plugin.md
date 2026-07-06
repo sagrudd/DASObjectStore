@@ -105,6 +105,13 @@ SHALL include endpoint identity, export path or service URL, credential or mount
 credential reference, TLS/CA material where relevant, validation status, and
 governance-domain binding eligibility.
 
+DASObjectStore-native endpoints SHALL NOT be treated as generic Mneion `posix`
+storage definitions. The distinction is defined in
+[Mnemosyne Contract Change Plan](mnemosyne-contract-change-plan.md):
+DASObjectStore owns the appliance identity, health, ingest, destage, validation,
+repair, and runtime mount leases, while Mneion owns governance-domain binding and
+object-style product access.
+
 ## Web UI Design Language
 
 The DASObjectStore interface SHALL feel like a storage operations console, not a

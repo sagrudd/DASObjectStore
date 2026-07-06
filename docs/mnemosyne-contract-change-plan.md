@@ -39,6 +39,39 @@ Rationale: DASObjectStore endpoints carry appliance health, ingest, destage,
 disk, store-policy, and object-copy semantics that ordinary NFS/POSIX records do
 not express.
 
+## DASObjectStore-Native Endpoints Versus `posix`
+
+Generic Mneion `posix` storage definitions describe a filesystem path and leave
+most runtime safety semantics outside the storage contract. That is useful for
+transitional integrations, but it is too weak for DASObjectStore because the
+durable storage boundary is an object appliance, not a path.
+
+DASObjectStore-native endpoints differ from `posix` definitions in these ways:
+
+- Identity is managed by DASObjectStore and exported to Mneion as
+  `manager_product_id = "dasobjectstore"` plus an endpoint kind such as
+  `dasobjectstore_das` or `dasobjectstore_nfs`.
+- Tenant-facing access remains object-style. Mneion products should receive an
+  object access profile, namespace prefix, and credential reference, not a local
+  directory, NFS export, or mount path.
+- Health and validation are first-class binding inputs. Disk health, USB
+  posture, NAS/NFS validation, object-service reachability, and endpoint
+  degradation can block new unsafe bindings while preserving visibility of
+  existing endpoints.
+- Runtime filesystem or NFS mounts are implementation leases owned by
+  DASObjectStore. They may be created for validation, repair, export, or local
+  service operation, but they are not durable Mneion control-plane facts.
+- Store policy remains attached to the managed appliance. SSD ingest, HDD
+  destage, copy redundancy, direct reproducible import, object verification,
+  repair, and redownload semantics cannot be represented by a bare POSIX path.
+- Governance-domain binding remains authoritative. DASObjectStore does not hand
+  products raw filesystem credentials or paths to bypass Mneion binding rules.
+
+`posix` should therefore remain a compatibility or emergency endpoint class for
+ordinary filesystem-backed storage. DASObjectStore-managed DAS, NAS/NFS, and
+S3-compatible endpoints should use the native endpoint kinds so the platform can
+reason about validation, safety, health, and binding readiness.
+
 ### C2: Extend Storage Definition Metadata
 
 Add optional fields to Mneion object-store/storage-definition payloads:
