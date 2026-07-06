@@ -1,12 +1,12 @@
 # Synoptikon Catalogue Entry Draft
 
-Status: Draft  
-Target file: `../mnemosyne/synoptikon-products.toml`  
-Scope: Milestone 13 catalogue planning only
+Status: Implemented in Synoptikon integration branch
+Target file: `../mnemosyne/synoptikon-products.toml`
+Scope: Catalogue and packaging artefact coordination
 
-This document records the DASObjectStore catalogue changes that should be made
-in the Mnemosyne repository when the coordinated Synoptikon integration change
-is ready. It intentionally does not modify `../mnemosyne` from this repository.
+This document records the DASObjectStore catalogue shape consumed by the
+Mnemosyne repository. The release server binary and Trunk web bundle are now
+packageable local artefacts when built from this repository.
 
 ## Product Entry
 
@@ -39,10 +39,10 @@ Rationale:
 - `required_services = ["limen", "keryx"]` follows the current product manifest
   platform dependencies while DASObjectStore remains an object-style storage
   appliance.
-- `binary` names the planned Milestone 14 standalone/server entry point. The
-  path should be revisited when the server crate or binary name stabilizes.
-- `web_bundle` names the existing Yew crate output path and should be revisited
-  when Trunk packaging is wired.
+- `binary` names the `dasobjectstore-server` binary produced by
+  `cargo build --release -p dasobjectstore-cli --bin dasobjectstore-server`.
+- `web_bundle` names the Trunk output produced by running `trunk build --release`
+  in `crates/dasobjectstore-gui-web`.
 
 ## Package Profile Additions
 
@@ -91,10 +91,8 @@ listener and a catalogue-assigned internal product port.
 
 ## Coordinated Changes Required
 
-Before applying this entry in `../mnemosyne`, confirm or implement:
+The coordinated Synoptikon integration must keep these pieces in place:
 
-- the `dasobjectstore-server` binary named in the catalogue;
-- the generated Yew bundle path under `crates/dasobjectstore-gui-web/dist`;
 - Synoptikon product build/restart support for the `../DASObjectStore` path;
 - entitlement provisioning for `entitlement_product_code = "dasobjectstore"`;
 - Mneion storage endpoint export and governance-domain binding support for

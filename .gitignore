@@ -18,3 +18,6 @@
 /node_modules/
 /playwright-report/
 /test-results/
+
+# Trunk/Yew generated web distribution artefacts
+/crates/dasobjectstore-gui-web/dist/
