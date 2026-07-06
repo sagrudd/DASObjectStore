@@ -2,6 +2,7 @@
 
 pub mod binding;
 pub mod boundary;
+pub mod host_boundary;
 pub mod host_mode;
 pub mod product_ui;
 pub mod storage_definition;
@@ -16,6 +17,11 @@ pub use boundary::{
     synoptikon_object_store_boundary, ArtefactAuthority, HostMode, HostStorageBoundary,
     LocalRootPolicy, LocalRootTemplate, ObjectStorePolicy, RegistrationContract, SqlPolicy,
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
+};
+pub use host_boundary::{
+    validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,
+    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedHostBoundaryError,
+    REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 pub use host_mode::{
     host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,

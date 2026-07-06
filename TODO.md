@@ -272,7 +272,7 @@ authentication-boundary, and Mneion endpoint integration work.
   and `/products/dasobjectstore/api`.
 - [x] Add host-mode domain model for `standalone` and
   `synoptikon_integrated`.
-- [ ] Add Synoptikon-integrated host boundary validation for account,
+- [x] Add Synoptikon-integrated host boundary validation for account,
   entitlement, central audit, correlation ID, project context, and storage
   authority.
 - [ ] Add Monas/standalone host boundary validation for local product root,
