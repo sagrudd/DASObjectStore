@@ -1,5 +1,7 @@
 use crate::{
-    host_mode_profile, HostModeProfile, HostModeProfileError, ProductHostMode, StorageAuthority,
+    host_mode_profile,
+    validation::{validate_context_id_like, validate_role_like},
+    HostModeProfile, HostModeProfileError, ProductHostMode, StorageAuthority,
     DASOBJECTSTORE_PRODUCT_ID,
 };
 use serde::{Deserialize, Serialize};
@@ -145,27 +147,8 @@ fn validate_context_id(
     field: &'static str,
     value: &str,
 ) -> Result<(), SynoptikonIntegratedHostBoundaryError> {
-    if value.is_empty() || value.len() > 128 {
-        return Err(invalid_context_field(field, "must be 1-128 characters"));
-    }
-
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return Err(invalid_context_field(field, "must not be empty"));
-    };
-    if !first.is_ascii_alphanumeric() {
-        return Err(invalid_context_field(
-            field,
-            "must start with an ASCII letter or digit",
-        ));
-    }
-    if !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | ':' | '-')) {
-        return Err(invalid_context_field(
-            field,
-            "contains unsupported characters",
-        ));
-    }
-    Ok(())
+    validate_context_id_like(field, value)
+        .map_err(|err| invalid_context_field(err.field, &err.reason))
 }
 
 fn validate_roles(roles: &[String]) -> Result<(), SynoptikonIntegratedHostBoundaryError> {
@@ -186,29 +169,7 @@ fn validate_roles(roles: &[String]) -> Result<(), SynoptikonIntegratedHostBounda
 }
 
 fn validate_role(role: &str) -> Result<(), SynoptikonIntegratedHostBoundaryError> {
-    if role.is_empty() || role.len() > 96 {
-        return Err(invalid_context_field("roles", "must be 1-96 characters"));
-    }
-
-    let mut chars = role.chars();
-    let Some(first) = chars.next() else {
-        return Err(invalid_context_field("roles", "must not be empty"));
-    };
-    if !first.is_ascii_lowercase() {
-        return Err(invalid_context_field(
-            "roles",
-            "must start with a lowercase ASCII letter",
-        ));
-    }
-    if !chars
-        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '_' | ':' | '-'))
-    {
-        return Err(invalid_context_field(
-            "roles",
-            "contains unsupported characters",
-        ));
-    }
-    Ok(())
+    validate_role_like("roles", role).map_err(|err| invalid_context_field(err.field, &err.reason))
 }
 
 fn invalid_context_field(

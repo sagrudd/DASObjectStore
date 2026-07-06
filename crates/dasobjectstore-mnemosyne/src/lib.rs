@@ -4,6 +4,7 @@ pub mod binding;
 pub mod boundary;
 pub mod host_boundary;
 pub mod host_mode;
+pub mod monas_host_boundary;
 pub mod product_ui;
 pub mod storage_definition;
 mod validation;
@@ -28,6 +29,10 @@ pub use host_mode::{
     AuditAuthority, AuthenticationAuthority, HostModeProfile, HostModeProfileError,
     ProductHostMode, StorageAuthority, DASOBJECTSTORE_PRODUCT_ROOT,
     DASOBJECTSTORE_STANDALONE_HTTPS_PORT,
+};
+pub use monas_host_boundary::{
+    validate_monas_standalone_host_boundary, MonasStandaloneHostBoundary,
+    MonasStandaloneHostBoundaryContext, MonasStandaloneHostBoundaryError,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,
