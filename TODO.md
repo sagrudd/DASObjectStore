@@ -319,7 +319,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Add CLI or API command to validate a NAS/NFS endpoint definition.
 - [x] Document how DASObjectStore-native endpoints differ from generic Mneion
   `posix` storage definitions.
-- [ ] Identify required Mneion storage-definition schema changes, if any, and
+- [x] Identify required Mneion storage-definition schema changes, if any, and
   record the coordinated implementation plan.
 
 ## Milestone 16: Web Operations Console and Design System

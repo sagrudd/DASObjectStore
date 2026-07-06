@@ -141,6 +141,113 @@ Required UI/API behavior:
 - prevent raw path display as the primary durable contract;
 - allow degraded endpoints to remain visible while blocking new unsafe bindings.
 
+## Storage-Definition Schema Change Inventory
+
+These are the required Mneion storage-definition schema changes identified from
+the DASObjectStore side. They are additive unless noted otherwise.
+
+### Storage Definition Record
+
+Add these fields to the Mneion storage-definition or object-store definition
+record:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `endpoint_owner` | enum | yes for new records | Values: `mneion`, `dasobjectstore`; default existing rows to `mneion`. |
+| `endpoint_kind` | enum | yes for new records | Values: `s3_compatible`, `nfs`, `posix`, `dasobjectstore_das`, `dasobjectstore_nfs`. |
+| `manager_product_id` | string or null | required for managed endpoints | Must be `dasobjectstore` for DASObjectStore-managed endpoints. |
+| `manager_api_path` | string or null | required for managed endpoints | Synoptikon-relative API mount, initially `/products/dasobjectstore/api`. |
+| `object_contract` | enum | yes | `object_style` for DASObjectStore endpoints; raw path contracts are not allowed for managed endpoints. |
+| `validation_contract` | string or null | recommended | Schema id for validation evidence, initially `dasobjectstore.nas_nfs_endpoint.v1` or later DAS pool equivalent. |
+| `health_contract` | string or null | recommended | Schema id for endpoint health summaries exposed by DASObjectStore. |
+| `capabilities` | string array | yes | Examples: `ssd_ingest`, `hdd_destage`, `copy_redundancy`, `disk_health`, `direct_reproducible_import`. |
+
+Existing `backend_kind` should be retained during the transition for backwards
+compatibility, but new code should derive behavior from `endpoint_kind` and
+`endpoint_owner`.
+
+### Managed Endpoint Location
+
+DASObjectStore-managed endpoint location metadata should be represented as a
+typed object rather than a raw path:
+
+| Endpoint kind | Location fields | Raw path exposure |
+| --- | --- | --- |
+| `dasobjectstore_das` | `pool_id`, `service_endpoint` | none |
+| `dasobjectstore_nfs` | `export_id`, `service_endpoint` | raw NFS server/export remain validation-only evidence, not tenant context |
+| `s3_compatible` | `provider_id`, `endpoint` | none |
+
+### Validation Evidence
+
+Add a validation-evidence record or payload accepted by Mneion admin/storage
+routes:
+
+- `schema_version`;
+- `storage_definition_id`;
+- `governance_domain_id` where validation is binding-specific;
+- `endpoint_id`;
+- `manager_product_id`;
+- `validated_at_utc`;
+- `validated_by`;
+- `validation_state`: `draft`, `pending_validation`, `validated`, `degraded`,
+  or `rejected`;
+- `health_state`;
+- `object_service_reachable`;
+- `policy_compatible`;
+- `warnings`;
+- references to DASObjectStore health details rather than inline disk internals.
+
+Rejected endpoints must remain visible for audit but must not become eligible
+for new active bindings.
+
+### Resolved Storage Context
+
+Extend resolved Mneion storage context for products with managed endpoint
+metadata:
+
+- `endpoint_owner`;
+- `endpoint_kind`;
+- `manager_product_id`;
+- `object_access_profile`;
+- `namespace_prefix`;
+- `credential_ref`;
+- `validated_at_utc`;
+- `health_state`;
+- `manager_api_path`.
+
+Resolved context must not include DASObjectStore local paths, NFS mount paths, or
+raw DAS member paths.
+
+## Coordinated Implementation Plan
+
+This repository has implemented the DASObjectStore-side endpoint model, export
+tests, NAS/NFS validation model, runtime validation planning, binding export,
+GUI API view models, and CLI endpoint-definition validation. The remaining
+schema work should be implemented in the Mnemosyne repositories in this order:
+
+1. `../mnemosyne/mneion-api-types`: add endpoint-owner, endpoint-kind,
+   managed-location, validation-evidence, and resolved-context types. Include
+   compatibility mapping from existing `backend_kind` values.
+2. `../mnemosyne/mneion-server`: add nullable persistence columns or a versioned
+   JSON metadata column for the additive fields, with migrations that default
+   existing rows to `endpoint_owner = "mneion"` and infer `endpoint_kind` from
+   existing backend values.
+3. `../mnemosyne/mneion-server`: update admin storage-definition create/update,
+   validation-evidence ingest, and governance-domain binding readiness checks.
+4. `../mnemosyne/mneion-web`: update Authority and Runtime storage workbenches
+   to show managed appliance state, validation state, health state, and the
+   DASObjectStore management link.
+5. `../mnemosyne/mnemosyne-product-sdk`: add host helpers for managed storage
+   appliance links, manager API paths, and endpoint health bootstrap metadata.
+6. `../mnemosyne-docs`: update the Mneion SRS, storage-binding implementation
+   notes, admin guide, and architecture decision records.
+7. `../DASObjectStore`: update export payloads only after the accepted
+   Mnemosyne schema is available, keeping compatibility tests for the prior
+   export shape until the platform migration is complete.
+
+No sibling repository changes should be committed from DASObjectStore
+automation. This plan is the handoff boundary for coordinated Mnemosyne work.
+
 ## Affected Repositories
 
 - `../DASObjectStore`: endpoint kind model, Mneion export contracts, validation
