@@ -32,6 +32,9 @@ pub(crate) struct ServerCli {
     /// Validate and print the resolved server configuration without starting.
     #[arg(long)]
     check_config: bool,
+    /// Create self-signed TLS assets when both certificate and key are missing.
+    #[arg(long)]
+    generate_missing_tls: bool,
     /// Emit configuration output as JSON.
     #[arg(long)]
     json: bool,
@@ -65,6 +68,10 @@ impl ServerCli {
         self.check_config
     }
 
+    pub(crate) fn generate_missing_tls(&self) -> bool {
+        self.generate_missing_tls
+    }
+
     pub(crate) fn json(&self) -> bool {
         self.json
     }
@@ -86,6 +93,7 @@ mod tests {
         let config = cli.server_config();
 
         assert!(cli.check_config());
+        assert!(!cli.generate_missing_tls());
         assert_eq!(config.bind_address, DEFAULT_STANDALONE_BIND_ADDRESS);
         assert_eq!(config.https_port, DEFAULT_STANDALONE_HTTPS_PORT);
         assert_eq!(config.product_root, Path::new(DEFAULT_PRODUCT_ROOT));
@@ -130,5 +138,17 @@ mod tests {
             config.tls.private_key_path,
             Path::new("/tmp/dasobjectstore/server.key")
         );
+    }
+
+    #[test]
+    fn parses_generate_missing_tls_flag() {
+        let cli = ServerCli::try_parse_from([
+            "dasobjectstore-server",
+            "--check-config",
+            "--generate-missing-tls",
+        ])
+        .expect("server CLI parses");
+
+        assert!(cli.generate_missing_tls());
     }
 }

@@ -288,7 +288,7 @@ authentication-boundary, and Mneion endpoint integration work.
 
 - [x] Add standalone server configuration model with default HTTPS port `8448`.
 - [x] Add CLI/server entry point for `dasobjectstore-server`.
-- [ ] Implement TLS asset generation/loading for standalone HTTPS.
+- [x] Implement TLS asset generation/loading for standalone HTTPS.
 - [ ] Implement local auth store modeled on Mnematikon: users, registration
   tokens, password hashes, session token hashes, expiry, and logout.
 - [ ] Add standalone `axum` routes for `/api/register`, `/api/login`,

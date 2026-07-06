@@ -4,6 +4,7 @@ pub mod actions;
 pub mod dashboard;
 pub mod routes;
 pub mod server_config;
+pub mod tls_assets;
 pub mod view;
 
 pub use actions::{
@@ -23,6 +24,10 @@ pub use server_config::{
     StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsConfig,
     DEFAULT_STANDALONE_PUBLIC_BASE_URL, DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH,
     DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH,
+};
+pub use tls_assets::{
+    ensure_standalone_tls_assets, load_standalone_tls_assets, StandaloneTlsAssetError,
+    StandaloneTlsAssetReport, StandaloneTlsAssets,
 };
 
 /// Returns the GUI API crate version.

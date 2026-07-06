@@ -27,6 +27,7 @@ dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
 dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
 dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
 plist = "1"
+rcgen = "0.14.8"
 libc = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }

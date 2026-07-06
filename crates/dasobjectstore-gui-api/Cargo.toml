@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 axum.workspace = true
 dasobjectstore-core.workspace = true
+rcgen.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
