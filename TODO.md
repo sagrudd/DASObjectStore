@@ -308,7 +308,7 @@ authentication-boundary, and Mneion endpoint integration work.
   `dasobjectstore_das`, `dasobjectstore_nfs`, and `s3_compatible` variants.
 - [x] Add storage-definition export tests for DAS-backed endpoints.
 - [x] Add storage-definition export tests for external NAS/NFS endpoints.
-- [ ] Add validation model for external NAS/NFS endpoint identity, export path,
+- [x] Add validation model for external NAS/NFS endpoint identity, export path,
   credential reference, TLS/CA reference where relevant, and status.
 - [ ] Add runtime mount/probe plan types for NFS/NAS validation without making
   raw paths tenant-facing contracts.

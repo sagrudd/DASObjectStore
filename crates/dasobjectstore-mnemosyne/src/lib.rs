@@ -6,6 +6,7 @@ pub mod host_boundary;
 pub mod host_mode;
 pub mod integrated_session;
 pub mod monas_host_boundary;
+pub mod nas_nfs_endpoint;
 pub mod product_ui;
 pub mod storage_definition;
 mod validation;
@@ -39,6 +40,11 @@ pub use integrated_session::{
 pub use monas_host_boundary::{
     validate_monas_standalone_host_boundary, MonasStandaloneHostBoundary,
     MonasStandaloneHostBoundaryContext, MonasStandaloneHostBoundaryError,
+};
+pub use nas_nfs_endpoint::{
+    validate_nas_nfs_endpoint_definition, NasNfsEndpointDefinition, NasNfsEndpointValidationError,
+    NasNfsEndpointValidationStatus, ValidatedNasNfsEndpointDefinition,
+    NAS_NFS_ENDPOINT_DEFINITION_SCHEMA_VERSION,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,
