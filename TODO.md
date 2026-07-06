@@ -286,7 +286,7 @@ authentication-boundary, and Mneion endpoint integration work.
 
 ## Milestone 14: Standalone HTTPS Application and Authentication
 
-- [ ] Add standalone server configuration model with default HTTPS port `8448`.
+- [x] Add standalone server configuration model with default HTTPS port `8448`.
 - [ ] Add CLI/server entry point for `dasobjectstore-server`.
 - [ ] Implement TLS asset generation/loading for standalone HTTPS.
 - [ ] Implement local auth store modeled on Mnematikon: users, registration

@@ -1,0 +1,258 @@
+use dasobjectstore_core::{
+    DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_HTTPS_PORT,
+};
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
+use std::net::{IpAddr, SocketAddr};
+use std::path::{Path, PathBuf};
+
+pub const DEFAULT_STANDALONE_PUBLIC_BASE_URL: &str = "https://127.0.0.1:8448";
+pub const DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH: &str = "tls/server.crt";
+pub const DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH: &str = "tls/server.key";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneServerConfig {
+    pub bind_address: String,
+    pub https_port: u16,
+    pub public_base_url: String,
+    pub product_root: PathBuf,
+    pub tls: StandaloneTlsConfig,
+}
+
+impl StandaloneServerConfig {
+    pub fn default_localhost() -> Self {
+        Self::with_bind_address(DEFAULT_STANDALONE_BIND_ADDRESS)
+    }
+
+    pub fn with_bind_address(bind_address: impl Into<String>) -> Self {
+        let product_root = PathBuf::from(DEFAULT_PRODUCT_ROOT);
+        let tls = StandaloneTlsConfig::under_product_root(&product_root);
+
+        Self {
+            bind_address: bind_address.into(),
+            https_port: DEFAULT_STANDALONE_HTTPS_PORT,
+            public_base_url: DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
+            product_root,
+            tls,
+        }
+    }
+
+    pub fn socket_addr(&self) -> Result<SocketAddr, StandaloneServerConfigError> {
+        let ip_addr = self.bind_address.parse::<IpAddr>().map_err(|_| {
+            StandaloneServerConfigError::InvalidBindAddress {
+                bind_address: self.bind_address.clone(),
+            }
+        })?;
+
+        validate_https_port(self.https_port)?;
+
+        Ok(SocketAddr::new(ip_addr, self.https_port))
+    }
+
+    pub fn validate(&self) -> Result<(), StandaloneServerConfigError> {
+        self.socket_addr()?;
+        validate_public_base_url(&self.public_base_url)?;
+        validate_absolute_path("product_root", &self.product_root)?;
+        self.tls.validate()?;
+        Ok(())
+    }
+}
+
+impl Default for StandaloneServerConfig {
+    fn default() -> Self {
+        Self::default_localhost()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneTlsConfig {
+    pub certificate_path: PathBuf,
+    pub private_key_path: PathBuf,
+}
+
+impl StandaloneTlsConfig {
+    pub fn under_product_root(product_root: &Path) -> Self {
+        Self {
+            certificate_path: product_root.join(DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH),
+            private_key_path: product_root.join(DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), StandaloneServerConfigError> {
+        validate_absolute_path("certificate_path", &self.certificate_path)?;
+        validate_absolute_path("private_key_path", &self.private_key_path)?;
+        if self.certificate_path == self.private_key_path {
+            return Err(StandaloneServerConfigError::DuplicateTlsAssetPath);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StandaloneServerConfigError {
+    InvalidBindAddress { bind_address: String },
+    InvalidHttpsPort { https_port: u16 },
+    InvalidPublicBaseUrl { public_base_url: String },
+    RelativePath { field: &'static str, path: PathBuf },
+    DuplicateTlsAssetPath,
+}
+
+impl Display for StandaloneServerConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidBindAddress { bind_address } => {
+                write!(
+                    formatter,
+                    "invalid bind address for standalone server: {bind_address}"
+                )
+            }
+            Self::InvalidHttpsPort { https_port } => {
+                write!(
+                    formatter,
+                    "invalid HTTPS port for standalone server: {https_port}"
+                )
+            }
+            Self::InvalidPublicBaseUrl { public_base_url } => {
+                write!(
+                    formatter,
+                    "standalone public_base_url must be an https URL: {public_base_url}"
+                )
+            }
+            Self::RelativePath { field, path } => {
+                write!(formatter, "{field} must be absolute: {}", path.display())
+            }
+            Self::DuplicateTlsAssetPath => {
+                write!(
+                    formatter,
+                    "TLS certificate_path and private_key_path must be distinct"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for StandaloneServerConfigError {}
+
+fn validate_https_port(https_port: u16) -> Result<(), StandaloneServerConfigError> {
+    if https_port == 0 {
+        return Err(StandaloneServerConfigError::InvalidHttpsPort { https_port });
+    }
+    Ok(())
+}
+
+fn validate_public_base_url(public_base_url: &str) -> Result<(), StandaloneServerConfigError> {
+    if !public_base_url.starts_with("https://") || public_base_url.trim() == "https://" {
+        return Err(StandaloneServerConfigError::InvalidPublicBaseUrl {
+            public_base_url: public_base_url.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_absolute_path(
+    field: &'static str,
+    path: &Path,
+) -> Result<(), StandaloneServerConfigError> {
+    if !path.is_absolute() {
+        return Err(StandaloneServerConfigError::RelativePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsConfig,
+        DEFAULT_STANDALONE_PUBLIC_BASE_URL,
+    };
+    use dasobjectstore_core::{
+        DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_HTTPS_PORT,
+    };
+    use std::path::PathBuf;
+
+    #[test]
+    fn defaults_to_localhost_https_port_8448() {
+        let config = StandaloneServerConfig::default();
+
+        assert_eq!(config.bind_address, DEFAULT_STANDALONE_BIND_ADDRESS);
+        assert_eq!(config.https_port, DEFAULT_STANDALONE_HTTPS_PORT);
+        assert_eq!(config.public_base_url, DEFAULT_STANDALONE_PUBLIC_BASE_URL);
+        assert_eq!(config.product_root, PathBuf::from(DEFAULT_PRODUCT_ROOT));
+        assert_eq!(
+            config.socket_addr().expect("socket address"),
+            "127.0.0.1:8448".parse().expect("expected socket address")
+        );
+        config.validate().expect("default config is valid");
+    }
+
+    #[test]
+    fn allows_explicit_linux_appliance_bind_address() {
+        let config = StandaloneServerConfig::with_bind_address("0.0.0.0");
+
+        assert_eq!(
+            config.socket_addr().expect("socket address"),
+            "0.0.0.0:8448".parse().expect("expected socket address")
+        );
+    }
+
+    #[test]
+    fn rejects_port_zero() {
+        let config = StandaloneServerConfig {
+            https_port: 0,
+            ..StandaloneServerConfig::default()
+        };
+
+        assert_eq!(
+            config.validate().expect_err("port zero rejected"),
+            StandaloneServerConfigError::InvalidHttpsPort { https_port: 0 }
+        );
+    }
+
+    #[test]
+    fn rejects_non_https_public_base_url() {
+        let config = StandaloneServerConfig {
+            public_base_url: "http://127.0.0.1:8448".to_string(),
+            ..StandaloneServerConfig::default()
+        };
+
+        assert_eq!(
+            config.validate().expect_err("http URL rejected"),
+            StandaloneServerConfigError::InvalidPublicBaseUrl {
+                public_base_url: "http://127.0.0.1:8448".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_relative_tls_paths() {
+        let tls = StandaloneTlsConfig {
+            certificate_path: PathBuf::from("tls/server.crt"),
+            private_key_path: PathBuf::from("/opt/dasobjectstore/tls/server.key"),
+        };
+
+        assert_eq!(
+            tls.validate().expect_err("relative certificate rejected"),
+            StandaloneServerConfigError::RelativePath {
+                field: "certificate_path",
+                path: PathBuf::from("tls/server.crt"),
+            }
+        );
+    }
+
+    #[test]
+    fn serializes_default_server_config() {
+        let encoded = serde_json::to_value(StandaloneServerConfig::default())
+            .expect("server config serializes");
+
+        assert_eq!(encoded["bind_address"], "127.0.0.1");
+        assert_eq!(encoded["https_port"], 8448);
+        assert_eq!(encoded["public_base_url"], "https://127.0.0.1:8448");
+        assert_eq!(
+            encoded["tls"]["certificate_path"],
+            "/opt/dasobjectstore/tls/server.crt"
+        );
+    }
+}

@@ -1,9 +1,10 @@
 use crate::HostMode;
+use dasobjectstore_core::{DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_HTTPS_PORT};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-pub const DASOBJECTSTORE_PRODUCT_ROOT: &str = "/opt/dasobjectstore";
-pub const DASOBJECTSTORE_STANDALONE_HTTPS_PORT: u16 = 8448;
+pub const DASOBJECTSTORE_PRODUCT_ROOT: &str = DEFAULT_PRODUCT_ROOT;
+pub const DASOBJECTSTORE_STANDALONE_HTTPS_PORT: u16 = DEFAULT_STANDALONE_HTTPS_PORT;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

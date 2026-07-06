@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod dashboard;
 pub mod routes;
+pub mod server_config;
 pub mod view;
 
 pub use actions::{
@@ -18,6 +19,11 @@ pub use dashboard::{
     PoolStateView, PoolStatusView, QueuePressureView,
 };
 pub use routes::gui_api_router;
+pub use server_config::{
+    StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsConfig,
+    DEFAULT_STANDALONE_PUBLIC_BASE_URL, DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH,
+    DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH,
+};
 
 /// Returns the GUI API crate version.
 pub fn version() -> &'static str {
