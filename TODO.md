@@ -339,7 +339,7 @@ authentication-boundary, and Mneion endpoint integration work.
   endpoints, S3 service state, Mneion export, and binding readiness.
 - [x] Implement Activity API route and Yew view for ingest queue, destage queue,
   repair tasks, audit/provenance, and long-running operations.
-- [ ] Add reusable Yew components for dense tables, inspector drawers, status
+- [x] Add reusable Yew components for dense tables, inspector drawers, status
   badges, capacity bars, segmented controls, icon buttons, and risky-operation
   confirmation panels.
 - [ ] Add visual regression/screenshot checks for the main workspaces on desktop

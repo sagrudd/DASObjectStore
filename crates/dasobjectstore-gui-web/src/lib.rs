@@ -1,6 +1,7 @@
 //! Yew frontend scaffold for Monas and Synoptikon delivery surfaces.
 
 pub mod activity;
+pub mod components;
 pub mod disks;
 pub mod endpoints;
 pub mod mount;
