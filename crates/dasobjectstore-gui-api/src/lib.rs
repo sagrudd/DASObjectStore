@@ -1,6 +1,7 @@
 //! Axum API boundary for GUI-facing DASObjectStore views.
 
 pub mod actions;
+pub mod auth;
 pub mod dashboard;
 pub mod routes;
 pub mod server_config;
@@ -10,6 +11,11 @@ pub mod view;
 pub use actions::{
     action_catalog, plan_action, GuiActionCatalog, GuiActionDescriptor, GuiActionExecution,
     GuiActionKind, GuiActionPlan, GuiActionPlanError, GuiActionPlanRequest, GuiActionSafety,
+};
+pub use auth::{
+    AuthRegistry, AuthTokenResetReport, AuthenticatedUser, LocalAuthStore, LocalAuthStoreError,
+    LoginResponse, LogoutResponse, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
+    SessionTokenRecord, UserSummary,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,

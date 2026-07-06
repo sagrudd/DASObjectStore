@@ -17,6 +17,7 @@ license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
 
 [workspace.dependencies]
+argon2 = "0.5.3"
 axum = "0.8.9"
 clap = { version = "4.5.48", features = ["derive"] }
 dasobjectstore-core = { path = "crates/dasobjectstore-core" }
@@ -28,9 +29,11 @@ dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" 
 dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
 plist = "1"
 rcgen = "0.14.8"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
 libc = "0.2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 sha2 = "0.10.9"
+uuid = { version = "1.19.0", features = ["v4", "serde"] }
 yew = { version = "0.23.0", features = ["csr"] }

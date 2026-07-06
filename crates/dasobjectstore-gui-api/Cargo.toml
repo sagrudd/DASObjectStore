@@ -9,10 +9,14 @@ repository.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+argon2.workspace = true
 axum.workspace = true
 dasobjectstore-core.workspace = true
+rand_core.workspace = true
 rcgen.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
