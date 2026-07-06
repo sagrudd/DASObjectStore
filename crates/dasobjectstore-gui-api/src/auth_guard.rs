@@ -189,7 +189,10 @@ fn rejection(
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthenticatedActorAuthority, AuthenticatedGuiActor, STANDALONE_USERNAME_HEADER};
+    use super::{
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, STANDALONE_SESSION_TOKEN_HEADER,
+        STANDALONE_USERNAME_HEADER,
+    };
     use crate::LocalAuthStore;
     use axum::{
         body::Body,
@@ -219,6 +222,31 @@ mod tests {
                     .uri("/protected")
                     .header(STANDALONE_USERNAME_HEADER, "admin")
                     .header(AUTHORIZATION, format!("Bearer {}", login.session_token))
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn extractor_accepts_explicit_session_token_header() {
+        let root = temp_root("standalone-token-header");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = protected_router().layer(Extension(auth_store));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/protected")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
                     .body(Body::empty())
                     .expect("request builds"),
             )

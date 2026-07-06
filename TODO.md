@@ -297,7 +297,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Add integrated-session issue/acceptance path for Synoptikon-provided
   actors.
 - [x] Add auth middleware/extractors for protected API routes.
-- [ ] Add tests for login, session expiry, logout, invalid sessions, and
+- [x] Add tests for login, session expiry, logout, invalid sessions, and
   integrated mode route omission.
 - [ ] Document packaging/service behavior for `https://127.0.0.1:8448` and
   optional Linux appliance binding to `0.0.0.0:8448`.

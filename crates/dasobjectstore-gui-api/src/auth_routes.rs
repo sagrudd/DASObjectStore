@@ -253,6 +253,80 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_route_rejects_expired_session() {
+        let root = temp_root("expired-session-route");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_auth_router(auth_store.clone());
+        let login = post_json::<LoginResponse>(
+            app.clone(),
+            "/api/login",
+            &LoginRequest {
+                username: "admin".to_string(),
+                password: "secret".to_string(),
+                session_ttl_seconds: Some(3_600),
+            },
+        )
+        .await;
+        expire_user_sessions(&auth_store, "admin");
+
+        let response = post_json_response(
+            app,
+            "/api/session",
+            &SessionCheckRequest {
+                username: "admin".to_string(),
+                session_token: login.session_token,
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn session_route_rejects_logged_out_session() {
+        let root = temp_root("logged-out-session-route");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_auth_router(auth_store);
+        let login = post_json::<LoginResponse>(
+            app.clone(),
+            "/api/login",
+            &LoginRequest {
+                username: "admin".to_string(),
+                password: "secret".to_string(),
+                session_ttl_seconds: Some(3_600),
+            },
+        )
+        .await;
+
+        let logout = post_json::<crate::LogoutResponse>(
+            app.clone(),
+            "/api/logout",
+            &LogoutRequest {
+                username: "admin".to_string(),
+                session_token: login.session_token.clone(),
+            },
+        )
+        .await;
+        assert!(logout.disconnected);
+
+        let response = post_json_response(
+            app,
+            "/api/session",
+            &SessionCheckRequest {
+                username: "admin".to_string(),
+                session_token: login.session_token,
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn standalone_host_mode_mounts_local_auth_routes() {
         let root = temp_root("standalone-host-mode");
         let auth_store = LocalAuthStore::new(&root);
@@ -325,25 +399,58 @@ mod tests {
     where
         T: DeserializeOwned,
     {
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(path)
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::to_vec(body).expect("request encodes"),
-                    ))
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
+        let response = post_json_response(app, path, body).await;
         assert_eq!(response.status(), StatusCode::OK);
 
         let bytes = to_bytes(response.into_body(), 64 * 1024)
             .await
             .expect("body bytes");
         serde_json::from_slice(&bytes).expect("response decodes")
+    }
+
+    async fn post_json_response(
+        app: axum::Router,
+        path: &str,
+        body: &impl serde::Serialize,
+    ) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(body).expect("request encodes"),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes")
+    }
+
+    fn registered_auth_store(root: &Path) -> LocalAuthStore {
+        let auth_store = LocalAuthStore::new(root);
+        auth_store.create_user("admin").expect("user created");
+        let token = auth_store
+            .issue_registration_token("admin", Some(3_600))
+            .expect("token issued");
+        auth_store
+            .register_with_token("admin", &token, "secret")
+            .expect("registered");
+        auth_store
+    }
+
+    fn expire_user_sessions(auth_store: &LocalAuthStore, username: &str) {
+        let mut registry = auth_store.load_registry().expect("registry loads");
+        let user = registry
+            .users
+            .iter_mut()
+            .find(|user| user.username == username)
+            .expect("user exists");
+        for session in &mut user.sessions {
+            session.expires_at_unix_seconds = 0;
+        }
+        let data = serde_json::to_string_pretty(&registry).expect("registry encodes");
+        fs::write(auth_store.registry_path(), format!("{data}\n")).expect("registry writes");
     }
 
     fn temp_root(label: &str) -> PathBuf {
