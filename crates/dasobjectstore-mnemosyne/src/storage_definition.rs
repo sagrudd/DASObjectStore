@@ -6,6 +6,7 @@ use std::fmt::{self, Display};
 
 pub const MNEION_S3_BACKEND_KIND: &str = "S3-Compatible";
 pub const MNEION_DASOBJECTSTORE_DAS_BACKEND_KIND: &str = "DASObjectStore-DAS";
+pub const MNEION_DASOBJECTSTORE_NFS_BACKEND_KIND: &str = "DASObjectStore-NFS";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -230,6 +231,44 @@ pub fn export_mneion_das_storage_definition(
     })
 }
 
+pub fn export_mneion_nfs_storage_definition(
+    endpoint: &MneionDasObjectStoreEndpoint,
+) -> Result<MneionManagedStorageDefinitionExport, MneionStorageDefinitionError> {
+    validate_managed_endpoint_base(endpoint)?;
+    let service_endpoint = match &endpoint.location {
+        MneionDasObjectStoreEndpointLocation::Nfs {
+            service_endpoint, ..
+        } => service_endpoint,
+        _ => {
+            return Err(MneionStorageDefinitionError::UnsupportedEndpointKind {
+                endpoint_kind: endpoint.endpoint_kind,
+            });
+        }
+    };
+    validate_endpoint(service_endpoint)?;
+
+    Ok(MneionManagedStorageDefinitionExport {
+        managed_endpoint: trimmed_managed_endpoint(endpoint),
+        object_store_create_request: MneionObjectStoreCreateRequest {
+            identifier: endpoint.identifier.trim().to_string(),
+            display_name: endpoint.display_name.trim().to_string(),
+            backend_kind: MNEION_DASOBJECTSTORE_NFS_BACKEND_KIND.to_string(),
+            endpoint: Some(service_endpoint.trim().to_string()),
+            nfs_server: None,
+            nfs_export_path: None,
+            nfs_root_prefix: None,
+            nfs_protocol: None,
+            nfs_auth_profile: None,
+        },
+        host_storage_boundary: synoptikon_object_store_boundary(),
+        notes: vec![
+            "Generated for a DASObjectStore-managed external NAS/NFS endpoint.".to_string(),
+            "Mneion should treat this as a managed storage appliance endpoint, not a generic POSIX path.".to_string(),
+            "Raw NAS export details remain DASObjectStore validation inputs, not tenant-facing storage contracts.".to_string(),
+        ],
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MneionStorageDefinitionError {
     InvalidIdentifier {
@@ -266,7 +305,7 @@ impl Display for MneionStorageDefinitionError {
             ),
             Self::UnsupportedEndpointKind { endpoint_kind } => write!(
                 formatter,
-                "Mneion DAS storage definition export requires dasobjectstore_das endpoint kind: {endpoint_kind:?}"
+                "Mneion managed storage definition export received unsupported endpoint kind: {endpoint_kind:?}"
             ),
         }
     }
@@ -360,10 +399,12 @@ fn trimmed_location(
 #[cfg(test)]
 mod tests {
     use super::{
-        export_mneion_das_storage_definition, export_mneion_storage_definition,
-        MneionDasObjectStoreEndpoint, MneionDasObjectStoreEndpointKind,
-        MneionEndpointObjectContract, MneionStorageDefinitionError, MneionStorageDefinitionRequest,
-        MNEION_DASOBJECTSTORE_DAS_BACKEND_KIND, MNEION_S3_BACKEND_KIND,
+        export_mneion_das_storage_definition, export_mneion_nfs_storage_definition,
+        export_mneion_storage_definition, MneionDasObjectStoreEndpoint,
+        MneionDasObjectStoreEndpointKind, MneionEndpointObjectContract,
+        MneionStorageDefinitionError, MneionStorageDefinitionRequest,
+        MNEION_DASOBJECTSTORE_DAS_BACKEND_KIND, MNEION_DASOBJECTSTORE_NFS_BACKEND_KIND,
+        MNEION_S3_BACKEND_KIND,
     };
     use dasobjectstore_object_service::ObjectServiceProviderId;
     use serde_json::json;
@@ -521,6 +562,86 @@ mod tests {
             err,
             MneionStorageDefinitionError::UnsupportedEndpointKind {
                 endpoint_kind: MneionDasObjectStoreEndpointKind::DasobjectstoreNfs
+            }
+        );
+    }
+
+    #[test]
+    fn exports_nfs_backed_storage_definition_bundle() {
+        let endpoint = MneionDasObjectStoreEndpoint::nfs_backed(
+            STORE_UUID,
+            "NAS endpoint",
+            "nas-export-1",
+            "https://nas-gateway.local:3900",
+        );
+
+        let export = export_mneion_nfs_storage_definition(&endpoint).expect("NFS export succeeds");
+
+        assert_eq!(
+            export.object_store_create_request.backend_kind,
+            MNEION_DASOBJECTSTORE_NFS_BACKEND_KIND
+        );
+        assert_eq!(
+            export.object_store_create_request.endpoint.as_deref(),
+            Some("https://nas-gateway.local:3900")
+        );
+        assert_eq!(
+            export.managed_endpoint.endpoint_kind,
+            MneionDasObjectStoreEndpointKind::DasobjectstoreNfs
+        );
+        assert_eq!(export.managed_endpoint.manager_product_id, "dasobjectstore");
+        assert!(export.object_store_create_request.nfs_export_path.is_none());
+        assert!(export
+            .notes
+            .iter()
+            .any(|note| note.contains("not tenant-facing storage contracts")));
+    }
+
+    #[test]
+    fn trims_nfs_backed_storage_definition_export_inputs() {
+        let endpoint = MneionDasObjectStoreEndpoint::nfs_backed(
+            format!(" {STORE_UUID} "),
+            " NAS endpoint ",
+            " nas-export-1 ",
+            " https://nas-gateway.local:3900 ",
+        );
+
+        let export = export_mneion_nfs_storage_definition(&endpoint).expect("NFS export succeeds");
+
+        assert_eq!(export.object_store_create_request.identifier, STORE_UUID);
+        assert_eq!(
+            export.object_store_create_request.display_name,
+            "NAS endpoint"
+        );
+        assert_eq!(
+            export.object_store_create_request.endpoint.as_deref(),
+            Some("https://nas-gateway.local:3900")
+        );
+        assert_eq!(export.managed_endpoint.identifier, STORE_UUID);
+        assert_eq!(export.managed_endpoint.display_name, "NAS endpoint");
+        assert_eq!(
+            serde_json::to_value(export.managed_endpoint).expect("endpoint serializes")["location"]
+                ["export_id"],
+            "nas-export-1"
+        );
+    }
+
+    #[test]
+    fn rejects_das_endpoint_for_nfs_backed_storage_definition_export() {
+        let endpoint = MneionDasObjectStoreEndpoint::das_backed(
+            STORE_UUID,
+            "DAS pool endpoint",
+            "pool-1",
+            "http://127.0.0.1:3900",
+        );
+
+        let err = export_mneion_nfs_storage_definition(&endpoint)
+            .expect_err("wrong endpoint kind rejected");
+
+        assert_eq!(
+            err,
+            MneionStorageDefinitionError::UnsupportedEndpointKind {
+                endpoint_kind: MneionDasObjectStoreEndpointKind::DasobjectstoreDas
             }
         );
     }

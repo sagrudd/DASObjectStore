@@ -50,12 +50,13 @@ pub use product_ui::{
     PRODUCT_UI_BOOTSTRAP_SCHEMA_VERSION, PRODUCT_UI_BOOTSTRAP_WELL_KNOWN_SUFFIX,
 };
 pub use storage_definition::{
-    export_mneion_das_storage_definition, export_mneion_storage_definition,
-    MneionDasObjectStoreEndpoint, MneionDasObjectStoreEndpointKind,
-    MneionDasObjectStoreEndpointLocation, MneionEndpointObjectContract,
-    MneionManagedStorageDefinitionExport, MneionObjectStoreCreateRequest,
-    MneionStorageDefinitionError, MneionStorageDefinitionExport, MneionStorageDefinitionRequest,
-    MNEION_DASOBJECTSTORE_DAS_BACKEND_KIND, MNEION_S3_BACKEND_KIND,
+    export_mneion_das_storage_definition, export_mneion_nfs_storage_definition,
+    export_mneion_storage_definition, MneionDasObjectStoreEndpoint,
+    MneionDasObjectStoreEndpointKind, MneionDasObjectStoreEndpointLocation,
+    MneionEndpointObjectContract, MneionManagedStorageDefinitionExport,
+    MneionObjectStoreCreateRequest, MneionStorageDefinitionError, MneionStorageDefinitionExport,
+    MneionStorageDefinitionRequest, MNEION_DASOBJECTSTORE_DAS_BACKEND_KIND,
+    MNEION_DASOBJECTSTORE_NFS_BACKEND_KIND, MNEION_S3_BACKEND_KIND,
 };
 
 /// Returns the Mnemosyne adapter crate version.
