@@ -4,6 +4,7 @@ pub mod binding;
 pub mod boundary;
 pub mod host_boundary;
 pub mod host_mode;
+pub mod integrated_session;
 pub mod monas_host_boundary;
 pub mod product_ui;
 pub mod storage_definition;
@@ -29,6 +30,11 @@ pub use host_mode::{
     AuditAuthority, AuthenticationAuthority, HostModeProfile, HostModeProfileError,
     ProductHostMode, StorageAuthority, DASOBJECTSTORE_PRODUCT_ROOT,
     DASOBJECTSTORE_STANDALONE_HTTPS_PORT,
+};
+pub use integrated_session::{
+    accept_synoptikon_integrated_session, SynoptikonIntegratedAcceptedSession,
+    SynoptikonIntegratedActor, SynoptikonIntegratedSessionError, SynoptikonIntegratedSessionIssue,
+    SYNOPTIKON_INTEGRATED_SESSION_SCHEMA_VERSION,
 };
 pub use monas_host_boundary::{
     validate_monas_standalone_host_boundary, MonasStandaloneHostBoundary,

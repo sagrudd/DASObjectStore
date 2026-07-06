@@ -294,7 +294,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Add standalone `axum` routes for `/api/register`, `/api/login`,
   `/api/logout`, and `/api/session`.
 - [x] Disable local auth routes when host mode is `synoptikon_integrated`.
-- [ ] Add integrated-session issue/acceptance path for Synoptikon-provided
+- [x] Add integrated-session issue/acceptance path for Synoptikon-provided
   actors.
 - [ ] Add auth middleware/extractors for protected API routes.
 - [ ] Add tests for login, session expiry, logout, invalid sessions, and
