@@ -277,7 +277,7 @@ authentication-boundary, and Mneion endpoint integration work.
   authority.
 - [x] Add Monas/standalone host boundary validation for local product root,
   local audit, local hardware workflows, and local state stores.
-- [ ] Draft the `../mnemosyne/synoptikon-products.toml` catalogue entry for
+- [x] Draft the `../mnemosyne/synoptikon-products.toml` catalogue entry for
   DASObjectStore without committing sibling changes from this repository.
 - [ ] Identify any Synoptikon/Mneion contract changes that would make
   DASObjectStore cleaner as a native storage appliance.
