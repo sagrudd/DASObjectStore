@@ -5,6 +5,7 @@ pub mod auth;
 pub mod auth_guard;
 pub mod auth_routes;
 pub mod dashboard;
+pub mod endpoints;
 pub mod routes;
 pub mod server_config;
 pub mod tls_assets;
@@ -35,6 +36,11 @@ pub use dashboard::{
     DestageQueueView, DiskHealthView, HealthSignalsView, HealthStateView, IngestJobStateView,
     IngestProgressView, IngestQueueJobView, IngestQueueView, ObjectStateView, PoolAccessMode,
     PoolStateView, PoolStatusView, QueuePressureView,
+};
+pub use endpoints::{
+    EndpointBindingReadinessView, EndpointBindingView, EndpointInventoryItemView,
+    EndpointInventoryView, EndpointKindView, EndpointValidationStateView, EndpointValidationView,
+    EndpointWarningSeverityView, EndpointWarningView, ENDPOINT_INVENTORY_SCHEMA_VERSION,
 };
 pub use routes::gui_api_router;
 pub use server_config::{

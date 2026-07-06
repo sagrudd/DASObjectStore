@@ -314,7 +314,7 @@ authentication-boundary, and Mneion endpoint integration work.
   raw paths tenant-facing contracts.
 - [x] Add governance-domain binding export support aligned with Mneion
   storage-binding rules.
-- [ ] Add API view models for endpoint inventory, validation status, active
+- [x] Add API view models for endpoint inventory, validation status, active
   bindings, and degraded endpoint warnings.
 - [ ] Add CLI or API command to validate a NAS/NFS endpoint definition.
 - [ ] Document how DASObjectStore-native endpoints differ from generic Mneion
