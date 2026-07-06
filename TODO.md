@@ -326,7 +326,7 @@ authentication-boundary, and Mneion endpoint integration work.
 
 - [x] Define shared GUI view models for Overview, Disks, Stores, Objects,
   Endpoints, and Activity.
-- [ ] Implement Overview API route and Yew view for capacity, ingest pressure,
+- [x] Implement Overview API route and Yew view for capacity, ingest pressure,
   destage urgency, endpoint state, and required actions.
 - [ ] Implement Disks API route and Yew view for enclosure grouping, health,
   USB/SMART warnings, benchmark drift, migrate, drain, replace, and retire.

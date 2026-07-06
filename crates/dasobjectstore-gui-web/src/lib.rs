@@ -1,6 +1,7 @@
 //! Yew frontend scaffold for Monas and Synoptikon delivery surfaces.
 
 pub mod mount;
+pub mod overview;
 
 #[cfg(target_arch = "wasm32")]
 pub mod app;
@@ -8,6 +9,7 @@ pub mod app;
 #[cfg(target_arch = "wasm32")]
 pub use app::App;
 pub use mount::{FrontendHost, FrontendMount};
+pub use overview::{overview_workspace_api_path, OVERVIEW_WORKSPACE_ROUTE};
 
 /// Returns the GUI web crate version.
 pub fn version() -> &'static str {

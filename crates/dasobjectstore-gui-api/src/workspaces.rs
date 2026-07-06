@@ -125,6 +125,18 @@ pub struct OverviewWorkspaceView {
     pub attention: DashboardAttentionView,
 }
 
+impl OverviewWorkspaceView {
+    pub fn empty() -> Self {
+        Self {
+            pool: None,
+            ingest: None,
+            destage: None,
+            endpoints: Some(EndpointInventoryView::from_endpoints(Vec::new())),
+            attention: DashboardAttentionView::from_sections(None, &[], None, None),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DisksWorkspaceView {
     pub disks: Vec<DiskHealthView>,
@@ -405,5 +417,17 @@ mod tests {
             encoded["activity"]["tasks"][0]["kind"],
             "endpoint_validation"
         );
+    }
+
+    #[test]
+    fn builds_empty_overview_workspace_for_api_bootstrap() {
+        let overview = OverviewWorkspaceView::empty();
+        let encoded = serde_json::to_value(overview).expect("overview serializes");
+
+        assert_eq!(encoded["pool"], serde_json::Value::Null);
+        assert_eq!(encoded["ingest"], serde_json::Value::Null);
+        assert_eq!(encoded["destage"], serde_json::Value::Null);
+        assert_eq!(encoded["endpoints"]["endpoint_count"], 0);
+        assert_eq!(encoded["attention"]["warning_count"], 0);
     }
 }
