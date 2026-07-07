@@ -10,6 +10,7 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,13 +45,65 @@ pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {
 }
 
 pub fn standalone_users_groups_router(auth_store: LocalAuthStore) -> Router {
+    standalone_users_groups_router_with_state(StandaloneUsersGroupsRouteState::system(auth_store))
+}
+
+fn standalone_users_groups_router_with_state(state: StandaloneUsersGroupsRouteState) -> Router {
     Router::new()
         .route(
             "/api/v1/workspaces/users-groups",
             get(users_groups_workspace),
         )
-        .layer(Extension(auth_store.clone()))
-        .with_state(auth_store)
+        .route(
+            "/api/v1/workspaces/users-groups/local-groups",
+            post(create_local_group),
+        )
+        .route(
+            "/api/v1/workspaces/users-groups/local-groups/members",
+            post(assign_local_user_to_group),
+        )
+        .layer(Extension(state.auth_store.clone()))
+        .with_state(state)
+}
+
+#[derive(Clone)]
+struct StandaloneUsersGroupsRouteState {
+    auth_store: LocalAuthStore,
+    local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
+    local_group_admin_client: Option<Arc<dyn StandaloneLocalGroupAdminClient>>,
+}
+
+impl StandaloneUsersGroupsRouteState {
+    fn system(auth_store: LocalAuthStore) -> Self {
+        Self {
+            auth_store,
+            local_user_provider: Arc::new(SystemLocalUserAuthorityProvider),
+            local_group_admin_client: None,
+        }
+    }
+}
+
+trait LocalUserAuthorityProvider: Send + Sync {
+    fn current_local_user(
+        &self,
+    ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError>;
+}
+
+struct SystemLocalUserAuthorityProvider;
+
+impl LocalUserAuthorityProvider for SystemLocalUserAuthorityProvider {
+    fn current_local_user(
+        &self,
+    ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError> {
+        discover_current_local_user()
+    }
+}
+
+trait StandaloneLocalGroupAdminClient: Send + Sync {
+    fn submit_local_group_operation(
+        &self,
+        request: StandaloneLocalGroupAdminDaemonRequest,
+    ) -> Result<StandaloneLocalGroupAdminResponse, StandaloneLocalGroupAdminClientError>;
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -83,6 +136,66 @@ pub struct SessionCheckRequest {
 pub struct AuthRouteError {
     pub code: String,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CreateLocalGroupRequest {
+    #[serde(alias = "group")]
+    pub group_name: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub confirmation_marker: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AssignLocalUserToGroupRequest {
+    #[serde(alias = "group")]
+    pub group_name: String,
+    #[serde(alias = "user")]
+    pub username: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub confirmation_marker: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StandaloneLocalGroupOperation {
+    CreateGroup,
+    AddUserToGroup,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneLocalGroupAdminResponse {
+    pub accepted: StandaloneLocalGroupAdminAcceptedResponse,
+    pub operation: StandaloneLocalGroupOperation,
+    pub group_name: String,
+    pub username: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneLocalGroupAdminAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StandaloneLocalGroupAdminDaemonRequest {
+    operation: StandaloneLocalGroupOperation,
+    group_name: String,
+    username: Option<String>,
+    dry_run: bool,
+    client_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StandaloneLocalGroupAdminClientError {
+    message: String,
 }
 
 async fn register(
@@ -130,11 +243,11 @@ async fn session(
 }
 
 async fn users_groups_workspace(
-    State(auth_store): State<LocalAuthStore>,
+    State(state): State<StandaloneUsersGroupsRouteState>,
     _actor: AuthenticatedGuiActor,
 ) -> Result<Json<UsersGroupsWorkspaceView>, (StatusCode, Json<AuthRouteError>)> {
-    let users = auth_store.list_users().map_err(auth_route_error)?;
-    let (current_user, warnings) = match discover_current_local_user() {
+    let users = state.auth_store.list_users().map_err(auth_route_error)?;
+    let (current_user, warnings) = match state.local_user_provider.current_local_user() {
         Ok(user) => (Some(user), Vec::new()),
         Err(err) => (
             None,
@@ -150,6 +263,166 @@ async fn users_groups_workspace(
         users,
         warnings,
     )))
+}
+
+async fn create_local_group(
+    State(state): State<StandaloneUsersGroupsRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<CreateLocalGroupRequest>,
+) -> Result<Json<StandaloneLocalGroupAdminResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let request = validate_create_local_group_request(request)?;
+    require_local_administrator(&state, &actor)?;
+    submit_local_group_admin_request(&state, request).map(Json)
+}
+
+async fn assign_local_user_to_group(
+    State(state): State<StandaloneUsersGroupsRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<AssignLocalUserToGroupRequest>,
+) -> Result<Json<StandaloneLocalGroupAdminResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let request = validate_assign_local_user_to_group_request(request)?;
+    require_local_administrator(&state, &actor)?;
+    submit_local_group_admin_request(&state, request).map(Json)
+}
+
+fn validate_create_local_group_request(
+    request: CreateLocalGroupRequest,
+) -> Result<StandaloneLocalGroupAdminDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
+    let group_name = required_field("group_name", request.group_name)?;
+    validate_client_request_id(request.client_request_id.as_deref())?;
+    validate_confirmation_marker(
+        request.dry_run,
+        request.confirmation_marker.as_deref(),
+        "confirm create local group",
+    )?;
+
+    Ok(StandaloneLocalGroupAdminDaemonRequest {
+        operation: StandaloneLocalGroupOperation::CreateGroup,
+        group_name,
+        username: None,
+        dry_run: request.dry_run,
+        client_request_id: request.client_request_id,
+    })
+}
+
+fn validate_assign_local_user_to_group_request(
+    request: AssignLocalUserToGroupRequest,
+) -> Result<StandaloneLocalGroupAdminDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
+    let group_name = required_field("group_name", request.group_name)?;
+    let username = required_field("username", request.username)?;
+    validate_client_request_id(request.client_request_id.as_deref())?;
+    validate_confirmation_marker(
+        request.dry_run,
+        request.confirmation_marker.as_deref(),
+        "confirm assign local user to group",
+    )?;
+
+    Ok(StandaloneLocalGroupAdminDaemonRequest {
+        operation: StandaloneLocalGroupOperation::AddUserToGroup,
+        group_name,
+        username: Some(username),
+        dry_run: request.dry_run,
+        client_request_id: request.client_request_id,
+    })
+}
+
+fn require_local_administrator(
+    state: &StandaloneUsersGroupsRouteState,
+    actor: &AuthenticatedGuiActor,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "standalone_local_session_required",
+            "standalone local group administration requires a local session",
+        ));
+    }
+
+    let current_user = state
+        .local_user_provider
+        .current_local_user()
+        .map_err(|err| {
+            route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "local_user_discovery_failed",
+                err.to_string(),
+            )
+        })?;
+
+    if !current_user.sudo_administrator {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "standalone_admin_authority_missing",
+            "current OS user must be a sudo-derived DASObjectStore administrator",
+        ));
+    }
+
+    Ok(())
+}
+
+fn submit_local_group_admin_request(
+    state: &StandaloneUsersGroupsRouteState,
+    request: StandaloneLocalGroupAdminDaemonRequest,
+) -> Result<StandaloneLocalGroupAdminResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.local_group_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_local_group_admin_unavailable",
+            "daemon local group administration contract is not available",
+        )
+    })?;
+
+    client
+        .submit_local_group_operation(request)
+        .map_err(|err| route_error(StatusCode::BAD_GATEWAY, "daemon_client_error", err.message))
+}
+
+fn required_field(
+    field: &'static str,
+    value: String,
+) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("{field} must not be blank"),
+        ));
+    }
+    Ok(value)
+}
+
+fn validate_client_request_id(
+    client_request_id: Option<&str>,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    if client_request_id.is_some_and(|value| value.trim().is_empty()) {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "client_request_id must not be blank",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_confirmation_marker(
+    dry_run: bool,
+    confirmation_marker: Option<&str>,
+    required_marker: &'static str,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    if dry_run {
+        return Ok(());
+    }
+
+    if confirmation_marker.map(str::trim) == Some(required_marker) {
+        return Ok(());
+    }
+
+    Err(route_error(
+        StatusCode::BAD_REQUEST,
+        "confirmation_required",
+        format!("confirmation_marker must be `{required_marker}`"),
+    ))
 }
 
 fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteError>) {
@@ -181,20 +454,42 @@ fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteErro
     )
 }
 
+fn route_error(
+    status: StatusCode,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> (StatusCode, Json<AuthRouteError>) {
+    (
+        status,
+        Json(AuthRouteError {
+            code: code.into(),
+            message: message.into(),
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_api_router_for_host_mode, standalone_auth_router, GuiApiHostMode, LoginRequest,
+        gui_api_router_for_host_mode, standalone_auth_router,
+        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
+        CreateLocalGroupRequest, GuiApiHostMode, LocalUserAuthorityProvider, LoginRequest,
         LogoutRequest, RegisterRequest, SessionCheckRequest,
+        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
+        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
+        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
+        StandaloneUsersGroupsRouteState,
     };
     use crate::{
-        LocalAuthStore, LoginResponse, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+        LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata, LoginResponse,
+        STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use serde::de::DeserializeOwned;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
 
@@ -479,6 +774,156 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_local_group_requires_session() {
+        let root = temp_root("create-local-group-auth");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_users_groups_router_with_state(test_users_groups_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_admin_client()),
+        ));
+
+        let response = post_json_response(
+            app,
+            "/api/v1/workspaces/users-groups/local-groups",
+            &CreateLocalGroupRequest {
+                group_name: "mnemosyne-writers".to_string(),
+                dry_run: true,
+                confirmation_marker: None,
+                client_request_id: Some("request-1".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn create_local_group_rejects_non_admin_os_user() {
+        let root = temp_root("create-local-group-non-admin");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_users_groups_router_with_state(test_users_groups_state(
+            auth_store,
+            local_user("operator", vec!["users"]),
+            Some(recording_admin_client()),
+        ));
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/users-groups/local-groups",
+            "admin",
+            &login.session_token,
+            &CreateLocalGroupRequest {
+                group_name: "mnemosyne-writers".to_string(),
+                dry_run: true,
+                confirmation_marker: None,
+                client_request_id: Some("request-1".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn create_local_group_forwards_dry_run_to_admin_client() {
+        let root = temp_root("create-local-group-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_admin_client();
+        let app = standalone_users_groups_router_with_state(test_users_groups_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneLocalGroupAdminResponse>(
+            app,
+            "/api/v1/workspaces/users-groups/local-groups",
+            "admin",
+            &login.session_token,
+            &CreateLocalGroupRequest {
+                group_name: " mnemosyne-writers ".to_string(),
+                dry_run: true,
+                confirmation_marker: None,
+                client_request_id: Some("request-1".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(
+            response.operation,
+            StandaloneLocalGroupOperation::CreateGroup
+        );
+        assert_eq!(response.group_name, "mnemosyne-writers");
+        assert!(response.accepted.dry_run);
+        assert_eq!(
+            client.requests(),
+            vec![StandaloneLocalGroupAdminDaemonRequest {
+                operation: StandaloneLocalGroupOperation::CreateGroup,
+                group_name: "mnemosyne-writers".to_string(),
+                username: None,
+                dry_run: true,
+                client_request_id: Some("request-1".to_string()),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn assign_local_user_to_group_forwards_dry_run_to_admin_client() {
+        let root = temp_root("assign-local-user-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_admin_client();
+        let app = standalone_users_groups_router_with_state(test_users_groups_state(
+            auth_store,
+            local_user("operator", vec!["wheel"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneLocalGroupAdminResponse>(
+            app,
+            "/api/v1/workspaces/users-groups/local-groups/members",
+            "admin",
+            &login.session_token,
+            &AssignLocalUserToGroupRequest {
+                group_name: "mnemosyne-writers".to_string(),
+                username: "stephen".to_string(),
+                dry_run: true,
+                confirmation_marker: None,
+                client_request_id: Some("request-2".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(
+            response.operation,
+            StandaloneLocalGroupOperation::AddUserToGroup
+        );
+        assert_eq!(response.username.as_deref(), Some("stephen"));
+        assert!(response.accepted.dry_run);
+        assert_eq!(
+            client.requests(),
+            vec![StandaloneLocalGroupAdminDaemonRequest {
+                operation: StandaloneLocalGroupOperation::AddUserToGroup,
+                group_name: "mnemosyne-writers".to_string(),
+                username: Some("stephen".to_string()),
+                dry_run: true,
+                client_request_id: Some("request-2".to_string()),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn synoptikon_integrated_host_mode_omits_local_auth_routes() {
         let root = temp_root("integrated-host-mode");
         let auth_store = LocalAuthStore::new(&root);
@@ -560,6 +1005,26 @@ mod tests {
         serde_json::from_slice(&bytes).expect("response decodes")
     }
 
+    async fn post_json_with_session<T>(
+        app: axum::Router,
+        path: &str,
+        username: &str,
+        session_token: &str,
+        body: &impl serde::Serialize,
+    ) -> T
+    where
+        T: DeserializeOwned,
+    {
+        let response =
+            post_json_response_with_session(app, path, username, session_token, body).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        serde_json::from_slice(&bytes).expect("response decodes")
+    }
+
     async fn post_json_response(
         app: axum::Router,
         path: &str,
@@ -577,6 +1042,100 @@ mod tests {
         )
         .await
         .expect("request completes")
+    }
+
+    async fn post_json_response_with_session(
+        app: axum::Router,
+        path: &str,
+        username: &str,
+        session_token: &str,
+        body: &impl serde::Serialize,
+    ) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("content-type", "application/json")
+                .header(STANDALONE_USERNAME_HEADER, username)
+                .header(STANDALONE_SESSION_TOKEN_HEADER, session_token)
+                .body(Body::from(
+                    serde_json::to_vec(body).expect("request encodes"),
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes")
+    }
+
+    fn test_users_groups_state(
+        auth_store: LocalAuthStore,
+        current_user: LocalUserMetadata,
+        local_group_admin_client: Option<Arc<RecordingAdminClient>>,
+    ) -> StandaloneUsersGroupsRouteState {
+        StandaloneUsersGroupsRouteState {
+            auth_store,
+            local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
+            local_group_admin_client: local_group_admin_client
+                .map(|client| client as Arc<dyn StandaloneLocalGroupAdminClient>),
+        }
+    }
+
+    fn local_user(username: &str, groups: Vec<&str>) -> LocalUserMetadata {
+        LocalUserMetadata::from_username_and_groups(
+            username,
+            groups.into_iter().map(str::to_string).collect(),
+        )
+    }
+
+    #[derive(Clone)]
+    struct FixedLocalUserProvider {
+        current_user: LocalUserMetadata,
+    }
+
+    impl LocalUserAuthorityProvider for FixedLocalUserProvider {
+        fn current_local_user(&self) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
+            Ok(self.current_user.clone())
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingAdminClient {
+        requests: Mutex<Vec<StandaloneLocalGroupAdminDaemonRequest>>,
+    }
+
+    impl RecordingAdminClient {
+        fn requests(&self) -> Vec<StandaloneLocalGroupAdminDaemonRequest> {
+            self.requests.lock().expect("requests lock").clone()
+        }
+    }
+
+    impl StandaloneLocalGroupAdminClient for RecordingAdminClient {
+        fn submit_local_group_operation(
+            &self,
+            request: StandaloneLocalGroupAdminDaemonRequest,
+        ) -> Result<StandaloneLocalGroupAdminResponse, StandaloneLocalGroupAdminClientError>
+        {
+            self.requests
+                .lock()
+                .expect("requests lock")
+                .push(request.clone());
+            Ok(StandaloneLocalGroupAdminResponse {
+                accepted: StandaloneLocalGroupAdminAcceptedResponse {
+                    job_id: "local-group-job-1".to_string(),
+                    kind: "system_administration".to_string(),
+                    accepted_at_utc: "2026-07-07T12:00:00Z".to_string(),
+                    dry_run: request.dry_run,
+                },
+                operation: request.operation,
+                group_name: request.group_name,
+                username: request.username,
+                client_request_id: request.client_request_id,
+            })
+        }
+    }
+
+    fn recording_admin_client() -> Arc<RecordingAdminClient> {
+        Arc::new(RecordingAdminClient::default())
     }
 
     fn registered_auth_store(root: &Path) -> LocalAuthStore {
