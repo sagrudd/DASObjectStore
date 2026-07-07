@@ -25,7 +25,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 
 - [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
   daemon configuration type, and unit tests for default runtime paths.
-- [ ] Define the daemon API contract for health summary, store inventory,
+- [x] Define the daemon API contract for health summary, store inventory,
   ingest job submission, ingest progress events, job status, and cancellation.
 - [ ] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
   view models, and Synoptikon adapters do not duplicate API shapes.
