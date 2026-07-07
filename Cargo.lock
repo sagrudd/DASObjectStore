@@ -353,6 +353,7 @@ name = "dasobjectstore-daemon"
 version = "0.0.0"
 dependencies = [
  "dasobjectstore-core",
+ "libc",
  "serde",
  "serde_json",
 ]

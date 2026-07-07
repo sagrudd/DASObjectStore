@@ -1,6 +1,7 @@
 //! Managed daemon boundary for DASObjectStore.
 
 pub mod api;
+pub mod auth;
 pub mod client;
 pub mod runtime;
 
@@ -14,6 +15,9 @@ pub use api::{
     DaemonRequestValidationError, DaemonSsdPressure, IngestJobStatusRequest,
     IngestJobStatusResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+};
+pub use auth::{
+    authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
 pub use client::{
     DaemonClient, DaemonClientError, DaemonClientTransport, InProcessDaemonTransport,
