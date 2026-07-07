@@ -25,7 +25,10 @@ pub use entrypoint::{
 pub use mount::{FrontendHost, FrontendMount};
 pub use objects::{objects_workspace_api_path, OBJECTS_WORKSPACE_ROUTE};
 pub use overview::{overview_workspace_api_path, OVERVIEW_WORKSPACE_ROUTE};
-pub use stores::{stores_workspace_api_path, STORES_WORKSPACE_ROUTE};
+pub use stores::{
+    store_create_action_api_path, stores_workspace_api_path, STORES_WORKSPACE_ROUTE,
+    STORE_CREATE_ACTION_ROUTE,
+};
 pub use users_groups::{users_groups_workspace_api_path, USERS_GROUPS_WORKSPACE_ROUTE};
 
 /// Returns the GUI web crate version.
