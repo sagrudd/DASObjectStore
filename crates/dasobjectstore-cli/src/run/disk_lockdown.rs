@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::process::Stdio;
 
 pub(super) const LOCKDOWN_CONFIRMATION: &str = "confirm lockdown das";
 
@@ -217,7 +218,11 @@ fn user_exists(user: &str) -> Result<bool, LockdownDasError> {
 }
 
 fn command_success(program: &str, args: &[&str]) -> Result<bool, LockdownDasError> {
-    let status = ProcessCommand::new(program).args(args).status()?;
+    let status = ProcessCommand::new(program)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
     Ok(status.success())
 }
 
