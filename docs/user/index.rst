@@ -9,6 +9,7 @@ stabilized in the current MVP.
 
    getting-started
    service-boundary
+   standalone-auth
    store-classes
    nas-endpoints
    disk-preparation

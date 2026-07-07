@@ -334,7 +334,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   integrated mode route omission.
 - [x] Document packaging/service behavior for `https://127.0.0.1:8448` and
   optional Linux appliance binding to `0.0.0.0:8448`.
-- [ ] Reconcile standalone auth with the appliance charter for local OS users
+- [x] Reconcile standalone auth with the appliance charter for local OS users
   and sudo-derived administrator status before expanding administrator
   workflows.
 - [ ] If OS-local auth is selected, add local-user discovery, sudo-rights

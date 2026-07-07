@@ -97,6 +97,13 @@ rather than writing managed storage directly. It does not own Synoptikon login,
 Synoptikon session cookies, tenant selection, entitlement checks, or Synoptikon
 public TLS.
 
+Standalone appliance administrator authority is OS-local. A host user with sudo
+rights is a DASObjectStore administrator, and host group membership authorizes
+ordinary store writer/admin job submission. The product-local auth store is a
+transitional Web session layer until OS-local actor discovery is implemented; it
+must not supersede sudo-derived administrator status. The full decision is
+recorded in [Standalone Authentication Decision](standalone-auth.md).
+
 ## TLS Assets
 
 Default standalone TLS assets live under the product root:

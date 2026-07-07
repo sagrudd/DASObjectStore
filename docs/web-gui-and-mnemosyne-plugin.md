@@ -70,7 +70,15 @@ modes:
   authenticated user context, roles, entitlement, correlation ID, and audit
   authority.
 
-Standalone local authentication SHOULD follow the Mnematikon pattern:
+Standalone appliance administrator authority SHALL be OS-local: a host user with
+sudo rights is an appliance administrator, and host group membership authorizes
+ordinary store writer/admin job submission. The product-local auth store is a
+transitional Web session layer until OS-local actor discovery is implemented; it
+does not supersede sudo-derived administrator status. The decision is recorded
+in [Standalone Authentication Decision](standalone-auth.md).
+
+The transitional standalone local authentication store SHOULD follow the
+Mnematikon pattern:
 
 - local users and sessions stored under `/opt/dasobjectstore`;
 - password hashes, registration tokens, and session token hashes persisted

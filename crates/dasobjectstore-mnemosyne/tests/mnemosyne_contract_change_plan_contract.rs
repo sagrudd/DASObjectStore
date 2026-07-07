@@ -84,6 +84,25 @@ fn plugin_spec_requires_daemon_backed_mutations() {
 }
 
 #[test]
+fn standalone_auth_decision_prefers_os_local_authority() {
+    for relative_path in [
+        "docs/standalone-auth.md",
+        "docs/standalone-service.md",
+        "docs/web-gui-and-mnemosyne-plugin.md",
+        "docs/user/standalone-auth.rst",
+    ] {
+        let document = fs::read_to_string(repo_root().join(relative_path))
+            .unwrap_or_else(|_| panic!("read {relative_path}"));
+
+        assert_contains(&document, "OS-local");
+        assert_contains(&document, "sudo");
+        assert_contains(&document, "administrator");
+        assert_contains(&document, "product-local");
+        assert_contains(&document, "dasobjectstored");
+    }
+}
+
+#[test]
 fn platform_convention_mutability_rule_is_documented() {
     for relative_path in [
         "README.md",
