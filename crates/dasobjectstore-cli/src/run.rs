@@ -271,7 +271,7 @@ fn docker_compose_args(
 }
 
 fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    if args.json() == args.pretty() {
+    if args.json() && args.pretty() {
         return Err(CliError::UnsupportedProbeFormat);
     }
 
@@ -2644,8 +2644,9 @@ impl Display for CliError {
             Self::UnsupportedPoolRepairMode => {
                 formatter.write_str("pool repair currently requires `--dry-run`")
             }
-            Self::UnsupportedProbeFormat => formatter
-                .write_str("probe requires exactly one output format; use `--json` or `--pretty`"),
+            Self::UnsupportedProbeFormat => {
+                formatter.write_str("probe accepts at most one output format; use `--json` or `--pretty`")
+            }
             Self::UnsupportedServiceStatusFormat => {
                 formatter.write_str("service status requires JSON output; use `--json`")
             }
@@ -2878,16 +2879,6 @@ mod tests {
         assert!(output.contains("status"));
         assert!(output.contains("queue"));
         assert!(output.contains("direct-import"));
-    }
-
-    #[test]
-    fn probe_without_format_returns_clear_error() {
-        let cli = Cli::try_parse_from(["dasobjectstore", "probe"]).expect("probe parses");
-        let mut output = Vec::new();
-
-        let err = run(&cli, &mut output).expect_err("format is required");
-
-        assert!(matches!(err, CliError::UnsupportedProbeFormat));
     }
 
     #[test]
