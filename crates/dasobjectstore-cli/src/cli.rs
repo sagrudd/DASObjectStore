@@ -25,6 +25,16 @@ impl Cli {
         command.write_help(writer)?;
         writeln!(writer)
     }
+
+    pub(crate) fn write_subcommand_help(name: &str, writer: &mut impl Write) -> io::Result<()> {
+        let mut command = <Self as CommandFactory>::command();
+        let help_result = command.try_get_matches_from_mut(["dasobjectstore", name, "--help"]);
+
+        match help_result {
+            Ok(_) => Ok(()),
+            Err(err) => write!(writer, "{err}"),
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]

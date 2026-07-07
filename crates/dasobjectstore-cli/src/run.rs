@@ -106,13 +106,13 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
-            None => Ok(()),
+            None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
         },
         Some(Command::Ingest(args)) => match args.command() {
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
             Some(IngestCommand::Queue(args)) => run_ingest_queue(args, writer),
             Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
-            None => Ok(()),
+            None => Cli::write_subcommand_help("ingest", writer).map_err(CliError::Io),
         },
         Some(Command::Object(args)) => match args.command() {
             ObjectCommand::Export(args) => run_object_export(args, writer),
@@ -1532,6 +1532,36 @@ mod tests {
         assert!(output.contains("Commands:"));
         assert!(output.contains("disk"));
         assert!(output.contains("health"));
+    }
+
+    #[test]
+    fn bare_store_command_writes_store_help() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "store"]).expect("store parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store help writes");
+
+        let output = String::from_utf8(output).expect("utf8 help");
+        assert!(output.contains("Manage object stores and policy"));
+        assert!(output.contains("Usage: dasobjectstore store [COMMAND]"));
+        assert!(output.contains("adopt"));
+        assert!(output.contains("create"));
+        assert!(output.contains("list"));
+    }
+
+    #[test]
+    fn bare_ingest_command_writes_ingest_help() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "ingest"]).expect("ingest parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("ingest help writes");
+
+        let output = String::from_utf8(output).expect("utf8 help");
+        assert!(output.contains("Inspect SSD ingest and destage work"));
+        assert!(output.contains("Usage: dasobjectstore ingest [COMMAND]"));
+        assert!(output.contains("status"));
+        assert!(output.contains("queue"));
+        assert!(output.contains("direct-import"));
     }
 
     #[test]
