@@ -70,6 +70,15 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
   requires another language or tool.
 - Use `clap` for CLI parsing and command documentation.
 - Use `axum` for GUI-facing HTTP/API surfaces and `yew` for frontend GUI work.
+- Treat DASObjectStore as a server/client system. Managed storage mutation
+  belongs behind the daemon/service boundary, not inside a normal-user CLI
+  process.
+- Prefer `dasobjectstored` as the enterprise storage authority: disk discovery,
+  mount validation, placement, ingest execution, destage, health mutation, disk
+  retirement, repair, and object-service orchestration should be daemon-owned.
+- Treat `dasobjectstore` as a client: it may parse commands, authenticate,
+  submit jobs, stream source data, and render progress, but it should not write
+  directly into managed DAS roots in normal operation.
 - Keep eventual GUI delivery aligned with sibling Monas and Synoptikon surfaces
   rather than introducing an unrelated UI stack.
 - Keep Mnemosyne/Synoptikon integration in an adapter layer.

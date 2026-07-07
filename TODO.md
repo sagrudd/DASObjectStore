@@ -5,10 +5,13 @@ Source roadmap: [ROADMAP.md](ROADMAP.md)
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
 developers
 
-Current priority: bring DASObjectStore under the Synoptikon umbrella as a formal
-Mnemosyne product/plugin. Standalone HTTPS operation remains required, but
-standalone-only polish is secondary to product manifest, catalogue, host-mode,
-authentication-boundary, and Mneion endpoint integration work.
+Current priority: correct the architecture so DASObjectStore is an enterprise
+server/client storage appliance. `dasobjectstored` SHALL become the managed
+storage authority, and the CLI, standalone HTTPS API, Web UI, and Synoptikon
+plugin SHALL submit requests/jobs through that boundary instead of mutating
+managed DAS roots directly. Synoptikon/Mneion integration remains the strategic
+product target, but storage mutation must first move behind the daemon boundary
+so the integration is foundational rather than bolted onto a CLI-local model.
 
 ## Working Rules
 
@@ -17,6 +20,34 @@ authentication-boundary, and Mneion endpoint integration work.
 - Update this file when tasks are completed, split, or superseded.
 - Keep persistent metadata, CLI behavior, and compatibility-impacting changes
   documented before merging implementation.
+
+## Current Priority: Milestone 12 Managed Daemon and Client Boundary
+
+- [ ] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
+  daemon configuration type, and unit tests for default runtime paths.
+- [ ] Define the daemon API contract for health summary, store inventory,
+  ingest job submission, ingest progress events, job status, and cancellation.
+- [ ] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
+  view models, and Synoptikon adapters do not duplicate API shapes.
+- [ ] Add a daemon client abstraction with an in-process test transport and a
+  planned Unix-domain socket transport.
+- [ ] Refactor `dasobjectstore ingest files` so the normal command path builds a
+  daemon request and renders daemon progress events.
+- [ ] Move current direct local ingest execution behind an explicit hidden
+  developer/test flag or test transport until it can be removed.
+- [ ] Implement daemon-side local authorization using Linux peer credentials and
+  store writer-group policy for the first Linux slice.
+- [ ] Add package assets for `dasobjectstored`: system user, systemd service,
+  socket/runtime directory, state directory, log directory, and permission
+  expectations.
+- [ ] Update DEB validation to ensure managed DAS roots are owned by the daemon
+  service identity, not ordinary ingest users.
+- [ ] Add integration tests proving normal non-root ingest succeeds through the
+  daemon without granting direct write permission to managed DAS roots.
+- [ ] Update user documentation so ingest is described as a client/server job
+  submission with byte-level progress, not a local filesystem write.
+- [ ] Update Synoptikon/Mneion integration docs so all storage-mutating actions
+  call the daemon API and inherit the common audit/authentication model.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
@@ -235,7 +266,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Document macOS limits for Docker Desktop, service management, SMART,
   filesystem support, permissions, and performance.
 
-## Milestone 12: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
+## Milestone 13: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
 
 - [x] Create `axum` GUI API scaffold with clear separation from core domain
   logic.
@@ -259,7 +290,7 @@ authentication-boundary, and Mneion endpoint integration work.
   and `generated_data`.
 - [x] Add README section linking to the reference workflow.
 
-## Milestone 13: Formal Mnemosyne Product Plugin
+## Milestone 14: Formal Mnemosyne Product Plugin
 
 - [x] Add `docs/web-gui-and-mnemosyne-plugin.md` covering host modes,
   standalone port policy, authentication posture, Mneion endpoint model, and
@@ -284,7 +315,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] When a contract change is justified, update DASObjectStore docs with the
   coordinated change plan and affected repositories before implementation.
 
-## Milestone 14: Standalone HTTPS Application and Authentication
+## Milestone 15: Standalone HTTPS Application and Authentication
 
 - [x] Add standalone server configuration model with default HTTPS port `8448`.
 - [x] Add CLI/server entry point for `dasobjectstore-server`.
@@ -302,7 +333,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Document packaging/service behavior for `https://127.0.0.1:8448` and
   optional Linux appliance binding to `0.0.0.0:8448`.
 
-## Milestone 15: Native Mneion Storage Endpoint and External NAS Support
+## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 
 - [x] Extend `dasobjectstore-mnemosyne` endpoint model with
   `dasobjectstore_das`, `dasobjectstore_nfs`, and `s3_compatible` variants.
@@ -322,7 +353,7 @@ authentication-boundary, and Mneion endpoint integration work.
 - [x] Identify required Mneion storage-definition schema changes, if any, and
   record the coordinated implementation plan.
 
-## Milestone 16: Web Operations Console and Design System
+## Milestone 17: Web Operations Console and Design System
 
 - [x] Define shared GUI view models for Overview, Disks, Stores, Objects,
   Endpoints, and Activity.

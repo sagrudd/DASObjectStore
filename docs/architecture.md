@@ -12,6 +12,32 @@ adapters.
 The architecture should keep the public core useful without Mnemosyne while
 leaving a clean adapter path for Monas and Synoptikon integration.
 
+## Server/Client Boundary
+
+DASObjectStore is an enterprise server/client appliance, not a CLI tool that
+directly mutates managed disks.
+
+The managed storage authority SHALL be `dasobjectstored`. It owns disk
+discovery, managed mount validation, SSD ingest staging, HDD placement,
+destage, health-state mutation, disk retirement, repair, object-service
+orchestration, and persistent metadata writes.
+
+The `dasobjectstore` CLI is a client. It may parse operator intent, authenticate
+to the daemon, stream file bytes, submit local import jobs, and render progress.
+It SHALL NOT write directly into managed DAS roots during normal operation.
+
+The standalone HTTPS server, Yew GUI, Synoptikon product mount, and future
+Mneion integrations SHALL use the same daemon-owned API/job boundary. Smaller
+single-host deployments MAY package the components together, but the storage
+mutation actor boundary must remain explicit in code, tests, documentation, and
+packaging.
+
+The preferred local daemon transport is a Unix-domain socket with peer
+credential inspection on Linux. HTTPS remains the browser and remote appliance
+surface. Authorization decisions should combine local group policy, standalone
+sessions, or Synoptikon-provided actor context with store-level writer/admin
+policy.
+
 ## Workspace Crates
 
 ### `dasobjectstore-core`
@@ -36,17 +62,37 @@ Must not depend on:
 
 ### `dasobjectstore-cli`
 
-Owns command-line parsing and command dispatch.
+Owns command-line parsing and client command dispatch.
 
 Responsibilities:
 
 - `clap` command definitions;
 - user-facing argument parsing;
 - command output formatting;
-- delegation into core, metadata, platform, object-service, and adapter crates.
+- daemon client request construction;
+- local progress rendering from daemon job events;
+- developer-only local execution fallbacks where explicitly marked unsafe.
 
-Must not own domain rules. CLI code should translate user intent into calls
-against lower-level crates.
+Must not own domain rules or normal managed-storage mutation. CLI code should
+translate user intent into requests against `dasobjectstored` or lower-level
+crates only for tests and explicitly documented developer fallbacks.
+
+### `dasobjectstore-daemon`
+
+Owns the managed storage runtime.
+
+Responsibilities:
+
+- daemon configuration and lifecycle;
+- Unix socket and internal API boundary;
+- authorization from peer credentials, local sessions, or Synoptikon actor
+  context;
+- job submission, cancellation, progress, and audit;
+- execution of ingest, direct reproducible import, destage, drain, retire,
+  repair, service orchestration, and metadata mutation;
+- systemd/package integration points for managed state directories and logs.
+
+Must not expose raw POSIX storage paths as tenant-facing contracts.
 
 ### `dasobjectstore-platform`
 
@@ -102,13 +148,14 @@ Docker/Compose behavior, including macOS Docker Desktop limits, is documented in
 
 ### `dasobjectstore-gui-api`
 
-Owns GUI-facing HTTP/API scaffolding.
+Owns GUI-facing HTTP/API scaffolding and client adapters for the daemon.
 
 Responsibilities:
 
 - `axum` router construction;
 - GUI view models for pool, disk, ingest, health, queue, and warning views;
 - safe API action boundaries for operations exposed through the GUI;
+- daemon client calls for storage-mutating actions;
 - serialization contracts consumed by future Yew views.
 
 Must not duplicate core storage rules or mutate persistent metadata directly.
@@ -156,7 +203,9 @@ Preferred dependency direction:
 
 ```text
 CLI / GUI / adapters
-  -> object-service / platform / metadata
+  -> daemon API client
+    -> daemon runtime
+      -> object-service / platform / metadata
     -> core
 ```
 
@@ -174,6 +223,8 @@ Each crate should test the behavior it owns:
 
 - core: pure domain and state transition tests;
 - CLI: command shape and output behavior;
+- daemon: authorization, job lifecycle, progress events, and managed mutation
+  execution;
 - platform: fixture-based parser tests;
 - metadata: schema, migration, snapshot, and recovery tests;
 - object-service: rendered configuration and provider behavior tests;

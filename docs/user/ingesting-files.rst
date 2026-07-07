@@ -5,9 +5,12 @@ Use ``dasobjectstore ingest files`` to load a directory tree from an external
 disk into a system-managed object store or SubObject endpoint. Do not copy files
 directly onto DAS member disks.
 
-The command reads the store policy, discovers managed HDD members, selects copy
-placements, stages each file through the DAS SSD, writes the requested verified
-HDD copies, and reports byte-level progress while the copy is running.
+The CLI is the client surface. In normal operation it submits an ingest job to
+the managed ``dasobjectstored`` service, streams or references source data as
+required by the local transport, and renders daemon progress events. The daemon
+reads the store policy, discovers managed HDD members, selects copy placements,
+stages each file through the DAS SSD, writes the requested verified HDD copies,
+and reports byte-level progress while the copy is running.
 
 Example
 -------
@@ -27,9 +30,10 @@ import files from a mounted external disk:
    dasobjectstore ingest files zymo_fecal_2025.05 \
      --source /mnt/external/zymo_fecal_2025.05
 
-The user running ingest must be a member of the store's writer group. For the
+The user running ingest must be authorized by the store's writer group. For the
 example above, membership in ``mnemosyne`` is required. Ingest does not require
-``sudo``.
+``sudo`` because the daemon, not the user's shell process, owns managed storage
+mutation.
 
 DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
@@ -47,7 +51,8 @@ Store creation and writer-group assignment are administrator actions:
      --class reproducible_cache \
      --writer-group mnemosyne
 
-Add ingest users to the writer group:
+Add ingest users to the writer group so the daemon can authorize their ingest
+jobs:
 
 .. code-block:: console
 
@@ -60,8 +65,8 @@ normal processes. Check membership with:
 
    id
 
-The output must include ``mnemosyne`` before non-root ingest will be allowed.
-If the group already exists, skip ``groupadd``.
+The output must include ``mnemosyne`` before non-root ingest job submission will
+be allowed. If the group already exists, skip ``groupadd``.
 
 The copy count defaults to the store policy. Use ``--copies`` only when the
 override is intentional:

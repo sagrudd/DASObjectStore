@@ -1,7 +1,30 @@
 # Standalone Service and Packaging
 
 Status: Draft  
-Scope: standalone HTTPS application packaging and service behavior
+Scope: standalone HTTPS application and managed daemon packaging behavior
+
+## Managed Daemon
+
+`dasobjectstored` is the managed storage authority. Packages SHALL run it as a
+service identity that owns DASObjectStore state, runtime sockets, logs, and
+managed storage mutation.
+
+Normal clients SHALL NOT write directly into managed DAS roots. The
+`dasobjectstore` CLI, standalone HTTPS server, Web UI, and Synoptikon product
+integration submit daemon requests or jobs and receive progress/state updates
+from the daemon.
+
+The preferred local Linux transport is a Unix-domain socket under the package
+runtime directory, for example:
+
+```text
+/run/dasobjectstore/dasobjectstored.sock
+```
+
+The daemon SHALL enforce writer/admin policy before accepting storage-mutating
+jobs. Local Unix groups such as `mnemosyne` authorize job submission; they are
+not intended to grant ordinary users raw write access to mounted DAS member
+filesystems.
 
 ## Permanent Port Policy
 
@@ -51,8 +74,10 @@ dasobjectstore-server --check-config --json
 ```
 
 The server owns local standalone authentication, local audit posture, and the
-standalone GUI/API surface. It does not own Synoptikon login, Synoptikon session
-cookies, tenant selection, entitlement checks, or Synoptikon public TLS.
+standalone GUI/API surface. Storage-mutating routes call `dasobjectstored`
+rather than writing managed storage directly. It does not own Synoptikon login,
+Synoptikon session cookies, tenant selection, entitlement checks, or Synoptikon
+public TLS.
 
 ## TLS Assets
 

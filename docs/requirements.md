@@ -13,6 +13,15 @@ DASObjectStore SHALL be implemented primarily in Rust.
 
 DASObjectStore SHALL be useful to non-Mnemosyne users.
 
+DASObjectStore SHALL be a server/client application. The managed service
+boundary is foundational, not optional polish.
+
+DASObjectStore SHALL provide a daemon, `dasobjectstored`, as the managed
+storage authority for normal operation.
+
+DASObjectStore SHALL treat the `dasobjectstore` CLI as a client to the daemon
+for normal storage-mutating workflows.
+
 Bringing DASObjectStore under the Synoptikon umbrella as a formal Mnemosyne
 product/plugin SHALL be the priority integration path. The standalone monolith
 SHALL reuse the same domain model and SHALL NOT fork into a separate
@@ -33,6 +42,7 @@ DASObjectStore SHALL support these primary use cases:
 - settle verified object copies onto heterogeneous HDD members;
 - expose object storage through an S3-compatible interface;
 - provide CLI and Web UI health visibility;
+- run storage-mutating operations through a managed daemon/client boundary;
 - support portable movement of the DAS between hosts;
 - support incremental addition and retirement of disks;
 - support per-store redundancy and retention policy;
@@ -434,6 +444,18 @@ DASObjectStore SHALL provide CLI and S3-compatible access from the outset.
 
 The CLI SHALL be implemented in Rust using `clap`.
 
+The CLI SHALL NOT directly mutate managed DAS storage in normal operation.
+Storage-mutating commands SHALL submit daemon requests or daemon jobs.
+
+The daemon SHALL expose a local client API suitable for CLI, standalone HTTPS,
+Web UI, and Synoptikon product integration.
+
+On Linux, the preferred local client transport SHALL be a Unix-domain socket
+with peer credential inspection for local actor identity.
+
+Remote/browser control SHALL use the standalone HTTPS or Synoptikon-integrated
+HTTPS surfaces rather than raw filesystem permissions.
+
 DASObjectStore SHALL provide a GUI/Web UI that initially supports:
 
 - dashboard;
@@ -462,6 +484,15 @@ SMB/NFS SHALL initially be read-only exports of settled/protected data.
 ## 19. Security Requirements
 
 DASObjectStore SHALL support a single local admin credential for Web UI/API control.
+
+DASObjectStore SHALL enforce store writer/admin policy at the daemon boundary.
+
+Local Unix group membership MAY authorize store writes, but group membership
+SHALL authorize API/job submission rather than granting ordinary users direct
+write access to managed DAS roots.
+
+Managed DAS roots SHALL be writable only by the daemon service account or by
+package-controlled service identities required for maintenance.
 
 DASObjectStore SHALL generate or manage separate per-store service credentials.
 

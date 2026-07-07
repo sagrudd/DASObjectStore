@@ -27,6 +27,8 @@ appliance:
   without making Mnemosyne a hard dependency.
 - DASObjectStore is specified as a formal Synoptikon product/plugin and as a
   standalone HTTPS application.
+- `dasobjectstored` is the managed storage authority, and normal CLI/Web/API
+  flows submit daemon requests or jobs instead of mutating DAS roots directly.
 - the Web GUI design language, host-mode authentication model, and Mneion
   storage endpoint conventions are documented before implementation.
 - current Synoptikon and Mneion conventions are treated as mutable design inputs
@@ -254,7 +256,45 @@ Exit criteria:
 - macOS behavior is explicit rather than pretending to match Linux full
   operation.
 
-## Milestone 12: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
+## Milestone 12: Managed Daemon and Client Boundary
+
+Goal: make DASObjectStore an enterprise server/client storage appliance rather
+than a direct CLI mutator.
+
+Priority: this milestone supersedes additional CLI-local storage mutation work.
+It SHALL be implemented before expanding ingest, disk management, or Web
+operations beyond scaffolding.
+
+Scope:
+
+- introduce `dasobjectstored` as the daemon-owned storage authority;
+- define the local daemon API for health, store inventory, ingest job
+  submission, progress events, cancellation, disk management, and service
+  orchestration;
+- add a daemon client layer reused by CLI, standalone HTTPS, Web UI, and
+  Synoptikon integration;
+- move normal `dasobjectstore ingest files` behavior to client submission and
+  progress rendering;
+- keep direct local storage mutation available only as an explicitly hidden
+  developer/test fallback until removed;
+- enforce writer/admin policy at the daemon boundary using peer credentials,
+  local sessions, or Synoptikon actor context;
+- package system user, systemd service, Unix socket, runtime directory, state
+  directory, logs, and permissions through the DEB;
+- document the security boundary so users are not asked to write directly to
+  managed DAS disks.
+
+Exit criteria:
+
+- normal non-root ingest succeeds through the daemon without granting the user
+  direct write access to managed DAS roots;
+- CLI, Web/API, and Synoptikon-facing paths share the same daemon request/job
+  model;
+- daemon job progress can reproduce the current byte-level ingest progress;
+- package installation creates and validates the daemon runtime boundary;
+- tests prove that CLI-local direct mutation is not the default storage path.
+
+## Milestone 13: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
 
 Goal: complete the coherent MVP surface for users and bioinformatics
 development.
@@ -280,14 +320,16 @@ Exit criteria:
 - the MVP can demonstrate a DAS-backed local object store for bioinformatics
   development.
 
-## Milestone 13: Formal Mnemosyne Product Plugin
+## Milestone 14: Formal Mnemosyne Product Plugin
 
 Goal: make DASObjectStore a first-class Synoptikon product/plugin while keeping
 the public core standalone.
 
-Priority: this is the next critical milestone. Product manifest, catalogue,
-host-mode, authentication-boundary, and Mneion endpoint compatibility work SHALL
-be favored over optional standalone-only enhancements.
+Priority: this remains the strategic Mnemosyne product milestone, but it
+depends on the managed daemon/client boundary from Milestone 12. Product
+manifest, catalogue, host-mode, authentication-boundary, and Mneion endpoint
+compatibility work SHALL be favored over optional standalone-only enhancements
+once the daemon storage authority is established.
 
 Scope:
 
@@ -312,15 +354,17 @@ Exit criteria:
 - any proposed Synoptikon/Mneion changes name the affected repositories,
   contracts, migrations, and tests required to keep the platform coherent.
 
-## Milestone 14: Standalone HTTPS Application and Authentication
+## Milestone 15: Standalone HTTPS Application and Authentication
 
-Goal: deliver a coherent standalone monolith where needed, without diverging
-from Mnemosyne authentication conventions.
+Goal: deliver a coherent standalone application where needed, without diverging
+from Mnemosyne authentication conventions or bypassing the daemon storage
+authority.
 
 Scope:
 
 - define standalone HTTPS default port `8448`;
 - implement `axum` server configuration and TLS asset handling;
+- connect storage-mutating HTTPS/API routes to `dasobjectstored`;
 - add host-mode selection for `standalone` and `synoptikon_integrated`;
 - implement local standalone login, logout, session validation, and local user
   storage using the Mnematikon pattern;
@@ -337,7 +381,7 @@ Exit criteria:
   session behavior;
 - package/service docs state the permanent port policy.
 
-## Milestone 15: Native Mneion Storage Endpoint and External NAS Support
+## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 
 Goal: make DASObjectStore a native storage endpoint across Mneion for DAS-backed
 and external NAS-backed storage.
@@ -365,7 +409,7 @@ Exit criteria:
 - external NAS endpoints are visible as first-class managed endpoints in the
   Web/API model.
 
-## Milestone 16: Web Operations Console and Design System
+## Milestone 17: Web Operations Console and Design System
 
 Goal: create the contemporary GUI workbench for disk, store, object, and
 endpoint operations.
