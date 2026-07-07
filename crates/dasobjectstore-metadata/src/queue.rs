@@ -219,7 +219,12 @@ fn read_ingest_queue_inner(
     store_id: Option<&StoreId>,
 ) -> Result<IngestQueueSnapshot, IngestQueueReadError> {
     let connection = Connection::open(live_sqlite_path)?;
-    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    if !ingest_jobs_table_exists(&connection)? {
+        return Ok(IngestQueueSnapshot {
+            live_sqlite_path: live_sqlite_path.to_path_buf(),
+            jobs: Vec::new(),
+        });
+    }
     let query = match store_id {
         Some(_) => {
             "SELECT
@@ -281,6 +286,18 @@ fn read_ingest_queue_inner(
         live_sqlite_path: live_sqlite_path.to_path_buf(),
         jobs,
     })
+}
+
+fn ingest_jobs_table_exists(connection: &Connection) -> Result<bool, IngestQueueReadError> {
+    let count = connection.query_row(
+        "SELECT COUNT(*)
+         FROM sqlite_master
+         WHERE type = 'table'
+           AND name = 'ingest_jobs'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(count > 0)
 }
 
 pub fn drain_ingest_queue(
@@ -685,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_empty_queue_from_older_live_sqlite_without_ingest_jobs_table() {
+    fn reads_empty_queue_from_older_live_sqlite_without_mutating_schema() {
         let root = temp_root("ingest-queue-old-schema");
         fs::create_dir_all(&root).expect("create temp root");
         let live_sqlite_path = root.join("live.sqlite");
@@ -717,7 +734,7 @@ mod tests {
             .expect("table count reads");
 
         assert!(snapshot.jobs.is_empty());
-        assert_eq!(table_count, 1);
+        assert_eq!(table_count, 0);
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

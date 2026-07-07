@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.12 - 2026-07-07
+
+- Keep `dasobjectstore ingest queue` read-only for normal users; older live
+  SQLite files without `ingest_jobs` now render an empty queue instead of
+  attempting schema repair against service-owned metadata.
+
 ## 0.1.11 - 2026-07-07
 
 - Keep `dasobjectstored` running when an upload client disconnects during
@@ -16,8 +22,8 @@ agreement before landing.
 - Remove temporary SSD ingest job roots after verified HDD settlement as well
   as after cancelled or failed object puts, preventing settled uploads from
   filling the SSD staging area.
-- Apply additive live SQLite schema repair before reading or draining ingest
-  queues so older live metadata files gain the `ingest_jobs` table.
+- Apply additive live SQLite schema repair before draining ingest queues so
+  older live metadata files gain the `ingest_jobs` table on mutating paths.
 
 ## 0.1.10 - 2026-07-07
 
