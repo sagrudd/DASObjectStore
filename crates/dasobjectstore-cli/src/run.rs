@@ -42,6 +42,11 @@ use dasobjectstore_core::risk::{
     ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
+use dasobjectstore_daemon::{
+    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestProgressEvent,
+    DaemonIngestStage, DaemonRuntimeConfig, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UnixSocketDaemonTransport,
+};
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, force_retire_disk,
     import_dirty_pool_read_only, import_reproducible_object_direct_to_hdd, inspect_pool_metadata,
@@ -1400,6 +1405,63 @@ struct ResolvedIngestEndpoint {
 }
 
 fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    if args.local_direct() {
+        return run_ingest_files_local_direct(args, writer);
+    }
+
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+    run_ingest_files_with_client(args, &client, writer)?;
+    writeln!(writer, "Daemon socket: {}", config.socket_path.display())?;
+
+    Ok(())
+}
+
+fn run_ingest_files_with_client<T>(
+    args: &IngestFilesArgs,
+    client: &DaemonClient<T>,
+    writer: &mut impl Write,
+) -> Result<(), CliError>
+where
+    T: DaemonClientTransport,
+{
+    let request = build_daemon_ingest_files_request(args);
+    let response = client.submit_ingest_files(request)?;
+    write_daemon_ingest_submission(args, &response, writer)?;
+
+    Ok(())
+}
+
+fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFilesRequest {
+    SubmitIngestFilesRequest {
+        endpoint: args.endpoint().clone(),
+        source_path: args.source().to_path_buf(),
+        copies: args.copies(),
+        dry_run: args.dry_run(),
+        client_request_id: None,
+    }
+}
+
+fn write_daemon_ingest_submission(
+    args: &IngestFilesArgs,
+    response: &SubmitIngestFilesResponse,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Daemon ingest job submitted")?;
+    writeln!(writer, "Endpoint: {}", args.endpoint())?;
+    writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
+    if let Some(copies) = args.copies() {
+        writeln!(writer, "Copies override: {copies}")?;
+    }
+    writeln!(writer, "Dry run: {}", args.dry_run())?;
+    writeln!(writer, "Job: {}", response.job_id)?;
+    writeln!(writer, "Accepted at UTC: {}", response.accepted_at_utc)
+}
+
+fn run_ingest_files_local_direct(
+    args: &IngestFilesArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
     let ssd_root = args
         .ssd_root()
         .map(Path::to_path_buf)
@@ -1846,6 +1908,60 @@ fn write_file_ingest_progress(
     )
 }
 
+#[allow(dead_code)]
+fn write_daemon_ingest_progress(
+    writer: &mut impl Write,
+    progress: &DaemonIngestProgressEvent,
+    started_at: Instant,
+) -> Result<(), io::Error> {
+    let percent = progress
+        .percent_complete()
+        .map(|value| format!("{value:>3}%"))
+        .unwrap_or_else(|| " n/a".to_string());
+    let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+    let rate = progress.work_bytes_done as f64 / elapsed;
+    let total_files = progress
+        .files_total
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let remaining_files = progress
+        .files_total
+        .map(|total| total.saturating_sub(progress.files_done).to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let ssd_pressure = progress
+        .ssd_pressure
+        .map(|pressure| format!("{pressure:?}"))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    writeln!(
+        writer,
+        "{:>12} {} {:>12}/s files={}/{} remaining={} stage={} ssd={}",
+        progress.work_bytes_done,
+        percent,
+        format_bytes(rate),
+        progress.files_done,
+        total_files,
+        remaining_files,
+        daemon_ingest_stage_label(&progress.stage),
+        ssd_pressure
+    )
+}
+
+#[allow(dead_code)]
+fn daemon_ingest_stage_label(stage: &DaemonIngestStage) -> String {
+    match stage {
+        DaemonIngestStage::Queued => "queued".to_string(),
+        DaemonIngestStage::SsdIngest => "ssd-ingest".to_string(),
+        DaemonIngestStage::HddCopy {
+            disk_id,
+            copy_number,
+        } => format!("hdd-copy:{disk_id}:{copy_number}"),
+        DaemonIngestStage::Complete => "complete".to_string(),
+        DaemonIngestStage::Failed => "failed".to_string(),
+        DaemonIngestStage::Cancelled => "cancelled".to_string(),
+    }
+}
+
 fn read_ssd_stress(
     ssd_root: &Path,
     capacity_policy: &SsdCapacityPolicy,
@@ -2139,6 +2255,7 @@ pub(crate) enum CliError {
     DiskDrain(DiskDrainError),
     DiskLockdown(LockdownDasError),
     DiskPrepare(PrepareDasError),
+    DaemonClient(DaemonClientError),
     DiskRetirement(DiskRetirementError),
     DirectHddImport(DirectHddImportError),
     ObjectExport(ObjectExportError),
@@ -2185,6 +2302,7 @@ impl Display for CliError {
             Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::DiskLockdown(err) => write!(formatter, "{err}"),
             Self::DiskPrepare(err) => write!(formatter, "{err}"),
+            Self::DaemonClient(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::DirectHddImport(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
@@ -2265,6 +2383,12 @@ impl From<PoolInspectError> for CliError {
 impl From<ReadOnlyAttachError> for CliError {
     fn from(err: ReadOnlyAttachError) -> Self {
         Self::PoolImport(err)
+    }
+}
+
+impl From<DaemonClientError> for CliError {
+    fn from(err: DaemonClientError) -> Self {
+        Self::DaemonClient(err)
     }
 }
 
@@ -2380,10 +2504,14 @@ mod tests {
     use crate::cli::Cli;
     use clap::Parser;
     use dasobjectstore_core::health::{HealthScore, HealthSignals};
-    use dasobjectstore_core::ids::{DiskId, PoolId, StoreId};
+    use dasobjectstore_core::ids::{DiskId, IngestJobId, PoolId, StoreId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
     use dasobjectstore_core::store::{
         CapacityBehavior, IngestMode, StoreClass, StorePolicy, StorePolicyValidationError,
+    };
+    use dasobjectstore_daemon::{
+        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonIngestProgressEvent,
+        DaemonIngestStage, DaemonSsdPressure, InProcessDaemonTransport, SubmitIngestFilesResponse,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -3442,6 +3570,7 @@ mod tests {
             "zymo_fecal_2025.05",
             "--source",
             source_root.to_str().expect("utf8 source root"),
+            "--local-direct",
             "--ssd-root",
             ssd_root.to_str().expect("utf8 ssd root"),
             "--hdd-root",
@@ -3469,6 +3598,86 @@ mod tests {
         assert!(output.contains("File ingest complete"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ingest_files_submits_daemon_request_on_normal_path() {
+        let source_root = PathBuf::from("/mnt/external/zymo");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            source_root.to_str().expect("utf8 source"),
+            "--copies",
+            "1",
+        ])
+        .expect("ingest files parses");
+        let Some(crate::cli::Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        let Some(crate::cli::IngestCommand::Files(files)) = args.command() else {
+            panic!("expected ingest files command");
+        };
+        let transport = InProcessDaemonTransport::new(|request| {
+            match request {
+                DaemonApiRequest::SubmitIngestFiles(request) => {
+                    assert_eq!(request.endpoint.as_str(), "zymo_fecal_2025.05");
+                    assert_eq!(request.source_path, source_root);
+                    assert_eq!(request.copies, Some(1));
+                    assert!(!request.dry_run);
+                }
+                _ => panic!("expected submit ingest files request"),
+            }
+            Ok(DaemonApiResponse::SubmitIngestFiles(
+                SubmitIngestFilesResponse {
+                    job_id: IngestJobId::new("job-zymo").expect("job id"),
+                    accepted_at_utc: "2026-07-07T10:27:12Z".to_string(),
+                    dry_run: false,
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+        let mut output = Vec::new();
+
+        super::run_ingest_files_with_client(files, &client, &mut output)
+            .expect("daemon ingest submission runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Daemon ingest job submitted"));
+        assert!(output.contains("Endpoint: zymo_fecal_2025.05"));
+        assert!(output.contains("Job: job-zymo"));
+    }
+
+    #[test]
+    fn daemon_ingest_progress_renderer_reports_byte_progress() {
+        let progress = DaemonIngestProgressEvent {
+            job_id: IngestJobId::new("job-zymo").expect("job id"),
+            endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+            stage: DaemonIngestStage::HddCopy {
+                disk_id: DiskId::new("disk-a").expect("disk id"),
+                copy_number: 1,
+            },
+            work_bytes_done: 512,
+            work_bytes_total: Some(1024),
+            files_done: 2,
+            files_total: Some(4),
+            current_object_id: None,
+            ssd_pressure: Some(DaemonSsdPressure::AcceptingWrites),
+            message: None,
+        };
+        let mut output = Vec::new();
+
+        super::write_daemon_ingest_progress(&mut output, &progress, std::time::Instant::now())
+            .expect("progress writes");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("50%"));
+        assert!(output.contains("files=2/4"));
+        assert!(output.contains("remaining=2"));
+        assert!(output.contains("stage=hdd-copy:disk-a:1"));
+        assert!(output.contains("ssd=AcceptingWrites"));
     }
 
     #[test]
@@ -3629,6 +3838,7 @@ mod tests {
             "Vervet",
             "--source",
             source_root.to_str().expect("utf8 source root"),
+            "--local-direct",
             "--ssd-root",
             ssd_root.to_str().expect("utf8 ssd root"),
             "--hdd-root",

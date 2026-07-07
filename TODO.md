@@ -31,9 +31,9 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   view models, and Synoptikon adapters do not duplicate API shapes.
 - [x] Add a daemon client abstraction with an in-process test transport and a
   planned Unix-domain socket transport.
-- [ ] Refactor `dasobjectstore ingest files` so the normal command path builds a
+- [x] Refactor `dasobjectstore ingest files` so the normal command path builds a
   daemon request and renders daemon progress events.
-- [ ] Move current direct local ingest execution behind an explicit hidden
+- [x] Move current direct local ingest execution behind an explicit hidden
   developer/test flag or test transport until it can be removed.
 - [ ] Implement daemon-side local authorization using Linux peer credentials and
   store writer-group policy for the first Linux slice.

@@ -16,6 +16,7 @@ path = "src/server_main.rs"
 [dependencies]
 clap.workspace = true
 dasobjectstore-core.workspace = true
+dasobjectstore-daemon.workspace = true
 dasobjectstore-gui-api.workspace = true
 dasobjectstore-metadata.workspace = true
 dasobjectstore-mnemosyne.workspace = true

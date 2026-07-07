@@ -711,6 +711,9 @@ pub(crate) struct IngestFilesArgs {
     /// Show the planned file set without importing.
     #[arg(long)]
     dry_run: bool,
+    /// Developer/test fallback that writes through the old local executor instead of the daemon.
+    #[arg(long, hide = true)]
+    local_direct: bool,
     /// Advanced test override for the system-managed store registry path.
     #[arg(long, hide = true)]
     registry_path: Option<PathBuf>,
@@ -742,6 +745,10 @@ impl IngestFilesArgs {
 
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
+    }
+
+    pub(crate) fn local_direct(&self) -> bool {
+        self.local_direct
     }
 
     pub(crate) fn registry_path(&self) -> Option<&Path> {

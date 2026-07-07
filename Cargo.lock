@@ -330,6 +330,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "dasobjectstore-core",
+ "dasobjectstore-daemon",
  "dasobjectstore-gui-api",
  "dasobjectstore-metadata",
  "dasobjectstore-mnemosyne",
