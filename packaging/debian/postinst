@@ -56,6 +56,9 @@ ensure_owned_dir /run/dasobjectstore 0750
 ensure_owned_dir /var/lib/dasobjectstore 0750
 ensure_owned_dir /var/log/dasobjectstore 0750
 install -d -o root -g "$service_group" -m 0750 /etc/dasobjectstore
+find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' \
+  -exec chgrp "$service_group" {} + \
+  -exec chmod 0640 {} +
 
 reject_user_owned_managed_root "$managed_root"
 ensure_owned_dir "$managed_root" 0750

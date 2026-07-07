@@ -47,6 +47,9 @@ require_text "$daemon_config" "\"socket_path\": \"/run/dasobjectstore/dasobjects
 
 require_text "$postinst" "service_user=\"dasobjectstore\""
 require_text "$postinst" "managed_root=\"/srv/dasobjectstore\""
+require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
+require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
+require_text "$postinst" "-exec chmod 0640 {} +"
 require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 

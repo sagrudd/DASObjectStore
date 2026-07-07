@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.3 - 2026-07-07
+
+- Ensure package upgrades grant the `dasobjectstore` daemon group read access to
+  JSON configuration and registry files under `/etc/dasobjectstore`, so
+  daemon-owned file ingest can read store definitions.
+
 ## 0.1.2 - 2026-07-07
 
 - Wire `dasobjectstored` to handle `SubmitIngestFiles` requests by resolving
