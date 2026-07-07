@@ -1,6 +1,7 @@
 //! Runtime configuration for the managed daemon.
 
 mod config;
+mod ingest_files;
 mod local_admin;
 mod service;
 
@@ -10,6 +11,10 @@ pub use config::{
     DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
     LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
     LINUX_DAEMON_STATE_DIR,
+};
+pub use ingest_files::{
+    submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,
+    DaemonFileIngestSummary, DaemonIngestFilesRuntimeError,
 };
 pub use local_admin::{
     LocalAdminCommandOutput, LocalAdminCommandPlan, LocalAdminCommandRunner,

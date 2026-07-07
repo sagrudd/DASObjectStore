@@ -12,15 +12,23 @@ use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
     CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest,
-    DaemonHealthSummaryResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
-    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-    DaemonServiceStatusResponse, IngestJobStatusRequest, IngestJobStatusResponse,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestJobStatusRequest,
+    IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 
 pub trait DaemonClientTransport {
     fn send(&self, request: DaemonApiRequest) -> Result<DaemonApiResponse, DaemonClientError>;
+
+    fn send_with_progress(
+        &self,
+        request: DaemonApiRequest,
+        _progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
+        self.send(request)
+    }
 }
 
 pub struct DaemonClient<T> {
@@ -65,6 +73,20 @@ where
         request: SubmitIngestFilesRequest,
     ) -> Result<SubmitIngestFilesResponse, DaemonClientError> {
         match self.send(DaemonApiRequest::SubmitIngestFiles(request))? {
+            DaemonApiResponse::SubmitIngestFiles(response) => Ok(response),
+            response => Err(unexpected("submit_ingest_files", response)),
+        }
+    }
+
+    pub fn submit_ingest_files_with_progress(
+        &self,
+        request: SubmitIngestFilesRequest,
+        mut progress: impl FnMut(DaemonIngestProgressEvent),
+    ) -> Result<SubmitIngestFilesResponse, DaemonClientError> {
+        match self
+            .transport
+            .send_with_progress(DaemonApiRequest::SubmitIngestFiles(request), &mut progress)?
+        {
             DaemonApiResponse::SubmitIngestFiles(response) => Ok(response),
             response => Err(unexpected("submit_ingest_files", response)),
         }
@@ -142,6 +164,10 @@ where
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
+    if let DaemonApiResponse::Error(error) = response {
+        return DaemonClientError::Api(error);
+    }
+
     DaemonClientError::UnexpectedResponse {
         expected,
         actual: response_name(&response),
@@ -244,6 +270,37 @@ mod tests {
                 actual: "store_inventory",
             }
         ));
+    }
+
+    #[test]
+    fn surfaces_daemon_api_error_responses() {
+        let transport = InProcessDaemonTransport::new(|_request| {
+            Ok(DaemonApiResponse::Error(
+                crate::api::DaemonApiErrorResponse::new(
+                    "not_implemented",
+                    "submit_ingest_files is not wired into dasobjectstored yet",
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let err = client
+            .submit_ingest_files(SubmitIngestFilesRequest {
+                endpoint: StoreId::new("zymo").expect("store id"),
+                source_path: "/tmp/source".into(),
+                object_type: dasobjectstore_core::object_type::ObjectType::Naive,
+                copies: None,
+                conflict_policy: DaemonIngestConflictPolicy::Strict,
+                dry_run: false,
+                client_request_id: None,
+            })
+            .expect_err("daemon api error is surfaced");
+
+        assert!(matches!(err, DaemonClientError::Api(_)));
+        assert_eq!(
+            err.to_string(),
+            "daemon returned not_implemented error: submit_ingest_files is not wired into dasobjectstored yet"
+        );
     }
 
     #[test]

@@ -458,10 +458,10 @@ Exit criteria:
 - Synoptikon and standalone hosting use the same domain view models;
 - risky flows are visibly gated and auditable.
 
-## Milestone 18: Parallel Ingress Operations TUI
+## Milestone 18: Parallel Ingress Operations and Embedded TUI Views
 
 Goal: make file ingress fast, reliable, observable, and operable from a normal
-console session as well as the Web UI and Synoptikon-facing adapters.
+CLI session as well as the Web UI and Synoptikon-facing adapters.
 
 Priority: this milestone hardens the existing SSD ingest, HDD settlement, daemon
 job, CLI progress, and Web Activity work into a supported operations surface. It
@@ -486,10 +486,12 @@ Scope:
   and throughput trend;
 - add durable ingest journals/manifests so interrupted jobs can be resumed,
   cancelled, retried, or reconciled without silent data loss;
-- implement a supported Rust TUI that can plan, describe, confirm, launch,
-  monitor, reconnect to, control, and summarize ingest jobs;
-- ensure the TUI, CLI progress renderer, Yew Activity view, and Synoptikon
-  adapters consume the same daemon job model and event stream;
+- implement supported embedded terminal views for long-running CLI actions that
+  can plan, describe, confirm, monitor, control, and summarize ingest jobs
+  without introducing a standalone TUI command surface;
+- ensure embedded CLI TUI views, the standard CLI progress renderer, Yew
+  Activity view, and Synoptikon adapters consume the same daemon job model and
+  event stream;
 - add benchmark/profiling coverage for small-file, large-file, mixed-file,
   slow-HDD, full-SSD, and interrupted-import scenarios.
 
@@ -498,14 +500,14 @@ Exit criteria:
 - before import, users can see file count and total import volume scaled to MiB,
   GiB, or TiB;
 - during import, users can see SSD-staged, HDD-written, and verified fractions;
-- the TUI shows resource policy, active workers, queue depths, SSD/HDD pressure,
-  bottleneck stage, throughput trend, verification status, and warnings without
-  requiring log inspection;
+- embedded terminal views show resource policy, active workers, queue depths,
+  SSD/HDD pressure, bottleneck stage, throughput trend, verification status, and
+  warnings without requiring log inspection;
 - interrupted jobs can be resumed or reconciled from the daemon journal;
 - benchmark evidence shows configured resource policies can be saturated without
   unbounded memory growth or unverified persistence claims;
-- TUI and Web views agree on job state because both consume the same backend
-  events.
+- embedded CLI terminal views and Web views agree on job state because both
+  consume the same backend events.
 
 ## Post-MVP Direction
 

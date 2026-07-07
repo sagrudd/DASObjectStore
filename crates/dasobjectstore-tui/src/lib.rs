@@ -1,17 +1,15 @@
-//! Terminal operator scaffold for DASObjectStore.
+//! Embedded terminal rendering helpers for DASObjectStore CLI actions.
 //!
-//! Framework decision: future interactive screens should use `ratatui` for
-//! widget/layout rendering with `crossterm` for terminal events. That pairing is
-//! the current Rust TUI default, keeps the operator surface Rust-first, and can
-//! be added when the daemon event contract is ready. This first Milestone 18
-//! slice intentionally keeps the crate renderer-neutral so import planning,
-//! resource policy previews, and terminal layout choices are testable without a
-//! full terminal loop.
+//! These helpers are intentionally library-only. DASObjectStore does not expose
+//! a standalone TUI command; long-running commands may opt into embedded
+//! graphical terminal views with flags such as `dasobjectstore ingest files
+//! --tui`.
 
 pub mod layout;
 pub mod monitoring;
 pub mod planning;
 pub mod resource;
+pub mod upload;
 
 pub use layout::{classify_terminal_layout, TerminalLayout};
 pub use monitoring::{
@@ -29,6 +27,7 @@ pub use planning::{
     ResourceUsePlan, SourcePath, IMPORT_LAUNCH_CONFIRMATION_PHRASE,
 };
 pub use resource::{ResourcePolicyDisplay, ResourcePolicySummary, WorkerCounts};
+pub use upload::{UploadTui, UploadTuiContext};
 
 /// Returns the TUI crate version.
 pub fn version() -> &'static str {

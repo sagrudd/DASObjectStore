@@ -5,12 +5,13 @@ Source roadmap: [ROADMAP.md](ROADMAP.md)
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
 developers
 
-Current status: the tracked MVP/current-round checklist is complete through
-Milestone 18 as of 2026-07-07. Milestone 12 is no longer the active priority;
-it remains recorded below as the completed daemon/client boundary that all
-normal CLI, HTTPS API, Web UI, TUI, and Synoptikon-facing storage mutation flows
-must preserve. New implementation work should be added as a new milestone or
-Post-MVP task instead of reopening stale current-priority language.
+Current status: the tracked MVP/current-round checklist is functionally complete
+through Milestone 18 as of 2026-07-07, with a small number of daemon ingest
+hardening items still tracked under Milestone 12. Milestone 12 remains recorded
+below as the daemon/client boundary that all normal CLI, HTTPS API, Web UI, TUI,
+and Synoptikon-facing storage mutation flows must preserve. New implementation
+work should be added as a new milestone or Post-MVP task instead of reopening
+stale current-priority language.
 
 ## Working Rules
 
@@ -31,17 +32,21 @@ Post-MVP task instead of reopening stale current-priority language.
 - [x] Add a daemon client abstraction with an in-process test transport and a
   planned Unix-domain socket transport.
 - [x] Refactor `dasobjectstore ingest files` so the normal command path builds a
-  daemon request and renders daemon progress events.
+  daemon request and the daemon executes SSD-first local file ingress.
+- [ ] Render daemon progress events for normal `dasobjectstore ingest files`
+  submissions instead of the current synchronous daemon response view.
+- [x] Add optional `dasobjectstore ingest files --tui` embedded upload rendering
+  for daemon file ingest submissions.
 - [x] Move current direct local ingest execution behind an explicit hidden
   developer/test flag or test transport until it can be removed.
-- [x] Implement daemon-side local authorization using Linux peer credentials and
+- [ ] Implement daemon-side local authorization using Linux peer credentials and
   store writer-group policy for the first Linux slice.
 - [x] Add package assets for `dasobjectstored`: system user, systemd service,
   socket/runtime directory, state directory, log directory, and permission
   expectations.
 - [x] Update DEB validation to ensure managed DAS roots are owned by the daemon
   service identity, not ordinary ingest users.
-- [x] Add integration tests proving normal non-root ingest succeeds through the
+- [ ] Add integration tests proving normal non-root ingest succeeds through the
   daemon without granting direct write permission to managed DAS roots.
 - [x] Update user documentation so ingest is described as a client/server job
   submission with byte-level progress, not a local filesystem write.
@@ -422,7 +427,7 @@ Post-MVP task instead of reopening stale current-priority language.
   local-user-to-group assignment once daemon administrator policy APIs are
   available.
 
-## Milestone 18: Parallel Ingress Operations TUI
+## Milestone 18: Parallel Ingress Operations and Embedded TUI Views
 
 - [x] Define the parallel daemon ingress pipeline stages: scan, source read, SSD
   stage, checksum/manifest capture, HDD placement, HDD write, verification, and
@@ -461,21 +466,22 @@ Post-MVP task instead of reopening stale current-priority language.
   compatible with the existing object model.
 - [x] Add atomic finalization rules so files are not reported as persisted until
   HDD write and verification requirements are satisfied.
-- [x] Add daemon API/event fields required by CLI, TUI, Yew, and Synoptikon
-  adapters without duplicating progress logic.
-- [x] Choose the Rust TUI framework and terminal event model for the supported
-  console surface.
-- [x] Add TUI binary/entry point and packaging path for standalone deployment.
-- [x] Implement TUI import planning with target ObjectStore/SubObject context,
-  source paths, file count, and data volume scaled to MiB, GiB, or TiB.
-- [x] Implement TUI import description metadata capture and confirmation before
-  launch.
+- [x] Add daemon API/event fields required by CLI embedded TUI views, Yew, and
+  Synoptikon adapters without duplicating progress logic.
+- [x] Choose the Rust terminal rendering model for optional embedded views used
+  by long-running CLI actions.
+- [x] Remove the standalone TUI binary and packaging path; terminal views are
+  optional niceties on normal CLI commands, not a separate product surface.
+- [x] Implement embedded import planning with target ObjectStore/SubObject
+  context, source paths, file count, and data volume scaled to MiB, GiB, or TiB.
+- [x] Implement import description metadata capture and confirmation before
+  launch where exposed by long-running CLI commands.
 - [x] Show resource policy before launch: worker counts, memory budget, SSD
   reserve, HDD queue depth, and verification parallelism.
 - [x] Allow administrators to choose automatic resource use or explicit caps for
   cores, memory, SSD reserve, and HDD write concurrency.
-- [x] Show live TUI progress for discovered/scanned, staged on SSD, written to
-  HDD, and verified data.
+- [x] Show live embedded progress for discovered/scanned, staged on SSD, written
+  to HDD, and verified data.
 - [x] Show active workers, queue depths, current bottleneck classification, and
   whether source-to-SSD streaming is throttled.
 - [x] Show SSD pressure with capacity, used/free space, trend, and
@@ -485,16 +491,16 @@ Post-MVP task instead of reopening stale current-priority language.
 - [x] Show verification progress, failures, retries, and final status.
 - [x] Show throughput current rate, moving average, recent high/low, and
   up/down/flat trend.
-- [x] Provide TUI keyboard actions for pause, resume, cancel, retry, and job
-  details where the daemon safely supports them.
-- [x] Ensure the TUI can attach to an existing running import job after
-  reconnecting.
+- [x] Provide embedded-view keyboard actions for pause, resume, cancel, retry,
+  and job details where the daemon safely supports them.
+- [x] Ensure embedded views can attach to an existing running import job after
+  reconnecting when the parent command supports attachment.
 - [x] Add supported terminal-size behavior for compact and standard console
   layouts.
-- [x] Add TUI error states for authentication failure, permission denial, lost
-  daemon/event connection, stalled job, SSD pressure, HDD write failure, and
-  verification failure.
-- [x] Add TUI tests or scripted terminal snapshots for planning, launch
+- [x] Add embedded terminal error states for authentication failure, permission
+  denial, lost daemon/event connection, stalled job, SSD pressure, HDD write
+  failure, and verification failure.
+- [x] Add embedded terminal tests or scripted snapshots for planning, launch
   confirmation, live monitoring, reconnect, and completed summary flows.
 - [x] Add benchmark harness for small-file, large-file, mixed-file, slow-HDD,
   full-SSD, and interrupted-import scenarios.
@@ -503,8 +509,8 @@ Post-MVP task instead of reopening stale current-priority language.
 - [x] Add performance acceptance targets for sustained source-to-SSD staging,
   HDD fan-out, verification throughput, bounded memory growth, and recovery time
   after interruption.
-- [x] Document TUI launch commands, keyboard controls, supported terminal sizes,
-  resource policy, and operational expectations.
+- [x] Document embedded `--tui` command flags, supported terminal sizes, resource
+  policy, and operational expectations.
 
 ## Cross-Cutting Tasks
 

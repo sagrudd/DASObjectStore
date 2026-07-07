@@ -1,10 +1,11 @@
-use crate::api::{DaemonJobValidationError, DaemonRequestValidationError};
+use crate::api::{DaemonApiErrorResponse, DaemonJobValidationError, DaemonRequestValidationError};
 use std::fmt::{self, Display};
 
 #[derive(Debug)]
 pub enum DaemonClientError {
     RequestValidation(DaemonRequestValidationError),
     JobValidation(DaemonJobValidationError),
+    Api(DaemonApiErrorResponse),
     Transport(String),
     UnexpectedResponse {
         expected: &'static str,
@@ -17,6 +18,11 @@ impl Display for DaemonClientError {
         match self {
             Self::RequestValidation(err) => write!(formatter, "{err}"),
             Self::JobValidation(err) => write!(formatter, "{err}"),
+            Self::Api(error) => write!(
+                formatter,
+                "daemon returned {} error: {}",
+                error.code, error.message
+            ),
             Self::Transport(message) => write!(formatter, "daemon transport failed: {message}"),
             Self::UnexpectedResponse { expected, actual } => {
                 write!(

@@ -49,6 +49,15 @@ pub trait DaemonApiHandler {
         &self,
         request: DaemonApiRequest,
     ) -> Result<DaemonApiResponse, UnixSocketDaemonServerError>;
+
+    fn handle_api_request_streaming(
+        &self,
+        request: DaemonApiRequest,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        let response = self.handle_api_request(request)?;
+        emit_response(response)
+    }
 }
 
 impl<S, C> DaemonApiHandler for DaemonRequestHandler<S, C>
@@ -62,6 +71,25 @@ where
     ) -> Result<DaemonApiResponse, UnixSocketDaemonServerError> {
         self.handle(request)
             .map_err(UnixSocketDaemonServerError::Handler)
+    }
+
+    fn handle_api_request_streaming(
+        &self,
+        request: DaemonApiRequest,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        let mut progress_error = None;
+        let response = self
+            .handle_with_progress(request, |event| {
+                if progress_error.is_none() {
+                    progress_error = emit_response(DaemonApiResponse::IngestProgress(event)).err();
+                }
+            })
+            .map_err(UnixSocketDaemonServerError::Handler)?;
+        if let Some(error) = progress_error {
+            return Err(error);
+        }
+        emit_response(response)
     }
 }
 
@@ -156,14 +184,28 @@ fn handle_stream(
     .read_line(&mut line)
     .map_err(UnixSocketDaemonServerError::Io)?;
 
-    let response = match serde_json::from_str::<DaemonApiRequest>(&line) {
-        Ok(request) => handler.handle_api_request(request)?,
-        Err(error) => DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-            "bad_request",
-            format!("failed to decode daemon request: {error}"),
-        )),
-    };
-    serde_json::to_writer(&mut stream, &response).map_err(UnixSocketDaemonServerError::Encode)?;
+    match serde_json::from_str::<DaemonApiRequest>(&line) {
+        Ok(request) => {
+            let mut emit_response = |response| write_response_frame(&mut stream, &response);
+            handler.handle_api_request_streaming(request, &mut emit_response)?;
+        }
+        Err(error) => write_response_frame(
+            &mut stream,
+            &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "bad_request",
+                format!("failed to decode daemon request: {error}"),
+            )),
+        )?,
+    }
+
+    Ok(())
+}
+
+fn write_response_frame(
+    stream: &mut UnixStream,
+    response: &DaemonApiResponse,
+) -> Result<(), UnixSocketDaemonServerError> {
+    serde_json::to_writer(&mut *stream, &response).map_err(UnixSocketDaemonServerError::Encode)?;
     stream
         .write_all(b"\n")
         .map_err(UnixSocketDaemonServerError::Io)?;
@@ -174,8 +216,12 @@ fn handle_stream(
 mod tests {
     use super::UnixSocketDaemonServer;
     use crate::api::{
-        DaemonApiRequest, DaemonApiResponse, DaemonServiceStatusResponse, StoreInventoryRequest,
+        DaemonApiRequest, DaemonApiResponse, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
+        DaemonIngestStage, DaemonServiceStatusResponse, StoreInventoryRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse,
     };
+    use dasobjectstore_core::ids::{IngestJobId, StoreId};
+    use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
@@ -238,6 +284,97 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error) if error.code == "bad_request"
+        ));
+    }
+
+    #[test]
+    fn streams_progress_before_final_response() {
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new("/tmp/dasobjectstored-test.sock", |_request| {
+            panic!("streaming handler should be used")
+        });
+
+        struct StreamingHandler;
+
+        impl super::DaemonApiHandler for StreamingHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                panic!("streaming handler should be used")
+            }
+
+            fn handle_api_request_streaming(
+                &self,
+                _request: DaemonApiRequest,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                emit_response(DaemonApiResponse::IngestProgress(
+                    DaemonIngestProgressEvent {
+                        job_id: IngestJobId::new("ingest-files-1").expect("job id"),
+                        endpoint: StoreId::new("zymo").expect("store id"),
+                        stage: DaemonIngestStage::SsdIngest,
+                        pipeline_stage: Some(DaemonIngestPipelineStage::SsdStage),
+                        work_bytes_done: 50,
+                        work_bytes_total: Some(100),
+                        files_done: 0,
+                        files_total: Some(1),
+                        current_object_id: None,
+                        ssd_pressure: None,
+                        telemetry: None,
+                        resource_policy: None,
+                        message: Some("copying".to_string()),
+                    },
+                ))?;
+                emit_response(DaemonApiResponse::SubmitIngestFiles(
+                    SubmitIngestFilesResponse {
+                        job_id: IngestJobId::new("ingest-files-1").expect("job id"),
+                        accepted_at_utc: "2026-07-07T10:27:12Z".to_string(),
+                        dry_run: false,
+                    },
+                ))
+            }
+        }
+
+        let server = UnixSocketDaemonServer::new(server.socket_path(), StreamingHandler);
+        serde_json::to_writer(
+            &mut client,
+            &DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                endpoint: StoreId::new("zymo").expect("store id"),
+                source_path: "/tmp/source".into(),
+                object_type: ObjectType::Naive,
+                copies: None,
+                conflict_policy: crate::api::DaemonIngestConflictPolicy::Strict,
+                dry_run: false,
+                client_request_id: None,
+            }),
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+
+        server.handle_stream(server_stream).expect("stream handled");
+
+        let mut reader = BufReader::new(client);
+        let mut first = String::new();
+        let mut second = String::new();
+        reader.read_line(&mut first).expect("progress frame");
+        reader.read_line(&mut second).expect("final frame");
+        let progress: DaemonApiResponse = serde_json::from_str(&first).expect("progress decoded");
+        let final_response: DaemonApiResponse =
+            serde_json::from_str(&second).expect("final decoded");
+        assert!(matches!(
+            progress,
+            DaemonApiResponse::IngestProgress(DaemonIngestProgressEvent {
+                work_bytes_done: 50,
+                ..
+            })
+        ));
+        assert!(matches!(
+            final_response,
+            DaemonApiResponse::SubmitIngestFiles(SubmitIngestFilesResponse { .. })
         ));
     }
 }

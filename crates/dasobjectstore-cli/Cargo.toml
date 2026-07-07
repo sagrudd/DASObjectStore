@@ -22,6 +22,7 @@ dasobjectstore-metadata.workspace = true
 dasobjectstore-mnemosyne.workspace = true
 dasobjectstore-object-service.workspace = true
 dasobjectstore-platform.workspace = true
+dasobjectstore-tui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

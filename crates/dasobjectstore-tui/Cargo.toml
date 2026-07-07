@@ -8,9 +8,6 @@ repository.workspace = true
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-name = "dasobjectstore-tui"
-path = "src/main.rs"
-
 [dependencies]
-clap.workspace = true
+dasobjectstore-core.workspace = true
+dasobjectstore-daemon.workspace = true

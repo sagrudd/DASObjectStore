@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
-version="${version:-0.1.1}"
+version="${version:-0.1.2}"
 arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 build_root="$repo_root/target/deb/${package_name}_${version}_${arch}"
 package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"
@@ -16,7 +16,6 @@ bash "$packaging_debian/validate-package-assets.sh"
 
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
-cargo build --release -p dasobjectstore-tui --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
 install -d \
@@ -30,8 +29,6 @@ install -d \
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$build_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
-install -m 0755 "$repo_root/target/release/dasobjectstore-tui" \
-  "$build_root/usr/bin/dasobjectstore-tui"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$build_root/usr/bin/dasobjectstored"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
@@ -55,8 +52,9 @@ Maintainer: DASObjectStore contributors
 Depends: ca-certificates, acl
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics
- DASObjectStore provides CLI, TUI, and service binaries for staging objects on
- SSD and settling verified copies onto DAS or NAS storage endpoints.
+ DASObjectStore provides CLI and service binaries for staging objects on SSD
+ and settling verified copies onto DAS or NAS storage endpoints. Long-running
+ CLI operations may expose embedded terminal views through command flags.
 CONTROL
 
 dpkg-deb --build --root-owner-group "$build_root" "$package_path"

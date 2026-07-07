@@ -1,12 +1,14 @@
 use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest,
-    DaemonApiResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
-    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-    DaemonServiceStatusResponse,
+    DaemonApiResponse, DaemonIngestProgressEvent, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 use crate::runtime::{
-    provision_garage_store_registry, DaemonServiceRuntimeError, GarageServiceController,
+    provision_garage_store_registry, submit_ingest_files_to_local_store_with_progress,
+    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, GarageServiceController,
     LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
     LocalGroupAdministrationRequest, ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
@@ -34,6 +36,14 @@ where
     pub fn handle(
         &self,
         request: DaemonApiRequest,
+    ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
+        self.handle_with_progress(request, |_| {})
+    }
+
+    pub fn handle_with_progress(
+        &self,
+        request: DaemonApiRequest,
+        mut emit_progress: impl FnMut(DaemonIngestProgressEvent),
     ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
         request.validate()?;
 
@@ -63,6 +73,19 @@ where
                 .assign_local_user_to_local_group(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::AssignLocalUserToLocalGroup)
                 .map_err(DaemonRequestHandlerError::LocalAdminRuntime),
+            DaemonApiRequest::SubmitIngestFiles(request) => {
+                match self.service_orchestrator.submit_ingest_files(
+                    request,
+                    &self.clock.now_utc(),
+                    &mut emit_progress,
+                ) {
+                    Ok(response) => Ok(DaemonApiResponse::SubmitIngestFiles(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "ingest_files_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
                 format!(
@@ -111,6 +134,17 @@ pub trait DaemonServiceOrchestrator {
             operation: "assign_local_user_to_local_group requires a local admin orchestrator"
                 .to_string(),
         })
+    }
+
+    fn submit_ingest_files(
+        &self,
+        _request: SubmitIngestFilesRequest,
+        _accepted_at_utc: &str,
+        _emit_progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+    ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
+        Err(DaemonIngestFilesRuntimeError::CommandFailed(
+            "submit_ingest_files requires a file ingest orchestrator".to_string(),
+        ))
     }
 }
 
@@ -222,6 +256,15 @@ where
             administrator_actor,
         })
     }
+
+    fn submit_ingest_files(
+        &self,
+        request: SubmitIngestFilesRequest,
+        accepted_at_utc: &str,
+        emit_progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+    ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
+        submit_ingest_files_to_local_store_with_progress(request, accepted_at_utc, emit_progress)
+    }
 }
 
 pub trait DaemonClock {
@@ -265,6 +308,7 @@ pub enum DaemonRequestHandlerError {
     RequestValidation(crate::api::DaemonRequestValidationError),
     ServiceRuntime(DaemonServiceRuntimeError),
     LocalAdminRuntime(LocalAdminRuntimeError),
+    IngestRuntime(DaemonIngestFilesRuntimeError),
 }
 
 impl Display for DaemonRequestHandlerError {
@@ -273,6 +317,7 @@ impl Display for DaemonRequestHandlerError {
             Self::RequestValidation(error) => Display::fmt(error, formatter),
             Self::ServiceRuntime(error) => Display::fmt(error, formatter),
             Self::LocalAdminRuntime(error) => Display::fmt(error, formatter),
+            Self::IngestRuntime(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -314,11 +359,14 @@ mod tests {
         DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
         DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
         DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        StoreInventoryRequest,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
     };
     use crate::runtime::{
-        DaemonServiceRuntimeError, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
+        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, LocalAdminRuntimeError,
+        LocalGroupAdministrationOperation,
     };
+    use dasobjectstore_core::ids::{IngestJobId, StoreId};
+    use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::cell::RefCell;
 
@@ -508,6 +556,81 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_submit_ingest_files_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-07T12:35:00Z"));
+        let mut progress_events = Vec::new();
+
+        let response = handler
+            .handle_with_progress(
+                DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: "/mnt/external/zymo".into(),
+                    object_type: ObjectType::Fastq,
+                    copies: Some(1),
+                    conflict_policy: crate::api::DaemonIngestConflictPolicy::Strict,
+                    dry_run: true,
+                    client_request_id: Some("request-3".to_string()),
+                }),
+                |event| progress_events.push(event),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::SubmitIngestFiles(SubmitIngestFilesResponse {
+                job_id,
+                dry_run: true,
+                ..
+            }) if job_id.as_str() == "ingest-files-2026-07-07t12-35-00z"
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .ingest_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-07T12:35:00Z".to_string(),
+                "zymo_fecal_2025.05".to_string(),
+                true,
+            )]
+        );
+        assert_eq!(progress_events.len(), 1);
+        assert_eq!(progress_events[0].message.as_deref(), Some("queued"));
+    }
+
+    #[test]
+    fn reports_submit_ingest_runtime_failures_as_api_errors() {
+        let service = FakeService {
+            ingest_error: Some("source is unreadable".to_string()),
+            ..FakeService::default()
+        };
+        let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
+
+        let response = handler
+            .handle(DaemonApiRequest::SubmitIngestFiles(
+                SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: "/mnt/external/zymo".into(),
+                    object_type: ObjectType::Naive,
+                    copies: None,
+                    conflict_policy: crate::api::DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "ingest_files_failed"
+                && error.message == "source is unreadable"
+        ));
+    }
+
+    #[test]
     fn validates_request_before_dispatch() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -573,6 +696,8 @@ mod tests {
                 bool,
             )>,
         >,
+        ingest_calls: RefCell<Vec<(String, String, bool)>>,
+        ingest_error: Option<String>,
     }
 
     impl DaemonServiceOrchestrator for FakeService {
@@ -672,6 +797,44 @@ mod tests {
                 request.group_name,
                 request.administrator_actor,
             ))
+        }
+
+        fn submit_ingest_files(
+            &self,
+            request: SubmitIngestFilesRequest,
+            accepted_at_utc: &str,
+            emit_progress: &mut dyn FnMut(crate::api::DaemonIngestProgressEvent),
+        ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
+            if let Some(message) = &self.ingest_error {
+                return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+                    message.clone(),
+                ));
+            }
+            emit_progress(crate::api::DaemonIngestProgressEvent {
+                job_id: IngestJobId::new("ingest-files-2026-07-07t12-35-00z").expect("job id"),
+                endpoint: request.endpoint.clone(),
+                stage: crate::api::DaemonIngestStage::Queued,
+                pipeline_stage: Some(crate::api::DaemonIngestPipelineStage::Scan),
+                work_bytes_done: 0,
+                work_bytes_total: Some(0),
+                files_done: 0,
+                files_total: Some(0),
+                current_object_id: None,
+                ssd_pressure: None,
+                telemetry: None,
+                resource_policy: None,
+                message: Some("queued".to_string()),
+            });
+            self.ingest_calls.borrow_mut().push((
+                accepted_at_utc.to_string(),
+                request.endpoint.as_str().to_string(),
+                request.dry_run,
+            ));
+            Ok(SubmitIngestFilesResponse {
+                job_id: IngestJobId::new("ingest-files-2026-07-07t12-35-00z").expect("job id"),
+                accepted_at_utc: accepted_at_utc.to_string(),
+                dry_run: request.dry_run,
+            })
         }
     }
 }

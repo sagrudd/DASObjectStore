@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 dasobjectstore-core.workspace = true
+dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true
 libc.workspace = true
 serde.workspace = true

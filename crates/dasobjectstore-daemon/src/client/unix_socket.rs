@@ -1,5 +1,5 @@
 use super::{DaemonClientError, DaemonClientTransport};
-use crate::api::{DaemonApiRequest, DaemonApiResponse};
+use crate::api::{DaemonApiRequest, DaemonApiResponse, DaemonIngestProgressEvent};
 use crate::runtime::DEFAULT_DAEMON_GROUP;
 use std::io::{BufRead, BufReader, Write};
 use std::io::{Error as IoError, ErrorKind};
@@ -25,6 +25,14 @@ impl UnixSocketDaemonTransport {
 
 impl DaemonClientTransport for UnixSocketDaemonTransport {
     fn send(&self, request: DaemonApiRequest) -> Result<DaemonApiResponse, DaemonClientError> {
+        self.send_with_progress(request, &mut |_| {})
+    }
+
+    fn send_with_progress(
+        &self,
+        request: DaemonApiRequest,
+        progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
         let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
             DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
         })?;
@@ -37,11 +45,25 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
             .flush()
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
 
-        let mut line = String::new();
-        BufReader::new(stream)
-            .read_line(&mut line)
-            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
-        serde_json::from_str(&line).map_err(|error| DaemonClientError::Transport(error.to_string()))
+        let mut reader = BufReader::new(stream);
+        loop {
+            let mut line = String::new();
+            let bytes_read = reader
+                .read_line(&mut line)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            if bytes_read == 0 {
+                return Err(DaemonClientError::Transport(
+                    "daemon closed the connection without a final response".to_string(),
+                ));
+            }
+            let response: DaemonApiResponse = serde_json::from_str(&line)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            if let DaemonApiResponse::IngestProgress(event) = response {
+                progress(event);
+                continue;
+            }
+            return Ok(response);
+        }
     }
 }
 

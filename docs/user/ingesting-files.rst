@@ -35,6 +35,17 @@ import files from a mounted external disk:
      --source /mnt/external/zymo_fecal_2025.05 \
      --object-type fastq
 
+Add ``--tui`` to render the embedded terminal upload view while the daemon
+upload runs. This is not a separate command or product surface; it is a
+graphical nicety for this long-running CLI action.
+
+.. code-block:: console
+
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --object-type fastq \
+     --tui
+
 The user running ingest must be authorized by the store's writer group. For the
 example above, membership in ``mnemosyne`` is required. Ingest does not require
 ``sudo`` because the daemon, not the user's shell process, owns managed storage

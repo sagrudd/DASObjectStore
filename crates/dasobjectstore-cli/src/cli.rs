@@ -940,6 +940,9 @@ pub(crate) struct IngestFilesArgs {
     /// Always ingest every file as a new stored version/payload.
     #[arg(long, conflicts_with_all = ["strict", "lazy"])]
     force: bool,
+    /// Render the upload context and daemon progress view while the upload runs.
+    #[arg(long)]
+    tui: bool,
     /// Show the planned file set without importing.
     #[arg(long)]
     dry_run: bool,
@@ -991,6 +994,10 @@ impl IngestFilesArgs {
 
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
+    }
+
+    pub(crate) fn tui(&self) -> bool {
+        self.tui
     }
 
     pub(crate) fn local_direct(&self) -> bool {
@@ -2265,6 +2272,7 @@ mod tests {
             "--copies",
             "1",
             "--lazy",
+            "--tui",
             "--dry-run",
         ])
         .expect("ingest files parses");
@@ -2280,6 +2288,7 @@ mod tests {
                 assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
                 assert_eq!(files.copies(), Some(1));
                 assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
+                assert!(files.tui());
                 assert!(files.dry_run());
             }
             _ => panic!("expected files command"),

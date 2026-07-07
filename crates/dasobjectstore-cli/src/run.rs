@@ -94,6 +94,7 @@ use dasobjectstore_platform::{
     group_enclosures, health::DiskHealthReport, probe::SystemCommandRunner, HostPlatform,
     ObservedDisk, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
+use dasobjectstore_tui::{UploadTui, UploadTuiContext};
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
@@ -1690,8 +1691,51 @@ where
     T: DaemonClientTransport,
 {
     let request = build_daemon_ingest_files_request(args);
+    if args.tui() {
+        return run_ingest_files_with_tui(args, client, request, writer);
+    }
     let response = client.submit_ingest_files(request)?;
     write_daemon_ingest_submission(args, &response, writer)?;
+
+    Ok(())
+}
+
+fn run_ingest_files_with_tui<T>(
+    args: &IngestFilesArgs,
+    client: &DaemonClient<T>,
+    request: SubmitIngestFilesRequest,
+    writer: &mut impl Write,
+) -> Result<(), CliError>
+where
+    T: DaemonClientTransport,
+{
+    let mut tui = UploadTui::start(
+        writer,
+        UploadTuiContext {
+            endpoint: args.endpoint().as_str().to_string(),
+            source_path: args.source().to_path_buf(),
+            object_type: args.object_type().to_string(),
+            conflict_policy: args.conflict_policy().to_string(),
+            dry_run: args.dry_run(),
+        },
+    )?;
+    let mut render_error = None;
+    let response = match client.submit_ingest_files_with_progress(request, |event| {
+        if render_error.is_none() {
+            render_error = tui.render_progress(event).err();
+        }
+    }) {
+        Ok(response) => response,
+        Err(err) => {
+            let _ = tui.fail(&err);
+            return Err(err.into());
+        }
+    };
+    if let Some(error) = render_error {
+        let _ = tui.fail(&error);
+        return Err(CliError::Io(error));
+    }
+    tui.finish(&response)?;
 
     Ok(())
 }
@@ -1776,6 +1820,7 @@ fn run_ingest_files_local_direct(
     writeln!(writer, "Source bytes: {total_source_bytes}")?;
     writeln!(writer, "Copies: {copies}")?;
     writeln!(writer, "Conflict policy: {}", args.conflict_policy())?;
+    writeln!(writer, "TUI: {}", args.tui())?;
     writeln!(writer, "Work bytes: {total_work_bytes}")?;
 
     if args.dry_run() {
@@ -4031,6 +4076,7 @@ mod tests {
             "--copies",
             "1",
             "--force",
+            "--tui",
         ])
         .expect("ingest files parses");
         let Some(crate::cli::Command::Ingest(args)) = cli.command() else {
@@ -4069,10 +4115,12 @@ mod tests {
             .expect("daemon ingest submission runs");
 
         let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("Daemon ingest job submitted"));
+        assert!(output.contains("DASObjectStore Upload TUI"));
+        assert!(output.contains("Final response: job=job-zymo"));
+        assert!(output.contains("\u{1b}[?1049h"));
+        assert!(output.contains("\u{1b}[?1049l"));
         assert!(output.contains("Endpoint: zymo_fecal_2025.05"));
         assert!(output.contains("Conflict policy: force"));
-        assert!(output.contains("Job: job-zymo"));
     }
 
     #[test]
