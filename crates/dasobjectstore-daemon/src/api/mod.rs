@@ -12,14 +12,20 @@ pub use health::{
 };
 pub use ingest::{
     CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestBottleneck,
-    DaemonIngestCompletionFraction, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
-    DaemonIngestPressure, DaemonIngestProgressEvent, DaemonIngestProgressFractions,
-    DaemonIngestQueueDepths, DaemonIngestResourcePolicy, DaemonIngestStage,
-    DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry, DaemonIngestTelemetry,
-    DaemonIngestThroughputTelemetry, DaemonIngestThroughputTrend, DaemonIngestWorkerActivity,
-    DaemonIngestWorkerCounts, DaemonIngestWorkerTelemetry, DaemonRequestValidationError,
-    IngestJobStatusRequest, IngestJobStatusResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
+    DaemonIngestCompletionFraction, DaemonIngestErrorRate, DaemonIngestHddQueueState,
+    DaemonIngestHddTargetQueue, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
+    DaemonIngestPlacementSchedulerInput, DaemonIngestPressure, DaemonIngestProgressEvent,
+    DaemonIngestProgressFractions, DaemonIngestQueueDepths, DaemonIngestResourcePolicy,
+    DaemonIngestSchedulingPolicy, DaemonIngestStage, DaemonIngestSystemSafetyReserve,
+    DaemonIngestSystemTelemetry, DaemonIngestTargetCapacity, DaemonIngestTargetFailureState,
+    DaemonIngestTelemetry, DaemonIngestThroughputTelemetry, DaemonIngestThroughputTrend,
+    DaemonIngestWorkerActivity, DaemonIngestWorkerCounts, DaemonIngestWorkerTelemetry,
+    DaemonRequestValidationError, DaemonSourceReadBackpressureAction,
+    DaemonSourceReadBackpressureDecision, DaemonSourceReadBackpressureInput,
+    DaemonSourceReadBackpressurePolicy, DaemonSourceReadBackpressureReason,
+    DaemonSourceReadPriority, IngestJobStatusRequest, IngestJobStatusResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
