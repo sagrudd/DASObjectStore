@@ -428,9 +428,9 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Define the parallel daemon ingress pipeline stages: scan, source read, SSD
   stage, checksum/manifest capture, HDD placement, HDD write, verification, and
   finalization.
-- [ ] Make streaming source files to SSD staging the first priority while
+- [x] Make streaming source files to SSD staging the first priority while
   maintaining bounded queues and pressure controls.
-- [ ] Add adaptive worker scheduling that uses available CPU cores for hashing,
+- [x] Add adaptive worker scheduling that uses available CPU cores for hashing,
   verification, metadata, and coordination without overdriving saturated disks.
 - [x] Add configurable resource policy for worker counts, memory budget, SSD
   reserve, HDD queue depth, verification parallelism, and system safety reserve.
@@ -469,11 +469,11 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Add TUI binary/entry point and packaging path for standalone deployment.
 - [x] Implement TUI import planning with target ObjectStore/SubObject context,
   source paths, file count, and data volume scaled to MiB, GiB, or TiB.
-- [ ] Implement TUI import description metadata capture and confirmation before
+- [x] Implement TUI import description metadata capture and confirmation before
   launch.
 - [x] Show resource policy before launch: worker counts, memory budget, SSD
   reserve, HDD queue depth, and verification parallelism.
-- [ ] Allow administrators to choose automatic resource use or explicit caps for
+- [x] Allow administrators to choose automatic resource use or explicit caps for
   cores, memory, SSD reserve, and HDD write concurrency.
 - [x] Show live TUI progress for discovered/scanned, staged on SSD, written to
   HDD, and verified data.

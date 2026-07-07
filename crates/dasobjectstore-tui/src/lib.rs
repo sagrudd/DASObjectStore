@@ -23,7 +23,10 @@ pub use monitoring::{
     TuiErrorState, VerificationStatus, VerificationTelemetry, WorkerActivity, WorkerTelemetry,
 };
 pub use planning::{
-    format_size_label, ImportPlan, ImportPlanningSummary, ImportTarget, SourcePath,
+    format_size_label, ImportDescriptionMetadata, ImportDescriptionMetadataDisplay,
+    ImportLaunchBlocker, ImportLaunchConfirmation, ImportLaunchReview, ImportMetadataError,
+    ImportMetadataField, ImportPlan, ImportPlanningSummary, ImportTarget, ResourceCap,
+    ResourceUsePlan, SourcePath, IMPORT_LAUNCH_CONFIRMATION_PHRASE,
 };
 pub use resource::{ResourcePolicyDisplay, ResourcePolicySummary, WorkerCounts};
 

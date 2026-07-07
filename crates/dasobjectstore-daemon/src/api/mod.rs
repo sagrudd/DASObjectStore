@@ -12,8 +12,9 @@ pub use health::{
     DaemonHealthSummaryResponse, DaemonIngestSummary, DaemonSsdPressure,
 };
 pub use ingest::{
-    CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestBottleneck,
-    DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
+    CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestAdaptiveSchedulerInput,
+    DaemonIngestAdaptiveSchedulingLimit, DaemonIngestAdaptiveWorkerSchedule,
+    DaemonIngestBottleneck, DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
     DaemonIngestCompletionFraction, DaemonIngestErrorRate, DaemonIngestHddQueueState,
     DaemonIngestHddTargetQueue, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
     DaemonIngestPlacementSchedulerInput, DaemonIngestPressure, DaemonIngestProgressEvent,
@@ -25,8 +26,9 @@ pub use ingest::{
     DaemonRequestValidationError, DaemonSourceReadBackpressureAction,
     DaemonSourceReadBackpressureDecision, DaemonSourceReadBackpressureInput,
     DaemonSourceReadBackpressurePolicy, DaemonSourceReadBackpressureReason,
-    DaemonSourceReadPriority, IngestJobStatusRequest, IngestJobStatusResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy, DaemonSourceToSsdQueueUsage,
+    IngestJobStatusRequest, IngestJobStatusResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,

@@ -46,13 +46,28 @@ roots.
 Planned TUI Launch
 ------------------
 
-These commands are planned for the Milestone 18 TUI entry point and are not
-executable until that implementation is merged:
+The current TUI entry point provides a non-interactive launch preview for import
+planning. It does not yet submit daemon jobs, but it accepts the launch metadata,
+confirmation, and resource-cap fields that the interactive import flow will use:
 
 .. code-block:: console
 
-   dasobjectstore-tui import zymo_fecal_2025.05 \
-     --source /mnt/external/zymo_fecal_2025.05
+   dasobjectstore-tui \
+     --object-store zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --description "Zymo fecal May 2025 ingest" \
+     --metadata ticket=LAB-42 \
+     --confirm-launch "confirm import launch"
+
+Launch previews are blocked until a nonblank ``--description`` and the exact
+``--confirm-launch "confirm import launch"`` phrase are provided. Additional
+description metadata can be supplied with repeated ``--metadata KEY=VALUE``
+arguments. Metadata keys must be unique, and both key and value must be
+nonblank.
+
+The planned interactive subcommands remain:
+
+.. code-block:: console
 
    dasobjectstore-tui attach <job-id>
 
@@ -134,6 +149,21 @@ explicitly capped. The policy summary should include:
 Automatic policy should use available CPU and memory headroom while preserving
 explicit safety limits. Manual caps should be visible throughout the run so an
 operator can explain why throughput is intentionally below device capability.
+
+The launch preview accepts automatic or explicit caps:
+
+.. code-block:: console
+
+   dasobjectstore-tui \
+     --cores auto \
+     --memory-cap-bytes auto \
+     --ssd-reserve-bytes auto \
+     --hdd-write-concurrency auto
+
+Use a positive number instead of ``auto`` to set an explicit cap. For example,
+``--cores 12``, ``--memory-cap-bytes 8589934592``,
+``--ssd-reserve-bytes 549755813888``, and ``--hdd-write-concurrency 6``.
+Explicit zero-value caps are rejected.
 
 Operational Expectations
 ------------------------
