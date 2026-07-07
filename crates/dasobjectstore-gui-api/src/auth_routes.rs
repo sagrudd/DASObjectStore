@@ -444,6 +444,11 @@ mod tests {
             encoded["capabilities"]["product_local_user_registration"],
             true
         );
+        assert_eq!(encoded["operations"][0]["kind"], "create_local_group");
+        assert_eq!(
+            encoded["operations"][1]["kind"],
+            "assign_local_user_to_group"
+        );
         assert!(encoded["current_user"].is_object() || encoded["warnings"].is_array());
 
         cleanup(&root);

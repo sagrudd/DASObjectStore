@@ -57,9 +57,10 @@ pub use tls_assets::{
 pub use workspaces::{
     workspace_navigation, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
     ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, LocalGroupMembershipView,
-    LocalUserAuthorityView, ObjectInventoryFiltersView, ObjectInventoryRowView,
-    ObjectsWorkspaceView, OperationsWorkspaceKindView, OperationsWorkspacesView,
-    OverviewWorkspaceView, StandaloneUserAccountView, StorePolicySummaryView, StoresWorkspaceView,
+    LocalGroupOperationKindView, LocalGroupOperationView, LocalUserAuthorityView,
+    ObjectInventoryFiltersView, ObjectInventoryRowView, ObjectsWorkspaceView,
+    OperationsWorkspaceKindView, OperationsWorkspacesView, OverviewWorkspaceView,
+    StandaloneUserAccountView, StorePolicySummaryView, StoresWorkspaceView,
     UsersGroupsCapabilitiesView, UsersGroupsHostModeView, UsersGroupsWorkspaceView,
     WorkspaceNavigationItemView, OPERATIONS_WORKSPACES_SCHEMA_VERSION,
 };

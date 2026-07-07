@@ -37,6 +37,20 @@ pub fn users_groups_workspace(props: &UsersGroupsWorkspaceProps) -> Html {
                 <section class="dos-users-groups__panel" data-panel="local-groups">
                     <h2>{ "Local Groups" }</h2>
                 </section>
+                <section
+                    class="dos-users-groups__panel"
+                    data-panel="create-local-group"
+                    data-operation="create_local_group"
+                >
+                    <h2>{ "Create Group" }</h2>
+                </section>
+                <section
+                    class="dos-users-groups__panel"
+                    data-panel="assign-local-user-to-group"
+                    data-operation="assign_local_user_to_group"
+                >
+                    <h2>{ "Assign User to Group" }</h2>
+                </section>
                 <section class="dos-users-groups__panel" data-panel="administrator-readiness">
                     <h2>{ "Administrator Readiness" }</h2>
                 </section>

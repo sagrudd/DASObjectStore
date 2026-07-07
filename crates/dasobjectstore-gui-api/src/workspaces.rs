@@ -340,6 +340,7 @@ pub struct UsersGroupsWorkspaceView {
     pub current_user: Option<LocalUserAuthorityView>,
     pub users: Vec<StandaloneUserAccountView>,
     pub groups: Vec<LocalGroupMembershipView>,
+    pub operations: Vec<LocalGroupOperationView>,
     pub capabilities: UsersGroupsCapabilitiesView,
     pub selected_username: Option<String>,
     pub selected_group_name: Option<String>,
@@ -376,6 +377,7 @@ impl UsersGroupsWorkspaceView {
                 .map(StandaloneUserAccountView::from)
                 .collect(),
             groups,
+            operations: local_group_operations(administrator_actions_enabled),
             capabilities: UsersGroupsCapabilitiesView {
                 product_local_user_registration: true,
                 os_local_user_management: administrator_actions_enabled,
@@ -394,6 +396,7 @@ impl UsersGroupsWorkspaceView {
             current_user: None,
             users: Vec::new(),
             groups: Vec::new(),
+            operations: Vec::new(),
             capabilities: UsersGroupsCapabilitiesView {
                 product_local_user_registration: false,
                 os_local_user_management: false,
@@ -459,6 +462,40 @@ pub struct LocalGroupMembershipView {
     pub sudo_administrator_group: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalGroupOperationView {
+    pub kind: LocalGroupOperationKindView,
+    pub label: String,
+    pub requires_sudo_administrator: bool,
+    pub enabled: bool,
+    pub blocked_reason: Option<String>,
+}
+
+impl LocalGroupOperationView {
+    fn sudo_gated(
+        kind: LocalGroupOperationKindView,
+        label: impl Into<String>,
+        administrator_actions_enabled: bool,
+    ) -> Self {
+        Self {
+            kind,
+            label: label.into(),
+            requires_sudo_administrator: true,
+            enabled: administrator_actions_enabled,
+            blocked_reason: (!administrator_actions_enabled).then(|| {
+                "Current OS user must be a sudo-derived DASObjectStore administrator.".to_string()
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalGroupOperationKindView {
+    CreateLocalGroup,
+    AssignLocalUserToGroup,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UsersGroupsCapabilitiesView {
     pub product_local_user_registration: bool,
@@ -478,16 +515,32 @@ fn local_group_memberships(user: &LocalUserMetadata) -> Vec<LocalGroupMembership
         .collect()
 }
 
+fn local_group_operations(administrator_actions_enabled: bool) -> Vec<LocalGroupOperationView> {
+    vec![
+        LocalGroupOperationView::sudo_gated(
+            LocalGroupOperationKindView::CreateLocalGroup,
+            "Create local writer/admin group",
+            administrator_actions_enabled,
+        ),
+        LocalGroupOperationView::sudo_gated(
+            LocalGroupOperationKindView::AssignLocalUserToGroup,
+            "Assign local user to group",
+            administrator_actions_enabled,
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         workspace_navigation, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
         ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView,
-        LocalGroupMembershipView, LocalUserAuthorityView, ObjectInventoryRowView,
-        ObjectsWorkspaceView, OperationsWorkspaceKindView, OperationsWorkspacesView,
-        OverviewWorkspaceView, StandaloneUserAccountView, StorePolicySummaryView,
-        StoresWorkspaceView, UsersGroupsCapabilitiesView, UsersGroupsHostModeView,
-        UsersGroupsWorkspaceView, OPERATIONS_WORKSPACES_SCHEMA_VERSION,
+        LocalGroupMembershipView, LocalGroupOperationKindView, LocalGroupOperationView,
+        LocalUserAuthorityView, ObjectInventoryRowView, ObjectsWorkspaceView,
+        OperationsWorkspaceKindView, OperationsWorkspacesView, OverviewWorkspaceView,
+        StandaloneUserAccountView, StorePolicySummaryView, StoresWorkspaceView,
+        UsersGroupsCapabilitiesView, UsersGroupsHostModeView, UsersGroupsWorkspaceView,
+        OPERATIONS_WORKSPACES_SCHEMA_VERSION,
     };
     use crate::dashboard::{DashboardAttentionView, ObjectStateView};
     use crate::endpoints::{EndpointInventoryItemView, EndpointInventoryView};
@@ -739,6 +792,25 @@ mod tests {
                 administrator_actions_enabled: true,
             }
         );
+        assert_eq!(
+            view.operations,
+            vec![
+                LocalGroupOperationView {
+                    kind: LocalGroupOperationKindView::CreateLocalGroup,
+                    label: "Create local writer/admin group".to_string(),
+                    requires_sudo_administrator: true,
+                    enabled: true,
+                    blocked_reason: None,
+                },
+                LocalGroupOperationView {
+                    kind: LocalGroupOperationKindView::AssignLocalUserToGroup,
+                    label: "Assign local user to group".to_string(),
+                    requires_sudo_administrator: true,
+                    enabled: true,
+                    blocked_reason: None,
+                }
+            ]
+        );
         assert!(view.warnings.is_empty());
     }
 
@@ -755,5 +827,11 @@ mod tests {
 
         assert!(!view.capabilities.administrator_actions_enabled);
         assert_eq!(view.warnings[0].code, "standalone_admin_authority_missing");
+        assert_eq!(view.operations.len(), 2);
+        assert!(view.operations.iter().all(|operation| {
+            !operation.enabled
+                && operation.requires_sudo_administrator
+                && operation.blocked_reason.is_some()
+        }));
     }
 }
