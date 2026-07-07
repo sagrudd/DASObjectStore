@@ -205,6 +205,8 @@ impl DaemonApiRequest {
             Self::ServiceStatus(_) => "service_status",
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
+            Self::CreateLocalGroup(_) => "create_local_group",
+            Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         }
     }
 }

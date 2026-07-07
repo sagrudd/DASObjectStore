@@ -750,6 +750,9 @@ pub enum DaemonRequestValidationError {
     InvalidCopyCount { copies: u8 },
     BlankClientRequestId,
     BlankCancellationReason,
+    BlankField { field: &'static str },
+    UnsafeLocalName { field: &'static str, value: String },
+    BlankConfirmationMarker,
     UnsupportedServiceProvider { provider: String },
 }
 
@@ -771,6 +774,14 @@ impl Display for DaemonRequestValidationError {
             }
             Self::BlankCancellationReason => {
                 formatter.write_str("cancellation reason must not be blank")
+            }
+            Self::BlankField { field } => write!(formatter, "{field} must not be blank"),
+            Self::UnsafeLocalName { field, value } => write!(
+                formatter,
+                "{field} must be a conservative POSIX-style local name: {value}"
+            ),
+            Self::BlankConfirmationMarker => {
+                formatter.write_str("confirmation_marker must not be blank")
             }
             Self::UnsupportedServiceProvider { provider } => write!(
                 formatter,

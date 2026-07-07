@@ -9,12 +9,14 @@ pub use in_process::InProcessDaemonTransport;
 pub use unix_socket::UnixSocketDaemonTransport;
 
 use crate::api::{
-    CancelIngestJobRequest, CancelIngestJobResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonHealthSummaryRequest, DaemonHealthSummaryResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestJobStatusRequest,
-    IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+    CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
+    CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest,
+    DaemonHealthSummaryResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+    DaemonServiceStatusResponse, IngestJobStatusRequest, IngestJobStatusResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -117,6 +119,26 @@ where
             response => Err(unexpected("service_provision", response)),
         }
     }
+
+    pub fn create_local_group(
+        &self,
+        request: CreateLocalGroupRequest,
+    ) -> Result<CreateLocalGroupResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CreateLocalGroup(request))? {
+            DaemonApiResponse::CreateLocalGroup(response) => Ok(response),
+            response => Err(unexpected("create_local_group", response)),
+        }
+    }
+
+    pub fn assign_local_user_to_local_group(
+        &self,
+        request: AssignLocalUserToLocalGroupRequest,
+    ) -> Result<AssignLocalUserToLocalGroupResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::AssignLocalUserToLocalGroup(request))? {
+            DaemonApiResponse::AssignLocalUserToLocalGroup(response) => Ok(response),
+            response => Err(unexpected("assign_local_user_to_local_group", response)),
+        }
+    }
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -136,6 +158,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceStatus(_) => "service_status",
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
+        DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
+        DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }
@@ -145,10 +169,12 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
 mod tests {
     use super::{DaemonClient, DaemonClientError, InProcessDaemonTransport};
     use crate::api::{
-        DaemonApiRequest, DaemonApiResponse, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+        AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+        CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
+        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
+        SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -315,5 +341,98 @@ mod tests {
             seen.borrow().as_slice(),
             [DaemonApiRequest::ServiceProvision(_)]
         ));
+    }
+
+    #[test]
+    fn create_local_group_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::CreateLocalGroup(
+                CreateLocalGroupResponse::accepted(
+                    crate::api::DaemonJobId::new("local-admin-1").expect("job id"),
+                    "2026-07-07T12:10:42Z",
+                    true,
+                    Some("request-1".to_string()),
+                    "mnemosyne",
+                    Some("operator".to_string()),
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .create_local_group(CreateLocalGroupRequest {
+                group_name: "mnemosyne".to_string(),
+                dry_run: true,
+                client_request_id: Some("request-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: "confirm create local group".to_string(),
+            })
+            .expect("create group response");
+
+        assert_eq!(response.group_name, "mnemosyne");
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::CreateLocalGroup(_)]
+        ));
+    }
+
+    #[test]
+    fn assign_local_user_to_local_group_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::AssignLocalUserToLocalGroup(
+                AssignLocalUserToLocalGroupResponse::accepted(
+                    crate::api::DaemonJobId::new("local-admin-2").expect("job id"),
+                    "2026-07-07T12:11:42Z",
+                    true,
+                    Some("request-2".to_string()),
+                    "stephen",
+                    "mnemosyne",
+                    Some("operator".to_string()),
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .assign_local_user_to_local_group(AssignLocalUserToLocalGroupRequest {
+                username: "stephen".to_string(),
+                group_name: "mnemosyne".to_string(),
+                dry_run: true,
+                client_request_id: Some("request-2".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: "confirm assign local user".to_string(),
+            })
+            .expect("assign user response");
+
+        assert_eq!(response.username, "stephen");
+        assert_eq!(response.group_name, "mnemosyne");
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::AssignLocalUserToLocalGroup(_)]
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_local_admin_request_before_transport_send() {
+        let transport = InProcessDaemonTransport::new(|_request| {
+            panic!("invalid request should not reach transport")
+        });
+        let client = DaemonClient::new(transport);
+
+        let err = client
+            .create_local_group(CreateLocalGroupRequest {
+                group_name: "Invalid Group".to_string(),
+                dry_run: true,
+                client_request_id: None,
+                administrator_actor: None,
+                confirmation_marker: "confirm create local group".to_string(),
+            })
+            .expect_err("invalid group name rejected");
+
+        assert!(matches!(err, DaemonClientError::RequestValidation(_)));
     }
 }

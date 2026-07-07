@@ -71,6 +71,7 @@ pub enum DaemonJobKind {
     DiskReplace,
     Repair,
     ServiceOperation,
+    SystemAdministration,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -7,8 +7,10 @@ pub mod runtime;
 pub mod server;
 
 pub use api::{
-    CancelIngestJobRequest, CancelIngestJobResponse, DaemonApiErrorResponse, DaemonApiRequest,
-    DaemonApiResponse, DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
+    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+    CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
+    CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
+    DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
     DaemonHealthSummaryResponse, DaemonIngestBottleneck, DaemonIngestBoundedBufferPolicy,
     DaemonIngestBufferPoolPolicySet, DaemonIngestCompletionFraction, DaemonIngestErrorRate,
     DaemonIngestHddQueueState, DaemonIngestHddTargetQueue, DaemonIngestPipelinePressure,
@@ -22,6 +24,7 @@ pub use api::{
     DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent, DaemonJobId, DaemonJobIdError,
     DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
     DaemonJobStatusResponse, DaemonJobSummary, DaemonJobValidationError,
+    DaemonLocalAdminAcceptedResponse, DaemonLocalAdminCommand, DaemonLocalAdminValidationError,
     DaemonRequestValidationError, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
     DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusDetail, DaemonServiceStatusRequest, DaemonServiceStatusResponse,

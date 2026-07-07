@@ -3,6 +3,7 @@
 mod health;
 mod ingest;
 mod jobs;
+mod local_admin;
 mod service;
 mod stores;
 
@@ -32,6 +33,11 @@ pub use jobs::{
     DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress, DaemonJobState,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonJobValidationError,
 };
+pub use local_admin::{
+    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+    CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonLocalAdminAcceptedResponse,
+    DaemonLocalAdminCommand, DaemonLocalAdminValidationError,
+};
 pub use service::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
@@ -52,6 +58,8 @@ pub enum DaemonApiRequest {
     ServiceStatus(DaemonServiceStatusRequest),
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
+    CreateLocalGroup(CreateLocalGroupRequest),
+    AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
 }
 
 impl DaemonApiRequest {
@@ -61,6 +69,12 @@ impl DaemonApiRequest {
             Self::CancelIngestJob(request) => request.validate(),
             Self::ServiceLifecycle(request) => request.validate(),
             Self::ServiceProvision(request) => request.validate(),
+            Self::CreateLocalGroup(request) => {
+                request.validate().map_err(local_admin_validation_error)
+            }
+            Self::AssignLocalUserToLocalGroup(request) => {
+                request.validate().map_err(local_admin_validation_error)
+            }
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
             | Self::IngestJobStatus(_)
@@ -80,8 +94,34 @@ pub enum DaemonApiResponse {
     ServiceStatus(DaemonServiceStatusResponse),
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
+    CreateLocalGroup(CreateLocalGroupResponse),
+    AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
+}
+
+fn local_admin_validation_error(
+    err: DaemonLocalAdminValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        DaemonLocalAdminValidationError::BlankName { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        DaemonLocalAdminValidationError::UnsafeName { field, value } => {
+            DaemonRequestValidationError::UnsafeLocalName { field, value }
+        }
+        DaemonLocalAdminValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+        DaemonLocalAdminValidationError::BlankAdministratorActor => {
+            DaemonRequestValidationError::BlankField {
+                field: "administrator_actor",
+            }
+        }
+        DaemonLocalAdminValidationError::BlankConfirmationMarker => {
+            DaemonRequestValidationError::BlankConfirmationMarker
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -102,9 +142,9 @@ impl DaemonApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonApiRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, StoreInventoryRequest,
-        SubmitIngestFilesRequest,
+        AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, DaemonApiRequest,
+        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceStatusRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -159,6 +199,32 @@ mod tests {
     }
 
     #[test]
+    fn local_admin_commands_use_stable_command_names() {
+        let create = DaemonApiRequest::CreateLocalGroup(CreateLocalGroupRequest {
+            group_name: "mnemosyne".to_string(),
+            dry_run: true,
+            client_request_id: Some("request-1".to_string()),
+            administrator_actor: Some("operator".to_string()),
+            confirmation_marker: "confirm create local group".to_string(),
+        });
+        let assign =
+            DaemonApiRequest::AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest {
+                username: "stephen".to_string(),
+                group_name: "mnemosyne".to_string(),
+                dry_run: true,
+                client_request_id: Some("request-2".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: "confirm assign local user".to_string(),
+            });
+
+        let create = serde_json::to_value(create).expect("create request serializes");
+        let assign = serde_json::to_value(assign).expect("assignment request serializes");
+
+        assert_eq!(create["command"], "create_local_group");
+        assert_eq!(assign["command"], "assign_local_user_to_local_group");
+    }
+
+    #[test]
     fn delegates_service_lifecycle_validation() {
         let request = DaemonApiRequest::ServiceLifecycle(DaemonServiceLifecycleRequest {
             operation: DaemonServiceOperation::Start,
@@ -176,6 +242,19 @@ mod tests {
             provider_id: ObjectServiceProviderId::Rustfs,
             dry_run: false,
             client_request_id: None,
+        });
+
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn delegates_local_admin_validation() {
+        let request = DaemonApiRequest::CreateLocalGroup(CreateLocalGroupRequest {
+            group_name: "Invalid Group".to_string(),
+            dry_run: true,
+            client_request_id: None,
+            administrator_actor: None,
+            confirmation_marker: "confirm create local group".to_string(),
         });
 
         assert!(request.validate().is_err());
