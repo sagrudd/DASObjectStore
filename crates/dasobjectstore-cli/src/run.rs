@@ -815,9 +815,11 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         .map(Path::to_path_buf)
         .unwrap_or_else(default_store_registry_path);
     let report = upsert_store_definition(&registry_path, definition)?;
-    let portable_report = upsert_portable_store_definition(args.ssd_root(), &report.definition)?;
+    let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
+    let portable_report =
+        upsert_portable_store_definition(args.ssd_root(), allow_default_ssd, &report.definition)?;
     if let Some(writer_group) = &report.definition.writer_group {
-        grant_store_writer_group_access(args.ssd_root(), writer_group)?;
+        grant_store_writer_group_access(args.ssd_root(), allow_default_ssd, writer_group)?;
         grant_writer_group_registry_access(&registry_path, writer_group)?;
         grant_writer_group_registry_access(&default_subobject_registry_path(), writer_group)?;
     }
@@ -932,9 +934,10 @@ fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), C
 
 fn upsert_portable_store_definition(
     ssd_root: Option<&Path>,
+    allow_default_ssd: bool,
     definition: &StoreServiceDefinition,
 ) -> Result<Option<StoreRegistryUpdateReport>, CliError> {
-    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root)? else {
+    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)? else {
         return Ok(None);
     };
     let registry_path = portable_store_registry_path(&ssd_root);
@@ -945,6 +948,7 @@ fn upsert_portable_store_definition(
 
 fn known_ssd_root_for_optional_mirror(
     ssd_root: Option<&Path>,
+    allow_default_ssd: bool,
 ) -> Result<Option<PathBuf>, CliError> {
     match ssd_root {
         Some(path) => {
@@ -952,6 +956,9 @@ fn known_ssd_root_for_optional_mirror(
             Ok(Some(path.to_path_buf()))
         }
         None => {
+            if !allow_default_ssd {
+                return Ok(None);
+            }
             let path = default_ssd_root();
             if is_known_ssd_root(&path) {
                 Ok(Some(path))
@@ -964,13 +971,14 @@ fn known_ssd_root_for_optional_mirror(
 
 fn grant_store_writer_group_access(
     ssd_root: Option<&Path>,
+    allow_default_ssd: bool,
     writer_group: &str,
 ) -> Result<(), CliError> {
     #[cfg(target_os = "linux")]
     {
         ensure_group_exists(writer_group)?;
         let mut roots = Vec::new();
-        if let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root)? {
+        if let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)? {
             roots.push(ssd_root);
         }
         roots.extend(
@@ -986,6 +994,7 @@ fn grant_store_writer_group_access(
     #[cfg(not(target_os = "linux"))]
     {
         let _ = ssd_root;
+        let _ = allow_default_ssd;
         let _ = writer_group;
     }
 
@@ -1227,8 +1236,12 @@ fn run_subobject_create(
         .unwrap_or_else(default_subobject_registry_path);
     let parent = subobject_parent_from_args(args)?;
     let report = create_subobject_definition(&registry_path, args.name(), parent)?;
-    let portable_report =
-        mirror_portable_subobject_definition(args.ssd_root(), &report.definition)?;
+    let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
+    let portable_report = mirror_portable_subobject_definition(
+        args.ssd_root(),
+        allow_default_ssd,
+        &report.definition,
+    )?;
     grant_subobject_writer_group_registry_access(args, &report.definition, &registry_path)?;
 
     write_subobject_create_report(&report, portable_report.as_ref(), writer)
@@ -1335,9 +1348,10 @@ fn write_subobject_create_report(
 
 fn mirror_portable_subobject_definition(
     ssd_root: Option<&Path>,
+    allow_default_ssd: bool,
     definition: &SubObjectDefinition,
 ) -> Result<Option<SubObjectRegistryUpdateReport>, CliError> {
-    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root)? else {
+    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)? else {
         return Ok(None);
     };
     let registry_path = portable_subobject_registry_path(&ssd_root);
