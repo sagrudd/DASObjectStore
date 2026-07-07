@@ -1,0 +1,24 @@
+//! Managed daemon boundary for DASObjectStore.
+
+pub mod runtime;
+
+pub use runtime::{
+    DaemonRuntimeConfig, DaemonRuntimeConfigError, DEFAULT_DAEMON_CONFIG_PATH,
+    DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
+};
+
+/// Returns the daemon crate version.
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version;
+
+    #[test]
+    fn exposes_package_version() {
+        assert_eq!(version(), "0.0.0");
+    }
+}

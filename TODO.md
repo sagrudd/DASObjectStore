@@ -23,7 +23,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 
 ## Current Priority: Milestone 12 Managed Daemon and Client Boundary
 
-- [ ] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
+- [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
   daemon configuration type, and unit tests for default runtime paths.
 - [ ] Define the daemon API contract for health summary, store inventory,
   ingest job submission, ingest progress events, job status, and cancellation.

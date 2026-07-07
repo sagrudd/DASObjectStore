@@ -2,6 +2,7 @@
 members = [
     "crates/dasobjectstore-cli",
     "crates/dasobjectstore-core",
+    "crates/dasobjectstore-daemon",
     "crates/dasobjectstore-gui-api",
     "crates/dasobjectstore-gui-web",
     "crates/dasobjectstore-metadata",
@@ -21,6 +22,7 @@ argon2 = "0.5.3"
 axum = "0.8.9"
 clap = { version = "4.5.48", features = ["derive"] }
 dasobjectstore-core = { path = "crates/dasobjectstore-core" }
+dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon" }
 dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api" }
 dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web" }
 dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
