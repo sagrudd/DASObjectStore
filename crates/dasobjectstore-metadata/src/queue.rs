@@ -3,7 +3,7 @@ use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::IngestJobState;
 use dasobjectstore_core::object_type::{ObjectType, ObjectTypeParseError};
 use rusqlite::types::Type;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
@@ -162,6 +162,24 @@ pub struct IngestQueueSnapshot {
     pub jobs: Vec<IngestQueueJob>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IngestQueueDrainRequest {
+    pub live_sqlite_path: PathBuf,
+    pub store_id: StoreId,
+    pub updated_at_utc: String,
+    pub reason: String,
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct IngestQueueDrainReport {
+    pub live_sqlite_path: PathBuf,
+    pub store_id: StoreId,
+    pub dry_run: bool,
+    pub jobs_cancelled: usize,
+    pub cancelled_job_ids: Vec<IngestJobId>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct IngestQueueJob {
     pub ingest_job_id: IngestJobId,
@@ -185,10 +203,24 @@ pub struct IngestQueueJob {
 pub fn read_ingest_queue(
     live_sqlite_path: impl AsRef<Path>,
 ) -> Result<IngestQueueSnapshot, IngestQueueReadError> {
-    let live_sqlite_path = live_sqlite_path.as_ref();
+    read_ingest_queue_inner(live_sqlite_path.as_ref(), None)
+}
+
+pub fn read_ingest_queue_for_store(
+    live_sqlite_path: impl AsRef<Path>,
+    store_id: &StoreId,
+) -> Result<IngestQueueSnapshot, IngestQueueReadError> {
+    read_ingest_queue_inner(live_sqlite_path.as_ref(), Some(store_id))
+}
+
+fn read_ingest_queue_inner(
+    live_sqlite_path: &Path,
+    store_id: Option<&StoreId>,
+) -> Result<IngestQueueSnapshot, IngestQueueReadError> {
     let connection = Connection::open(live_sqlite_path)?;
-    let mut statement = connection.prepare(
-        "SELECT
+    let query = match store_id {
+        Some(_) => {
+            "SELECT
             ingest_job_id,
             store_id,
             object_id,
@@ -206,19 +238,102 @@ pub fn read_ingest_queue(
             created_at_utc,
             updated_at_utc
          FROM ingest_jobs
-         ORDER BY priority DESC, created_at_utc ASC, ingest_job_id ASC",
-    )?;
-    let rows = statement.query_map([], read_ingest_queue_job)?;
+         WHERE store_id = ?1
+         ORDER BY priority DESC, created_at_utc ASC, ingest_job_id ASC"
+        }
+        None => {
+            "SELECT
+            ingest_job_id,
+            store_id,
+            object_id,
+            object_type,
+            state,
+            ingest_mode,
+            acknowledgement_policy,
+            priority,
+            staging_path,
+            expected_size_bytes,
+            received_bytes,
+            content_hash,
+            content_hash_algorithm,
+            failure_message,
+            created_at_utc,
+            updated_at_utc
+        FROM ingest_jobs
+         ORDER BY priority DESC, created_at_utc ASC, ingest_job_id ASC"
+        }
+    };
+    let mut statement = connection.prepare(query)?;
+
+    let mut rows = match store_id {
+        Some(store_id) => statement.query(params![store_id.as_str()])?,
+        None => statement.query([])?,
+    };
 
     let mut jobs = Vec::new();
-    for row in rows {
-        jobs.push(row?);
+    while let Some(row) = rows.next()? {
+        jobs.push(read_ingest_queue_job(row)?);
     }
 
     Ok(IngestQueueSnapshot {
         live_sqlite_path: live_sqlite_path.to_path_buf(),
         jobs,
     })
+}
+
+pub fn drain_ingest_queue(
+    request: &IngestQueueDrainRequest,
+) -> Result<IngestQueueDrainReport, IngestQueueDrainError> {
+    let mut connection = Connection::open(&request.live_sqlite_path)?;
+    let cancelled_job_ids = active_job_ids_for_store(&connection, &request.store_id)?;
+
+    if !request.dry_run && !cancelled_job_ids.is_empty() {
+        let transaction = connection.transaction()?;
+        transaction.execute(
+            "UPDATE ingest_jobs
+             SET state = 'Cancelled',
+                 failure_message = ?1,
+                 updated_at_utc = ?2
+             WHERE store_id = ?3
+               AND state NOT IN ('Complete', 'Failed', 'Cancelled')",
+            params![
+                request.reason.trim(),
+                request.updated_at_utc,
+                request.store_id.as_str()
+            ],
+        )?;
+        transaction.commit()?;
+    }
+
+    Ok(IngestQueueDrainReport {
+        live_sqlite_path: request.live_sqlite_path.clone(),
+        store_id: request.store_id.clone(),
+        dry_run: request.dry_run,
+        jobs_cancelled: cancelled_job_ids.len(),
+        cancelled_job_ids,
+    })
+}
+
+fn active_job_ids_for_store(
+    connection: &Connection,
+    store_id: &StoreId,
+) -> Result<Vec<IngestJobId>, IngestQueueDrainError> {
+    let mut statement = connection.prepare(
+        "SELECT ingest_job_id
+         FROM ingest_jobs
+         WHERE store_id = ?1
+           AND state NOT IN ('Complete', 'Failed', 'Cancelled')
+         ORDER BY priority DESC, created_at_utc ASC, ingest_job_id ASC",
+    )?;
+    let rows = statement.query_map(params![store_id.as_str()], |row| {
+        parse_id("ingest_job_id", row.get::<_, String>(0)?)
+    })?;
+
+    let mut job_ids = Vec::new();
+    for row in rows {
+        job_ids.push(row?);
+    }
+    Ok(job_ids)
 }
 
 #[derive(Debug)]
@@ -261,6 +376,34 @@ impl Display for IngestQueueReadError {
 impl std::error::Error for IngestQueueReadError {}
 
 impl From<rusqlite::Error> for IngestQueueReadError {
+    fn from(err: rusqlite::Error) -> Self {
+        Self::Sqlite(err)
+    }
+}
+
+#[derive(Debug)]
+pub enum IngestQueueDrainError {
+    Sqlite(rusqlite::Error),
+    InvalidIdentifier {
+        field: &'static str,
+        source: InvalidId,
+    },
+}
+
+impl Display for IngestQueueDrainError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sqlite(err) => write!(formatter, "failed to drain ingest queue metadata: {err}"),
+            Self::InvalidIdentifier { field, source } => {
+                write!(formatter, "invalid ingest queue {field}: {source}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IngestQueueDrainError {}
+
+impl From<rusqlite::Error> for IngestQueueDrainError {
     fn from(err: rusqlite::Error) -> Self {
         Self::Sqlite(err)
     }
@@ -353,12 +496,12 @@ fn optional_u64(field: &'static str, value: Option<i64>) -> Result<Option<u64>, 
 #[cfg(test)]
 mod tests {
     use super::{
-        read_ingest_queue, DestagePriorityPolicy, DestageUrgency, IngestAdmission,
-        IngestBackpressurePolicy, IngestQueueEntry,
+        drain_ingest_queue, read_ingest_queue, read_ingest_queue_for_store, DestagePriorityPolicy,
+        DestageUrgency, IngestAdmission, IngestBackpressurePolicy, IngestQueueDrainRequest,
+        IngestQueueEntry,
     };
-    use crate::SsdPressure;
-    use crate::LIVE_SCHEMA_SQL;
-    use dasobjectstore_core::ids::IngestJobId;
+    use crate::{SsdPressure, LIVE_SCHEMA_SQL};
+    use dasobjectstore_core::ids::{IngestJobId, StoreId};
     use dasobjectstore_core::lifecycle::IngestJobState;
     use dasobjectstore_core::object_type::ObjectType;
     use rusqlite::Connection;
@@ -538,6 +681,101 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn reads_ingest_queue_for_one_store() {
+        let root = temp_root("ingest-queue-store");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_store_named(&connection, "store-b");
+        insert_job(
+            &connection,
+            "job-a",
+            "Queued",
+            0,
+            "2026-01-01T00:00:00Z",
+            128,
+        );
+        insert_job_for_store(
+            &connection,
+            "store-b",
+            "job-b",
+            "Queued",
+            0,
+            "2026-01-01T00:00:01Z",
+            64,
+        );
+
+        let snapshot = read_ingest_queue_for_store(
+            &live_sqlite_path,
+            &StoreId::new("store-b").expect("store id"),
+        )
+        .expect("queue reads");
+
+        assert_eq!(snapshot.jobs.len(), 1);
+        assert_eq!(snapshot.jobs[0].ingest_job_id.as_str(), "job-b");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn drains_active_ingest_queue_jobs_for_store_without_deleting_rows() {
+        let root = temp_root("ingest-queue-drain");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_job(
+            &connection,
+            "job-active",
+            "Receiving",
+            10,
+            "2026-01-01T00:00:00Z",
+            128,
+        );
+        insert_job(
+            &connection,
+            "job-complete",
+            "Complete",
+            0,
+            "2026-01-01T00:00:01Z",
+            64,
+        );
+        drop(connection);
+
+        let request = IngestQueueDrainRequest {
+            live_sqlite_path: live_sqlite_path.clone(),
+            store_id: StoreId::new("store-a").expect("store id"),
+            updated_at_utc: "2026-07-07T12:00:00Z".to_string(),
+            reason: "operator drained ingest queue".to_string(),
+            dry_run: true,
+        };
+        let dry_run = drain_ingest_queue(&request).expect("dry run drains");
+        assert!(dry_run.dry_run);
+        assert_eq!(dry_run.jobs_cancelled, 1);
+        assert_eq!(job_state(&live_sqlite_path, "job-active"), "Receiving");
+
+        let report = drain_ingest_queue(&IngestQueueDrainRequest {
+            dry_run: false,
+            ..request
+        })
+        .expect("queue drains");
+
+        assert_eq!(report.jobs_cancelled, 1);
+        assert_eq!(report.cancelled_job_ids[0].as_str(), "job-active");
+        assert_eq!(job_state(&live_sqlite_path, "job-active"), "Cancelled");
+        assert_eq!(job_state(&live_sqlite_path, "job-complete"), "Complete");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     fn entry(
         id: &str,
         state: IngestJobState,
@@ -559,14 +797,18 @@ mod tests {
     fn insert_store(connection: &Connection) {
         connection
             .execute(
-                "INSERT INTO pools (pool_id, state, created_at_utc, updated_at_utc)
+                "INSERT OR IGNORE INTO pools (pool_id, state, created_at_utc, updated_at_utc)
                  VALUES ('pool-a', 'Clean', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 [],
             )
             .expect("pool inserts");
+        insert_store_named(connection, "store-a");
+    }
+
+    fn insert_store_named(connection: &Connection, store_id: &str) {
         connection
             .execute(
-                "INSERT INTO stores (
+                "INSERT OR IGNORE INTO stores (
                     store_id,
                     pool_id,
                     class,
@@ -574,20 +816,40 @@ mod tests {
                     created_at_utc,
                     updated_at_utc
                  ) VALUES (
-                    'store-a',
+                    ?1,
                     'pool-a',
                     'generated_data',
                     '{}',
                     '2026-01-01T00:00:00Z',
                     '2026-01-01T00:00:00Z'
                  )",
-                [],
+                [store_id],
             )
             .expect("store inserts");
     }
 
     fn insert_job(
         connection: &Connection,
+        ingest_job_id: &str,
+        state: &str,
+        priority: i32,
+        created_at_utc: &str,
+        received_bytes: u64,
+    ) {
+        insert_job_for_store(
+            connection,
+            "store-a",
+            ingest_job_id,
+            state,
+            priority,
+            created_at_utc,
+            received_bytes,
+        );
+    }
+
+    fn insert_job_for_store(
+        connection: &Connection,
+        store_id: &str,
         ingest_job_id: &str,
         state: &str,
         priority: i32,
@@ -609,9 +871,10 @@ mod tests {
                     received_bytes,
                     created_at_utc,
                     updated_at_utc
-                 ) VALUES (?1, 'store-a', 'fastq', ?2, 'SsdFirst', 'AfterHddPlacement', ?3, ?4, 256, ?5, ?6, ?6)",
+                 ) VALUES (?1, ?2, 'fastq', ?3, 'SsdFirst', 'AfterHddPlacement', ?4, ?5, 256, ?6, ?7, ?7)",
                 (
                     ingest_job_id,
+                    store_id,
                     state,
                     priority,
                     format!("/ssd/.dasobjectstore/ingest/jobs/{ingest_job_id}"),
@@ -620,6 +883,17 @@ mod tests {
                 ),
             )
             .expect("job inserts");
+    }
+
+    fn job_state(live_sqlite_path: &std::path::Path, ingest_job_id: &str) -> String {
+        let connection = Connection::open(live_sqlite_path).expect("open sqlite");
+        connection
+            .query_row(
+                "SELECT state FROM ingest_jobs WHERE ingest_job_id = ?1",
+                [ingest_job_id],
+                |row| row.get(0),
+            )
+            .expect("job state")
     }
 
     fn temp_root(name: &str) -> PathBuf {

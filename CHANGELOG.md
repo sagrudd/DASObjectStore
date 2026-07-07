@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.6 - 2026-07-07
+
+- Remove the public `--live-sqlite-path` requirement from `store drain`; the
+  store name now resolves live metadata from the managed SSD root.
+- Scope `ingest queue` by store name and add pretty output by default, with
+  JSON still available through `--json`.
+- Add `ingest drain-queue` to cancel active queued ingest jobs for a store with
+  administrative confirmation while preserving queue rows for auditability.
+
 ## 0.1.5 - 2026-07-07
 
 - Fix Linux package builds for the upload Ctrl-C handler by initializing

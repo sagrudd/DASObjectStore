@@ -306,6 +306,39 @@ be readable by the ``dasobjectstore`` service user.
 Interrupted imports should be inspected through daemon job status and store
 state before retrying.
 
+Inspect and Drain the Ingest Queue
+----------------------------------
+
+Inspect queued or active ingest jobs for a store:
+
+.. code-block:: console
+
+   dasobjectstore ingest queue generated-data
+
+Use JSON when automating:
+
+.. code-block:: console
+
+   dasobjectstore ingest queue generated-data --json
+
+If an import was started by mistake, preview queue cancellation first:
+
+.. code-block:: console
+
+   sudo dasobjectstore ingest drain-queue generated-data --dry-run
+
+To cancel active queued jobs for that store:
+
+.. code-block:: console
+
+   sudo dasobjectstore ingest drain-queue generated-data \
+     --allow-ingest-queue-drain \
+     --confirm "confirm ingest queue drain"
+
+Queue drain marks active ingest jobs as ``Cancelled`` and records a failure
+message; it does not delete queue rows. This preserves an audit trail while
+stopping accidental work from continuing through the settlement path.
+
 The operations TUI provides the console workflow contract for planning,
 confirmation, launch, monitoring, reconnect, and completion review. It uses the
 same daemon job model as the CLI and Web UI, with visibility into file counts,

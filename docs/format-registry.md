@@ -32,7 +32,7 @@ The following current CLI outputs are machine-readable compatibility surfaces:
 
 - `dasobjectstore probe --json`;
 - `dasobjectstore health --json`;
-- `dasobjectstore ingest queue --json`;
+- `dasobjectstore ingest queue <STORE_ID> --json`;
 - `dasobjectstore ingest direct-import --json`;
 - `dasobjectstore disk drain --json`;
 - `dasobjectstore disk replace --json`;

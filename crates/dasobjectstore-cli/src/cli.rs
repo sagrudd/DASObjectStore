@@ -616,9 +616,12 @@ impl StoreS3UploadArgs {
 pub(crate) struct StoreDrainArgs {
     /// Store identifier to drain.
     store_id: StoreId,
-    /// Path to live.sqlite for the pool.
-    #[arg(long)]
-    live_sqlite_path: PathBuf,
+    /// Advanced override for the live SQLite metadata path.
+    #[arg(long, hide = true)]
+    live_sqlite_path: Option<PathBuf>,
+    /// Advanced override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
     /// Managed HDD mount root.
     #[arg(long)]
     hdd_root: Option<PathBuf>,
@@ -641,8 +644,12 @@ impl StoreDrainArgs {
         &self.store_id
     }
 
-    pub(crate) fn live_sqlite_path(&self) -> &Path {
-        &self.live_sqlite_path
+    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
+        self.live_sqlite_path.as_deref()
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
     }
 
     pub(crate) fn hdd_root(&self) -> Option<&Path> {
@@ -906,8 +913,10 @@ pub(crate) enum IngestCommand {
     Files(IngestFilesArgs),
     /// Report SSD ingest capacity and pressure state.
     Status(IngestStatusArgs),
-    /// Emit live ingest queue entries as JSON.
+    /// Inspect live ingest queue entries for a store.
     Queue(IngestQueueArgs),
+    /// Cancel active queued ingest jobs for a store.
+    DrainQueue(IngestDrainQueueArgs),
     /// Import a reproducible object directly to HDD, bypassing SSD ingest.
     DirectImport(IngestDirectImportArgs),
 }
@@ -1150,17 +1159,77 @@ impl IngestStatusArgs {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct IngestQueueArgs {
-    /// Path to live.sqlite for the pool.
-    #[arg(long)]
-    live_sqlite_path: PathBuf,
+    /// Store identifier whose queue entries should be listed.
+    store_id: StoreId,
+    /// Advanced override for the live SQLite metadata path.
+    #[arg(long, hide = true)]
+    live_sqlite_path: Option<PathBuf>,
     /// Emit queue entries as JSON.
     #[arg(long)]
     json: bool,
 }
 
 impl IngestQueueArgs {
-    pub(crate) fn live_sqlite_path(&self) -> &Path {
-        &self.live_sqlite_path
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
+        self.live_sqlite_path.as_deref()
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestDrainQueueArgs {
+    /// Store identifier whose active ingest jobs should be cancelled.
+    store_id: StoreId,
+    /// Advanced override for the live SQLite metadata path.
+    #[arg(long, hide = true)]
+    live_sqlite_path: Option<PathBuf>,
+    /// Show active queue jobs that would be cancelled without mutating metadata.
+    #[arg(long)]
+    dry_run: bool,
+    /// Policy allowance for cancelling active ingest queue jobs.
+    #[arg(long)]
+    allow_ingest_queue_drain: bool,
+    /// Action-time confirmation phrase: "confirm ingest queue drain".
+    #[arg(long, default_value = "")]
+    confirm: String,
+    /// Reason recorded on cancelled ingest jobs.
+    #[arg(long, default_value = "operator drained ingest queue")]
+    reason: String,
+    /// Emit the drain report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl IngestDrainQueueArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
+        self.live_sqlite_path.as_deref()
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    pub(crate) fn allow_ingest_queue_drain(&self) -> bool {
+        self.allow_ingest_queue_drain
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+
+    pub(crate) fn reason(&self) -> &str {
+        &self.reason
     }
 
     pub(crate) fn json(&self) -> bool {
@@ -2367,8 +2436,7 @@ mod tests {
             "dasobjectstore",
             "ingest",
             "queue",
-            "--live-sqlite-path",
-            "/tmp/live.sqlite",
+            "generated-data",
             "--json",
         ])
         .expect("ingest queue parses");
@@ -2378,10 +2446,42 @@ mod tests {
         };
         match args.command() {
             Some(IngestCommand::Queue(queue)) => {
-                assert_eq!(queue.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
+                assert_eq!(queue.store_id().as_str(), "generated-data");
+                assert_eq!(queue.live_sqlite_path(), None);
                 assert!(queue.json());
             }
             _ => panic!("expected queue command"),
+        }
+    }
+
+    #[test]
+    fn parses_ingest_drain_queue() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "drain-queue",
+            "generated-data",
+            "--dry-run",
+            "--allow-ingest-queue-drain",
+            "--confirm",
+            "confirm ingest queue drain",
+            "--json",
+        ])
+        .expect("ingest drain-queue parses");
+
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        match args.command() {
+            Some(IngestCommand::DrainQueue(drain)) => {
+                assert_eq!(drain.store_id().as_str(), "generated-data");
+                assert_eq!(drain.live_sqlite_path(), None);
+                assert!(drain.dry_run());
+                assert!(drain.allow_ingest_queue_drain());
+                assert_eq!(drain.confirm(), "confirm ingest queue drain");
+                assert!(drain.json());
+            }
+            _ => panic!("expected drain-queue command"),
         }
     }
 
@@ -2520,8 +2620,6 @@ mod tests {
             "store",
             "drain",
             "generated-data",
-            "--live-sqlite-path",
-            "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
             "--hdd-root",
             "/srv/dasobjectstore/hdd",
             "--allow-store-drain",
@@ -2537,10 +2635,7 @@ mod tests {
         match args.command() {
             Some(StoreCommand::Drain(drain)) => {
                 assert_eq!(drain.store_id().as_str(), "generated-data");
-                assert_eq!(
-                    drain.live_sqlite_path(),
-                    Path::new("/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite")
-                );
+                assert_eq!(drain.live_sqlite_path(), None);
                 assert_eq!(drain.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
                 assert!(drain.allow_store_drain());
                 assert_eq!(drain.confirm(), "confirm store drain");

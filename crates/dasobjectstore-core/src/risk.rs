@@ -9,6 +9,7 @@ pub enum RiskyOperation {
     ForceRetire,
     ForceReadWriteImport,
     PrepareDas,
+    IngestQueueDrain,
     StoreDrain,
     StoreDelete,
 }
@@ -20,6 +21,7 @@ impl RiskyOperation {
             Self::ForceRetire => "force_retire",
             Self::ForceReadWriteImport => "force_read_write_import",
             Self::PrepareDas => "prepare_das",
+            Self::IngestQueueDrain => "ingest_queue_drain",
             Self::StoreDrain => "store_drain",
             Self::StoreDelete => "store_delete",
         }
@@ -31,6 +33,7 @@ impl RiskyOperation {
             Self::ForceRetire => "confirm force retire",
             Self::ForceReadWriteImport => "confirm force read-write import",
             Self::PrepareDas => "confirm prepare das",
+            Self::IngestQueueDrain => "confirm ingest queue drain",
             Self::StoreDrain => "confirm store drain",
             Self::StoreDelete => "confirm store delete",
         }
@@ -43,6 +46,7 @@ pub struct RiskPolicy {
     pub allow_force_retire: bool,
     pub allow_force_read_write_import: bool,
     pub allow_prepare_das: bool,
+    pub allow_ingest_queue_drain: bool,
     pub allow_store_drain: bool,
     pub allow_store_delete: bool,
 }
@@ -54,6 +58,7 @@ impl RiskPolicy {
             RiskyOperation::ForceRetire => self.allow_force_retire,
             RiskyOperation::ForceReadWriteImport => self.allow_force_read_write_import,
             RiskyOperation::PrepareDas => self.allow_prepare_das,
+            RiskyOperation::IngestQueueDrain => self.allow_ingest_queue_drain,
             RiskyOperation::StoreDrain => self.allow_store_drain,
             RiskyOperation::StoreDelete => self.allow_store_delete,
         }
@@ -180,6 +185,10 @@ mod tests {
             "force_read_write_import"
         );
         assert_eq!(RiskyOperation::PrepareDas.name(), "prepare_das");
+        assert_eq!(
+            RiskyOperation::IngestQueueDrain.name(),
+            "ingest_queue_drain"
+        );
         assert_eq!(RiskyOperation::StoreDrain.name(), "store_drain");
         assert_eq!(RiskyOperation::StoreDelete.name(), "store_delete");
     }
@@ -261,16 +270,18 @@ mod tests {
         assert!(policy.allows(RiskyOperation::DirectToHddImport));
         assert!(!policy.allows(RiskyOperation::ForceRetire));
         assert!(!policy.allows(RiskyOperation::ForceReadWriteImport));
+        assert!(!policy.allows(RiskyOperation::IngestQueueDrain));
         assert!(!policy.allows(RiskyOperation::StoreDrain));
         assert!(!policy.allows(RiskyOperation::StoreDelete));
     }
 
-    fn all_risky_operations() -> [RiskyOperation; 6] {
+    fn all_risky_operations() -> [RiskyOperation; 7] {
         [
             RiskyOperation::DirectToHddImport,
             RiskyOperation::ForceRetire,
             RiskyOperation::ForceReadWriteImport,
             RiskyOperation::PrepareDas,
+            RiskyOperation::IngestQueueDrain,
             RiskyOperation::StoreDrain,
             RiskyOperation::StoreDelete,
         ]
@@ -292,6 +303,10 @@ mod tests {
             },
             RiskyOperation::PrepareDas => RiskPolicy {
                 allow_prepare_das: true,
+                ..RiskPolicy::default()
+            },
+            RiskyOperation::IngestQueueDrain => RiskPolicy {
+                allow_ingest_queue_drain: true,
                 ..RiskPolicy::default()
             },
             RiskyOperation::StoreDrain => RiskPolicy {

@@ -107,22 +107,24 @@ Always inspect the plan first:
 
 .. code-block:: console
 
-   sudo dasobjectstore store drain generated-data \
-     --live-sqlite-path /srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite \
-     --dry-run
+   sudo dasobjectstore store drain generated-data --dry-run
 
 To drain a store without deleting the store definition:
 
 .. code-block:: console
 
    sudo dasobjectstore store drain generated-data \
-     --live-sqlite-path /srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite \
      --allow-store-drain \
      --confirm "confirm store drain"
 
 Drain removes the store's object rows, placement rows, ingest-job rows, and
 known payload files. It leaves the store definition in the host and portable
 registries, so the store can be reused after the contents are cleared.
+
+The command resolves live metadata from the managed SSD root, using
+``DASOBJECTSTORE_SSD_ROOT`` when set and otherwise
+``/srv/dasobjectstore/ssd``. Operators should not need to pass a SQLite path for
+normal managed stores.
 
 To delete a store entirely:
 

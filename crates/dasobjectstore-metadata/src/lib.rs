@@ -85,10 +85,11 @@ pub use object::{
 };
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use queue::{
-    read_ingest_queue, DestagePriorityPolicy, DestageUrgency, IngestAdmission,
-    IngestBackpressurePolicy, IngestQueueEntry, IngestQueueJob, IngestQueuePlan,
-    IngestQueueReadError, IngestQueueSnapshot, DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY,
-    DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
+    drain_ingest_queue, read_ingest_queue, read_ingest_queue_for_store, DestagePriorityPolicy,
+    DestageUrgency, IngestAdmission, IngestBackpressurePolicy, IngestQueueDrainError,
+    IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueEntry, IngestQueueJob,
+    IngestQueuePlan, IngestQueueReadError, IngestQueueSnapshot,
+    DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY, DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
 };
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{

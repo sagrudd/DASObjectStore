@@ -3,9 +3,9 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
-    IngestCommand, IngestDirectImportArgs, IngestFilesArgs, IngestQueueArgs, IngestStatusArgs,
-    MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand,
-    ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
+    IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs,
+    IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
+    ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
     PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreCreateArgs,
     StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs, StoreS3UploadArgs,
@@ -50,17 +50,19 @@ use dasobjectstore_daemon::{
     UnixSocketDaemonTransport,
 };
 use dasobjectstore_metadata::{
-    attach_clean_pool_read_only, delete_store, drain_store, export_settled_object,
-    force_retire_disk, import_dirty_pool_read_only, import_reproducible_object_direct_to_hdd,
-    inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
-    put_object_ssd_first_with_progress, read_disk_drain_plan, read_disk_replacement_plan,
-    read_ingest_queue, read_object_inspect, request_disk_retirement, DestagePriorityPolicy,
-    DirectHddImportError, DirectHddImportRequest, DiskCopyRoot, DiskDrainError,
-    DiskRetirementError, IngestQueueReadError, ObjectExportError, ObjectExportRequest,
-    ObjectInspectError, ObjectPutError, ObjectPutProgress, ObjectPutProgressStage,
-    ObjectPutRequest, PoolInspectError, ReadOnlyAttachError, ReadOnlyAttachOptions,
-    SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError, StoreCleanupError,
-    StoreDeleteRequest, StoreDrainRequest,
+    attach_clean_pool_read_only, delete_store, drain_ingest_queue, drain_store,
+    export_settled_object, force_retire_disk, import_dirty_pool_read_only,
+    import_reproducible_object_direct_to_hdd, inspect_pool_metadata, measure_ssd_capacity,
+    put_object_ssd_first, put_object_ssd_first_with_progress, read_disk_drain_plan,
+    read_disk_replacement_plan, read_ingest_queue_for_store, read_object_inspect,
+    request_disk_retirement, DestagePriorityPolicy, DirectHddImportError, DirectHddImportRequest,
+    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
+    IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueReadError, IngestQueueSnapshot,
+    ObjectExportError, ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
+    ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
+    ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
+    StoreCleanupError, StoreDeleteRequest, StoreDrainRequest, LIVE_SQLITE_FILE_NAME,
+    METADATA_DIR_NAME,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -102,7 +104,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{collections::hash_map::DefaultHasher, collections::BTreeMap};
 
 #[cfg(unix)]
@@ -147,6 +149,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(IngestCommand::Files(args)) => run_ingest_files(args, writer),
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
             Some(IngestCommand::Queue(args)) => run_ingest_queue(args, writer),
+            Some(IngestCommand::DrainQueue(args)) => run_ingest_drain_queue(args, writer),
             Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
             None => Cli::write_subcommand_help("ingest", writer).map_err(CliError::Io),
         },
@@ -898,8 +901,13 @@ fn run_store_drain(args: &StoreDrainArgs, writer: &mut impl Write) -> Result<(),
         .hdd_root()
         .map(Path::to_path_buf)
         .unwrap_or_else(default_hdd_root);
+    let live_sqlite_path = resolve_store_live_sqlite_path(
+        args.store_id(),
+        args.live_sqlite_path(),
+        args.registry_path(),
+    )?;
     let report = drain_store(&StoreDrainRequest {
-        live_sqlite_path: args.live_sqlite_path().to_path_buf(),
+        live_sqlite_path,
         store_id: args.store_id().clone(),
         disk_roots: discover_managed_hdd_roots(&hdd_root)?,
         dry_run: args.dry_run(),
@@ -990,7 +998,7 @@ fn require_admin_for_destructive_store_action(dry_run: bool) -> Result<(), CliEr
     }
 
     Err(CliError::CommandFailed(
-        "store drain/delete requires an administrative user; rerun with sudo".to_string(),
+        "destructive storage cleanup requires an administrative user; rerun with sudo".to_string(),
     ))
 }
 
@@ -1408,6 +1416,45 @@ fn default_ssd_root() -> PathBuf {
     std::env::var_os("DASOBJECTSTORE_SSD_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/srv/dasobjectstore/ssd"))
+}
+
+fn resolve_live_sqlite_path(override_path: Option<&Path>) -> PathBuf {
+    override_path.map(Path::to_path_buf).unwrap_or_else(|| {
+        default_ssd_root()
+            .join(METADATA_DIR_NAME)
+            .join(LIVE_SQLITE_FILE_NAME)
+    })
+}
+
+fn resolve_store_live_sqlite_path(
+    store_id: &StoreId,
+    override_path: Option<&Path>,
+    registry_path: Option<&Path>,
+) -> Result<PathBuf, CliError> {
+    if override_path.is_none() {
+        let registry_path = registry_path
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_store_registry_path);
+        let store_exists = read_store_registry(&registry_path)?
+            .iter()
+            .any(|definition| &definition.store_id == store_id);
+        if !store_exists {
+            return Err(CliError::CommandFailed(format!(
+                "store `{store_id}` is not defined in {}",
+                registry_path.display()
+            )));
+        }
+    }
+
+    Ok(resolve_live_sqlite_path(override_path))
+}
+
+fn now_utc_string() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default();
+    format!("unix:{seconds}")
 }
 
 fn default_hdd_root() -> PathBuf {
@@ -2415,14 +2462,100 @@ fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result
 }
 
 fn run_ingest_queue(args: &IngestQueueArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    if !args.json() {
-        return Err(CliError::UnsupportedIngestQueueFormat);
+    let live_sqlite_path = resolve_live_sqlite_path(args.live_sqlite_path());
+    let snapshot = read_ingest_queue_for_store(&live_sqlite_path, args.store_id())?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_ingest_queue_summary(&snapshot, writer)?;
     }
 
-    let snapshot = read_ingest_queue(args.live_sqlite_path())?;
-    serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
-    writer.write_all(b"\n")?;
+    Ok(())
+}
 
+fn run_ingest_drain_queue(
+    args: &IngestDrainQueueArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    require_admin_for_destructive_store_action(args.dry_run())?;
+    if !args.dry_run() {
+        RiskGate::new(RiskPolicy {
+            allow_ingest_queue_drain: args.allow_ingest_queue_drain(),
+            ..RiskPolicy::default()
+        })
+        .evaluate(
+            RiskyOperation::IngestQueueDrain,
+            &ActionConfirmation::new(args.confirm()),
+        )?;
+    }
+
+    let request = IngestQueueDrainRequest {
+        live_sqlite_path: resolve_live_sqlite_path(args.live_sqlite_path()),
+        store_id: args.store_id().clone(),
+        updated_at_utc: now_utc_string(),
+        reason: args.reason().to_string(),
+        dry_run: args.dry_run(),
+    };
+    let report = drain_ingest_queue(&request)?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_ingest_queue_drain_report(&report, writer)?;
+    }
+
+    Ok(())
+}
+
+fn write_ingest_queue_summary(
+    snapshot: &IngestQueueSnapshot,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Ingest queue")?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        snapshot.live_sqlite_path.display()
+    )?;
+    writeln!(writer, "Jobs: {}", snapshot.jobs.len())?;
+    for job in &snapshot.jobs {
+        writeln!(
+            writer,
+            "- {} store={} state={} object_type={} received={} expected={}",
+            job.ingest_job_id,
+            job.store_id,
+            job.state,
+            job.object_type,
+            job.received_bytes,
+            job.expected_size_bytes
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        )?;
+    }
+    Ok(())
+}
+
+fn write_ingest_queue_drain_report(
+    report: &IngestQueueDrainReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    let action = if report.dry_run {
+        "would cancel"
+    } else {
+        "cancelled"
+    };
+    writeln!(writer, "Ingest queue drain")?;
+    writeln!(writer, "Store: {}", report.store_id)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        report.live_sqlite_path.display()
+    )?;
+    writeln!(writer, "Jobs {action}: {}", report.jobs_cancelled)?;
+    for job_id in &report.cancelled_job_ids {
+        writeln!(writer, "- {job_id}")?;
+    }
     Ok(())
 }
 
@@ -2685,6 +2818,7 @@ pub(crate) enum CliError {
     Io(io::Error),
     Json(serde_json::Error),
     IngestQueueRead(IngestQueueReadError),
+    IngestQueueDrain(IngestQueueDrainError),
     MetadataInspect(PoolInspectError),
     PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
@@ -2717,7 +2851,6 @@ pub(crate) enum CliError {
     Probe(ProbeError),
     StorePolicyValidation(StorePolicyValidationErrors),
     UnsupportedHealthFormat,
-    UnsupportedIngestQueueFormat,
     UnsupportedPoolImportMode,
     UnsupportedPoolImportState {
         state: PoolState,
@@ -2733,6 +2866,7 @@ impl Display for CliError {
             Self::Io(err) => write!(formatter, "failed to access command input or output: {err}"),
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
+            Self::IngestQueueDrain(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
@@ -2769,9 +2903,6 @@ impl Display for CliError {
             Self::UnsupportedHealthFormat => formatter.write_str(
                 "health requires at most one output format; use `--summary`, `--verbose`, or `--json`",
             ),
-            Self::UnsupportedIngestQueueFormat => {
-                formatter.write_str("ingest queue requires JSON output; use `--json`")
-            }
             Self::UnsupportedPoolImportMode => {
                 formatter.write_str("pool import currently requires `--read-only`")
             }
@@ -2809,6 +2940,12 @@ impl From<serde_json::Error> for CliError {
 impl From<IngestQueueReadError> for CliError {
     fn from(err: IngestQueueReadError) -> Self {
         Self::IngestQueueRead(err)
+    }
+}
+
+impl From<IngestQueueDrainError> for CliError {
+    fn from(err: IngestQueueDrainError) -> Self {
+        Self::IngestQueueDrain(err)
     }
 }
 
@@ -4457,6 +4594,7 @@ mod tests {
             "dasobjectstore",
             "ingest",
             "queue",
+            "store-a",
             "--live-sqlite-path",
             live_sqlite_path.to_str().expect("utf8 live sqlite path"),
             "--json",
@@ -4564,20 +4702,77 @@ mod tests {
     }
 
     #[test]
-    fn ingest_queue_requires_json_flag() {
+    fn ingest_queue_writes_pretty_snapshot_by_default() {
+        let root = temp_root("ingest-queue-pretty");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_ingest_job(&connection, "job-low", "Queued", 0, "2026-01-01T00:00:00Z");
         let cli = Cli::try_parse_from([
             "dasobjectstore",
             "ingest",
             "queue",
+            "store-a",
             "--live-sqlite-path",
-            "/tmp/live.sqlite",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
         ])
         .expect("ingest queue parses");
         let mut output = Vec::new();
 
-        let err = run(&cli, &mut output).expect_err("json flag is required");
+        run(&cli, &mut output).expect("ingest queue runs");
 
-        assert!(matches!(err, CliError::UnsupportedIngestQueueFormat));
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Ingest queue"));
+        assert!(output.contains("Jobs: 1"));
+        assert!(output.contains("job-low"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ingest_drain_queue_marks_active_jobs_cancelled() {
+        let root = temp_root("ingest-drain-queue");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_ingest_job(
+            &connection,
+            "job-active",
+            "Queued",
+            0,
+            "2026-01-01T00:00:00Z",
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "drain-queue",
+            "store-a",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+            "--dry-run",
+            "--allow-ingest-queue-drain",
+            "--confirm",
+            "confirm ingest queue drain",
+        ])
+        .expect("ingest drain-queue parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("ingest queue drains");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Ingest queue drain"));
+        assert!(output.contains("Jobs would cancel: 1"));
+        assert_eq!(ingest_job_state(&live_sqlite_path, "job-active"), "Queued");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
     #[test]
@@ -5219,6 +5414,17 @@ mod tests {
                 ),
             )
             .expect("ingest job inserts");
+    }
+
+    fn ingest_job_state(live_sqlite_path: &Path, ingest_job_id: &str) -> String {
+        let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
+        connection
+            .query_row(
+                "SELECT state FROM ingest_jobs WHERE ingest_job_id = ?1",
+                [ingest_job_id],
+                |row| row.get(0),
+            )
+            .expect("ingest job state")
     }
 
     fn insert_disk(connection: &Connection, disk_id: &str, state: &str) {
