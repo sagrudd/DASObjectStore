@@ -1,8 +1,13 @@
 use crate::api::{
     DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
-use crate::runtime::{DaemonServiceRuntimeError, GarageServiceController, ServiceCommandRunner};
+use crate::runtime::{
+    provision_garage_store_registry, DaemonServiceRuntimeError, GarageServiceController,
+    ServiceCommandRunner,
+};
+use dasobjectstore_object_service::{default_store_registry_path, ObjectServiceProviderId};
 use std::fmt::{self, Display};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -40,6 +45,11 @@ where
                 .lifecycle(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::ServiceLifecycle)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
+            DaemonApiRequest::ServiceProvision(request) => self
+                .service_orchestrator
+                .provision(request, &self.clock.now_utc())
+                .map(DaemonApiResponse::ServiceProvision)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime),
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
                 format!(
@@ -62,6 +72,12 @@ pub trait DaemonServiceOrchestrator {
         request: DaemonServiceLifecycleRequest,
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceLifecycleResponse, DaemonServiceRuntimeError>;
+
+    fn provision(
+        &self,
+        request: DaemonServiceProvisionRequest,
+        accepted_at_utc: &str,
+    ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError>;
 }
 
 impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
@@ -81,6 +97,41 @@ where
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceLifecycleResponse, DaemonServiceRuntimeError> {
         GarageServiceController::lifecycle(self, request, accepted_at_utc)
+    }
+
+    fn provision(
+        &self,
+        request: DaemonServiceProvisionRequest,
+        accepted_at_utc: &str,
+    ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError> {
+        request.validate()?;
+        let summary =
+            provision_garage_store_registry(self, default_store_registry_path(), request.dry_run)?;
+        let job_id_value = format!(
+            "service-provision-{}",
+            accepted_at_utc
+                .chars()
+                .map(|character| if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_ascii_lowercase()
+        );
+        let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
+            .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
+        Ok(DaemonServiceProvisionResponse::accepted(
+            job_id,
+            accepted_at_utc,
+            request.dry_run,
+            ObjectServiceProviderId::Garage,
+            summary.registry_path.to_string_lossy().to_string(),
+            summary.stores,
+            summary.buckets,
+            summary.commands,
+        ))
     }
 }
 
@@ -153,6 +204,7 @@ impl DaemonApiRequest {
             Self::CancelIngestJob(_) => "cancel_ingest_job",
             Self::ServiceStatus(_) => "service_status",
             Self::ServiceLifecycle(_) => "service_lifecycle",
+            Self::ServiceProvision(_) => "service_provision",
         }
     }
 }
@@ -166,7 +218,8 @@ mod tests {
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonRequestValidationError,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-        DaemonServiceStatusRequest, DaemonServiceStatusResponse, StoreInventoryRequest,
+        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, StoreInventoryRequest,
     };
     use crate::runtime::DaemonServiceRuntimeError;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -238,6 +291,40 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_service_provision_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-07T12:05:42Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::ServiceProvision(
+                DaemonServiceProvisionRequest {
+                    provider_id: ObjectServiceProviderId::Garage,
+                    dry_run: true,
+                    client_request_id: Some("request-1".to_string()),
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::ServiceProvision(DaemonServiceProvisionResponse {
+                buckets: 1,
+                commands: 3,
+                ..
+            })
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .provision_calls
+                .borrow()
+                .as_slice(),
+            &["2026-07-07T12:05:42Z".to_string()]
+        );
+    }
+
+    #[test]
     fn validates_request_before_dispatch() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -293,6 +380,7 @@ mod tests {
     struct FakeService {
         status_calls: RefCell<Vec<bool>>,
         lifecycle_calls: RefCell<Vec<String>>,
+        provision_calls: RefCell<Vec<String>>,
     }
 
     impl DaemonServiceOrchestrator for FakeService {
@@ -324,6 +412,27 @@ mod tests {
                 request.dry_run,
                 request.operation,
                 ObjectServiceProviderId::Garage,
+            ))
+        }
+
+        fn provision(
+            &self,
+            request: DaemonServiceProvisionRequest,
+            accepted_at_utc: &str,
+        ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError> {
+            self.provision_calls
+                .borrow_mut()
+                .push(accepted_at_utc.to_string());
+            Ok(DaemonServiceProvisionResponse::accepted(
+                crate::api::DaemonJobId::new("service-provision-2026-07-07t12-05-42z")
+                    .expect("job id"),
+                accepted_at_utc,
+                request.dry_run,
+                ObjectServiceProviderId::Garage,
+                "/etc/dasobjectstore/stores.json",
+                1,
+                1,
+                3,
             ))
         }
     }

@@ -4,8 +4,9 @@ use crate::api::{
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
 use dasobjectstore_object_service::{
-    plan_garage_provisioning, ObjectServiceError, ObjectServiceProviderId, ServiceState,
-    StoreServiceCredential,
+    generate_per_store_credentials, plan_garage_provisioning, plan_store_service_layout,
+    read_store_registry, ObjectServiceError, ObjectServiceProviderId, ServiceState,
+    StoreServiceCredential, SystemCredentialEntropy,
 };
 use serde_json::Value;
 use std::fmt::{self, Display};
@@ -128,6 +129,7 @@ where
         }
 
         Ok(GarageProvisioningSummary {
+            stores: credentials.len(),
             buckets: plan.bucket_count(),
             commands: plan.commands.len(),
         })
@@ -158,6 +160,15 @@ pub struct ServiceCommandOutput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GarageProvisioningSummary {
+    pub stores: usize,
+    pub buckets: usize,
+    pub commands: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GarageStoreRegistryProvisioningSummary {
+    pub registry_path: PathBuf,
+    pub stores: usize,
     pub buckets: usize,
     pub commands: usize,
 }
@@ -280,6 +291,38 @@ impl From<ObjectServiceError> for DaemonServiceRuntimeError {
     fn from(error: ObjectServiceError) -> Self {
         Self::ObjectService(error)
     }
+}
+
+pub fn provision_garage_store_registry<R>(
+    controller: &GarageServiceController<R>,
+    registry_path: impl Into<PathBuf>,
+    dry_run: bool,
+) -> Result<GarageStoreRegistryProvisioningSummary, DaemonServiceRuntimeError>
+where
+    R: ServiceCommandRunner,
+{
+    let registry_path = registry_path.into();
+    let definitions = read_store_registry(&registry_path)?;
+    let layout = plan_store_service_layout(&definitions)?;
+    let mut entropy = SystemCredentialEntropy;
+    let credentials = generate_per_store_credentials(&layout.credential_requests, &mut entropy)?;
+    let summary = if dry_run {
+        let plan = plan_garage_provisioning(&credentials)?;
+        GarageProvisioningSummary {
+            stores: credentials.len(),
+            buckets: plan.bucket_count(),
+            commands: plan.commands.len(),
+        }
+    } else {
+        controller.provision_buckets(&credentials)?
+    };
+
+    Ok(GarageStoreRegistryProvisioningSummary {
+        registry_path,
+        stores: summary.stores,
+        buckets: summary.buckets,
+        commands: summary.commands,
+    })
 }
 
 fn docker_compose_args(
@@ -476,11 +519,15 @@ mod tests {
         DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceStatusRequest,
     };
     use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::store::{StoreClass, StorePolicy};
     use dasobjectstore_object_service::{
         generate_per_store_credentials, CredentialEntropy, ObjectServiceError,
         ObjectServiceProviderId, ServiceState, StoreCredentialRequest, StoreServiceCredential,
+        StoreServiceDefinition,
     };
+    use std::fs;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn status_parses_running_compose_service() {
@@ -594,6 +641,36 @@ mod tests {
         assert!(message.contains("<redacted>"));
     }
 
+    #[test]
+    fn provision_store_registry_dry_run_counts_registry_bindings_without_commands() {
+        let registry_path = write_store_registry();
+        let runner = super::FakeRunner::with_stdout("");
+        let controller = GarageServiceController::new(config(), runner);
+
+        let summary = super::provision_garage_store_registry(&controller, &registry_path, true)
+            .expect("registry provision planned");
+
+        assert_eq!(summary.registry_path, registry_path);
+        assert_eq!(summary.stores, 1);
+        assert_eq!(summary.buckets, 1);
+        assert_eq!(summary.commands, 3);
+        assert!(controller.runner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn provision_store_registry_executes_commands_from_registry_bindings() {
+        let registry_path = write_store_registry();
+        let runner = super::FakeRunner::with_stdout("");
+        let controller = GarageServiceController::new(config(), runner);
+
+        let summary = super::provision_garage_store_registry(&controller, &registry_path, false)
+            .expect("registry provisioned");
+
+        assert_eq!(summary.stores, 1);
+        assert_eq!(summary.commands, 3);
+        assert_eq!(controller.runner.calls.borrow().len(), 3);
+    }
+
     fn config() -> GarageServiceRuntimeConfig {
         GarageServiceRuntimeConfig {
             compose_file: PathBuf::from("/etc/dasobjectstore/garage.compose.yml"),
@@ -616,6 +693,32 @@ mod tests {
             &mut FixedEntropy::default(),
         )
         .expect("credentials generated")
+    }
+
+    fn write_store_registry() -> PathBuf {
+        let path = temp_root().join("stores.json");
+        let definitions = vec![StoreServiceDefinition {
+            store_id: StoreId::new("generated").expect("store id"),
+            policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+            bucket_name: Some("dos-generated".to_string()),
+            writer_group: Some("mnemosyne".to_string()),
+        }];
+        let parent = path.parent().expect("registry parent");
+        fs::create_dir_all(parent).expect("registry dir");
+        let file = fs::File::create(&path).expect("registry file");
+        serde_json::to_writer_pretty(file, &definitions).expect("registry written");
+        path
+    }
+
+    fn temp_root() -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-daemon-service-{}-{now}",
+            std::process::id()
+        ))
     }
 
     #[derive(Default)]

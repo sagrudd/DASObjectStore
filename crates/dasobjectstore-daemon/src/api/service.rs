@@ -53,12 +53,74 @@ impl DaemonServiceLifecycleRequest {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceProvisionRequest {
+    pub provider_id: ObjectServiceProviderId,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+}
+
+impl DaemonServiceProvisionRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.provider_id != ObjectServiceProviderId::Garage {
+            return Err(DaemonRequestValidationError::UnsupportedServiceProvider {
+                provider: self.provider_id.name().to_string(),
+            });
+        }
+        if self
+            .client_request_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(DaemonRequestValidationError::BlankClientRequestId);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonServiceOperation {
     Start,
     Stop,
     Restart,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceProvisionResponse {
+    pub accepted: DaemonJobAcceptedResponse,
+    pub provider_id: ObjectServiceProviderId,
+    pub registry_path: String,
+    pub stores: usize,
+    pub buckets: usize,
+    pub commands: usize,
+}
+
+impl DaemonServiceProvisionResponse {
+    pub fn accepted(
+        job_id: DaemonJobId,
+        accepted_at_utc: impl Into<String>,
+        dry_run: bool,
+        provider_id: ObjectServiceProviderId,
+        registry_path: impl Into<String>,
+        stores: usize,
+        buckets: usize,
+        commands: usize,
+    ) -> Self {
+        Self {
+            accepted: DaemonJobAcceptedResponse {
+                job_id,
+                kind: DaemonJobKind::ServiceOperation,
+                accepted_at_utc: accepted_at_utc.into(),
+                dry_run,
+            },
+            provider_id,
+            registry_path: registry_path.into(),
+            stores,
+            buckets,
+            commands,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -93,7 +155,8 @@ impl DaemonServiceLifecycleResponse {
 mod tests {
     use super::{
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-        DaemonServiceStatusDetail, DaemonServiceStatusResponse,
+        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
+        DaemonServiceStatusResponse,
     };
     use crate::api::{DaemonJobId, DaemonJobKind, DaemonRequestValidationError};
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -153,6 +216,24 @@ mod tests {
     }
 
     #[test]
+    fn provision_request_rejects_non_selected_provider() {
+        let request = DaemonServiceProvisionRequest {
+            provider_id: ObjectServiceProviderId::Rustfs,
+            dry_run: false,
+            client_request_id: None,
+        };
+
+        let err = request.validate().expect_err("RustFS is not selected");
+
+        assert_eq!(
+            err,
+            DaemonRequestValidationError::UnsupportedServiceProvider {
+                provider: "rustfs".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn lifecycle_response_uses_service_operation_job_kind() {
         let response = DaemonServiceLifecycleResponse::accepted(
             DaemonJobId::new("service-1").expect("job id"),
@@ -163,6 +244,25 @@ mod tests {
         );
 
         assert_eq!(response.accepted.kind, DaemonJobKind::ServiceOperation);
+        assert!(response.accepted.dry_run);
+    }
+
+    #[test]
+    fn provision_response_uses_service_operation_job_kind() {
+        let response = DaemonServiceProvisionResponse::accepted(
+            DaemonJobId::new("service-provision-1").expect("job id"),
+            "2026-07-07T12:05:42Z",
+            true,
+            ObjectServiceProviderId::Garage,
+            "/etc/dasobjectstore/stores.json",
+            2,
+            2,
+            6,
+        );
+
+        assert_eq!(response.accepted.kind, DaemonJobKind::ServiceOperation);
+        assert_eq!(response.buckets, 2);
+        assert_eq!(response.commands, 6);
         assert!(response.accepted.dry_run);
     }
 }

@@ -28,7 +28,8 @@ pub use jobs::{
 };
 pub use service::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-    DaemonServiceStatusDetail, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 
@@ -44,6 +45,7 @@ pub enum DaemonApiRequest {
     CancelIngestJob(CancelIngestJobRequest),
     ServiceStatus(DaemonServiceStatusRequest),
     ServiceLifecycle(DaemonServiceLifecycleRequest),
+    ServiceProvision(DaemonServiceProvisionRequest),
 }
 
 impl DaemonApiRequest {
@@ -52,6 +54,7 @@ impl DaemonApiRequest {
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::CancelIngestJob(request) => request.validate(),
             Self::ServiceLifecycle(request) => request.validate(),
+            Self::ServiceProvision(request) => request.validate(),
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
             | Self::IngestJobStatus(_)
@@ -70,6 +73,7 @@ pub enum DaemonApiResponse {
     CancelIngestJob(CancelIngestJobResponse),
     ServiceStatus(DaemonServiceStatusResponse),
     ServiceLifecycle(DaemonServiceLifecycleResponse),
+    ServiceProvision(DaemonServiceProvisionResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
 }
@@ -93,7 +97,8 @@ impl DaemonApiErrorResponse {
 mod tests {
     use super::{
         DaemonApiRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
-        DaemonServiceStatusRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, StoreInventoryRequest,
+        SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -131,19 +136,37 @@ mod tests {
             dry_run: true,
             client_request_id: None,
         });
+        let provision = DaemonApiRequest::ServiceProvision(DaemonServiceProvisionRequest {
+            provider_id: ObjectServiceProviderId::Garage,
+            dry_run: true,
+            client_request_id: None,
+        });
 
         let status = serde_json::to_value(status).expect("status request serializes");
         let lifecycle = serde_json::to_value(lifecycle).expect("lifecycle request serializes");
+        let provision = serde_json::to_value(provision).expect("provision request serializes");
 
         assert_eq!(status["command"], "service_status");
         assert_eq!(lifecycle["command"], "service_lifecycle");
         assert_eq!(lifecycle["payload"]["operation"], "start");
+        assert_eq!(provision["command"], "service_provision");
     }
 
     #[test]
     fn delegates_service_lifecycle_validation() {
         let request = DaemonApiRequest::ServiceLifecycle(DaemonServiceLifecycleRequest {
             operation: DaemonServiceOperation::Start,
+            provider_id: ObjectServiceProviderId::Rustfs,
+            dry_run: false,
+            client_request_id: None,
+        });
+
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn delegates_service_provision_validation() {
+        let request = DaemonApiRequest::ServiceProvision(DaemonServiceProvisionRequest {
             provider_id: ObjectServiceProviderId::Rustfs,
             dry_run: false,
             client_request_id: None,

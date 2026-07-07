@@ -11,8 +11,9 @@ pub use unix_socket::UnixSocketDaemonTransport;
 use crate::api::{
     CancelIngestJobRequest, CancelIngestJobResponse, DaemonApiRequest, DaemonApiResponse,
     DaemonHealthSummaryRequest, DaemonHealthSummaryResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    IngestJobStatusRequest, IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestJobStatusRequest,
+    IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 
@@ -106,6 +107,16 @@ where
             response => Err(unexpected("service_lifecycle", response)),
         }
     }
+
+    pub fn service_provision(
+        &self,
+        request: DaemonServiceProvisionRequest,
+    ) -> Result<DaemonServiceProvisionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ServiceProvision(request))? {
+            DaemonApiResponse::ServiceProvision(response) => Ok(response),
+            response => Err(unexpected("service_provision", response)),
+        }
+    }
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -124,6 +135,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::CancelIngestJob(_) => "cancel_ingest_job",
         DaemonApiResponse::ServiceStatus(_) => "service_status",
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
+        DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }
@@ -134,9 +146,9 @@ mod tests {
     use super::{DaemonClient, DaemonClientError, InProcessDaemonTransport};
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
-        SubmitIngestFilesRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -266,6 +278,42 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::ServiceLifecycle(_)]
+        ));
+    }
+
+    #[test]
+    fn service_provision_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ServiceProvision(
+                DaemonServiceProvisionResponse::accepted(
+                    crate::api::DaemonJobId::new("service-provision-1").expect("job id"),
+                    "2026-07-07T12:05:42Z",
+                    true,
+                    ObjectServiceProviderId::Garage,
+                    "/etc/dasobjectstore/stores.json",
+                    1,
+                    1,
+                    3,
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .service_provision(DaemonServiceProvisionRequest {
+                provider_id: ObjectServiceProviderId::Garage,
+                dry_run: true,
+                client_request_id: Some("request-1".to_string()),
+            })
+            .expect("service provision response");
+
+        assert!(response.accepted.dry_run);
+        assert_eq!(response.commands, 3);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ServiceProvision(_)]
         ));
     }
 }
