@@ -1,6 +1,8 @@
 use super::{DaemonClientError, DaemonClientTransport};
 use crate::api::{DaemonApiRequest, DaemonApiResponse};
+use crate::runtime::DEFAULT_DAEMON_GROUP;
 use std::io::{BufRead, BufReader, Write};
+use std::io::{Error as IoError, ErrorKind};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
@@ -24,10 +26,7 @@ impl UnixSocketDaemonTransport {
 impl DaemonClientTransport for UnixSocketDaemonTransport {
     fn send(&self, request: DaemonApiRequest) -> Result<DaemonApiResponse, DaemonClientError> {
         let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
-            DaemonClientError::Transport(format!(
-                "failed to connect to {}: {error}",
-                self.socket_path.display()
-            ))
+            DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
         })?;
         serde_json::to_writer(&mut stream, &request)
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
@@ -46,9 +45,22 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
     }
 }
 
+fn connect_error_message(socket_path: &Path, error: &IoError) -> String {
+    if error.kind() == ErrorKind::PermissionDenied {
+        return format!(
+            "failed to connect to {}: {error}. The packaged daemon socket is restricted to members of the `{}` group. Ask an administrator to run `sudo usermod -aG {} \"$USER\"`, then start a new login session and verify membership with `id -nG`.",
+            socket_path.display(),
+            DEFAULT_DAEMON_GROUP,
+            DEFAULT_DAEMON_GROUP
+        );
+    }
+
+    format!("failed to connect to {}: {error}", socket_path.display())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::UnixSocketDaemonTransport;
+    use super::{connect_error_message, UnixSocketDaemonTransport};
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse,
@@ -57,6 +69,7 @@ mod tests {
     use crate::server::UnixSocketDaemonServer;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::fs;
+    use std::io::{Error as IoError, ErrorKind};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::thread;
@@ -104,6 +117,18 @@ mod tests {
             .expect_err("missing socket rejected");
 
         assert!(matches!(error, DaemonClientError::Transport(_)));
+    }
+
+    #[test]
+    fn unix_socket_transport_explains_permission_denied() {
+        let message = connect_error_message(
+            PathBuf::from("/run/dasobjectstore/dasobjectstored.sock").as_path(),
+            &IoError::from(ErrorKind::PermissionDenied),
+        );
+
+        assert!(message.contains("restricted to members of the `dasobjectstore` group"));
+        assert!(message.contains("sudo usermod -aG dasobjectstore \"$USER\""));
+        assert!(message.contains("start a new login session"));
     }
 
     fn unique_socket_path() -> PathBuf {

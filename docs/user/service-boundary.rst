@@ -35,13 +35,26 @@ The Unix-domain socket is the local client transport. The daemon will use peer
 credentials on Linux to identify the submitting local actor before accepting
 storage-mutating jobs.
 
+Packaged installations restrict the socket directory and socket file to the
+``dasobjectstore`` group. A local user must be in this transport group before
+the CLI can connect to ``dasobjectstored``:
+
+.. code-block:: console
+
+   sudo usermod -aG dasobjectstore "$USER"
+
+Start a new login session after changing group membership, then verify it with
+``id -nG``. Store writer groups such as ``mnemosyne`` are still checked
+separately by store policy after the client has connected to the daemon.
+
 Permission Model
 ----------------
 
 Managed DAS roots should be owned by the daemon service identity. Ingest users
-should be members of the relevant store writer group, for example
-``mnemosyne``, but that group authorizes daemon job submission. It should not be
-used to grant broad write access to individual HDD filesystems.
+should be members of the daemon transport group and the relevant store writer
+group, for example ``mnemosyne``. The writer group authorizes daemon job
+submission for that store. It should not be used to grant broad write access to
+individual HDD filesystems.
 
 The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary

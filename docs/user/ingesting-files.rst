@@ -107,6 +107,16 @@ The daemon socket path in packaged Linux deployments is:
 
    /run/dasobjectstore/dasobjectstored.sock
 
+If the CLI reports ``Permission denied`` while connecting to this socket, the
+current login session is not in the daemon transport group. Ask an administrator
+to add the user to ``dasobjectstore`` and then start a new login session:
+
+.. code-block:: console
+
+   sudo usermod -aG dasobjectstore "$USER"
+
+Check the active session with ``id -nG`` before retrying ingest.
+
 Existing Objects
 ----------------
 
@@ -165,11 +175,12 @@ Store creation and writer-group assignment are administrator actions:
      --class reproducible_cache \
      --writer-group mnemosyne
 
-Add ingest users to the writer group so the daemon can authorize their ingest
-jobs:
+Add ingest users to the daemon transport group and the store writer group so the
+CLI can connect and the daemon can authorize their ingest jobs:
 
 .. code-block:: console
 
+   sudo usermod -aG dasobjectstore "$USER"
    sudo usermod -aG mnemosyne "$USER"
 
 The user must start a new login session before the new group is visible to
@@ -179,8 +190,9 @@ normal processes. Check membership with:
 
    id
 
-The output must include ``mnemosyne`` before non-root ingest job submission will
-be allowed. If the group already exists, skip ``groupadd``.
+The output must include both ``dasobjectstore`` and ``mnemosyne`` before
+non-root ingest job submission will be allowed. If the group already exists,
+skip ``groupadd``.
 
 The copy count defaults to the store policy. Use ``--copies`` only when the
 override is intentional:
