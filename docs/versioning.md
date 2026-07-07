@@ -1,12 +1,13 @@
 # Versioning Policy
 
-Status: Draft  
+Status: Active
 Applies to: DASObjectStore source, CLI, service contracts, and persistent
 metadata formats
 
 ## Semantic Versioning
 
 DASObjectStore SHALL use semantic versioning once releases begin.
+Releases have begun at `0.1.1`.
 
 Version numbers follow:
 
@@ -17,6 +18,12 @@ MAJOR.MINOR.PATCH
 - `PATCH` releases contain compatible fixes only.
 - `MINOR` releases add backward-compatible behavior.
 - `MAJOR` releases may introduce breaking changes.
+
+Patch and minor bumps may be applied automatically with compatible fixes or
+backward-compatible features. Major version bumps require explicit agreement
+from both the user and the coding agent before landing.
+
+Every version change must update `CHANGELOG.md`.
 
 ## Pre-1.0 Compatibility
 

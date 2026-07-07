@@ -39,7 +39,7 @@ mod tests {
             health,
             ApiHealth {
                 service: "dasobjectstore-gui-api".to_string(),
-                version: "0.0.0".to_string(),
+                version: dasobjectstore_core::VERSION.to_string(),
                 status: ApiStatus::Development,
             }
         );

@@ -11,7 +11,7 @@ fn product_manifest_declares_dasobjectstore_plugin_contract() {
     assert_eq!(manifest["schema_version"], PRODUCT_MANIFEST_SCHEMA_VERSION);
     assert_eq!(manifest["product"]["id"], "dasobjectstore");
     assert_eq!(manifest["product"]["name"], "DASObjectStore");
-    assert_eq!(manifest["product"]["version"], "0.0.0");
+    assert_eq!(manifest["product"]["version"], env!("CARGO_PKG_VERSION"));
     assert!(manifest["modes"]["standalone"]
         .as_bool()
         .expect("standalone is bool"));

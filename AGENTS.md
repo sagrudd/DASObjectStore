@@ -14,11 +14,19 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 
 ## Versioning
 
-- Maintain semantic versioning once releases begin.
+- Maintain semantic versioning for every release; releases have begun at
+  `0.1.1`.
+- Keep the Rust workspace package version as the source of truth for Rust
+  crates and CLI/server `--version` output.
+- Keep `CHANGELOG.md` updated for every version change.
 - Use version changes intentionally:
-  - patch for compatible fixes;
+  - patch for compatible fixes and documentation-only release corrections;
   - minor for backward-compatible features;
   - major for breaking changes.
+- Apply patch and minor version bumps automatically when the delivered work
+  warrants them.
+- Do not apply a major version bump without clear agreement from both the user
+  and the coding agent in the thread.
 - Document version-impacting decisions before changing public interfaces,
   persistent metadata formats, CLI behavior, or store/pool compatibility rules.
 
