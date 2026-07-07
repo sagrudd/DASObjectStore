@@ -8,7 +8,8 @@ use crate::cli::{
     ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
     PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreCreateArgs,
-    StoreDefaultsArgs, StoreListArgs, StoreValidateArgs,
+    StoreDefaultsArgs, StoreListArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand,
+    SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -58,9 +59,12 @@ use dasobjectstore_mnemosyne::{
     NasNfsEndpointValidationError,
 };
 use dasobjectstore_object_service::{
-    default_store_registry_path, plan_store_service_layout, portable_store_registry_path,
-    read_store_registry, render_compose, upsert_store_definition, ComposeRenderRequest,
-    ComposeServiceConfig, ObjectServiceError, StoreRegistryUpdateReport, StoreServiceDefinition,
+    create_subobject_definition, default_store_registry_path, default_subobject_registry_path,
+    mirror_subobject_definition, plan_store_service_layout, portable_store_registry_path,
+    portable_subobject_registry_path, read_store_registry, read_subobject_registry, render_compose,
+    search_subobjects, upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig,
+    ObjectServiceError, StoreRegistryUpdateReport, StoreServiceDefinition, SubObjectDefinition,
+    SubObjectParent, SubObjectRegistryUpdateReport,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -117,6 +121,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
             None => Cli::write_subcommand_help("ingest", writer).map_err(CliError::Io),
         },
+        Some(Command::Subobject(args)) => run_subobject(args, writer),
         Some(Command::Object(args)) => match args.command() {
             ObjectCommand::Export(args) => run_object_export(args, writer),
             ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
@@ -995,12 +1000,179 @@ fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Resu
     Ok(())
 }
 
+fn run_subobject(args: &SubobjectArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    match args.command() {
+        SubobjectCommand::Create(args) => run_subobject_create(args, writer),
+        SubobjectCommand::List(args) => run_subobject_list(args, writer),
+        SubobjectCommand::Search(args) => run_subobject_search(args, writer),
+    }
+}
+
+fn run_subobject_create(
+    args: &SubobjectCreateArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_subobject_registry_path);
+    let parent = subobject_parent_from_args(args)?;
+    let report = create_subobject_definition(&registry_path, args.name(), parent)?;
+    let portable_report =
+        mirror_portable_subobject_definition(args.ssd_root(), &report.definition)?;
+
+    write_subobject_create_report(&report, portable_report.as_ref(), writer)
+}
+
+fn subobject_parent_from_args(args: &SubobjectCreateArgs) -> Result<SubObjectParent, CliError> {
+    match (args.store(), args.parent()) {
+        (Some(store_id), None) => {
+            let stores_registry_path = args
+                .stores_registry_path()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(default_store_registry_path);
+            let store_exists = read_store_registry(&stores_registry_path)?
+                .iter()
+                .any(|definition| definition.store_id == *store_id);
+            if !store_exists {
+                return Err(CliError::CommandFailed(format!(
+                    "store {} was not found in {}",
+                    store_id,
+                    stores_registry_path.display()
+                )));
+            }
+            Ok(SubObjectParent::Store {
+                store_id: store_id.clone(),
+            })
+        }
+        (None, Some(name)) => Ok(SubObjectParent::SubObject {
+            name: name.to_string(),
+        }),
+        _ => Err(CliError::CommandFailed(
+            "subobject create requires exactly one of --store or --parent".to_string(),
+        )),
+    }
+}
+
+fn run_subobject_list(args: &SubobjectListArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_subobject_registry_path);
+    let definitions = read_subobject_registry(&registry_path)?;
+
+    writeln!(writer, "SubObjects: {}", definitions.len())?;
+    for definition in definitions {
+        write_subobject_definition_line(&definition, writer)?;
+    }
+
+    Ok(())
+}
+
+fn run_subobject_search(
+    args: &SubobjectSearchArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_subobject_registry_path);
+    let definitions = read_subobject_registry(&registry_path)?;
+    let matches = search_subobjects(&definitions, args.query());
+
+    writeln!(writer, "SubObjects matched: {}", matches.len())?;
+    for definition in matches {
+        write_subobject_definition_line(definition, writer)?;
+    }
+
+    Ok(())
+}
+
+fn write_subobject_create_report(
+    report: &SubObjectRegistryUpdateReport,
+    portable_report: Option<&SubObjectRegistryUpdateReport>,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(writer, "SubObject {}", report.action.as_str())?;
+    writeln!(writer, "Name: {}", report.definition.name)?;
+    writeln!(writer, "Store: {}", report.definition.store_id)?;
+    writeln!(
+        writer,
+        "Parent: {}",
+        subobject_parent_label(&report.definition.parent)
+    )?;
+    writeln!(
+        writer,
+        "Object prefix: {}",
+        report.definition.object_prefix()
+    )?;
+    writeln!(
+        writer,
+        "Registry: {}",
+        report.registry_path.to_string_lossy()
+    )?;
+    match portable_report {
+        Some(report) => writeln!(
+            writer,
+            "Portable registry: {}",
+            report.registry_path.to_string_lossy()
+        )?,
+        None => writeln!(writer, "Portable registry: not detected")?,
+    }
+
+    Ok(())
+}
+
+fn mirror_portable_subobject_definition(
+    ssd_root: Option<&Path>,
+    definition: &SubObjectDefinition,
+) -> Result<Option<SubObjectRegistryUpdateReport>, CliError> {
+    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root)? else {
+        return Ok(None);
+    };
+    let registry_path = portable_subobject_registry_path(&ssd_root);
+    let report = mirror_subobject_definition(&registry_path, definition.clone())?;
+
+    Ok(Some(report))
+}
+
+fn write_subobject_definition_line(
+    definition: &SubObjectDefinition,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(
+        writer,
+        "- {} store={} parent={} prefix={}",
+        definition.name,
+        definition.store_id,
+        subobject_parent_label(&definition.parent),
+        definition.object_prefix()
+    )?;
+
+    Ok(())
+}
+
+fn subobject_parent_label(parent: &SubObjectParent) -> String {
+    match parent {
+        SubObjectParent::Store { store_id } => format!("store:{store_id}"),
+        SubObjectParent::SubObject { name } => format!("subobject:{name}"),
+    }
+}
+
 #[derive(Clone, Debug)]
 struct FileIngestEntry {
     source_path: PathBuf,
     relative_path: PathBuf,
     object_id: ObjectId,
     size_bytes: u64,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedIngestEndpoint {
+    endpoint_name: String,
+    endpoint_kind: &'static str,
+    store: StoreServiceDefinition,
+    object_prefix: String,
 }
 
 fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1014,30 +1186,29 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
         .registry_path()
         .map(Path::to_path_buf)
         .unwrap_or_else(default_store_registry_path);
-    let store = read_store_registry(&registry_path)?
-        .into_iter()
-        .find(|definition| definition.store_id == *args.store_id())
-        .ok_or_else(|| {
-            CliError::CommandFailed(format!(
-                "store {} was not found in {}",
-                args.store_id(),
-                registry_path.display()
-            ))
-        })?;
-    let copies = args.copies().unwrap_or(store.policy.copies);
+    let subobject_registry_path = args
+        .subobject_registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_subobject_registry_path);
+    let endpoint =
+        resolve_ingest_endpoint(args.endpoint(), &registry_path, &subobject_registry_path)?;
+    let copies = args.copies().unwrap_or(endpoint.store.policy.copies);
     if copies == 0 || disk_roots.len() < copies as usize {
         return Err(CliError::CommandFailed(format!(
             "ingest files requires at least {copies} disk root mapping(s), got {}",
             disk_roots.len()
         )));
     }
-    let files = collect_ingest_files(args.source(), args.store_id())?;
+    let files = collect_ingest_files(args.source(), &endpoint.object_prefix)?;
     let total_source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
     let total_work_bytes = total_source_bytes.saturating_mul(u64::from(copies) + 1);
 
     writeln!(writer, "File ingest plan")?;
-    writeln!(writer, "Store: {}", args.store_id())?;
-    writeln!(writer, "Class: {}", store.policy.class.name())?;
+    writeln!(writer, "Endpoint: {}", endpoint.endpoint_name)?;
+    writeln!(writer, "Endpoint kind: {}", endpoint.endpoint_kind)?;
+    writeln!(writer, "Store: {}", endpoint.store.store_id)?;
+    writeln!(writer, "Object prefix: {}", endpoint.object_prefix)?;
+    writeln!(writer, "Class: {}", endpoint.store.policy.class.name())?;
     writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
     writeln!(writer, "SSD root: {}", ssd_root.to_string_lossy())?;
     writeln!(writer, "Files: {}", files.len())?;
@@ -1144,7 +1315,68 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
     Ok(())
 }
 
-fn collect_ingest_files(root: &Path, store_id: &StoreId) -> Result<Vec<FileIngestEntry>, CliError> {
+fn resolve_ingest_endpoint(
+    endpoint: &StoreId,
+    store_registry_path: &Path,
+    subobject_registry_path: &Path,
+) -> Result<ResolvedIngestEndpoint, CliError> {
+    let stores = read_store_registry(store_registry_path)?;
+    let store_match = stores
+        .iter()
+        .find(|definition| definition.store_id == *endpoint);
+    let subobjects = read_subobject_registry(subobject_registry_path)?;
+    let subobject_match = subobjects
+        .iter()
+        .find(|definition| definition.name == endpoint.as_str());
+
+    if store_match.is_some() && subobject_match.is_some() {
+        return Err(CliError::CommandFailed(format!(
+            "ingest endpoint {} is ambiguous; both an object store and a SubObject use that name",
+            endpoint
+        )));
+    }
+
+    if let Some(store) = store_match {
+        return Ok(ResolvedIngestEndpoint {
+            endpoint_name: endpoint.as_str().to_string(),
+            endpoint_kind: "object_store",
+            store: store.clone(),
+            object_prefix: store.store_id.as_str().to_string(),
+        });
+    }
+
+    if let Some(subobject) = subobject_match {
+        let store = stores
+            .iter()
+            .find(|definition| definition.store_id == subobject.store_id)
+            .ok_or_else(|| {
+                CliError::CommandFailed(format!(
+                    "SubObject {} references missing store {} in {}",
+                    subobject.name,
+                    subobject.store_id,
+                    store_registry_path.display()
+                ))
+            })?;
+        return Ok(ResolvedIngestEndpoint {
+            endpoint_name: subobject.name.clone(),
+            endpoint_kind: "subobject",
+            store: store.clone(),
+            object_prefix: subobject.object_prefix(),
+        });
+    }
+
+    Err(CliError::CommandFailed(format!(
+        "ingest endpoint {} was not found in {} or {}",
+        endpoint,
+        store_registry_path.display(),
+        subobject_registry_path.display()
+    )))
+}
+
+fn collect_ingest_files(
+    root: &Path,
+    object_prefix: &str,
+) -> Result<Vec<FileIngestEntry>, CliError> {
     if !root.is_dir() {
         return Err(CliError::CommandFailed(format!(
             "ingest source must be a directory: {}",
@@ -1153,7 +1385,7 @@ fn collect_ingest_files(root: &Path, store_id: &StoreId) -> Result<Vec<FileInges
     }
 
     let mut files = Vec::new();
-    collect_ingest_files_into(root, root, store_id, &mut files)?;
+    collect_ingest_files_into(root, root, object_prefix, &mut files)?;
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
 
     Ok(files)
@@ -1162,7 +1394,7 @@ fn collect_ingest_files(root: &Path, store_id: &StoreId) -> Result<Vec<FileInges
 fn collect_ingest_files_into(
     root: &Path,
     current: &Path,
-    store_id: &StoreId,
+    object_prefix: &str,
     files: &mut Vec<FileIngestEntry>,
 ) -> Result<(), CliError> {
     for entry in fs::read_dir(current)? {
@@ -1170,7 +1402,7 @@ fn collect_ingest_files_into(
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
-            collect_ingest_files_into(root, &path, store_id, files)?;
+            collect_ingest_files_into(root, &path, object_prefix, files)?;
         } else if file_type.is_file() {
             let metadata = entry.metadata()?;
             let relative_path = path
@@ -1178,7 +1410,7 @@ fn collect_ingest_files_into(
                 .map_err(|err| CliError::CommandFailed(err.to_string()))?
                 .to_path_buf();
             files.push(FileIngestEntry {
-                object_id: object_id_for_ingested_file(store_id, &relative_path)?,
+                object_id: object_id_for_ingested_file(object_prefix, &relative_path)?,
                 source_path: path,
                 relative_path,
                 size_bytes: metadata.len(),
@@ -1190,7 +1422,7 @@ fn collect_ingest_files_into(
 }
 
 fn object_id_for_ingested_file(
-    store_id: &StoreId,
+    object_prefix: &str,
     relative_path: &Path,
 ) -> Result<ObjectId, CliError> {
     let relative = relative_path
@@ -1198,7 +1430,7 @@ fn object_id_for_ingested_file(
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/");
-    ObjectId::new(format!("{}/{}", store_id.as_str(), relative))
+    ObjectId::new(format!("{object_prefix}/{relative}"))
         .map_err(|err| CliError::CommandFailed(err.to_string()))
 }
 
@@ -2828,6 +3060,7 @@ mod tests {
         let ssd_root = root.join("ssd");
         let hdd_root = root.join("hdd-a");
         let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
         fs::create_dir_all(source_root.join("nested")).expect("create source");
         fs::create_dir_all(&hdd_root).expect("create hdd root");
         create_known_ssd_marker(&ssd_root);
@@ -2857,6 +3090,10 @@ mod tests {
             &format!("disk-a={}", hdd_root.to_string_lossy()),
             "--registry-path",
             registry_path.to_str().expect("utf8 registry path"),
+            "--subobject-registry-path",
+            subobject_registry_path
+                .to_str()
+                .expect("utf8 subobject registry path"),
         ])
         .expect("ingest files parses");
         let mut output = Vec::new();
@@ -2872,6 +3109,185 @@ mod tests {
         assert!(output.contains("remaining=0"));
         assert!(output.contains("File complete: nested/sample.fastq.gz"));
         assert!(output.contains("File ingest complete"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn subobject_create_list_and_search_report_nested_prefixes() {
+        let root = temp_root("subobject-cli");
+        let stores_registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        let ssd_root = root.join("ssd");
+        fs::create_dir_all(&root).expect("create temp root");
+        create_known_ssd_marker(&ssd_root);
+        write_store_definitions_file(
+            &stores_registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("ENA").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+                bucket_name: Some("dos-ena".to_string()),
+            }],
+        );
+
+        for args in [
+            vec![
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Xenognostikon",
+                "--store",
+                "ENA",
+                "--registry-path",
+                subobject_registry_path
+                    .to_str()
+                    .expect("utf8 subobject path"),
+                "--ssd-root",
+                ssd_root.to_str().expect("utf8 ssd root"),
+                "--stores-registry-path",
+                stores_registry_path.to_str().expect("utf8 store path"),
+            ],
+            vec![
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Vervet",
+                "--parent",
+                "Xenognostikon",
+                "--registry-path",
+                subobject_registry_path
+                    .to_str()
+                    .expect("utf8 subobject path"),
+                "--ssd-root",
+                ssd_root.to_str().expect("utf8 ssd root"),
+            ],
+        ] {
+            let cli = Cli::try_parse_from(args).expect("subobject create parses");
+            let mut output = Vec::new();
+            run(&cli, &mut output).expect("subobject create runs");
+        }
+        assert!(
+            ssd_root
+                .join(".dasobjectstore")
+                .join("subobjects.json")
+                .is_file(),
+            "portable SubObject registry should be mirrored to the SSD"
+        );
+
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "subobject",
+            "search",
+            "vervet",
+            "--registry-path",
+            subobject_registry_path
+                .to_str()
+                .expect("utf8 subobject path"),
+        ])
+        .expect("subobject search parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("subobject search runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("SubObjects matched: 1"));
+        assert!(output.contains("Vervet"));
+        assert!(output.contains("prefix=ENA/Xenognostikon/Vervet"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ingest_files_resolves_nested_subobject_endpoint() {
+        let root = temp_root("ingest-files-subobject");
+        let source_root = root.join("external");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd-a");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        fs::create_dir_all(source_root.join("nested")).expect("create source");
+        fs::create_dir_all(&hdd_root).expect("create hdd root");
+        create_known_ssd_marker(&ssd_root);
+        fs::write(
+            source_root.join("nested").join("sample.fastq.gz"),
+            b"ACGT".repeat(128),
+        )
+        .expect("write source file");
+        write_store_definitions_file(
+            &registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("ENA").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+                bucket_name: Some("dos-ena".to_string()),
+            }],
+        );
+        run(
+            &Cli::try_parse_from([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Xenognostikon",
+                "--store",
+                "ENA",
+                "--registry-path",
+                subobject_registry_path
+                    .to_str()
+                    .expect("utf8 subobject path"),
+                "--stores-registry-path",
+                registry_path.to_str().expect("utf8 registry path"),
+            ])
+            .expect("subobject create parses"),
+            &mut Vec::new(),
+        )
+        .expect("top-level subobject create runs");
+        run(
+            &Cli::try_parse_from([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Vervet",
+                "--parent",
+                "Xenognostikon",
+                "--registry-path",
+                subobject_registry_path
+                    .to_str()
+                    .expect("utf8 subobject path"),
+            ])
+            .expect("subobject create parses"),
+            &mut Vec::new(),
+        )
+        .expect("nested subobject create runs");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "Vervet",
+            "--source",
+            source_root.to_str().expect("utf8 source root"),
+            "--ssd-root",
+            ssd_root.to_str().expect("utf8 ssd root"),
+            "--disk-root",
+            &format!("disk-a={}", hdd_root.to_string_lossy()),
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+            "--subobject-registry-path",
+            subobject_registry_path
+                .to_str()
+                .expect("utf8 subobject path"),
+        ])
+        .expect("ingest files parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("ingest files runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Endpoint: Vervet"));
+        assert!(output.contains("Endpoint kind: subobject"));
+        assert!(output.contains("Store: ENA"));
+        assert!(output.contains("Object prefix: ENA/Xenognostikon/Vervet"));
+        assert!(output.contains(
+            "Importing nested/sample.fastq.gz as ENA/Xenognostikon/Vervet/nested/sample.fastq.gz"
+        ));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

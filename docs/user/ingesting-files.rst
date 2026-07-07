@@ -2,8 +2,8 @@ Ingesting Files from a Mounted Disk
 ===================================
 
 Use ``dasobjectstore ingest files`` to load a directory tree from an external
-disk into a system-managed object store. Do not copy files directly onto DAS
-member disks.
+disk into a system-managed object store or SubObject endpoint. Do not copy files
+directly onto DAS member disks.
 
 The command reads the store policy, stages each file through the DAS SSD, writes
 the requested verified HDD copies, and reports byte-level progress while the
@@ -96,11 +96,20 @@ Source Layout and Object IDs
 ----------------------------
 
 The command imports regular files beneath ``--source``. Object IDs are derived
-from the store ID and relative path. For example:
+from the resolved endpoint prefix and relative path. For a direct object store,
+the endpoint prefix is the store ID. For example:
 
 .. code-block:: text
 
    zymo_fecal_2025.05/nested/sample.fastq.gz
+
+For a nested SubObject, the endpoint prefix includes the root store and
+SubObject path. For example, importing into ``Vervet`` beneath
+``ENA/Xenognostikon`` produces:
+
+.. code-block:: text
+
+   ENA/Xenognostikon/Vervet/nested/sample.fastq.gz
 
 Symlinks and non-regular files are not imported by this path.
 
@@ -111,4 +120,3 @@ This command performs synchronous ingest and settlement. It gives clear operator
 progress for large local imports, but it is not yet a resumable job scheduler.
 If an import is interrupted, inspect the output and rerun after checking the
 store state.
-

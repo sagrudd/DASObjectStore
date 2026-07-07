@@ -51,6 +51,8 @@ pub(crate) enum Command {
     Store(StoreArgs),
     /// Inspect SSD ingest and destage work.
     Ingest(IngestArgs),
+    /// Manage named SubObject endpoints.
+    Subobject(SubobjectArgs),
     /// Inspect object metadata.
     Object(ObjectArgs),
     /// Render and manage the S3-compatible object service.
@@ -685,8 +687,8 @@ pub(crate) enum IngestCommand {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct IngestFilesArgs {
-    /// Store receiving the imported files.
-    store_id: StoreId,
+    /// Store or SubObject endpoint receiving the imported files.
+    endpoint: StoreId,
     /// Mounted source directory containing files to import.
     #[arg(long)]
     source: PathBuf,
@@ -705,11 +707,14 @@ pub(crate) struct IngestFilesArgs {
     /// Advanced test override for the system-managed store registry path.
     #[arg(long, hide = true)]
     registry_path: Option<PathBuf>,
+    /// Advanced test override for the system-managed SubObject registry path.
+    #[arg(long, hide = true)]
+    subobject_registry_path: Option<PathBuf>,
 }
 
 impl IngestFilesArgs {
-    pub(crate) fn store_id(&self) -> &StoreId {
-        &self.store_id
+    pub(crate) fn endpoint(&self) -> &StoreId {
+        &self.endpoint
     }
 
     pub(crate) fn source(&self) -> &Path {
@@ -730,6 +735,111 @@ impl IngestFilesArgs {
 
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
+
+    pub(crate) fn subobject_registry_path(&self) -> Option<&Path> {
+        self.subobject_registry_path.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct SubobjectArgs {
+    #[command(subcommand)]
+    command: SubobjectCommand,
+}
+
+impl SubobjectArgs {
+    pub(crate) fn command(&self) -> &SubobjectCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum SubobjectCommand {
+    /// Create a named SubObject endpoint.
+    Create(SubobjectCreateArgs),
+    /// List named SubObject endpoints.
+    List(SubobjectListArgs),
+    /// Search SubObject endpoints by name or path.
+    Search(SubobjectSearchArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct SubobjectCreateArgs {
+    /// Unique SubObject endpoint name.
+    name: String,
+    /// Parent object store for a top-level SubObject.
+    #[arg(long, conflicts_with = "parent")]
+    store: Option<StoreId>,
+    /// Parent SubObject name for a nested SubObject.
+    #[arg(long)]
+    parent: Option<String>,
+    /// DAS SSD root used for portable SubObject metadata.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
+    /// Advanced test override for the system-managed SubObject registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    stores_registry_path: Option<PathBuf>,
+}
+
+impl SubobjectCreateArgs {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn store(&self) -> Option<&StoreId> {
+        self.store.as_ref()
+    }
+
+    pub(crate) fn parent(&self) -> Option<&str> {
+        self.parent.as_deref()
+    }
+
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
+
+    pub(crate) fn stores_registry_path(&self) -> Option<&Path> {
+        self.stores_registry_path.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct SubobjectListArgs {
+    /// Advanced test override for the system-managed SubObject registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl SubobjectListArgs {
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct SubobjectSearchArgs {
+    /// Case-insensitive name or path fragment.
+    query: String,
+    /// Advanced test override for the system-managed SubObject registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl SubobjectSearchArgs {
+    pub(crate) fn query(&self) -> &str {
+        &self.query
     }
 
     pub(crate) fn registry_path(&self) -> Option<&Path> {
@@ -1261,7 +1371,7 @@ mod tests {
     use super::{
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
         MnemosyneCommand, ObjectCommand, PoolCommand, ProbeArgs, ServiceCommand, StoreArgs,
-        StoreCommand,
+        StoreCommand, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -1884,7 +1994,7 @@ mod tests {
         };
         match args.command() {
             Some(IngestCommand::Files(files)) => {
-                assert_eq!(files.store_id().as_str(), "zymo_fecal_2025.05");
+                assert_eq!(files.endpoint().as_str(), "zymo_fecal_2025.05");
                 assert_eq!(files.source(), Path::new("/mnt/external/zymo"));
                 assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
                 assert_eq!(
@@ -1895,6 +2005,31 @@ mod tests {
                 assert!(files.dry_run());
             }
             _ => panic!("expected files command"),
+        }
+    }
+
+    #[test]
+    fn parses_subobject_create_under_store() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "subobject",
+            "create",
+            "Xenognostikon",
+            "--store",
+            "ENA",
+        ])
+        .expect("subobject create parses");
+
+        let Some(Command::Subobject(args)) = cli.command() else {
+            panic!("expected subobject command");
+        };
+        match args.command() {
+            SubobjectCommand::Create(create) => {
+                assert_eq!(create.name(), "Xenognostikon");
+                assert_eq!(create.store().expect("store").as_str(), "ENA");
+                assert_eq!(create.parent(), None);
+            }
+            _ => panic!("expected create command"),
         }
     }
 

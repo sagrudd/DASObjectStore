@@ -12,4 +12,5 @@ stabilized in the current MVP.
    nas-endpoints
    disk-preparation
    object-stores
+   subobjects
    ingesting-files

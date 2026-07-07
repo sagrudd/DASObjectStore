@@ -5,6 +5,7 @@ pub mod credentials;
 pub mod layout;
 pub mod provider;
 pub mod registry;
+pub mod subobject;
 
 pub use compose::{render_compose, ComposeServiceConfig};
 pub use credentials::{
@@ -21,6 +22,12 @@ pub use registry::{
     default_store_registry_path, portable_store_registry_path, read_store_registry,
     upsert_store_definition, StoreRegistryAction, StoreRegistryUpdateReport,
     PORTABLE_STORE_REGISTRY_RELATIVE_PATH, STORE_REGISTRY_ENV,
+};
+pub use subobject::{
+    create_subobject_definition, default_subobject_registry_path, mirror_subobject_definition,
+    portable_subobject_registry_path, read_subobject_registry, search_subobjects,
+    SubObjectDefinition, SubObjectParent, SubObjectRegistryAction, SubObjectRegistryUpdateReport,
+    PORTABLE_SUBOBJECT_REGISTRY_RELATIVE_PATH,
 };
 
 /// Returns the object service crate version.
