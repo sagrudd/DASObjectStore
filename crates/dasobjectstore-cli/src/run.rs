@@ -125,7 +125,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
                 run_mnemosyne_validate_nas_nfs_endpoint(args, writer)
             }
         },
-        _ => Ok(()),
+        None => Cli::write_help(writer).map_err(CliError::Io),
     }
 }
 
@@ -1308,6 +1308,21 @@ mod tests {
     use std::fs::{self, File};
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn bare_invocation_writes_top_level_help() {
+        let cli = Cli::try_parse_from(["dasobjectstore"]).expect("root command parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("help writes");
+
+        let output = String::from_utf8(output).expect("utf8 help");
+        assert!(output.contains("Portable mixed-disk DAS object store"));
+        assert!(output.contains("Usage: dasobjectstore"));
+        assert!(output.contains("Commands:"));
+        assert!(output.contains("disk"));
+        assert!(output.contains("health"));
+    }
 
     #[test]
     fn probe_without_format_returns_clear_error() {

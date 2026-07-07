@@ -1,9 +1,10 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::ids::{DiskId, ObjectId};
 use dasobjectstore_core::store::StoreClass;
 use dasobjectstore_object_service::ObjectServiceProviderId;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 /// Portable mixed-disk DAS object store.
@@ -17,6 +18,12 @@ pub(crate) struct Cli {
 impl Cli {
     pub(crate) fn command(&self) -> Option<&Command> {
         self.command.as_ref()
+    }
+
+    pub(crate) fn write_help(writer: &mut impl Write) -> io::Result<()> {
+        let mut command = <Self as CommandFactory>::command();
+        command.write_help(writer)?;
+        writeln!(writer)
     }
 }
 
