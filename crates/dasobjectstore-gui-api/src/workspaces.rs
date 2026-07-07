@@ -833,5 +833,21 @@ mod tests {
                 && operation.requires_sudo_administrator
                 && operation.blocked_reason.is_some()
         }));
+        assert_eq!(
+            view.operations[0].kind,
+            LocalGroupOperationKindView::CreateLocalGroup
+        );
+        assert_eq!(
+            view.operations[0].blocked_reason.as_deref(),
+            Some("Current OS user must be a sudo-derived DASObjectStore administrator.")
+        );
+        assert_eq!(
+            view.operations[1].kind,
+            LocalGroupOperationKindView::AssignLocalUserToGroup
+        );
+        assert_eq!(
+            view.operations[1].blocked_reason.as_deref(),
+            Some("Current OS user must be a sudo-derived DASObjectStore administrator.")
+        );
     }
 }

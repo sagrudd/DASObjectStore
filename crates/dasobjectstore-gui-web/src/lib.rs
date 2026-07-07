@@ -29,7 +29,10 @@ pub use stores::{
     store_create_action_api_path, stores_workspace_api_path, subobject_create_action_api_path,
     STORES_WORKSPACE_ROUTE, STORE_CREATE_ACTION_ROUTE, SUBOBJECT_CREATE_ACTION_ROUTE,
 };
-pub use users_groups::{users_groups_workspace_api_path, USERS_GROUPS_WORKSPACE_ROUTE};
+pub use users_groups::{
+    users_groups_workspace_api_path, ASSIGN_LOCAL_USER_TO_GROUP_OPERATION,
+    CREATE_LOCAL_GROUP_OPERATION, USERS_GROUPS_WORKSPACE_ROUTE,
+};
 
 /// Returns the GUI web crate version.
 pub fn version() -> &'static str {

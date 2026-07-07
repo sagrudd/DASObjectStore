@@ -284,6 +284,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn action_plan_route_rejects_invalid_store_create_request() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "store_create",
+                "store_id": "generated-data"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "store_create");
+        assert_eq!(encoded["missing_fields"], json!(["store_class"]));
+    }
+
+    #[tokio::test]
     async fn action_plan_route_returns_subobject_create_plan() {
         let response = post_json(
             "/api/v1/actions/plan",

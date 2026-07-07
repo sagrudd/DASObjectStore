@@ -407,16 +407,19 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   and mobile-width layouts.
 - [x] Verify the UI does not use a landing-page pattern after login and opens
   directly into the operations Overview.
-- [ ] Add standalone Users/Groups API and Yew workspace where host mode allows
+- [x] Add standalone Users/Groups API and Yew workspace where host mode allows
   local user and group management.
-- [ ] Add group creation and local-user-to-group assignment surfaces that align
+- [x] Add group creation and local-user-to-group assignment surfaces that align
   with daemon writer/admin policy.
-- [ ] Add ObjectStore creation/configuration surfaces through the Web UI where
+- [x] Add ObjectStore creation/configuration surfaces through the Web UI where
   the existing store registry/domain APIs are stable.
-- [ ] Add SubObject creation/configuration surfaces through the Web UI where the
+- [x] Add SubObject creation/configuration surfaces through the Web UI where the
   existing SubObject registry/domain APIs are stable.
-- [ ] Add Web UI tests for admin-only access, permission-denied states, group
-  membership changes, ObjectStore creation, and SubObject creation.
+- [x] Add Web UI tests for admin-only access, permission-denied states, group
+  management operation surfaces, ObjectStore creation, and SubObject creation.
+- [ ] Add daemon-backed execution routes for local group creation and
+  local-user-to-group assignment once daemon administrator policy APIs are
+  available.
 
 ## Milestone 18: Parallel Ingress Operations TUI
 

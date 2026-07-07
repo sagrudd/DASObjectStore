@@ -412,6 +412,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standalone_users_groups_workspace_rejects_invalid_session() {
+        let root = temp_root("standalone-users-groups-invalid-session");
+        let auth_store = registered_auth_store(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/workspaces/users-groups")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, "invalid")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn standalone_users_groups_workspace_returns_authority_payload() {
         let root = temp_root("standalone-users-groups");
         let auth_store = registered_auth_store(&root);

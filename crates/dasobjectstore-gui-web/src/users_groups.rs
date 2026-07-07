@@ -1,4 +1,6 @@
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = "workspaces/users-groups";
+pub const CREATE_LOCAL_GROUP_OPERATION: &str = "create_local_group";
+pub const ASSIGN_LOCAL_USER_TO_GROUP_OPERATION: &str = "assign_local_user_to_group";
 
 pub fn users_groups_workspace_api_path(api_base_path: &str) -> String {
     format!(
@@ -40,14 +42,14 @@ pub fn users_groups_workspace(props: &UsersGroupsWorkspaceProps) -> Html {
                 <section
                     class="dos-users-groups__panel"
                     data-panel="create-local-group"
-                    data-operation="create_local_group"
+                    data-operation={CREATE_LOCAL_GROUP_OPERATION}
                 >
                     <h2>{ "Create Group" }</h2>
                 </section>
                 <section
                     class="dos-users-groups__panel"
                     data-panel="assign-local-user-to-group"
-                    data-operation="assign_local_user_to_group"
+                    data-operation={ASSIGN_LOCAL_USER_TO_GROUP_OPERATION}
                 >
                     <h2>{ "Assign User to Group" }</h2>
                 </section>
@@ -64,13 +66,25 @@ pub fn users_groups_workspace(props: &UsersGroupsWorkspaceProps) -> Html {
 
 #[cfg(test)]
 mod tests {
-    use super::users_groups_workspace_api_path;
+    use super::{
+        users_groups_workspace_api_path, ASSIGN_LOCAL_USER_TO_GROUP_OPERATION,
+        CREATE_LOCAL_GROUP_OPERATION,
+    };
 
     #[test]
     fn builds_users_groups_workspace_api_path() {
         assert_eq!(
             users_groups_workspace_api_path("/products/dasobjectstore/api/v1/"),
             "/products/dasobjectstore/api/v1/workspaces/users-groups"
+        );
+    }
+
+    #[test]
+    fn exposes_group_management_operation_ids() {
+        assert_eq!(CREATE_LOCAL_GROUP_OPERATION, "create_local_group");
+        assert_eq!(
+            ASSIGN_LOCAL_USER_TO_GROUP_OPERATION,
+            "assign_local_user_to_group"
         );
     }
 }
