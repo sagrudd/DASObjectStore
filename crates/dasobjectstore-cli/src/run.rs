@@ -4,9 +4,10 @@ use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
     HealthArgs, IngestCommand, IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs,
     MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand,
-    ObjectExportArgs, ObjectInspectArgs, PoolCommand, PoolImportArgs, PoolInspectArgs,
-    PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs,
-    ServiceStatusArgs, StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
+    ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
+    PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
+    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
+    StoreValidateArgs,
 };
 mod output;
 
@@ -15,8 +16,8 @@ use self::output::{
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
     write_host_connection_status, write_ingest_direct_import_report, write_ingest_status,
     write_nas_nfs_endpoint_validation_report, write_object_export_report,
-    write_object_inspect_summary, write_pool_import_report, write_pool_inspect_summary,
-    write_pool_repair_dry_run, write_pretty_report,
+    write_object_inspect_summary, write_object_put_report, write_pool_import_report,
+    write_pool_inspect_summary, write_pool_repair_dry_run, write_pretty_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -26,12 +27,12 @@ use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, force_retire_disk,
     import_dirty_pool_read_only, import_reproducible_object_direct_to_hdd, inspect_pool_metadata,
-    measure_ssd_capacity, read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue,
-    read_object_inspect, request_disk_retirement, DestagePriorityPolicy, DirectHddImportError,
-    DirectHddImportRequest, DiskCopyRoot, DiskDrainError, DiskRetirementError,
-    IngestQueueReadError, ObjectExportError, ObjectExportRequest, ObjectInspectError,
-    PoolInspectError, ReadOnlyAttachError, ReadOnlyAttachOptions, SsdCapacityMeasurementError,
-    SsdCapacityPolicy, SsdCapacityPolicyError,
+    measure_ssd_capacity, put_object_ssd_first, read_disk_drain_plan, read_disk_replacement_plan,
+    read_ingest_queue, read_object_inspect, request_disk_retirement, DestagePriorityPolicy,
+    DirectHddImportError, DirectHddImportRequest, DiskCopyRoot, DiskDrainError,
+    DiskRetirementError, IngestQueueReadError, ObjectExportError, ObjectExportRequest,
+    ObjectInspectError, ObjectPutError, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
+    ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -96,6 +97,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Object(args)) => match args.command() {
             ObjectCommand::Export(args) => run_object_export(args, writer),
             ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
+            ObjectCommand::Put(args) => run_object_put(args, writer),
         },
         Some(Command::Service(args)) => match args.command() {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
@@ -777,6 +779,27 @@ fn run_object_export(args: &ObjectExportArgs, writer: &mut impl Write) -> Result
     Ok(())
 }
 
+fn run_object_put(args: &ObjectPutArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let disk_roots = parse_disk_roots(args.disk_roots())?;
+    let request = ObjectPutRequest::new(
+        args.object_id().clone(),
+        args.source(),
+        args.ssd_root(),
+        disk_roots,
+        args.copies(),
+    );
+    let report = put_object_ssd_first(&request)?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_object_put_report(&report, writer)?;
+    }
+
+    Ok(())
+}
+
 fn parse_disk_roots(values: &[String]) -> Result<Vec<DiskCopyRoot>, CliError> {
     values
         .iter()
@@ -926,6 +949,7 @@ pub(crate) enum CliError {
     DirectHddImport(DirectHddImportError),
     ObjectExport(ObjectExportError),
     ObjectInspect(ObjectInspectError),
+    ObjectPut(ObjectPutError),
     ObjectService(ObjectServiceError),
     MneionBindingSnippet(MneionBindingSnippetError),
     MneionStorageDefinition(MneionStorageDefinitionError),
@@ -964,6 +988,7 @@ impl Display for CliError {
             Self::DirectHddImport(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
+            Self::ObjectPut(err) => write!(formatter, "{err}"),
             Self::ObjectService(err) => write!(formatter, "{err}"),
             Self::MneionBindingSnippet(err) => write!(formatter, "{err}"),
             Self::MneionStorageDefinition(err) => write!(formatter, "{err}"),
@@ -1063,6 +1088,12 @@ impl From<ObjectInspectError> for CliError {
 impl From<ObjectExportError> for CliError {
     fn from(err: ObjectExportError) -> Self {
         Self::ObjectExport(err)
+    }
+}
+
+impl From<ObjectPutError> for CliError {
+    fn from(err: ObjectPutError) -> Self {
+        Self::ObjectPut(err)
     }
 }
 
@@ -2099,6 +2130,46 @@ mod tests {
             fs::read(&destination_path).expect("read exported payload"),
             b"settled payload"
         );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn object_put_stages_and_settles_verified_copies() {
+        let root = temp_root("object-put");
+        let source_path = root.join("source.fastq.gz");
+        let ssd_root = root.join("ssd");
+        let disk_a = root.join("disk-a");
+        let disk_b = root.join("disk-b");
+        fs::create_dir_all(&root).expect("create temp root");
+        fs::write(&source_path, b"settle this payload").expect("write source");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "put",
+            "object-a",
+            "--source",
+            source_path.to_str().expect("utf8 source path"),
+            "--ssd-root",
+            ssd_root.to_str().expect("utf8 ssd path"),
+            "--disk-root",
+            &format!("disk-a={}", disk_a.to_string_lossy()),
+            "--disk-root",
+            &format!("disk-b={}", disk_b.to_string_lossy()),
+            "--copies",
+            "2",
+        ])
+        .expect("object put parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("object put runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Object put complete"));
+        assert!(output.contains("Object: object-a"));
+        assert!(output.contains("Settled copies: 2"));
+        assert!(output.contains("disk=disk-a"));
+        assert!(output.contains("disk=disk-b"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

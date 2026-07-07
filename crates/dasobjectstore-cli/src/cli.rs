@@ -563,6 +563,8 @@ pub(crate) enum ObjectCommand {
     Export(ObjectExportArgs),
     /// Inspect one object from live metadata.
     Inspect(ObjectInspectArgs),
+    /// Stage one object on SSD and settle verified HDD copies.
+    Put(ObjectPutArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -598,6 +600,53 @@ impl ObjectExportArgs {
 
     pub(crate) fn disk_roots(&self) -> &[String] {
         &self.disk_roots
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ObjectPutArgs {
+    /// Object identifier to store.
+    object_id: ObjectId,
+    /// Source file to import.
+    #[arg(long)]
+    source: PathBuf,
+    /// SSD ingest root used for the mandatory fast landing copy.
+    #[arg(long)]
+    ssd_root: PathBuf,
+    /// Disk root mapping in the form disk-id=/mounted/disk/root.
+    #[arg(long = "disk-root")]
+    disk_roots: Vec<String>,
+    /// Number of verified HDD copies to settle.
+    #[arg(long, default_value_t = 1)]
+    copies: u8,
+    /// Emit put report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl ObjectPutArgs {
+    pub(crate) fn object_id(&self) -> &ObjectId {
+        &self.object_id
+    }
+
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
+    }
+
+    pub(crate) fn ssd_root(&self) -> &Path {
+        &self.ssd_root
+    }
+
+    pub(crate) fn disk_roots(&self) -> &[String] {
+        &self.disk_roots
+    }
+
+    pub(crate) fn copies(&self) -> u8 {
+        self.copies
     }
 
     pub(crate) fn json(&self) -> bool {
@@ -1284,7 +1333,7 @@ mod tests {
             panic!("expected object command");
         };
         match args.command() {
-            ObjectCommand::Export(_) => panic!("expected inspect command"),
+            ObjectCommand::Export(_) | ObjectCommand::Put(_) => panic!("expected inspect command"),
             ObjectCommand::Inspect(inspect) => {
                 assert_eq!(inspect.object_id().as_str(), "object-a");
                 assert_eq!(inspect.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
@@ -1321,7 +1370,52 @@ mod tests {
                 assert_eq!(export.disk_roots(), &["disk-a=/Volumes/disk-a".to_string()]);
                 assert!(export.json());
             }
-            ObjectCommand::Inspect(_) => panic!("expected export command"),
+            ObjectCommand::Inspect(_) | ObjectCommand::Put(_) => panic!("expected export command"),
+        }
+    }
+
+    #[test]
+    fn parses_object_put() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "object",
+            "put",
+            "object-a",
+            "--source",
+            "/tmp/input/object-a",
+            "--ssd-root",
+            "/tmp/ssd",
+            "--disk-root",
+            "disk-a=/Volumes/disk-a",
+            "--disk-root",
+            "disk-b=/Volumes/disk-b",
+            "--copies",
+            "2",
+            "--json",
+        ])
+        .expect("object put parses");
+
+        let Some(Command::Object(args)) = cli.command() else {
+            panic!("expected object command");
+        };
+        match args.command() {
+            ObjectCommand::Put(put) => {
+                assert_eq!(put.object_id().as_str(), "object-a");
+                assert_eq!(put.source(), Path::new("/tmp/input/object-a"));
+                assert_eq!(put.ssd_root(), Path::new("/tmp/ssd"));
+                assert_eq!(
+                    put.disk_roots(),
+                    &[
+                        "disk-a=/Volumes/disk-a".to_string(),
+                        "disk-b=/Volumes/disk-b".to_string()
+                    ]
+                );
+                assert_eq!(put.copies(), 2);
+                assert!(put.json());
+            }
+            ObjectCommand::Export(_) | ObjectCommand::Inspect(_) => {
+                panic!("expected put command")
+            }
         }
     }
 

@@ -3,8 +3,8 @@ use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use dasobjectstore_metadata::{
     DestagePriorityPolicy, DirectHddImportReport, DiskDrainAction, DiskDrainObjectSummary,
     DiskDrainPlanSummary, DiskReplacementPlanSummary, DiskRetirementReport, ObjectExportReport,
-    ObjectInspectSummary, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity, SsdCapacityPolicy,
-    SsdPressure,
+    ObjectInspectSummary, ObjectPutReport, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity,
+    SsdCapacityPolicy, SsdPressure,
 };
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
@@ -553,6 +553,39 @@ pub(super) fn write_object_export_report(
     )?;
     writeln!(writer, "Bytes written: {}", report.bytes_written)?;
     writeln!(writer, "Content hash: {}", report.content_hash)
+}
+
+pub(super) fn write_object_put_report(
+    report: &ObjectPutReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Object put complete")?;
+    writeln!(writer, "Object: {}", report.object_id)?;
+    writeln!(writer, "Source: {}", report.source_path.to_string_lossy())?;
+    writeln!(
+        writer,
+        "Staged payload: {}",
+        report.staged_payload_path.to_string_lossy()
+    )?;
+    writeln!(writer, "Bytes staged: {}", report.bytes_staged)?;
+    writeln!(
+        writer,
+        "Content hash: {}:{}",
+        report.content_hash_algorithm, report.content_hash
+    )?;
+    writeln!(writer, "Settled copies: {}", report.placements.len())?;
+    for placement in &report.placements {
+        writeln!(
+            writer,
+            "- copy {} disk={} bytes={} path={}",
+            placement.copy_number,
+            placement.disk_id,
+            placement.bytes_written,
+            placement.destination_path.to_string_lossy()
+        )?;
+    }
+
+    Ok(())
 }
 
 pub(super) fn write_nas_nfs_endpoint_validation_report(

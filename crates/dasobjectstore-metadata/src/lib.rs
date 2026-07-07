@@ -13,6 +13,7 @@ mod hash;
 pub mod ingest;
 pub mod initialize;
 pub mod inspect;
+pub mod local_object_store;
 pub mod manifest;
 pub mod markers;
 pub mod object;
@@ -62,6 +63,10 @@ pub use initialize::{
     METADATA_DIR_NAME, SNAPSHOT_DIR_NAME,
 };
 pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
+pub use local_object_store::{
+    put_object_ssd_first, ObjectPutError, ObjectPutPlacementReport, ObjectPutReport,
+    ObjectPutRequest,
+};
 pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,
     POOL_MANIFEST_FORMAT_VERSION,

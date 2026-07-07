@@ -84,7 +84,7 @@ pub struct IngestWriteReport {
     pub content_hash: String,
 }
 
-fn encode_path_component(value: &str) -> String {
+pub(crate) fn encode_path_component(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
         match byte {
