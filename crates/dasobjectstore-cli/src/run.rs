@@ -1725,6 +1725,20 @@ struct ResolvedIngestEndpoint {
     object_prefix: String,
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SourceAclPermission {
+    Traverse,
+    ReadTree,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SourceAclAction {
+    path: PathBuf,
+    permission: SourceAclPermission,
+}
+
 fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(), CliError> {
     if args.local_direct() {
         return run_ingest_files_local_direct(args, writer);
@@ -1851,29 +1865,28 @@ fn prepare_source_access_for_packaged_daemon(source: &Path) -> Result<(), CliErr
         )));
     }
 
-    for ancestor in acl_ancestors_requiring_execute(&source)? {
-        run_setfacl(
-            &[
-                "-m",
-                &format!("u:{SERVICE_USER}:--x"),
-                path_arg(&ancestor).as_str(),
-            ],
-            &ancestor,
-            "grant daemon traversal",
-        )?;
-    }
-
-    if source_requires_read_acl(&source)? {
-        run_setfacl(
-            &[
-                "-R",
-                "-m",
-                &format!("u:{SERVICE_USER}:rX"),
-                path_arg(&source).as_str(),
-            ],
-            &source,
-            "grant daemon source read",
-        )?;
+    for action in plan_source_acl_actions(&source)? {
+        match action.permission {
+            SourceAclPermission::Traverse => run_setfacl(
+                &[
+                    "-m",
+                    &format!("u:{SERVICE_USER}:--x"),
+                    path_arg(&action.path).as_str(),
+                ],
+                &action.path,
+                "grant daemon traversal",
+            )?,
+            SourceAclPermission::ReadTree => run_setfacl(
+                &[
+                    "-R",
+                    "-m",
+                    &format!("u:{SERVICE_USER}:rX"),
+                    path_arg(&action.path).as_str(),
+                ],
+                &action.path,
+                "grant daemon source read",
+            )?,
+        }
     }
 
     Ok(())
@@ -1882,6 +1895,24 @@ fn prepare_source_access_for_packaged_daemon(source: &Path) -> Result<(), CliErr
 #[cfg(not(target_os = "linux"))]
 fn prepare_source_access_for_packaged_daemon(_source: &Path) -> Result<(), CliError> {
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn plan_source_acl_actions(source: &Path) -> Result<Vec<SourceAclAction>, CliError> {
+    let mut actions = acl_ancestors_requiring_execute(source)?
+        .into_iter()
+        .map(|path| SourceAclAction {
+            path,
+            permission: SourceAclPermission::Traverse,
+        })
+        .collect::<Vec<_>>();
+    if source_requires_read_acl(source)? {
+        actions.push(SourceAclAction {
+            path: source.to_path_buf(),
+            permission: SourceAclPermission::ReadTree,
+        });
+    }
+    Ok(actions)
 }
 
 #[cfg(target_os = "linux")]
@@ -3226,6 +3257,8 @@ mod tests {
     };
     use rusqlite::Connection;
     use std::fs::{self, File};
+    #[cfg(target_os = "linux")]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4468,6 +4501,53 @@ mod tests {
         assert!(output.contains("zymo_fecal_2025.05"));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_acl_plan_grants_private_home_traversal_and_private_source_read() {
+        let root = temp_root("source-acl-private");
+        let home = root.join("home").join("stephen");
+        let source = home.join("zymo_fecal_2025.05");
+        fs::create_dir_all(&source).expect("create private source");
+        set_mode(&root, 0o755);
+        set_mode(root.join("home"), 0o755);
+        set_mode(&home, 0o750);
+        set_mode(&source, 0o750);
+
+        let actions = super::plan_source_acl_actions(&source).expect("source acl plan");
+
+        assert!(actions.contains(&super::SourceAclAction {
+            path: home,
+            permission: super::SourceAclPermission::Traverse,
+        }));
+        assert!(actions.contains(&super::SourceAclAction {
+            path: source.clone(),
+            permission: super::SourceAclPermission::ReadTree,
+        }));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_acl_plan_skips_recursive_acl_for_public_source_root() {
+        let root = temp_root("source-acl-public");
+        let mount = root.join("mnt");
+        let source = mount.join("external");
+        fs::create_dir_all(&source).expect("create public source");
+        set_mode(&root, 0o755);
+        set_mode(&mount, 0o755);
+        set_mode(&source, 0o755);
+
+        let actions = super::plan_source_acl_actions(&source).expect("source acl plan");
+
+        assert!(!actions.contains(&super::SourceAclAction {
+            path: source.clone(),
+            permission: super::SourceAclPermission::ReadTree,
+        }));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     #[test]
     fn daemon_ingest_progress_renderer_reports_byte_progress() {
         let progress = DaemonIngestProgressEvent {
@@ -5681,6 +5761,15 @@ mod tests {
             "dasobjectstore-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_mode(path: impl AsRef<Path>, mode: u32) {
+        let mut permissions = fs::metadata(path.as_ref())
+            .expect("metadata for chmod fixture")
+            .permissions();
+        permissions.set_mode(mode);
+        fs::set_permissions(path, permissions).expect("set chmod fixture mode");
     }
 
     fn create_known_ssd_marker(ssd_root: &Path) {

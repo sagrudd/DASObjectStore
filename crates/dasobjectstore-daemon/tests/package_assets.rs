@@ -69,6 +69,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
+    assert_contains(BUILD_DEB, "Depends: ca-certificates, acl");
 }
 
 #[test]
@@ -81,6 +82,23 @@ fn deb_postinst_rejects_user_owned_managed_root() {
         POSTINST,
         "Managed DAS roots must be owned by $service_user:$service_group",
     );
+}
+
+#[test]
+fn deb_postinst_repairs_existing_managed_member_roots() {
+    assert_contains(POSTINST, "repair_managed_tree()");
+    assert_contains(POSTINST, "chown \"$service_user:$service_group\" \"$root\"");
+    assert_contains(POSTINST, "chmod 0750 \"$root\"");
+    assert_contains(POSTINST, "-path \"$root/lost+found\" -prune");
+    assert_contains(
+        POSTINST,
+        "-exec chown \"$service_user:$service_group\" {} +",
+    );
+    assert_contains(POSTINST, "-type d -exec chmod 0750 {} +");
+    assert_contains(POSTINST, "-type f -exec chmod 0640 {} +");
+    assert_contains(POSTINST, "repair_managed_tree \"$managed_root/ssd\"");
+    assert_contains(POSTINST, "for root in \"$managed_root\"/hdd/*; do");
+    assert_contains(POSTINST, "repair_managed_tree \"$root\"");
 }
 
 fn assert_contains(haystack: &str, needle: &str) {
