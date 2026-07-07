@@ -34,6 +34,7 @@ fn systemd_service_uses_packaged_identity_and_paths() {
     assert_contains(SERVICE, LINUX_DAEMON_RUNTIME_DIR);
     assert_contains(SERVICE, LINUX_DAEMON_STATE_DIR);
     assert_contains(SERVICE, LINUX_DAEMON_LOG_DIR);
+    assert_contains(SERVICE, "ProtectHome=read-only");
 }
 
 #[test]

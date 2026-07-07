@@ -36,6 +36,7 @@ require_file "$build_deb"
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
 require_text "$service" "RuntimeDirectory=dasobjectstore"
+require_text "$service" "ProtectHome=read-only"
 require_text "$service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /srv/dasobjectstore"
 
 require_text "$sysusers" "u dasobjectstore"

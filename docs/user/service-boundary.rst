@@ -64,3 +64,19 @@ ownership through the formal disk lockdown workflow before continuing.
 The hidden ``--local-direct`` ingest mode is a developer/test fallback while the
 daemon implementation is being completed. It is not the normal production
 storage path.
+
+Source Path Reads
+-----------------
+
+Daemon-side ingest accepts user-provided source paths. In packaged Linux
+deployments the systemd unit sets ``ProtectHome=read-only`` so
+``dasobjectstored`` can read source trees under home directories while still
+preventing writes through the service sandbox. This is an interim packaging
+policy for local daemon ingest; storage mutation remains daemon-owned and
+limited to the managed runtime, state, log, and ``/srv/dasobjectstore`` paths.
+
+The service sandbox does not override normal Unix permissions. The source tree
+must be readable and searchable by the ``dasobjectstore`` service user, or by a
+group/ACL that grants that service identity access. Prefer granting read-only
+access to the specific ingest directory instead of broad write permissions to a
+home directory or managed DAS root.
