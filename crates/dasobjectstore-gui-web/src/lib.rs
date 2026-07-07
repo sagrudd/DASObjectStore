@@ -30,7 +30,9 @@ pub use stores::{
     STORES_WORKSPACE_ROUTE, STORE_CREATE_ACTION_ROUTE, SUBOBJECT_CREATE_ACTION_ROUTE,
 };
 pub use users_groups::{
-    users_groups_workspace_api_path, ASSIGN_LOCAL_USER_TO_GROUP_OPERATION,
+    assign_local_user_to_group_action_api_path, create_local_group_action_api_path,
+    users_groups_workspace_api_path, ASSIGN_LOCAL_USER_TO_GROUP_ACTION_ROUTE,
+    ASSIGN_LOCAL_USER_TO_GROUP_OPERATION, CREATE_LOCAL_GROUP_ACTION_ROUTE,
     CREATE_LOCAL_GROUP_OPERATION, USERS_GROUPS_WORKSPACE_ROUTE,
 };
 

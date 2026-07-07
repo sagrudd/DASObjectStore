@@ -15,6 +15,22 @@ authority. For administrator workflows, DASObjectStore will use OS-local
 identity and sudo-derived administrator status, then submit the action to
 ``dasobjectstored``.
 
+Local group administration is also daemon-backed. Creating a local writer or
+administrator group, and assigning a local user to one of those groups, is
+accepted by the Web UI only as a request to ``dasobjectstored``. The daemon is
+responsible for validating the operation, enforcing sudo-derived administrator
+authority, and running the host-local system change when policy allows it. The
+frontend must not mutate OS users or groups directly.
+
+Group creation and assignment actions are sudo-administrator gated and support a
+dry-run path before mutation. When a request would change the host, the UI must
+present the daemon plan and require explicit confirmation before submitting the
+confirmed operation.
+
+After a user is added to a group, existing login sessions may not show the new
+membership. The user must start a new login session before DASObjectStore or
+other host processes can reliably see the updated group list.
+
 Storage mutation must still go through the daemon:
 
 * disk preparation, drain, replacement, and retirement;
