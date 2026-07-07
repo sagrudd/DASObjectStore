@@ -1,8 +1,7 @@
 use crate::hash::{copy_and_hash, SHA256_ALGORITHM};
 use crate::initialize::METADATA_DIR_NAME;
+use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::IngestJobId;
-use std::fs;
-use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -33,7 +32,13 @@ impl IngestStagingLayout {
     }
 
     pub fn create_base_directories(&self) -> Result<(), std::io::Error> {
-        fs::create_dir_all(&self.jobs_root)
+        create_private_dir_all(&self.jobs_root)?;
+        set_private_dir_permissions(&self.ingest_root)?;
+        if let Some(metadata_root) = self.ingest_root.parent() {
+            set_private_dir_permissions(metadata_root)?;
+        }
+
+        Ok(())
     }
 
     pub fn job_paths(&self, job_id: &IngestJobId) -> IngestJobPaths {
@@ -56,7 +61,10 @@ pub struct IngestJobPaths {
 
 impl IngestJobPaths {
     pub fn create_directories(&self) -> Result<(), std::io::Error> {
-        fs::create_dir_all(&self.scratch_dir)
+        create_private_dir_all(&self.scratch_dir)?;
+        set_private_dir_permissions(&self.job_root)?;
+
+        Ok(())
     }
 
     pub fn write_payload_with_hash(
@@ -65,7 +73,7 @@ impl IngestJobPaths {
     ) -> Result<IngestWriteReport, std::io::Error> {
         self.create_directories()?;
 
-        let mut file = File::create(&self.payload_path)?;
+        let mut file = create_private_file(&self.payload_path)?;
         let report = copy_and_hash(reader, &mut file)?;
         file.sync_all()?;
 
@@ -103,11 +111,15 @@ mod tests {
         IngestStagingLayout, INGEST_CONTENT_HASH_ALGORITHM, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
         INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
     };
+    #[cfg(unix)]
+    use crate::secure_fs::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
     use crate::{initialize_pool, read_ingest_queue, PoolInitOptions};
     use dasobjectstore_core::ids::{IngestJobId, PoolId};
     use rusqlite::Connection;
     use std::fs;
     use std::io::Cursor;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -168,6 +180,13 @@ mod tests {
         assert!(paths.job_root.is_dir());
         assert!(paths.scratch_dir.is_dir());
         assert!(!paths.payload_path.exists());
+        #[cfg(unix)]
+        {
+            assert_private_dir(&layout.ingest_root);
+            assert_private_dir(&layout.jobs_root);
+            assert_private_dir(&paths.job_root);
+            assert_private_dir(&paths.scratch_dir);
+        }
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -194,6 +213,8 @@ mod tests {
             fs::read(&paths.payload_path).expect("read payload"),
             b"dasobjectstore ingest bytes".repeat(8)
         );
+        #[cfg(unix)]
+        assert_private_file(&paths.payload_path);
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -429,5 +450,29 @@ mod tests {
             "dasobjectstore-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    #[cfg(unix)]
+    fn assert_private_dir(path: &std::path::Path) {
+        assert_eq!(
+            fs::metadata(path)
+                .expect("directory metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            PRIVATE_DIR_MODE
+        );
+    }
+
+    #[cfg(unix)]
+    fn assert_private_file(path: &std::path::Path) {
+        assert_eq!(
+            fs::metadata(path)
+                .expect("file metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            PRIVATE_FILE_MODE
+        );
     }
 }

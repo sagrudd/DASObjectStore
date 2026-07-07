@@ -1,7 +1,8 @@
 use crate::hash::{copy_and_hash, hash_file_sha256, SHA256_ALGORITHM};
+use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
 use std::fmt::{self, Display};
-use std::fs::{self, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 pub const HDD_COPY_CONTENT_HASH_ALGORITHM: &str = SHA256_ALGORITHM;
@@ -84,11 +85,12 @@ impl From<std::io::Error> for HddCopyError {
 
 pub fn write_verified_hdd_copy(request: &HddCopyRequest) -> Result<HddCopyReport, HddCopyError> {
     if let Some(parent) = request.destination_path.parent() {
-        fs::create_dir_all(parent)?;
+        create_private_dir_all(parent)?;
+        restrict_object_tree_dirs(parent)?;
     }
 
     let mut source = File::open(&request.source_path)?;
-    let mut destination = File::create(&request.destination_path)?;
+    let mut destination = create_private_file(&request.destination_path)?;
     let write_report = copy_and_hash(&mut source, &mut destination)?;
     destination.sync_all()?;
 
@@ -106,6 +108,18 @@ pub fn write_verified_hdd_copy(request: &HddCopyRequest) -> Result<HddCopyReport
         content_hash_algorithm: HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
         content_hash,
     })
+}
+
+fn restrict_object_tree_dirs(payload_parent: &Path) -> Result<(), HddCopyError> {
+    set_private_dir_permissions(payload_parent)?;
+    if let Some(prefix_dir) = payload_parent.parent() {
+        set_private_dir_permissions(prefix_dir)?;
+        if let Some(objects_dir) = prefix_dir.parent() {
+            set_private_dir_permissions(objects_dir)?;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn verify_hdd_copy_hash(
@@ -127,8 +141,12 @@ pub fn verify_hdd_copy_hash(
 mod tests {
     use super::{write_verified_hdd_copy, HddCopyError, HddCopyRequest};
     use crate::hash::hash_file_sha256;
+    #[cfg(unix)]
+    use crate::secure_fs::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
     use dasobjectstore_core::ids::{DiskId, ObjectId};
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -156,6 +174,8 @@ mod tests {
             fs::read(report.destination_path).expect("destination payload"),
             payload
         );
+        #[cfg(unix)]
+        assert_private_payload_tree(&destination_path);
 
         let _ = fs::remove_dir_all(root);
     }
@@ -204,5 +224,31 @@ mod tests {
             "dasobjectstore-metadata-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    #[cfg(unix)]
+    fn assert_private_payload_tree(payload_path: &std::path::Path) {
+        assert_eq!(
+            fs::metadata(payload_path)
+                .expect("payload metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            PRIVATE_FILE_MODE
+        );
+
+        let object_dir = payload_path.parent().expect("object dir");
+        let prefix_dir = object_dir.parent().expect("prefix dir");
+        let objects_dir = prefix_dir.parent().expect("objects dir");
+        for directory in [object_dir, prefix_dir, objects_dir] {
+            assert_eq!(
+                fs::metadata(directory)
+                    .expect("directory metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                PRIVATE_DIR_MODE
+            );
+        }
     }
 }

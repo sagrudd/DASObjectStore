@@ -20,6 +20,7 @@ pub mod object;
 pub mod placement_log;
 pub mod queue;
 pub mod schema;
+mod secure_fs;
 pub mod snapshot;
 
 pub use attach::{
