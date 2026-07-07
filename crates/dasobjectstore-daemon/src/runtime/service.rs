@@ -3,7 +3,10 @@ use crate::api::{
     DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusDetail,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
-use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
+use dasobjectstore_object_service::{
+    plan_garage_provisioning, ObjectServiceError, ObjectServiceProviderId, ServiceState,
+    StoreServiceCredential,
+};
 use serde_json::Value;
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
@@ -104,6 +107,31 @@ where
             ObjectServiceProviderId::Garage,
         ))
     }
+
+    pub fn provision_buckets(
+        &self,
+        credentials: &[StoreServiceCredential],
+    ) -> Result<GarageProvisioningSummary, DaemonServiceRuntimeError> {
+        self.config.validate()?;
+        let plan = plan_garage_provisioning(credentials)?;
+        for command in &plan.commands {
+            let raw_args = docker_compose_args(
+                &self.config,
+                garage_exec_args(&self.config.service_name, command.argv()),
+            );
+            let redacted_args = docker_compose_args(
+                &self.config,
+                garage_exec_args(&self.config.service_name, command.redacted_argv()),
+            );
+            self.runner
+                .run_with_display_args("docker", &raw_args, &redacted_args)?;
+        }
+
+        Ok(GarageProvisioningSummary {
+            buckets: plan.bucket_count(),
+            commands: plan.commands.len(),
+        })
+    }
 }
 
 pub trait ServiceCommandRunner {
@@ -112,11 +140,26 @@ pub trait ServiceCommandRunner {
         program: &str,
         args: &[String],
     ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError>;
+
+    fn run_with_display_args(
+        &self,
+        program: &str,
+        args: &[String],
+        _display_args: &[String],
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        self.run(program, args)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServiceCommandOutput {
     pub stdout: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GarageProvisioningSummary {
+    pub buckets: usize,
+    pub commands: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -128,6 +171,15 @@ impl ServiceCommandRunner for SystemServiceCommandRunner {
         program: &str,
         args: &[String],
     ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        self.run_with_display_args(program, args, args)
+    }
+
+    fn run_with_display_args(
+        &self,
+        program: &str,
+        args: &[String],
+        display_args: &[String],
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
         let output = Command::new(program).args(args).output().map_err(|error| {
             DaemonServiceRuntimeError::CommandIo {
                 program: program.to_string(),
@@ -137,7 +189,7 @@ impl ServiceCommandRunner for SystemServiceCommandRunner {
         if !output.status.success() {
             return Err(DaemonServiceRuntimeError::CommandFailed {
                 program: program.to_string(),
-                args: args.to_vec(),
+                args: display_args.to_vec(),
                 status: output.status.to_string(),
                 stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             });
@@ -174,6 +226,7 @@ pub enum DaemonServiceRuntimeError {
     },
     InvalidJobId(String),
     Validation(DaemonRequestValidationError),
+    ObjectService(ObjectServiceError),
 }
 
 impl Display for DaemonServiceRuntimeError {
@@ -210,6 +263,7 @@ impl Display for DaemonServiceRuntimeError {
             }
             Self::InvalidJobId(value) => write!(formatter, "invalid service job id: {value}"),
             Self::Validation(error) => Display::fmt(error, formatter),
+            Self::ObjectService(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -222,9 +276,15 @@ impl From<DaemonRequestValidationError> for DaemonServiceRuntimeError {
     }
 }
 
+impl From<ObjectServiceError> for DaemonServiceRuntimeError {
+    fn from(error: ObjectServiceError) -> Self {
+        Self::ObjectService(error)
+    }
+}
+
 fn docker_compose_args(
     config: &GarageServiceRuntimeConfig,
-    action_args: impl IntoIterator<Item = &'static str>,
+    action_args: impl IntoIterator<Item = impl Into<String>>,
 ) -> Vec<String> {
     let mut args = vec![
         "compose".to_string(),
@@ -237,7 +297,18 @@ fn docker_compose_args(
         args.push("--project-directory".to_string());
         args.push(project_directory.to_string_lossy().to_string());
     }
-    args.extend(action_args.into_iter().map(String::from));
+    args.extend(action_args.into_iter().map(Into::into));
+    args
+}
+
+fn garage_exec_args(service_name: &str, garage_args: Vec<String>) -> Vec<String> {
+    let mut args = vec![
+        "exec".to_string(),
+        "-T".to_string(),
+        service_name.to_string(),
+        "/garage".to_string(),
+    ];
+    args.extend(garage_args);
     args
 }
 
@@ -336,6 +407,8 @@ fn require_absolute_path(
 struct FakeRunner {
     output: std::cell::RefCell<ServiceCommandOutput>,
     calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
+    display_calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
+    fail_with_display_args: bool,
 }
 
 #[cfg(test)]
@@ -346,6 +419,15 @@ impl FakeRunner {
                 stdout: stdout.into(),
             }),
             calls: std::cell::RefCell::new(Vec::new()),
+            display_calls: std::cell::RefCell::new(Vec::new()),
+            fail_with_display_args: false,
+        }
+    }
+
+    fn failing() -> Self {
+        Self {
+            fail_with_display_args: true,
+            ..Self::with_stdout("")
         }
     }
 }
@@ -362,6 +444,29 @@ impl ServiceCommandRunner for FakeRunner {
             .push((program.to_string(), args.to_vec()));
         Ok(self.output.borrow().clone())
     }
+
+    fn run_with_display_args(
+        &self,
+        program: &str,
+        args: &[String],
+        display_args: &[String],
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        self.calls
+            .borrow_mut()
+            .push((program.to_string(), args.to_vec()));
+        self.display_calls
+            .borrow_mut()
+            .push((program.to_string(), display_args.to_vec()));
+        if self.fail_with_display_args {
+            return Err(DaemonServiceRuntimeError::CommandFailed {
+                program: program.to_string(),
+                args: display_args.to_vec(),
+                status: "exit status: 1".to_string(),
+                stderr: "failed".to_string(),
+            });
+        }
+        Ok(self.output.borrow().clone())
+    }
 }
 
 #[cfg(test)]
@@ -370,7 +475,11 @@ mod tests {
     use crate::api::{
         DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceStatusRequest,
     };
-    use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_object_service::{
+        generate_per_store_credentials, CredentialEntropy, ObjectServiceError,
+        ObjectServiceProviderId, ServiceState, StoreCredentialRequest, StoreServiceCredential,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -442,6 +551,49 @@ mod tests {
         assert!(controller.runner.calls.borrow().is_empty());
     }
 
+    #[test]
+    fn provision_buckets_runs_garage_commands_through_compose() {
+        let credentials = credentials();
+        let runner = super::FakeRunner::with_stdout("");
+        let controller = GarageServiceController::new(config(), runner);
+
+        let summary = controller
+            .provision_buckets(&credentials)
+            .expect("buckets provisioned");
+
+        assert_eq!(summary.buckets, 1);
+        assert_eq!(summary.commands, 3);
+        let calls = controller.runner.calls.borrow();
+        assert_eq!(calls.len(), 3);
+        assert!(calls[0]
+            .1
+            .windows(4)
+            .any(|args| args == ["exec", "-T", "garage", "/garage"]));
+        assert!(calls[0].1.contains(&"import".to_string()));
+        assert!(calls[1].1.ends_with(&[
+            "bucket".to_string(),
+            "create".to_string(),
+            "dos-generated".to_string()
+        ]));
+        assert!(calls[2].1.contains(&"--owner".to_string()));
+    }
+
+    #[test]
+    fn provision_buckets_redacts_secret_from_failed_command_error() {
+        let credentials = credentials();
+        let secret = credentials[0].secret_access_key.expose_secret().to_string();
+        let runner = super::FakeRunner::failing();
+        let controller = GarageServiceController::new(config(), runner);
+
+        let err = controller
+            .provision_buckets(&credentials)
+            .expect_err("failure returned");
+        let message = err.to_string();
+
+        assert!(!message.contains(&secret));
+        assert!(message.contains("<redacted>"));
+    }
+
     fn config() -> GarageServiceRuntimeConfig {
         GarageServiceRuntimeConfig {
             compose_file: PathBuf::from("/etc/dasobjectstore/garage.compose.yml"),
@@ -452,6 +604,32 @@ mod tests {
             metadata_path: PathBuf::from("/var/lib/dasobjectstore/garage/meta"),
             data_path: PathBuf::from("/srv/dasobjectstore/hdd/garage"),
             endpoint: "http://127.0.0.1:3900".to_string(),
+        }
+    }
+
+    fn credentials() -> Vec<StoreServiceCredential> {
+        generate_per_store_credentials(
+            &[StoreCredentialRequest {
+                store_id: StoreId::new("generated").expect("store id"),
+                bucket_name: "dos-generated".to_string(),
+            }],
+            &mut FixedEntropy::default(),
+        )
+        .expect("credentials generated")
+    }
+
+    #[derive(Default)]
+    struct FixedEntropy {
+        next: u8,
+    }
+
+    impl CredentialEntropy for FixedEntropy {
+        fn fill(&mut self, bytes: &mut [u8]) -> Result<(), ObjectServiceError> {
+            for byte in bytes {
+                *byte = self.next;
+                self.next = self.next.wrapping_add(1);
+            }
+            Ok(())
         }
     }
 }

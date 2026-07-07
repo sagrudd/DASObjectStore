@@ -11,6 +11,7 @@ pub use config::{
     LINUX_DAEMON_STATE_DIR,
 };
 pub use service::{
-    DaemonServiceRuntimeError, GarageServiceController, GarageServiceRuntimeConfig,
-    ServiceCommandOutput, ServiceCommandRunner, SystemServiceCommandRunner,
+    DaemonServiceRuntimeError, GarageProvisioningSummary, GarageServiceController,
+    GarageServiceRuntimeConfig, ServiceCommandOutput, ServiceCommandRunner,
+    SystemServiceCommandRunner,
 };

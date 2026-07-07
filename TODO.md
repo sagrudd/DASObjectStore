@@ -237,8 +237,10 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   request handler.
 - [x] Add the long-running Unix-domain socket listener loop that dispatches
   requests through the `dasobjectstored` request handler.
-- [ ] Implement daemon-owned Garage bucket provisioning and per-store key
-  permissions from store registry bindings.
+- [x] Add daemon-owned Garage provisioning command plan and runtime executor
+  with secret-redacted diagnostics.
+- [ ] Wire daemon-owned Garage bucket provisioning and per-store key
+  permissions from store registry bindings into the daemon API/job path.
 - [x] Generate Docker/Compose configuration from store and pool policy.
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.

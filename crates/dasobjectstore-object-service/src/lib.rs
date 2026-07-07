@@ -5,6 +5,7 @@ pub mod credentials;
 pub mod garage;
 pub mod layout;
 pub mod provider;
+pub mod provisioning;
 pub mod registry;
 pub mod subobject;
 
@@ -22,6 +23,10 @@ pub use layout::{plan_store_service_layout, StoreServiceDefinition, StoreService
 pub use provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus, StoreBucketBinding,
+};
+pub use provisioning::{
+    plan_garage_provisioning, GarageProvisioningCommand, GarageProvisioningCommandKind,
+    GarageProvisioningPlan,
 };
 pub use registry::{
     default_store_registry_path, portable_store_registry_path, read_store_registry,
