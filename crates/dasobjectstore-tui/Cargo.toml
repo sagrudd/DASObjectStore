@@ -9,5 +9,7 @@ repository.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+crossterm.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
+ratatui.workspace = true

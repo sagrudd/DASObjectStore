@@ -23,6 +23,7 @@ dasobjectstore-mnemosyne.workspace = true
 dasobjectstore-object-service.workspace = true
 dasobjectstore-platform.workspace = true
 dasobjectstore-tui.workspace = true
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
@@ -30,4 +31,5 @@ serde_json.workspace = true
 debug-commands = []
 
 [dev-dependencies]
+ratatui.workspace = true
 rusqlite.workspace = true

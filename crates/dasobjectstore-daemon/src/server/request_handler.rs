@@ -37,13 +37,15 @@ where
         &self,
         request: DaemonApiRequest,
     ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
-        self.handle_with_progress(request, |_| {})
+        self.handle_with_progress(request, |_| Ok(()))
     }
 
     pub fn handle_with_progress(
         &self,
         request: DaemonApiRequest,
-        mut emit_progress: impl FnMut(DaemonIngestProgressEvent),
+        mut emit_progress: impl FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
         request.validate()?;
 
@@ -140,7 +142,9 @@ pub trait DaemonServiceOrchestrator {
         &self,
         _request: SubmitIngestFilesRequest,
         _accepted_at_utc: &str,
-        _emit_progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+        _emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
         Err(DaemonIngestFilesRuntimeError::CommandFailed(
             "submit_ingest_files requires a file ingest orchestrator".to_string(),
@@ -261,7 +265,9 @@ where
         &self,
         request: SubmitIngestFilesRequest,
         accepted_at_utc: &str,
-        emit_progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+        emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
         submit_ingest_files_to_local_store_with_progress(request, accepted_at_utc, emit_progress)
     }
@@ -573,7 +579,10 @@ mod tests {
                     dry_run: true,
                     client_request_id: Some("request-3".to_string()),
                 }),
-                |event| progress_events.push(event),
+                |event| {
+                    progress_events.push(event);
+                    Ok(())
+                },
             )
             .expect("request handled");
 
@@ -803,7 +812,9 @@ mod tests {
             &self,
             request: SubmitIngestFilesRequest,
             accepted_at_utc: &str,
-            emit_progress: &mut dyn FnMut(crate::api::DaemonIngestProgressEvent),
+            emit_progress: &mut dyn FnMut(
+                crate::api::DaemonIngestProgressEvent,
+            ) -> Result<(), DaemonIngestFilesRuntimeError>,
         ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
             if let Some(message) = &self.ingest_error {
                 return Err(DaemonIngestFilesRuntimeError::CommandFailed(
@@ -817,6 +828,8 @@ mod tests {
                 pipeline_stage: Some(crate::api::DaemonIngestPipelineStage::Scan),
                 work_bytes_done: 0,
                 work_bytes_total: Some(0),
+                stage_bytes_done: Some(0),
+                stage_bytes_total: Some(0),
                 files_done: 0,
                 files_total: Some(0),
                 current_object_id: None,
@@ -824,7 +837,7 @@ mod tests {
                 telemetry: None,
                 resource_policy: None,
                 message: Some("queued".to_string()),
-            });
+            })?;
             self.ingest_calls.borrow_mut().push((
                 accepted_at_utc.to_string(),
                 request.endpoint.as_str().to_string(),

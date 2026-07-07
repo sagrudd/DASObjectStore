@@ -6,6 +6,7 @@ pub enum DaemonClientError {
     RequestValidation(DaemonRequestValidationError),
     JobValidation(DaemonJobValidationError),
     Api(DaemonApiErrorResponse),
+    Cancelled(String),
     Transport(String),
     UnexpectedResponse {
         expected: &'static str,
@@ -23,6 +24,7 @@ impl Display for DaemonClientError {
                 "daemon returned {} error: {}",
                 error.code, error.message
             ),
+            Self::Cancelled(message) => formatter.write_str(message),
             Self::Transport(message) => write!(formatter, "daemon transport failed: {message}"),
             Self::UnexpectedResponse { expected, actual } => {
                 write!(

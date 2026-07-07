@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::io::{Error as IoError, ErrorKind};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnixSocketDaemonTransport {
@@ -25,17 +26,29 @@ impl UnixSocketDaemonTransport {
 
 impl DaemonClientTransport for UnixSocketDaemonTransport {
     fn send(&self, request: DaemonApiRequest) -> Result<DaemonApiResponse, DaemonClientError> {
-        self.send_with_progress(request, &mut |_| {})
+        self.send_with_progress(request, &mut |_| Ok(()))
     }
 
     fn send_with_progress(
         &self,
         request: DaemonApiRequest,
-        progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+        progress: &mut dyn FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
+        self.send_with_progress_and_heartbeat(request, progress, &mut || Ok(()))
+    }
+
+    fn send_with_progress_and_heartbeat(
+        &self,
+        request: DaemonApiRequest,
+        progress: &mut dyn FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
+        heartbeat: &mut dyn FnMut() -> Result<(), DaemonClientError>,
     ) -> Result<DaemonApiResponse, DaemonClientError> {
         let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
             DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
         })?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
         serde_json::to_writer(&mut stream, &request)
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
         stream
@@ -48,9 +61,19 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
         let mut reader = BufReader::new(stream);
         loop {
             let mut line = String::new();
-            let bytes_read = reader
-                .read_line(&mut line)
-                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            let bytes_read = match reader.read_line(&mut line) {
+                Ok(bytes_read) => bytes_read,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                    ) =>
+                {
+                    heartbeat()?;
+                    continue;
+                }
+                Err(error) => return Err(DaemonClientError::Transport(error.to_string())),
+            };
             if bytes_read == 0 {
                 return Err(DaemonClientError::Transport(
                     "daemon closed the connection without a final response".to_string(),
@@ -59,7 +82,7 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
             let response: DaemonApiResponse = serde_json::from_str(&line)
                 .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
             if let DaemonApiResponse::IngestProgress(event) = response {
-                progress(event);
+                progress(event)?;
                 continue;
             }
             return Ok(response);

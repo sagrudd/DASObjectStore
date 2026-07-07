@@ -95,6 +95,7 @@ use dasobjectstore_platform::{
     ObservedDisk, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
 use dasobjectstore_tui::{UploadTui, UploadTuiContext};
+use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
@@ -103,6 +104,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::Instant;
 use std::{collections::hash_map::DefaultHasher, collections::BTreeMap};
+
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(unix)]
+static UPLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
@@ -1709,7 +1716,8 @@ fn run_ingest_files_with_tui<T>(
 where
     T: DaemonClientTransport,
 {
-    let mut tui = UploadTui::start(
+    let interrupt_guard = UploadInterruptGuard::install();
+    let tui = start_upload_tui(
         writer,
         UploadTuiContext {
             endpoint: args.endpoint().as_str().to_string(),
@@ -1719,25 +1727,49 @@ where
             dry_run: args.dry_run(),
         },
     )?;
-    let mut render_error = None;
-    let response = match client.submit_ingest_files_with_progress(request, |event| {
-        if render_error.is_none() {
-            render_error = tui.render_progress(event).err();
-        }
-    }) {
+    let tui = RefCell::new(tui);
+    let response = match client.submit_ingest_files_with_progress_and_heartbeat(
+        request,
+        |event| {
+            interrupt_guard.check_cancelled()?;
+            tui.borrow_mut()
+                .render_progress(event)
+                .map_err(|err| DaemonClientError::Transport(err.to_string()))?;
+            Ok(())
+        },
+        || {
+            interrupt_guard.check_cancelled()?;
+            tui.borrow_mut()
+                .render_heartbeat()
+                .map_err(|err| DaemonClientError::Transport(err.to_string()))?;
+            Ok(())
+        },
+    ) {
         Ok(response) => response,
         Err(err) => {
-            let _ = tui.fail(&err);
+            let _ = tui.into_inner().fail(&err);
             return Err(err.into());
         }
     };
-    if let Some(error) = render_error {
-        let _ = tui.fail(&error);
-        return Err(CliError::Io(error));
-    }
-    tui.finish(&response)?;
+    tui.into_inner().finish(&response)?;
 
     Ok(())
+}
+
+#[cfg(not(test))]
+fn start_upload_tui<W: Write>(
+    writer: &mut W,
+    context: UploadTuiContext,
+) -> io::Result<UploadTui<'_, W>> {
+    UploadTui::start(writer, context)
+}
+
+#[cfg(test)]
+fn start_upload_tui<W: Write>(
+    writer: &mut W,
+    context: UploadTuiContext,
+) -> io::Result<UploadTui<'_, W>> {
+    UploadTui::start_with_fixed_viewport(writer, context, ratatui::layout::Rect::new(0, 0, 100, 28))
 }
 
 fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFilesRequest {
@@ -1768,6 +1800,70 @@ fn write_daemon_ingest_submission(
     writeln!(writer, "Dry run: {}", args.dry_run())?;
     writeln!(writer, "Job: {}", response.job_id)?;
     writeln!(writer, "Accepted at UTC: {}", response.accepted_at_utc)
+}
+
+#[cfg(unix)]
+struct UploadInterruptGuard {
+    previous: libc::sigaction,
+}
+
+#[cfg(unix)]
+impl UploadInterruptGuard {
+    fn install() -> Self {
+        UPLOAD_CANCELLED.store(false, Ordering::SeqCst);
+        let handler = libc::sigaction {
+            sa_sigaction: upload_sigint_handler as usize,
+            sa_mask: unsafe { std::mem::zeroed() },
+            sa_flags: 0,
+        };
+        let mut previous: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::sigemptyset(&mut previous.sa_mask);
+            let mut handler = handler;
+            libc::sigemptyset(&mut handler.sa_mask);
+            libc::sigaction(libc::SIGINT, &handler, &mut previous);
+        }
+        Self { previous }
+    }
+
+    fn check_cancelled(&self) -> Result<(), DaemonClientError> {
+        if UPLOAD_CANCELLED.load(Ordering::SeqCst) {
+            Err(DaemonClientError::Cancelled(
+                "upload cancelled by Ctrl-C; daemon cleanup requested for the active file"
+                    .to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for UploadInterruptGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::sigaction(libc::SIGINT, &self.previous, std::ptr::null_mut());
+        }
+    }
+}
+
+#[cfg(unix)]
+extern "C" fn upload_sigint_handler(_: libc::c_int) {
+    UPLOAD_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+#[cfg(not(unix))]
+struct UploadInterruptGuard;
+
+#[cfg(not(unix))]
+impl UploadInterruptGuard {
+    fn install() -> Self {
+        Self
+    }
+
+    fn check_cancelled(&self) -> Result<(), DaemonClientError> {
+        Ok(())
+    }
 }
 
 fn run_ingest_files_local_direct(
@@ -4115,12 +4211,9 @@ mod tests {
             .expect("daemon ingest submission runs");
 
         let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("DASObjectStore Upload TUI"));
+        assert!(output.contains("DASObjectStore Upload"));
         assert!(output.contains("Final response: job=job-zymo"));
-        assert!(output.contains("\u{1b}[?1049h"));
-        assert!(output.contains("\u{1b}[?1049l"));
-        assert!(output.contains("Endpoint: zymo_fecal_2025.05"));
-        assert!(output.contains("Conflict policy: force"));
+        assert!(output.contains("zymo_fecal_2025.05"));
     }
 
     #[test]
@@ -4135,6 +4228,8 @@ mod tests {
             pipeline_stage: None,
             work_bytes_done: 512,
             work_bytes_total: Some(1024),
+            stage_bytes_done: Some(512),
+            stage_bytes_total: Some(1024),
             files_done: 2,
             files_total: Some(4),
             current_object_id: None,

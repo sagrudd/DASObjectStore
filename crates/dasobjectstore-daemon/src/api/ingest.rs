@@ -242,6 +242,10 @@ pub struct DaemonIngestProgressEvent {
     pub pipeline_stage: Option<DaemonIngestPipelineStage>,
     pub work_bytes_done: u64,
     pub work_bytes_total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_bytes_done: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_bytes_total: Option<u64>,
     pub files_done: u64,
     pub files_total: Option<u64>,
     pub current_object_id: Option<ObjectId>,
@@ -528,6 +532,8 @@ mod tests {
             pipeline_stage: Some(DaemonIngestPipelineStage::HddWrite),
             work_bytes_done: 150,
             work_bytes_total: Some(100),
+            stage_bytes_done: Some(150),
+            stage_bytes_total: Some(100),
             files_done: 1,
             files_total: Some(1),
             current_object_id: Some(ObjectId::new("zymo/sample.fastq.gz").expect("object id")),

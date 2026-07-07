@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.4 - 2026-07-07
+
+- Replace the embedded upload TUI renderer with Ratatui/Crossterm to reduce
+  screen jitter during long-running ingest operations.
+- Add upload heartbeat rendering so elapsed time continues to advance while the
+  daemon is between progress frames.
+- Propagate Ctrl-C from `dasobjectstore ingest files --tui` to the daemon as a
+  cancellation signal and remove active partial SSD ingest job roots and partial
+  HDD destination files.
+- Extend daemon ingest progress events with per-stage byte counters and clearer
+  SSD-settling/HDD-migration status for the upload TUI.
+
 ## 0.1.3 - 2026-07-07
 
 - Ensure package upgrades grant the `dasobjectstore` daemon group read access to

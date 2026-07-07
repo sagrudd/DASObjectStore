@@ -10,8 +10,8 @@ use dasobjectstore_core::placement::{
 };
 use dasobjectstore_core::store::StorePolicy;
 use dasobjectstore_metadata::{
-    measure_ssd_capacity, put_object_ssd_first_with_progress, DiskCopyRoot, ObjectPutProgress,
-    ObjectPutProgressStage, ObjectPutRequest,
+    measure_ssd_capacity, put_object_ssd_first_with_controlled_progress, DiskCopyRoot,
+    ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
@@ -46,13 +46,13 @@ pub fn submit_ingest_files_to_local_store(
     request: SubmitIngestFilesRequest,
     accepted_at_utc: &str,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
-    submit_ingest_files_to_local_store_with_progress(request, accepted_at_utc, |_| {})
+    submit_ingest_files_to_local_store_with_progress(request, accepted_at_utc, |_| Ok(()))
 }
 
 pub fn submit_ingest_files_to_local_store_with_progress(
     request: SubmitIngestFilesRequest,
     accepted_at_utc: &str,
-    progress: impl FnMut(DaemonIngestProgressEvent),
+    progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
     let executor = LocalFileIngestExecutor::from_environment();
     executor.submit(request, accepted_at_utc, progress)
@@ -96,7 +96,7 @@ impl LocalFileIngestExecutor {
         &self,
         request: SubmitIngestFilesRequest,
         accepted_at_utc: &str,
-        progress: impl FnMut(DaemonIngestProgressEvent),
+        progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
         let job_id = ingest_job_id(accepted_at_utc)?;
         let summary = self.execute(request, &job_id, progress)?;
@@ -111,7 +111,7 @@ impl LocalFileIngestExecutor {
         &self,
         request: SubmitIngestFilesRequest,
         job_id: &IngestJobId,
-        mut progress: impl FnMut(DaemonIngestProgressEvent),
+        mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
         validate_known_ssd_root(&self.ssd_root)?;
         let endpoint = resolve_ingest_endpoint(
@@ -149,6 +149,8 @@ impl LocalFileIngestExecutor {
             pipeline_stage: Some(DaemonIngestPipelineStage::Scan),
             work_bytes_done: 0,
             work_bytes_total: Some(total_work_bytes),
+            stage_bytes_done: Some(0),
+            stage_bytes_total: Some(source_bytes),
             files_done: 0,
             files_total: Some(files.len() as u64),
             current_object_id: None,
@@ -161,7 +163,7 @@ impl LocalFileIngestExecutor {
                 source_bytes,
                 copies
             )),
-        });
+        })?;
 
         if request.dry_run {
             progress(DaemonIngestProgressEvent {
@@ -171,6 +173,8 @@ impl LocalFileIngestExecutor {
                 pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
                 work_bytes_done: 0,
                 work_bytes_total: Some(total_work_bytes),
+                stage_bytes_done: Some(0),
+                stage_bytes_total: Some(0),
                 files_done: files.len() as u64,
                 files_total: Some(files.len() as u64),
                 current_object_id: None,
@@ -178,7 +182,7 @@ impl LocalFileIngestExecutor {
                 telemetry: None,
                 resource_policy: None,
                 message: Some("dry run complete; no files imported".to_string()),
-            });
+            })?;
             return Ok(summary);
         }
 
@@ -200,7 +204,7 @@ impl LocalFileIngestExecutor {
                 copies,
             )
             .with_object_type(request.object_type);
-            put_object_ssd_first_with_progress(&put_request, |object_progress| {
+            put_object_ssd_first_with_controlled_progress(&put_request, |object_progress| {
                 let next_stage_key = object_progress_stage_key(&object_progress);
                 if next_stage_key != stage_key {
                     stage_key = next_stage_key;
@@ -220,7 +224,16 @@ impl LocalFileIngestExecutor {
                     completed_files,
                     files.len() as u64,
                     &object_progress,
-                ));
+                ))
+                .map_err(|err| {
+                    if matches!(err, DaemonIngestFilesRuntimeError::ClientDisconnected(_)) {
+                        dasobjectstore_metadata::ObjectPutError::Cancelled
+                    } else {
+                        dasobjectstore_metadata::ObjectPutError::Io(io::Error::other(
+                            err.to_string(),
+                        ))
+                    }
+                })
             })?;
             completed_files = completed_files.saturating_add(1);
             progress(DaemonIngestProgressEvent {
@@ -230,6 +243,8 @@ impl LocalFileIngestExecutor {
                 pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
                 work_bytes_done: completed_work_bytes,
                 work_bytes_total: Some(total_work_bytes),
+                stage_bytes_done: Some(entry.size_bytes),
+                stage_bytes_total: Some(entry.size_bytes),
                 files_done: completed_files,
                 files_total: Some(files.len() as u64),
                 current_object_id: Some(entry.object_id.clone()),
@@ -240,7 +255,7 @@ impl LocalFileIngestExecutor {
                     "file complete: {}",
                     entry.relative_path.to_string_lossy()
                 )),
-            });
+            })?;
         }
 
         progress(DaemonIngestProgressEvent {
@@ -250,6 +265,8 @@ impl LocalFileIngestExecutor {
             pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
             work_bytes_done: total_work_bytes,
             work_bytes_total: Some(total_work_bytes),
+            stage_bytes_done: Some(0),
+            stage_bytes_total: Some(0),
             files_done: files.len() as u64,
             files_total: Some(files.len() as u64),
             current_object_id: None,
@@ -257,7 +274,7 @@ impl LocalFileIngestExecutor {
             telemetry: None,
             resource_policy: None,
             message: Some("file ingest complete".to_string()),
-        });
+        })?;
 
         Ok(summary)
     }
@@ -280,13 +297,15 @@ fn object_progress_event(
         pipeline_stage: Some(pipeline_stage_for_object_progress(progress)),
         work_bytes_done: completed_work_bytes,
         work_bytes_total: Some(total_work_bytes),
+        stage_bytes_done: Some(progress.bytes_written),
+        stage_bytes_total: Some(entry.size_bytes),
         files_done: completed_files,
         files_total: Some(total_files),
         current_object_id: Some(entry.object_id.clone()),
         ssd_pressure: None,
         telemetry: None,
         resource_policy: None,
-        message: Some(entry.relative_path.to_string_lossy().to_string()),
+        message: Some(stage_message_for_object_progress(progress, entry)),
     }
 }
 
@@ -317,6 +336,24 @@ fn pipeline_stage_for_object_progress(progress: &ObjectPutProgress) -> DaemonIng
     match progress.stage {
         ObjectPutProgressStage::SsdIngest => DaemonIngestPipelineStage::SsdStage,
         ObjectPutProgressStage::HddCopy { .. } => DaemonIngestPipelineStage::HddWrite,
+    }
+}
+
+fn stage_message_for_object_progress(
+    progress: &ObjectPutProgress,
+    entry: &FileIngestEntry,
+) -> String {
+    match &progress.stage {
+        ObjectPutProgressStage::SsdIngest => {
+            format!("settling to SSD: {}", entry.relative_path.to_string_lossy())
+        }
+        ObjectPutProgressStage::HddCopy {
+            disk_id,
+            copy_number,
+        } => format!(
+            "migrating to HDD {disk_id} copy {copy_number}: {}",
+            entry.relative_path.to_string_lossy()
+        ),
     }
 }
 
@@ -616,6 +653,7 @@ pub enum DaemonIngestFilesRuntimeError {
     ObjectService(ObjectServiceError),
     ObjectPut(dasobjectstore_metadata::ObjectPutError),
     Capacity(dasobjectstore_metadata::SsdCapacityMeasurementError),
+    ClientDisconnected(String),
     InvalidJobId(String),
     CommandFailed(String),
 }
@@ -627,6 +665,7 @@ impl Display for DaemonIngestFilesRuntimeError {
             Self::ObjectService(err) => Display::fmt(err, formatter),
             Self::ObjectPut(err) => Display::fmt(err, formatter),
             Self::Capacity(err) => Display::fmt(err, formatter),
+            Self::ClientDisconnected(message) => formatter.write_str(message),
             Self::InvalidJobId(job_id) => write!(formatter, "invalid ingest job id: {job_id}"),
             Self::CommandFailed(message) => formatter.write_str(message),
         }
@@ -640,7 +679,7 @@ impl std::error::Error for DaemonIngestFilesRuntimeError {
             Self::ObjectService(err) => Some(err),
             Self::ObjectPut(err) => Some(err),
             Self::Capacity(err) => Some(err),
-            Self::InvalidJobId(_) | Self::CommandFailed(_) => None,
+            Self::ClientDisconnected(_) | Self::InvalidJobId(_) | Self::CommandFailed(_) => None,
         }
     }
 }
@@ -716,7 +755,7 @@ mod tests {
                     client_request_id: None,
                 },
                 "2026-07-07T10:27:12Z",
-                |_| {},
+                |_| Ok(()),
             )
             .expect("dry run succeeds");
 

@@ -23,6 +23,17 @@ pub(crate) fn copy_and_hash_with_progress(
     writer: &mut impl Write,
     mut progress: impl FnMut(u64),
 ) -> Result<HashWriteReport, std::io::Error> {
+    copy_and_hash_with_controlled_progress(reader, writer, |bytes_written| {
+        progress(bytes_written);
+        Ok(())
+    })
+}
+
+pub(crate) fn copy_and_hash_with_controlled_progress(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+) -> Result<HashWriteReport, std::io::Error> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     let mut bytes_written = 0_u64;
@@ -36,7 +47,7 @@ pub(crate) fn copy_and_hash_with_progress(
         writer.write_all(chunk)?;
         hasher.update(chunk);
         bytes_written += read as u64;
-        progress(bytes_written);
+        progress(bytes_written)?;
     }
 
     Ok(HashWriteReport {

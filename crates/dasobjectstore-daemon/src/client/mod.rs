@@ -25,9 +25,18 @@ pub trait DaemonClientTransport {
     fn send_with_progress(
         &self,
         request: DaemonApiRequest,
-        _progress: &mut dyn FnMut(DaemonIngestProgressEvent),
+        _progress: &mut dyn FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
     ) -> Result<DaemonApiResponse, DaemonClientError> {
         self.send(request)
+    }
+
+    fn send_with_progress_and_heartbeat(
+        &self,
+        request: DaemonApiRequest,
+        progress: &mut dyn FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
+        _heartbeat: &mut dyn FnMut() -> Result<(), DaemonClientError>,
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
+        self.send_with_progress(request, progress)
     }
 }
 
@@ -83,10 +92,27 @@ where
         request: SubmitIngestFilesRequest,
         mut progress: impl FnMut(DaemonIngestProgressEvent),
     ) -> Result<SubmitIngestFilesResponse, DaemonClientError> {
-        match self
-            .transport
-            .send_with_progress(DaemonApiRequest::SubmitIngestFiles(request), &mut progress)?
-        {
+        self.submit_ingest_files_with_progress_and_heartbeat(
+            request,
+            |event| {
+                progress(event);
+                Ok(())
+            },
+            || Ok(()),
+        )
+    }
+
+    pub fn submit_ingest_files_with_progress_and_heartbeat(
+        &self,
+        request: SubmitIngestFilesRequest,
+        mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
+        mut heartbeat: impl FnMut() -> Result<(), DaemonClientError>,
+    ) -> Result<SubmitIngestFilesResponse, DaemonClientError> {
+        match self.transport.send_with_progress_and_heartbeat(
+            DaemonApiRequest::SubmitIngestFiles(request),
+            &mut progress,
+            &mut heartbeat,
+        )? {
             DaemonApiResponse::SubmitIngestFiles(response) => Ok(response),
             response => Err(unexpected("submit_ingest_files", response)),
         }

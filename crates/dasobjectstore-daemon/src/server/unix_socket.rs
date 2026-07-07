@@ -1,4 +1,5 @@
 use crate::api::{DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse};
+use crate::runtime::DaemonIngestFilesRuntimeError;
 use crate::server::{DaemonRequestHandler, DaemonRequestHandlerError, DaemonServiceOrchestrator};
 use crate::DaemonClock;
 use std::fmt::{self, Display};
@@ -78,17 +79,15 @@ where
         request: DaemonApiRequest,
         emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
     ) -> Result<(), UnixSocketDaemonServerError> {
-        let mut progress_error = None;
         let response = self
             .handle_with_progress(request, |event| {
-                if progress_error.is_none() {
-                    progress_error = emit_response(DaemonApiResponse::IngestProgress(event)).err();
-                }
+                emit_response(DaemonApiResponse::IngestProgress(event)).map_err(|err| {
+                    DaemonIngestFilesRuntimeError::ClientDisconnected(format!(
+                        "upload cancelled because the client disconnected: {err}"
+                    ))
+                })
             })
             .map_err(UnixSocketDaemonServerError::Handler)?;
-        if let Some(error) = progress_error {
-            return Err(error);
-        }
         emit_response(response)
     }
 }
@@ -320,6 +319,8 @@ mod tests {
                         pipeline_stage: Some(DaemonIngestPipelineStage::SsdStage),
                         work_bytes_done: 50,
                         work_bytes_total: Some(100),
+                        stage_bytes_done: Some(50),
+                        stage_bytes_total: Some(100),
                         files_done: 0,
                         files_total: Some(1),
                         current_object_id: None,

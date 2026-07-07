@@ -1,8 +1,9 @@
-use crate::hash::{copy_and_hash_with_progress, hash_file_sha256, SHA256_ALGORITHM};
+use crate::hash::{copy_and_hash_with_controlled_progress, hash_file_sha256, SHA256_ALGORITHM};
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
 use std::fmt::{self, Display};
-use std::fs::File;
+use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub const HDD_COPY_CONTENT_HASH_ALGORITHM: &str = SHA256_ALGORITHM;
@@ -51,6 +52,7 @@ pub struct HddCopyReport {
 #[derive(Debug)]
 pub enum HddCopyError {
     Io(std::io::Error),
+    Cancelled,
     HashMismatch { expected: String, actual: String },
 }
 
@@ -58,6 +60,7 @@ impl Display for HddCopyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(formatter, "HDD copy IO failed: {err}"),
+            Self::Cancelled => formatter.write_str("HDD copy cancelled"),
             Self::HashMismatch { expected, actual } => {
                 write!(
                     formatter,
@@ -72,6 +75,7 @@ impl std::error::Error for HddCopyError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
+            Self::Cancelled => None,
             Self::HashMismatch { .. } => None,
         }
     }
@@ -89,16 +93,42 @@ pub fn write_verified_hdd_copy(request: &HddCopyRequest) -> Result<HddCopyReport
 
 pub fn write_verified_hdd_copy_with_progress(
     request: &HddCopyRequest,
-    progress: impl FnMut(u64),
+    mut progress: impl FnMut(u64),
+) -> Result<HddCopyReport, HddCopyError> {
+    write_verified_hdd_copy_with_controlled_progress(request, |bytes_written| {
+        progress(bytes_written);
+        Ok(())
+    })
+}
+
+pub fn write_verified_hdd_copy_with_controlled_progress(
+    request: &HddCopyRequest,
+    progress: impl FnMut(u64) -> Result<(), HddCopyError>,
 ) -> Result<HddCopyReport, HddCopyError> {
     if let Some(parent) = request.destination_path.parent() {
         create_private_dir_all(parent)?;
         restrict_object_tree_dirs(parent)?;
     }
 
+    let report = write_verified_hdd_copy_inner(request, progress);
+    if report.is_err() {
+        let _ = fs::remove_file(&request.destination_path);
+    }
+
+    report
+}
+
+fn write_verified_hdd_copy_inner(
+    request: &HddCopyRequest,
+    mut progress: impl FnMut(u64) -> Result<(), HddCopyError>,
+) -> Result<HddCopyReport, HddCopyError> {
     let mut source = File::open(&request.source_path)?;
     let mut destination = create_private_file(&request.destination_path)?;
-    let write_report = copy_and_hash_with_progress(&mut source, &mut destination, progress)?;
+    let write_report =
+        copy_and_hash_with_controlled_progress(&mut source, &mut destination, |bytes_written| {
+            progress(bytes_written).map_err(hdd_copy_error_to_io)
+        })
+        .map_err(hdd_copy_error_from_io)?;
     destination.sync_all()?;
 
     let content_hash = verify_hdd_copy_hash(
@@ -115,6 +145,24 @@ pub fn write_verified_hdd_copy_with_progress(
         content_hash_algorithm: HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
         content_hash,
     })
+}
+
+fn hdd_copy_error_to_io(error: HddCopyError) -> io::Error {
+    match error {
+        HddCopyError::Io(error) => error,
+        HddCopyError::Cancelled => io::Error::new(io::ErrorKind::Interrupted, "HDD copy cancelled"),
+        HddCopyError::HashMismatch { expected, actual } => io::Error::other(format!(
+            "HDD copy hash mismatch: expected {expected}, got {actual}"
+        )),
+    }
+}
+
+fn hdd_copy_error_from_io(error: io::Error) -> HddCopyError {
+    if error.kind() == io::ErrorKind::Interrupted {
+        HddCopyError::Cancelled
+    } else {
+        HddCopyError::Io(error)
+    }
 }
 
 fn restrict_object_tree_dirs(payload_parent: &Path) -> Result<(), HddCopyError> {
@@ -146,7 +194,10 @@ pub fn verify_hdd_copy_hash(
 
 #[cfg(test)]
 mod tests {
-    use super::{write_verified_hdd_copy, HddCopyError, HddCopyRequest};
+    use super::{
+        write_verified_hdd_copy, write_verified_hdd_copy_with_controlled_progress, HddCopyError,
+        HddCopyRequest,
+    };
     use crate::hash::hash_file_sha256;
     #[cfg(unix)]
     use crate::secure_fs::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
@@ -203,6 +254,30 @@ mod tests {
         let err = write_verified_hdd_copy(&request).expect_err("hash mismatch");
 
         assert!(matches!(err, HddCopyError::HashMismatch { .. }));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn removes_partial_destination_when_hdd_copy_is_cancelled() {
+        let root = temp_root("hdd-copy-cancelled");
+        let source_path = root.join("ssd").join("payload");
+        let destination_path = root.join("hdd-a").join("objects").join("object-a");
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source dir");
+        fs::write(&source_path, vec![7_u8; 128 * 1024]).expect("source payload");
+        let expected_hash = hash_file_sha256(&source_path).expect("source hash");
+        let request = request(source_path, destination_path.clone(), expected_hash);
+
+        let err = write_verified_hdd_copy_with_controlled_progress(&request, |_| {
+            Err(HddCopyError::Cancelled)
+        })
+        .expect_err("copy cancelled");
+
+        assert!(matches!(err, HddCopyError::Cancelled));
+        assert!(
+            !destination_path.exists(),
+            "cancelled HDD copy should remove partial destination payload"
+        );
 
         let _ = fs::remove_dir_all(root);
     }
