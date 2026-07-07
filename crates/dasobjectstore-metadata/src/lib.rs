@@ -2,6 +2,7 @@
 
 pub mod attach;
 pub mod capacity;
+pub mod contents;
 pub mod copy;
 pub mod direct_import;
 pub mod disk;
@@ -32,6 +33,10 @@ pub use capacity::{
     measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError, SsdCapacityPolicy,
     SsdCapacityPolicyError, SsdPressure, DEFAULT_SSD_CRITICAL_WATERMARK_PERCENT,
     DEFAULT_SSD_HIGH_WATERMARK_PERCENT,
+};
+pub use contents::{
+    read_store_contents, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
+    StoreContentsSnapshot,
 };
 pub use copy::{
     verify_hdd_copy_hash, write_verified_hdd_copy, write_verified_hdd_copy_with_progress,

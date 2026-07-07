@@ -7,10 +7,10 @@ use crate::cli::{
     IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
     ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
     PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreCreateArgs,
-    StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs, StoreS3UploadArgs,
-    StoreValidateArgs, SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs,
-    SubobjectSearchArgs,
+    ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
+    StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs,
+    StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand, SubobjectCreateArgs,
+    SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -55,14 +55,15 @@ use dasobjectstore_metadata::{
     import_reproducible_object_direct_to_hdd, inspect_pool_metadata, measure_ssd_capacity,
     put_object_ssd_first, put_object_ssd_first_with_progress, read_disk_drain_plan,
     read_disk_replacement_plan, read_ingest_queue_for_store, read_object_inspect,
-    request_disk_retirement, DestagePriorityPolicy, DirectHddImportError, DirectHddImportRequest,
-    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
-    IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueReadError, IngestQueueSnapshot,
-    ObjectExportError, ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
-    ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
-    ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
-    StoreCleanupError, StoreDeleteRequest, StoreDrainRequest, LIVE_SQLITE_FILE_NAME,
-    METADATA_DIR_NAME,
+    read_store_contents, request_disk_retirement, DestagePriorityPolicy, DirectHddImportError,
+    DirectHddImportRequest, DiskCopyRoot, DiskDrainError, DiskRetirementError,
+    IngestQueueDrainError, IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueReadError,
+    IngestQueueSnapshot, ObjectExportError, ObjectExportRequest, ObjectInspectError,
+    ObjectPutError, ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, PoolInspectError,
+    ReadOnlyAttachError, ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy,
+    SsdCapacityPolicyError, StoreCleanupError, StoreContentsObject, StoreContentsReadError,
+    StoreContentsRequest, StoreContentsSnapshot, StoreDeleteRequest, StoreDrainRequest,
+    LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -138,6 +139,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Store(args)) => match args.command() {
             Some(StoreCommand::Adopt(args)) => run_store_adopt(args, writer),
+            Some(StoreCommand::Contents(args)) => run_store_contents(args, writer),
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Drain(args)) => run_store_drain(args, writer),
             Some(StoreCommand::Delete(args)) => run_store_delete(args, writer),
@@ -175,6 +177,29 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
+}
+
+fn run_store_contents(args: &StoreContentsArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    if args.du() && args.tree() {
+        return Err(CliError::UnsupportedStoreContentsFormat);
+    }
+    let live_sqlite_path =
+        resolve_store_live_sqlite_path(args.store_id(), args.live_sqlite_path(), None)?;
+    let mut request = StoreContentsRequest::new(live_sqlite_path, args.store_id().clone());
+    if let Some(filter) = args.filter() {
+        request = request.with_filter(filter);
+    }
+    let snapshot = read_store_contents(&request)?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
+        writer.write_all(b"\n")?;
+    } else if args.tree() {
+        write_store_contents_tree(&snapshot, args.depth(), writer)?;
+    } else {
+        write_store_contents_du(&snapshot, args.depth(), writer)?;
+    }
+
+    Ok(())
 }
 
 fn run_service_up(args: &ServiceComposeArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1293,6 +1318,153 @@ fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), C
     }
 
     Ok(())
+}
+
+fn write_store_contents_du(
+    snapshot: &StoreContentsSnapshot,
+    depth: usize,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(writer, "Store contents")?;
+    writeln!(writer, "Store: {}", snapshot.store_id)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        snapshot.live_sqlite_path.display()
+    )?;
+    if let Some(filter) = &snapshot.filter {
+        writeln!(writer, "Filter: {filter}")?;
+    }
+    writeln!(writer, "Objects: {}", snapshot.objects.len())?;
+    writeln!(
+        writer,
+        "Total: {}",
+        format_bytes(snapshot.total_size_bytes() as f64)
+    )?;
+    writeln!(writer, "Mode: du depth={depth}")?;
+    for (path, size_bytes) in store_contents_du_entries(&snapshot.objects, depth) {
+        writeln!(writer, "{}\t{path}", format_bytes(size_bytes as f64))?;
+    }
+
+    Ok(())
+}
+
+fn write_store_contents_tree(
+    snapshot: &StoreContentsSnapshot,
+    depth: usize,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(writer, "Store contents")?;
+    writeln!(writer, "Store: {}", snapshot.store_id)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        snapshot.live_sqlite_path.display()
+    )?;
+    if let Some(filter) = &snapshot.filter {
+        writeln!(writer, "Filter: {filter}")?;
+    }
+    writeln!(writer, "Objects: {}", snapshot.objects.len())?;
+    writeln!(
+        writer,
+        "Total: {}",
+        format_bytes(snapshot.total_size_bytes() as f64)
+    )?;
+    writeln!(writer, "Mode: tree depth={depth}")?;
+    let tree = StoreContentsTreeNode::from_objects(&snapshot.objects);
+    writeln!(writer, ". {}", format_bytes(tree.size_bytes as f64))?;
+    write_store_contents_tree_children(&tree, 1, depth, writer)?;
+
+    Ok(())
+}
+
+fn store_contents_du_entries(objects: &[StoreContentsObject], depth: usize) -> Vec<(String, u64)> {
+    let mut entries = BTreeMap::<String, u64>::new();
+    entries.insert(
+        ".".to_string(),
+        objects.iter().map(|object| object.size_bytes).sum(),
+    );
+    if depth == 0 {
+        return entries.into_iter().collect();
+    }
+
+    for object in objects {
+        let parts = store_contents_path_parts(&object.path);
+        let max_depth = depth.min(parts.len());
+        for prefix_depth in 1..=max_depth {
+            let prefix = parts[..prefix_depth].join("/");
+            *entries.entry(prefix).or_insert(0) += object.size_bytes;
+        }
+    }
+
+    entries.into_iter().collect()
+}
+
+#[derive(Default)]
+struct StoreContentsTreeNode {
+    size_bytes: u64,
+    file_size_bytes: Option<u64>,
+    children: BTreeMap<String, StoreContentsTreeNode>,
+}
+
+impl StoreContentsTreeNode {
+    fn from_objects(objects: &[StoreContentsObject]) -> Self {
+        let mut root = Self::default();
+        for object in objects {
+            root.insert(&store_contents_path_parts(&object.path), object.size_bytes);
+        }
+        root
+    }
+
+    fn insert(&mut self, parts: &[String], size_bytes: u64) {
+        self.size_bytes = self.size_bytes.saturating_add(size_bytes);
+        if let Some((head, tail)) = parts.split_first() {
+            self.children
+                .entry(head.clone())
+                .or_default()
+                .insert(tail, size_bytes);
+        } else {
+            self.file_size_bytes = Some(size_bytes);
+        }
+    }
+}
+
+fn write_store_contents_tree_children(
+    node: &StoreContentsTreeNode,
+    current_depth: usize,
+    max_depth: usize,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if current_depth > max_depth {
+        return Ok(());
+    }
+
+    for (name, child) in &node.children {
+        let indent = "  ".repeat(current_depth.saturating_sub(1));
+        if child.children.is_empty() {
+            writeln!(
+                writer,
+                "{indent}- {name} {}",
+                format_bytes(child.size_bytes as f64)
+            )?;
+        } else {
+            writeln!(
+                writer,
+                "{indent}- {name}/ {}",
+                format_bytes(child.size_bytes as f64)
+            )?;
+            write_store_contents_tree_children(child, current_depth + 1, max_depth, writer)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn store_contents_path_parts(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter(|part| !part.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn run_store_s3_upload(args: &StoreS3UploadArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -3110,6 +3282,7 @@ pub(crate) enum CliError {
     Json(serde_json::Error),
     IngestQueueRead(IngestQueueReadError),
     IngestQueueDrain(IngestQueueDrainError),
+    StoreContentsRead(StoreContentsReadError),
     MetadataInspect(PoolInspectError),
     PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
@@ -3149,6 +3322,7 @@ pub(crate) enum CliError {
     UnsupportedPoolRepairMode,
     UnsupportedProbeFormat,
     UnsupportedServiceStatusFormat,
+    UnsupportedStoreContentsFormat,
 }
 
 impl Display for CliError {
@@ -3158,6 +3332,7 @@ impl Display for CliError {
             Self::Json(err) => write!(formatter, "failed to process JSON: {err}"),
             Self::IngestQueueRead(err) => write!(formatter, "{err}"),
             Self::IngestQueueDrain(err) => write!(formatter, "{err}"),
+            Self::StoreContentsRead(err) => write!(formatter, "{err}"),
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
@@ -3210,6 +3385,9 @@ impl Display for CliError {
             Self::UnsupportedServiceStatusFormat => {
                 formatter.write_str("service status requires JSON output; use `--json`")
             }
+            Self::UnsupportedStoreContentsFormat => formatter.write_str(
+                "store contents accepts at most one view format; use `--du` or `--tree`",
+            ),
         }
     }
 }
@@ -3237,6 +3415,12 @@ impl From<IngestQueueReadError> for CliError {
 impl From<IngestQueueDrainError> for CliError {
     fn from(err: IngestQueueDrainError) -> Self {
         Self::IngestQueueDrain(err)
+    }
+}
+
+impl From<StoreContentsReadError> for CliError {
+    fn from(err: StoreContentsReadError) -> Self {
+        Self::StoreContentsRead(err)
     }
 }
 
@@ -4442,6 +4626,102 @@ mod tests {
             serde_json::from_slice(&output).expect("store list output is json");
         assert_eq!(output[0]["store_id"], "public-reference");
         assert_eq!(output[0]["policy"]["class"], "ReproducibleCache");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_contents_writes_du_summary_with_depth_and_filter() {
+        let root = temp_root("store-contents-du");
+        let live_sqlite_path = create_live_sqlite_with_store_contents(&root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "contents",
+            "store-a",
+            "--du",
+            "--depth",
+            "1",
+            "--filter",
+            r"\.(pod5|fastq\.gz)$",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+        ])
+        .expect("store contents parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store contents runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Store contents"));
+        assert!(output.contains("Store: store-a"));
+        assert!(output.contains("Objects: 2"));
+        assert!(output.contains("Mode: du depth=1"));
+        assert!(output.contains("."));
+        assert!(output.contains("\traw"));
+        assert!(!output.contains("notes.txt"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_contents_writes_tree() {
+        let root = temp_root("store-contents-tree");
+        let live_sqlite_path = create_live_sqlite_with_store_contents(&root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "contents",
+            "store-a",
+            "--tree",
+            "--depth",
+            "3",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+        ])
+        .expect("store contents parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store contents runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Mode: tree depth=3"));
+        assert!(output.contains("- raw/"));
+        assert!(output.contains("  - PAW10254/"));
+        assert!(output.contains("    - sample.pod5"));
+        assert!(output.contains("- notes.txt"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_contents_writes_json_snapshot() {
+        let root = temp_root("store-contents-json");
+        let live_sqlite_path = create_live_sqlite_with_store_contents(&root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "contents",
+            "store-a",
+            "--json",
+            "--filter",
+            "pod5$",
+            "--live-sqlite-path",
+            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
+        ])
+        .expect("store contents parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store contents runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("store contents output is json");
+        assert_eq!(output["store_id"], "store-a");
+        assert_eq!(
+            output["objects"].as_array().expect("objects array").len(),
+            1
+        );
+        assert_eq!(output["objects"][0]["path"], "raw/PAW10254/sample.pod5");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -5995,6 +6275,39 @@ mod tests {
                  );",
             )
             .expect("object fixture inserts");
+
+        live_sqlite_path
+    }
+
+    fn create_live_sqlite_with_store_contents(root: &Path) -> PathBuf {
+        fs::create_dir_all(root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        for (object_id, size_bytes, object_type) in [
+            ("store-a/raw/PAW10254/sample.pod5", 128_i64, "pod5"),
+            ("store-a/raw/PAW10254/sample.fastq.gz", 64_i64, "fastq"),
+            ("store-a/notes.txt", 16_i64, "naive"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO objects (
+                        object_id, store_id, object_type, state, size_bytes, content_hash,
+                        created_at_utc, updated_at_utc
+                     ) VALUES (?1, 'store-a', ?2, 'SsdEvictionEligible', ?3, ?4, ?5, ?5)",
+                    (
+                        object_id,
+                        object_type,
+                        size_bytes,
+                        format!("sha256:{object_id}"),
+                        "2026-01-02T00:00:00Z",
+                    ),
+                )
+                .expect("object inserts");
+        }
 
         live_sqlite_path
     }

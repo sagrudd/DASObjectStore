@@ -513,6 +513,8 @@ impl StoreArgs {
 pub(crate) enum StoreCommand {
     /// Adopt portable object stores from a DAS SSD on this host.
     Adopt(StoreAdoptArgs),
+    /// Inspect objects and aggregate folder sizes in a store.
+    Contents(StoreContentsArgs),
     /// Create or update a system-managed object store.
     Create(StoreCreateArgs),
     /// Delete all objects and payload files in a store.
@@ -527,6 +529,60 @@ pub(crate) enum StoreCommand {
     S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreContentsArgs {
+    /// Store identifier whose contents should be inspected.
+    store_id: StoreId,
+    /// Render aggregate folder sizes, similar to du -h -d <n>.
+    #[arg(long)]
+    du: bool,
+    /// Render a tree of directories and object leaves.
+    #[arg(long)]
+    tree: bool,
+    /// Maximum folder depth for --du or --tree.
+    #[arg(short = 'd', long, default_value_t = 1)]
+    depth: usize,
+    /// Rust regex used to filter relative object paths and full object IDs.
+    #[arg(long)]
+    filter: Option<String>,
+    /// Emit object entries as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Advanced override for the live SQLite metadata path.
+    #[arg(long, hide = true)]
+    live_sqlite_path: Option<PathBuf>,
+}
+
+impl StoreContentsArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn du(&self) -> bool {
+        self.du
+    }
+
+    pub(crate) fn tree(&self) -> bool {
+        self.tree
+    }
+
+    pub(crate) fn depth(&self) -> usize {
+        self.depth
+    }
+
+    pub(crate) fn filter(&self) -> Option<&str> {
+        self.filter.as_deref()
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
+        self.live_sqlite_path.as_deref()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -2715,6 +2771,44 @@ mod tests {
                 assert_eq!(list.registry_path(), None);
             }
             _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_contents_tree_with_filter() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "contents",
+            "generated-data",
+            "--tree",
+            "--depth",
+            "3",
+            "--filter",
+            r"\.pod5$",
+            "--live-sqlite-path",
+            "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
+        ])
+        .expect("store contents parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Contents(contents)) => {
+                assert_eq!(contents.store_id().as_str(), "generated-data");
+                assert!(!contents.du());
+                assert!(contents.tree());
+                assert_eq!(contents.depth(), 3);
+                assert_eq!(contents.filter(), Some(r"\.pod5$"));
+                assert_eq!(
+                    contents.live_sqlite_path(),
+                    Some(Path::new(
+                        "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"
+                    ))
+                );
+            }
+            _ => panic!("expected contents command"),
         }
     }
 

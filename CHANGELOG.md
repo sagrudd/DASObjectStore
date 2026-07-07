@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.0 - 2026-07-07
+
+- Add `dasobjectstore store contents` to inspect logical object-store contents
+  from live metadata with du-style aggregate sizes, tree output, JSON output,
+  depth limits, and regex filtering.
+
 ## 0.2.0 - 2026-07-07
 
 - Add a top-level Makefile with standard build, test, check, clean, DEB, RPM,

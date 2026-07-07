@@ -14,6 +14,7 @@ stabilized in the current MVP.
    nas-endpoints
    disk-preparation
    object-stores
+   inspecting-store-contents
    subobjects
    ingesting-files
    remote-s3-uploads
