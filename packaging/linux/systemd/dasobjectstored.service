@@ -1,0 +1,29 @@
+[Unit]
+Description=DASObjectStore managed storage daemon
+Documentation=https://github.com/sagrudd/DASObjectStore
+After=local-fs.target
+
+[Service]
+Type=simple
+User=dasobjectstore
+Group=dasobjectstore
+RuntimeDirectory=dasobjectstore
+RuntimeDirectoryMode=0750
+StateDirectory=dasobjectstore
+StateDirectoryMode=0750
+LogsDirectory=dasobjectstore
+LogsDirectoryMode=0750
+ConfigurationDirectory=dasobjectstore
+ConfigurationDirectoryMode=0750
+ExecStart=/usr/bin/dasobjectstored --config /etc/dasobjectstore/daemon.json
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /srv/dasobjectstore
+
+[Install]
+WantedBy=multi-user.target

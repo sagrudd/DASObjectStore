@@ -37,7 +37,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   developer/test flag or test transport until it can be removed.
 - [x] Implement daemon-side local authorization using Linux peer credentials and
   store writer-group policy for the first Linux slice.
-- [ ] Add package assets for `dasobjectstored`: system user, systemd service,
+- [x] Add package assets for `dasobjectstored`: system user, systemd service,
   socket/runtime directory, state directory, log directory, and permission
   expectations.
 - [ ] Update DEB validation to ensure managed DAS roots are owned by the daemon

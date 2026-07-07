@@ -1,0 +1,48 @@
+Managed Service Boundary
+========================
+
+DASObjectStore is a client/server storage appliance. Normal users should submit
+jobs through ``dasobjectstore`` or the Web/API surface; they should not write
+directly into managed DAS mountpoints.
+
+Linux packages define a managed daemon named ``dasobjectstored``. The package
+assets create a dedicated service identity:
+
+.. code-block:: text
+
+   user:  dasobjectstore
+   group: dasobjectstore
+
+The daemon owns runtime state, persistent state, logs, and managed storage
+mutation. Local users are authorized by store writer/admin policy, such as
+membership in a store's writer group, rather than by direct filesystem write
+permission to HDD members.
+
+Packaged Paths
+--------------
+
+The Linux package assets reserve these paths:
+
+.. code-block:: text
+
+   /etc/dasobjectstore/daemon.json
+   /run/dasobjectstore/dasobjectstored.sock
+   /var/lib/dasobjectstore
+   /var/log/dasobjectstore
+   /srv/dasobjectstore
+
+The Unix-domain socket is the local client transport. The daemon will use peer
+credentials on Linux to identify the submitting local actor before accepting
+storage-mutating jobs.
+
+Permission Model
+----------------
+
+Managed DAS roots should be owned by the daemon service identity. Ingest users
+should be members of the relevant store writer group, for example
+``mnemosyne``, but that group authorizes daemon job submission. It should not be
+used to grant broad write access to individual HDD filesystems.
+
+The hidden ``--local-direct`` ingest mode is a developer/test fallback while the
+daemon implementation is being completed. It is not the normal production
+storage path.

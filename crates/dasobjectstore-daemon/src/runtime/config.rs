@@ -6,26 +6,30 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_DAEMON_SERVICE_USER: &str = "dasobjectstore";
 pub const DEFAULT_DAEMON_GROUP: &str = "dasobjectstore";
 pub const DEFAULT_DAEMON_SOCKET_FILE_NAME: &str = "dasobjectstored.sock";
+pub const LINUX_DAEMON_CONFIG_PATH: &str = "/etc/dasobjectstore/daemon.json";
+pub const LINUX_DAEMON_RUNTIME_DIR: &str = "/run/dasobjectstore";
+pub const LINUX_DAEMON_STATE_DIR: &str = "/var/lib/dasobjectstore";
+pub const LINUX_DAEMON_LOG_DIR: &str = "/var/log/dasobjectstore";
 
 #[cfg(target_os = "macos")]
 pub const DEFAULT_DAEMON_CONFIG_PATH: &str = "/usr/local/etc/dasobjectstore/daemon.json";
 #[cfg(not(target_os = "macos"))]
-pub const DEFAULT_DAEMON_CONFIG_PATH: &str = "/etc/dasobjectstore/daemon.json";
+pub const DEFAULT_DAEMON_CONFIG_PATH: &str = LINUX_DAEMON_CONFIG_PATH;
 
 #[cfg(target_os = "macos")]
 pub const DEFAULT_DAEMON_RUNTIME_DIR: &str = "/usr/local/var/run/dasobjectstore";
 #[cfg(not(target_os = "macos"))]
-pub const DEFAULT_DAEMON_RUNTIME_DIR: &str = "/run/dasobjectstore";
+pub const DEFAULT_DAEMON_RUNTIME_DIR: &str = LINUX_DAEMON_RUNTIME_DIR;
 
 #[cfg(target_os = "macos")]
 pub const DEFAULT_DAEMON_STATE_DIR: &str = "/usr/local/var/lib/dasobjectstore";
 #[cfg(not(target_os = "macos"))]
-pub const DEFAULT_DAEMON_STATE_DIR: &str = "/var/lib/dasobjectstore";
+pub const DEFAULT_DAEMON_STATE_DIR: &str = LINUX_DAEMON_STATE_DIR;
 
 #[cfg(target_os = "macos")]
 pub const DEFAULT_DAEMON_LOG_DIR: &str = "/usr/local/var/log/dasobjectstore";
 #[cfg(not(target_os = "macos"))]
-pub const DEFAULT_DAEMON_LOG_DIR: &str = "/var/log/dasobjectstore";
+pub const DEFAULT_DAEMON_LOG_DIR: &str = LINUX_DAEMON_LOG_DIR;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonRuntimeConfig {
@@ -50,6 +54,20 @@ impl DaemonRuntimeConfig {
             runtime_dir,
             state_dir: PathBuf::from(DEFAULT_DAEMON_STATE_DIR),
             log_dir: PathBuf::from(DEFAULT_DAEMON_LOG_DIR),
+            product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
+        }
+    }
+
+    pub fn linux_packaged() -> Self {
+        let runtime_dir = PathBuf::from(LINUX_DAEMON_RUNTIME_DIR);
+        Self {
+            service_user: DEFAULT_DAEMON_SERVICE_USER.to_string(),
+            service_group: DEFAULT_DAEMON_GROUP.to_string(),
+            config_path: PathBuf::from(LINUX_DAEMON_CONFIG_PATH),
+            socket_path: runtime_dir.join(DEFAULT_DAEMON_SOCKET_FILE_NAME),
+            runtime_dir,
+            state_dir: PathBuf::from(LINUX_DAEMON_STATE_DIR),
+            log_dir: PathBuf::from(LINUX_DAEMON_LOG_DIR),
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
         }
     }

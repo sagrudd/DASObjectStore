@@ -1,0 +1,10 @@
+{
+  "service_user": "dasobjectstore",
+  "service_group": "dasobjectstore",
+  "config_path": "/etc/dasobjectstore/daemon.json",
+  "runtime_dir": "/run/dasobjectstore",
+  "socket_path": "/run/dasobjectstore/dasobjectstored.sock",
+  "state_dir": "/var/lib/dasobjectstore",
+  "log_dir": "/var/log/dasobjectstore",
+  "product_root": "/opt/dasobjectstore"
+}

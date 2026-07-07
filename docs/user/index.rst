@@ -8,6 +8,7 @@ stabilized in the current MVP.
    :maxdepth: 2
 
    getting-started
+   service-boundary
    store-classes
    nas-endpoints
    disk-preparation

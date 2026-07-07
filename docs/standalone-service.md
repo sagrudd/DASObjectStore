@@ -26,6 +26,18 @@ jobs. Local Unix groups such as `mnemosyne` authorize job submission; they are
 not intended to grant ordinary users raw write access to mounted DAS member
 filesystems.
 
+Initial Linux package assets live under `packaging/linux/`:
+
+- `systemd/dasobjectstored.service`
+- `sysusers.d/dasobjectstore.conf`
+- `tmpfiles.d/dasobjectstore.conf`
+- `etc/dasobjectstore/daemon.json`
+
+These assets define the `dasobjectstore` service user/group, the daemon runtime
+socket directory, state directory, log directory, configuration directory, and
+managed storage ownership expectations. The Rust daemon crate keeps tests that
+pin those assets to the packaged Linux runtime defaults.
+
 ## Permanent Port Policy
 
 DASObjectStore standalone packages SHALL reserve HTTPS port `8448`.
