@@ -427,6 +427,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "dasobjectstore-tui"
+version = "0.0.0"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

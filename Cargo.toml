@@ -9,6 +9,7 @@ members = [
     "crates/dasobjectstore-mnemosyne",
     "crates/dasobjectstore-object-service",
     "crates/dasobjectstore-platform",
+    "crates/dasobjectstore-tui",
 ]
 resolver = "2"
 
@@ -29,6 +30,7 @@ dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
 dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
 dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
 dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
+dasobjectstore-tui = { path = "crates/dasobjectstore-tui" }
 plist = "1"
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
