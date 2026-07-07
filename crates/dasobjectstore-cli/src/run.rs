@@ -1,28 +1,36 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskReplaceArgs, DiskRetireArgs,
-    HealthArgs, IngestCommand, IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs,
-    MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand,
-    ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
-    PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StoreCommand, StoreDefaultsArgs,
-    StoreValidateArgs,
+    Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskPrepareDasArgs,
+    DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs, IngestCommand,
+    IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
+    MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
+    ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs,
+    ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs,
+    StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
+mod disk_prepare;
 mod output;
 
+use self::disk_prepare::{
+    prepare_das, PrepareDasDevice, PrepareDasError, PrepareDasRequest, PrepareDasRole,
+    PrepareFilesystem,
+};
 use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
     write_host_connection_status, write_ingest_direct_import_report, write_ingest_status,
     write_nas_nfs_endpoint_validation_report, write_object_export_report,
     write_object_inspect_summary, write_object_put_report, write_pool_import_report,
-    write_pool_inspect_summary, write_pool_repair_dry_run, write_pretty_report,
+    write_pool_inspect_summary, write_pool_repair_dry_run, write_prepare_das_report,
+    write_pretty_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
 use dasobjectstore_core::lifecycle::PoolState;
-use dasobjectstore_core::risk::{ActionConfirmation, RiskPolicy};
+use dasobjectstore_core::risk::{
+    ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
+};
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, force_retire_disk,
@@ -80,6 +88,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Disk(args)) => match args.command() {
             DiskCommand::Drain(args) => run_disk_drain(args, writer),
             DiskCommand::ForceRetire(args) => run_disk_force_retire(args, writer),
+            DiskCommand::PrepareDas(args) => run_disk_prepare_das(args, writer),
             DiskCommand::Replace(args) => run_disk_replace(args, writer),
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
@@ -636,6 +645,72 @@ fn run_disk_force_retire(
     Ok(())
 }
 
+fn run_disk_prepare_das(
+    args: &DiskPrepareDasArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if !args.dry_run() {
+        RiskGate::new(RiskPolicy {
+            allow_prepare_das: args.allow_format(),
+            ..RiskPolicy::default()
+        })
+        .evaluate(
+            RiskyOperation::PrepareDas,
+            &ActionConfirmation::new(args.confirm()),
+        )?;
+    }
+
+    let request = PrepareDasRequest {
+        devices: prepare_das_devices(args)?,
+        mount_root: args.mount_root().to_path_buf(),
+        filesystem: prepare_filesystem(args.filesystem()),
+        owner: args.owner().map(ToOwned::to_owned),
+        dry_run: args.dry_run(),
+    };
+    let report = prepare_das(&request)?;
+    write_prepare_das_report(&report, writer)?;
+
+    Ok(())
+}
+
+fn prepare_das_devices(args: &DiskPrepareDasArgs) -> Result<Vec<PrepareDasDevice>, CliError> {
+    let mut devices = vec![PrepareDasDevice {
+        role: PrepareDasRole::Ssd,
+        device_path: args.ssd_device().to_path_buf(),
+    }];
+    for (index, value) in args.hdd_devices().iter().enumerate() {
+        let (disk_id, device_path) =
+            value
+                .split_once('=')
+                .ok_or_else(|| CliError::InvalidDeviceMapping {
+                    value: value.clone(),
+                })?;
+        let disk_id = DiskId::new(disk_id).map_err(|_| CliError::InvalidDeviceMapping {
+            value: value.clone(),
+        })?;
+        if device_path.is_empty() {
+            return Err(CliError::InvalidDeviceMapping {
+                value: value.clone(),
+            });
+        }
+        devices.push(PrepareDasDevice {
+            role: PrepareDasRole::Hdd {
+                disk_id,
+                ordinal: index + 1,
+            },
+            device_path: Path::new(device_path).to_path_buf(),
+        });
+    }
+
+    Ok(devices)
+}
+
+fn prepare_filesystem(filesystem: DiskPrepareFilesystem) -> PrepareFilesystem {
+    match filesystem {
+        DiskPrepareFilesystem::Ext4 => PrepareFilesystem::Ext4,
+    }
+}
+
 fn run_disk_drain(args: &DiskDrainArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let plan = read_disk_drain_plan(args.live_sqlite_path(), args.disk_id())?;
 
@@ -945,6 +1020,7 @@ pub(crate) enum CliError {
     MetadataInspect(PoolInspectError),
     PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
+    DiskPrepare(PrepareDasError),
     DiskRetirement(DiskRetirementError),
     DirectHddImport(DirectHddImportError),
     ObjectExport(ObjectExportError),
@@ -958,6 +1034,10 @@ pub(crate) enum CliError {
     InvalidDiskRootMapping {
         value: String,
     },
+    InvalidDeviceMapping {
+        value: String,
+    },
+    RiskGate(RiskGateError),
     SsdCapacityMeasurement(SsdCapacityMeasurementError),
     SsdCapacityPolicy(SsdCapacityPolicyError),
     #[cfg(feature = "debug-commands")]
@@ -984,6 +1064,7 @@ impl Display for CliError {
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
+            Self::DiskPrepare(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::DirectHddImport(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
@@ -998,6 +1079,11 @@ impl Display for CliError {
                 formatter,
                 "invalid disk root mapping `{value}`; expected disk-id=/mounted/disk/root"
             ),
+            Self::InvalidDeviceMapping { value } => write!(
+                formatter,
+                "invalid device mapping `{value}`; expected disk-id=/dev/disk/by-id/device"
+            ),
+            Self::RiskGate(err) => write!(formatter, "{err}"),
             Self::SsdCapacityMeasurement(err) => write!(formatter, "{err}"),
             Self::SsdCapacityPolicy(err) => write!(formatter, "{err}"),
             #[cfg(feature = "debug-commands")]
@@ -1070,6 +1156,18 @@ impl From<DiskRetirementError> for CliError {
 impl From<DirectHddImportError> for CliError {
     fn from(err: DirectHddImportError) -> Self {
         Self::DirectHddImport(err)
+    }
+}
+
+impl From<PrepareDasError> for CliError {
+    fn from(err: PrepareDasError) -> Self {
+        Self::DiskPrepare(err)
+    }
+}
+
+impl From<RiskGateError> for CliError {
+    fn from(err: RiskGateError) -> Self {
+        Self::RiskGate(err)
     }
 }
 

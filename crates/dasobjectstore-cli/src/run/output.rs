@@ -1,3 +1,4 @@
+use super::disk_prepare::PrepareDasReport;
 use super::{CliError, DiskHealthSummary, HealthReport, HostConnectionStatus};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use dasobjectstore_metadata::{
@@ -381,6 +382,40 @@ pub(super) fn write_disk_retirement_report(
         "Live metadata: {}",
         report.live_sqlite_path.to_string_lossy()
     )
+}
+
+pub(super) fn write_prepare_das_report(
+    report: &PrepareDasReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    if report.dry_run {
+        writeln!(writer, "DAS preparation dry run")?;
+    } else {
+        writeln!(writer, "DAS preparation complete")?;
+    }
+    writeln!(
+        writer,
+        "Mount root: {}",
+        report.mount_root.to_string_lossy()
+    )?;
+    for target in &report.targets {
+        writeln!(writer, "- {}", target.role)?;
+        writeln!(writer, "  Device: {}", target.device_path.to_string_lossy())?;
+        writeln!(
+            writer,
+            "  Partition: {}",
+            target.partition_path.to_string_lossy()
+        )?;
+        writeln!(writer, "  Mount: {}", target.mount_point.to_string_lossy())?;
+        writeln!(writer, "  Filesystem: {}", target.filesystem)?;
+        if report.dry_run {
+            for command in &target.commands {
+                writeln!(writer, "  $ {command}")?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) fn write_disk_force_retirement_report(

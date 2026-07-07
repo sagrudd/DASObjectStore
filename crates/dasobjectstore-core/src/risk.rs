@@ -8,6 +8,7 @@ pub enum RiskyOperation {
     DirectToHddImport,
     ForceRetire,
     ForceReadWriteImport,
+    PrepareDas,
 }
 
 impl RiskyOperation {
@@ -16,6 +17,7 @@ impl RiskyOperation {
             Self::DirectToHddImport => "direct_to_hdd_import",
             Self::ForceRetire => "force_retire",
             Self::ForceReadWriteImport => "force_read_write_import",
+            Self::PrepareDas => "prepare_das",
         }
     }
 
@@ -24,6 +26,7 @@ impl RiskyOperation {
             Self::DirectToHddImport => "confirm direct-to-hdd import",
             Self::ForceRetire => "confirm force retire",
             Self::ForceReadWriteImport => "confirm force read-write import",
+            Self::PrepareDas => "confirm prepare das",
         }
     }
 }
@@ -33,6 +36,7 @@ pub struct RiskPolicy {
     pub allow_direct_to_hdd_import: bool,
     pub allow_force_retire: bool,
     pub allow_force_read_write_import: bool,
+    pub allow_prepare_das: bool,
 }
 
 impl RiskPolicy {
@@ -41,6 +45,7 @@ impl RiskPolicy {
             RiskyOperation::DirectToHddImport => self.allow_direct_to_hdd_import,
             RiskyOperation::ForceRetire => self.allow_force_retire,
             RiskyOperation::ForceReadWriteImport => self.allow_force_read_write_import,
+            RiskyOperation::PrepareDas => self.allow_prepare_das,
         }
     }
 }
@@ -164,6 +169,7 @@ mod tests {
             RiskyOperation::ForceReadWriteImport.name(),
             "force_read_write_import"
         );
+        assert_eq!(RiskyOperation::PrepareDas.name(), "prepare_das");
     }
 
     #[test]
@@ -245,11 +251,12 @@ mod tests {
         assert!(!policy.allows(RiskyOperation::ForceReadWriteImport));
     }
 
-    fn all_risky_operations() -> [RiskyOperation; 3] {
+    fn all_risky_operations() -> [RiskyOperation; 4] {
         [
             RiskyOperation::DirectToHddImport,
             RiskyOperation::ForceRetire,
             RiskyOperation::ForceReadWriteImport,
+            RiskyOperation::PrepareDas,
         ]
     }
 
@@ -265,6 +272,10 @@ mod tests {
             },
             RiskyOperation::ForceReadWriteImport => RiskPolicy {
                 allow_force_read_write_import: true,
+                ..RiskPolicy::default()
+            },
+            RiskyOperation::PrepareDas => RiskPolicy {
+                allow_prepare_das: true,
                 ..RiskPolicy::default()
             },
         }

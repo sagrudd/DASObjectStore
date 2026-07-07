@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::ids::{DiskId, ObjectId};
@@ -218,6 +218,8 @@ pub(crate) enum DiskCommand {
     Drain(DiskDrainArgs),
     /// Force a disk into retired state after explicit risk confirmation.
     ForceRetire(DiskForceRetireArgs),
+    /// Repartition, format, and mount DAS devices for DASObjectStore.
+    PrepareDas(DiskPrepareDasArgs),
     /// Plan replacement work from an old disk onto a named new disk.
     Replace(DiskReplaceArgs),
     /// Request retirement by moving a disk into draining state.
@@ -287,6 +289,81 @@ impl DiskForceRetireArgs {
 
     pub(crate) fn confirm(&self) -> &str {
         &self.confirm
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskPrepareDasArgs {
+    /// Stable by-id path for the mandatory SSD ingest device.
+    #[arg(long)]
+    ssd_device: PathBuf,
+    /// HDD mapping in the form disk-id=/dev/disk/by-id/usb-...
+    #[arg(long = "hdd-device")]
+    hdd_devices: Vec<String>,
+    /// Root under which prepared devices are mounted.
+    #[arg(long, default_value = "/srv/dasobjectstore")]
+    mount_root: PathBuf,
+    /// Filesystem to create on each prepared device.
+    #[arg(long, value_enum, default_value_t = DiskPrepareFilesystem::Ext4)]
+    filesystem: DiskPrepareFilesystem,
+    /// Owner account for mounted roots after preparation.
+    #[arg(long)]
+    owner: Option<String>,
+    /// Show the managed command plan without changing devices.
+    #[arg(long)]
+    dry_run: bool,
+    /// Policy allowance for destructive DAS preparation.
+    #[arg(long)]
+    allow_format: bool,
+    /// Action-time confirmation phrase: "confirm prepare das".
+    #[arg(long, default_value = "")]
+    confirm: String,
+}
+
+impl DiskPrepareDasArgs {
+    pub(crate) fn ssd_device(&self) -> &Path {
+        &self.ssd_device
+    }
+
+    pub(crate) fn hdd_devices(&self) -> &[String] {
+        &self.hdd_devices
+    }
+
+    pub(crate) fn mount_root(&self) -> &Path {
+        &self.mount_root
+    }
+
+    pub(crate) fn filesystem(&self) -> DiskPrepareFilesystem {
+        self.filesystem
+    }
+
+    pub(crate) fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    pub(crate) fn allow_format(&self) -> bool {
+        self.allow_format
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum DiskPrepareFilesystem {
+    Ext4,
+}
+
+impl std::fmt::Display for DiskPrepareFilesystem {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ext4 => formatter.write_str("ext4"),
+        }
     }
 }
 
@@ -938,8 +1015,9 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, DiskCommand, IngestArgs, IngestCommand, MnemosyneCommand, ObjectCommand,
-        PoolCommand, ProbeArgs, ServiceCommand, StoreArgs, StoreCommand,
+        Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
+        MnemosyneCommand, ObjectCommand, PoolCommand, ProbeArgs, ServiceCommand, StoreArgs,
+        StoreCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -1119,6 +1197,7 @@ mod tests {
         match args.command() {
             DiskCommand::Drain(_) => panic!("expected retire command"),
             DiskCommand::ForceRetire(_) => panic!("expected retire command"),
+            DiskCommand::PrepareDas(_) => panic!("expected retire command"),
             DiskCommand::Replace(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
                 assert_eq!(retire.disk_id().as_str(), "disk-a");
@@ -1160,6 +1239,58 @@ mod tests {
                 assert_eq!(force_retire.confirm(), "confirm force retire");
             }
             _ => panic!("expected force-retire command"),
+        }
+    }
+
+    #[test]
+    fn parses_disk_prepare_das() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "prepare-das",
+            "--ssd-device",
+            "/dev/disk/by-id/usb-Samsung_QNAP_0000081064-0:0",
+            "--hdd-device",
+            "qnap-1057=/dev/disk/by-id/usb-ST4000VN_QNAP_0000081057-0:0",
+            "--hdd-device",
+            "qnap-1058=/dev/disk/by-id/usb-ST4000VN_QNAP_0000081058-0:0",
+            "--mount-root",
+            "/srv/dasobjectstore",
+            "--filesystem",
+            "ext4",
+            "--owner",
+            "stephen",
+            "--dry-run",
+            "--allow-format",
+            "--confirm",
+            "confirm prepare das",
+        ])
+        .expect("disk prepare-das parses");
+
+        let Some(Command::Disk(args)) = cli.command() else {
+            panic!("expected disk command");
+        };
+        match args.command() {
+            DiskCommand::PrepareDas(prepare) => {
+                assert_eq!(
+                    prepare.ssd_device(),
+                    Path::new("/dev/disk/by-id/usb-Samsung_QNAP_0000081064-0:0")
+                );
+                assert_eq!(
+                    prepare.hdd_devices(),
+                    &[
+                        "qnap-1057=/dev/disk/by-id/usb-ST4000VN_QNAP_0000081057-0:0".to_string(),
+                        "qnap-1058=/dev/disk/by-id/usb-ST4000VN_QNAP_0000081058-0:0".to_string()
+                    ]
+                );
+                assert_eq!(prepare.mount_root(), Path::new("/srv/dasobjectstore"));
+                assert_eq!(prepare.filesystem(), DiskPrepareFilesystem::Ext4);
+                assert_eq!(prepare.owner(), Some("stephen"));
+                assert!(prepare.dry_run());
+                assert!(prepare.allow_format());
+                assert_eq!(prepare.confirm(), "confirm prepare das");
+            }
+            _ => panic!("expected prepare-das command"),
         }
     }
 
