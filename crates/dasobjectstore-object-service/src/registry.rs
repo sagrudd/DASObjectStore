@@ -20,6 +20,8 @@ const DEFAULT_STORE_REGISTRY_PATH: &str = "/usr/local/etc/dasobjectstore/stores.
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_STORE_REGISTRY_PATH: &str = "/etc/dasobjectstore/stores.json";
 
+pub const PORTABLE_STORE_REGISTRY_RELATIVE_PATH: &str = ".dasobjectstore/stores.json";
+
 #[cfg(unix)]
 const REGISTRY_DIR_MODE: u32 = 0o750;
 #[cfg(unix)]
@@ -54,6 +56,12 @@ pub fn default_store_registry_path() -> PathBuf {
     std::env::var_os(STORE_REGISTRY_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_STORE_REGISTRY_PATH))
+}
+
+pub fn portable_store_registry_path(ssd_root: impl AsRef<Path>) -> PathBuf {
+    ssd_root
+        .as_ref()
+        .join(PORTABLE_STORE_REGISTRY_RELATIVE_PATH)
 }
 
 pub fn read_store_registry(

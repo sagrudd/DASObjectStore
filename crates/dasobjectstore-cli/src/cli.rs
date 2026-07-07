@@ -497,6 +497,8 @@ impl StoreArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum StoreCommand {
+    /// Adopt portable object stores from a DAS SSD on this host.
+    Adopt(StoreAdoptArgs),
     /// Create or update a system-managed object store.
     Create(StoreCreateArgs),
     /// Emit the built-in JSON policy defaults for a store class.
@@ -520,6 +522,9 @@ pub(crate) struct StoreCreateArgs {
     /// Explicit S3 bucket name; defaults to a stable name derived from the store ID.
     #[arg(long)]
     bucket: Option<String>,
+    /// DAS SSD root used for portable store metadata.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
     /// Emit the created or updated store definition as JSON.
     #[arg(long)]
     json: bool,
@@ -545,6 +550,37 @@ impl StoreCreateArgs {
         self.bucket.as_deref()
     }
 
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreAdoptArgs {
+    /// DAS SSD root containing portable store metadata.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
+    /// Emit adopted store definitions as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl StoreAdoptArgs {
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
+    }
+
     pub(crate) fn json(&self) -> bool {
         self.json
     }
@@ -559,6 +595,12 @@ pub(crate) struct StoreListArgs {
     /// Emit store definitions as JSON.
     #[arg(long)]
     json: bool,
+    /// List portable store metadata from the DAS SSD instead of host metadata.
+    #[arg(long)]
+    portable: bool,
+    /// DAS SSD root used when listing portable store metadata.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
     /// Advanced test override for the system-managed store registry path.
     #[arg(long, hide = true)]
     registry_path: Option<PathBuf>,
@@ -567,6 +609,14 @@ pub(crate) struct StoreListArgs {
 impl StoreListArgs {
     pub(crate) fn json(&self) -> bool {
         self.json
+    }
+
+    pub(crate) fn portable(&self) -> bool {
+        self.portable
+    }
+
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
     }
 
     pub(crate) fn registry_path(&self) -> Option<&Path> {
@@ -1827,6 +1877,31 @@ mod tests {
     }
 
     #[test]
+    fn parses_store_adopt() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "adopt",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--json",
+        ])
+        .expect("store adopt parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Adopt(adopt)) => {
+                assert_eq!(adopt.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
+                assert!(adopt.json());
+                assert_eq!(adopt.registry_path(), None);
+            }
+            _ => panic!("expected adopt command"),
+        }
+    }
+
+    #[test]
     fn parses_store_create() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
@@ -1839,6 +1914,8 @@ mod tests {
             "2",
             "--bucket",
             "generated-data",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
             "--json",
         ])
         .expect("store create parses");
@@ -1852,6 +1929,10 @@ mod tests {
                 assert_eq!(create.class(), StoreClass::GeneratedData);
                 assert_eq!(create.copies(), Some(2));
                 assert_eq!(create.bucket(), Some("generated-data"));
+                assert_eq!(
+                    create.ssd_root(),
+                    Some(Path::new("/srv/dasobjectstore/ssd"))
+                );
                 assert!(create.json());
                 assert_eq!(create.registry_path(), None);
             }
@@ -1861,8 +1942,16 @@ mod tests {
 
     #[test]
     fn parses_store_list() {
-        let cli = Cli::try_parse_from(["dasobjectstore", "store", "list", "--json"])
-            .expect("store list parses");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "list",
+            "--portable",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--json",
+        ])
+        .expect("store list parses");
 
         let Some(Command::Store(args)) = cli.command() else {
             panic!("expected store command");
@@ -1870,6 +1959,8 @@ mod tests {
         match args.command() {
             Some(StoreCommand::List(list)) => {
                 assert!(list.json());
+                assert!(list.portable());
+                assert_eq!(list.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
                 assert_eq!(list.registry_path(), None);
             }
             _ => panic!("expected list command"),

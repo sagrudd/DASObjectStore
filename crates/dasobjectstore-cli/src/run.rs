@@ -7,7 +7,8 @@ use crate::cli::{
     MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
     ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs,
     ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs,
-    StoreCommand, StoreCreateArgs, StoreDefaultsArgs, StoreListArgs, StoreValidateArgs,
+    StoreAdoptArgs, StoreCommand, StoreCreateArgs, StoreDefaultsArgs, StoreListArgs,
+    StoreValidateArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -56,9 +57,9 @@ use dasobjectstore_mnemosyne::{
     NasNfsEndpointValidationError,
 };
 use dasobjectstore_object_service::{
-    default_store_registry_path, plan_store_service_layout, read_store_registry, render_compose,
-    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, ObjectServiceError,
-    StoreServiceDefinition,
+    default_store_registry_path, plan_store_service_layout, portable_store_registry_path,
+    read_store_registry, render_compose, upsert_store_definition, ComposeRenderRequest,
+    ComposeServiceConfig, ObjectServiceError, StoreRegistryUpdateReport, StoreServiceDefinition,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -73,9 +74,9 @@ use dasobjectstore_platform::{
     ObservedDisk, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
 use std::fmt::{self, Display};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
@@ -100,6 +101,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
         Some(Command::Store(args)) => match args.command() {
+            Some(StoreCommand::Adopt(args)) => run_store_adopt(args, writer),
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
@@ -799,22 +801,104 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         .map(Path::to_path_buf)
         .unwrap_or_else(default_store_registry_path);
     let report = upsert_store_definition(&registry_path, definition)?;
+    let portable_report = upsert_portable_store_definition(args.ssd_root(), &report.definition)?;
 
     if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        serde_json::to_writer_pretty(
+            &mut *writer,
+            &serde_json::json!({
+                "host": report,
+                "portable": portable_report,
+            }),
+        )?;
         writer.write_all(b"\n")?;
     } else {
         write_store_create_report(&report, writer)?;
+        match &portable_report {
+            Some(report) => writeln!(
+                writer,
+                "Portable registry: {}",
+                report.registry_path.to_string_lossy()
+            )?,
+            None => writeln!(writer, "Portable registry: not detected")?,
+        }
+    }
+
+    Ok(())
+}
+
+fn run_store_adopt(args: &StoreAdoptArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let ssd_root = known_ssd_root_for_adopt(args.ssd_root())?;
+    let portable_registry_path = portable_store_registry_path(&ssd_root);
+    let definitions = read_store_registry(&portable_registry_path)?;
+    if definitions.is_empty() {
+        return Err(CliError::PortableRegistry(format!(
+            "portable store registry is empty at {}",
+            portable_registry_path.display()
+        )));
+    }
+
+    let host_registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_store_registry_path);
+    let mut reports = Vec::new();
+    for definition in definitions {
+        reports.push(upsert_store_definition(
+            &host_registry_path,
+            definition.clone(),
+        )?);
+    }
+
+    if args.json() {
+        serde_json::to_writer_pretty(
+            &mut *writer,
+            &serde_json::json!({
+                "ssd_root": ssd_root,
+                "portable_registry_path": portable_registry_path,
+                "host_registry_path": host_registry_path,
+                "adopted": reports,
+            }),
+        )?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Portable store registry adopted")?;
+        writeln!(writer, "SSD root: {}", ssd_root.to_string_lossy())?;
+        writeln!(
+            writer,
+            "Portable registry: {}",
+            portable_registry_path.to_string_lossy()
+        )?;
+        writeln!(
+            writer,
+            "Host registry: {}",
+            host_registry_path.to_string_lossy()
+        )?;
+        writeln!(writer, "Stores adopted: {}", reports.len())?;
+        for report in &reports {
+            writeln!(
+                writer,
+                "- {} action={} class={} copies={}",
+                report.definition.store_id,
+                report.action.as_str(),
+                report.definition.policy.class.name(),
+                report.definition.policy.copies
+            )?;
+        }
     }
 
     Ok(())
 }
 
 fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let registry_path = args
-        .registry_path()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_store_registry_path);
+    let registry_path = if args.portable() {
+        let ssd_root = known_ssd_root_for_adopt(args.ssd_root())?;
+        portable_store_registry_path(ssd_root)
+    } else {
+        args.registry_path()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_store_registry_path)
+    };
     let definitions = read_store_registry(&registry_path)?;
 
     if args.json() {
@@ -825,6 +909,78 @@ fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), C
     }
 
     Ok(())
+}
+
+fn upsert_portable_store_definition(
+    ssd_root: Option<&Path>,
+    definition: &StoreServiceDefinition,
+) -> Result<Option<StoreRegistryUpdateReport>, CliError> {
+    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root)? else {
+        return Ok(None);
+    };
+    let registry_path = portable_store_registry_path(&ssd_root);
+    let report = upsert_store_definition(&registry_path, definition.clone())?;
+
+    Ok(Some(report))
+}
+
+fn known_ssd_root_for_optional_mirror(
+    ssd_root: Option<&Path>,
+) -> Result<Option<PathBuf>, CliError> {
+    match ssd_root {
+        Some(path) => {
+            validate_known_ssd_root(path)?;
+            Ok(Some(path.to_path_buf()))
+        }
+        None => {
+            let path = default_ssd_root();
+            if is_known_ssd_root(&path) {
+                Ok(Some(path))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn known_ssd_root_for_adopt(ssd_root: Option<&Path>) -> Result<PathBuf, CliError> {
+    let path = ssd_root
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_ssd_root);
+    validate_known_ssd_root(&path)?;
+
+    Ok(path)
+}
+
+fn default_ssd_root() -> PathBuf {
+    std::env::var_os("DASOBJECTSTORE_SSD_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/srv/dasobjectstore/ssd"))
+}
+
+fn is_known_ssd_root(path: &Path) -> bool {
+    read_device_marker(path).is_ok_and(|marker| marker.lines().any(|line| line == "role=ssd"))
+}
+
+fn validate_known_ssd_root(path: &Path) -> Result<(), CliError> {
+    let marker = read_device_marker(path).map_err(|err| {
+        CliError::PortableRegistry(format!(
+            "{} is not a known DASObjectStore SSD root: {err}",
+            path.display()
+        ))
+    })?;
+    if !marker.lines().any(|line| line == "role=ssd") {
+        return Err(CliError::PortableRegistry(format!(
+            "{} is not a DASObjectStore SSD root; expected role=ssd in .dasobjectstore/device.env",
+            path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn read_device_marker(path: &Path) -> Result<String, std::io::Error> {
+    fs::read_to_string(path.join(".dasobjectstore").join("device.env"))
 }
 
 fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1111,6 +1267,7 @@ pub(crate) enum CliError {
     MneionStorageDefinition(MneionStorageDefinitionError),
     NasNfsEndpointValidation(NasNfsEndpointValidationError),
     CommandFailed(String),
+    PortableRegistry(String),
     InvalidDiskRootMapping {
         value: String,
     },
@@ -1156,6 +1313,7 @@ impl Display for CliError {
             Self::MneionStorageDefinition(err) => write!(formatter, "{err}"),
             Self::NasNfsEndpointValidation(err) => write!(formatter, "{err}"),
             Self::CommandFailed(err) => write!(formatter, "{err}"),
+            Self::PortableRegistry(err) => write!(formatter, "{err}"),
             Self::InvalidDiskRootMapping { value } => write!(
                 formatter,
                 "invalid disk root mapping `{value}`; expected disk-id=/mounted/disk/root"
@@ -2034,6 +2192,126 @@ mod tests {
             definitions[0].bucket_name.as_deref(),
             Some("generated-data")
         );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_create_mirrors_definition_to_known_portable_ssd() {
+        let root = temp_root("store-create-portable");
+        let host_registry_path = root.join("host").join("stores.json");
+        let ssd_root = root.join("ssd");
+        create_known_ssd_marker(&ssd_root);
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "create",
+            "generated-data",
+            "--class",
+            "generated_data",
+            "--bucket",
+            "generated-data",
+            "--ssd-root",
+            ssd_root.to_str().expect("utf8 ssd root"),
+            "--registry-path",
+            host_registry_path
+                .to_str()
+                .expect("utf8 host registry path"),
+        ])
+        .expect("store create parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store create runs");
+
+        let portable_registry_path = ssd_root.join(".dasobjectstore").join("stores.json");
+        assert!(portable_registry_path.is_file());
+        let portable_definitions: Vec<StoreServiceDefinition> = serde_json::from_reader(
+            File::open(&portable_registry_path).expect("open portable registry"),
+        )
+        .expect("portable registry json");
+        assert_eq!(portable_definitions.len(), 1);
+        assert_eq!(portable_definitions[0].store_id.as_str(), "generated-data");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Portable registry:"));
+        assert!(output.contains(".dasobjectstore/stores.json"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_adopt_imports_portable_registry_to_host_registry() {
+        let root = temp_root("store-adopt-portable");
+        let host_registry_path = root.join("host").join("stores.json");
+        let ssd_root = root.join("ssd");
+        create_known_ssd_marker(&ssd_root);
+        let portable_registry_path = ssd_root.join(".dasobjectstore").join("stores.json");
+        write_store_definitions_file(
+            &portable_registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("public-reference").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+                bucket_name: Some("public-reference".to_string()),
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "adopt",
+            "--ssd-root",
+            ssd_root.to_str().expect("utf8 ssd root"),
+            "--registry-path",
+            host_registry_path
+                .to_str()
+                .expect("utf8 host registry path"),
+        ])
+        .expect("store adopt parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store adopt runs");
+
+        let host_definitions: Vec<StoreServiceDefinition> =
+            serde_json::from_reader(File::open(&host_registry_path).expect("open host registry"))
+                .expect("host registry json");
+        assert_eq!(host_definitions.len(), 1);
+        assert_eq!(host_definitions[0].store_id.as_str(), "public-reference");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Portable store registry adopted"));
+        assert!(output.contains("Stores adopted: 1"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_list_reads_portable_registry_from_known_ssd() {
+        let root = temp_root("store-list-portable");
+        let ssd_root = root.join("ssd");
+        create_known_ssd_marker(&ssd_root);
+        write_store_definitions_file(
+            &ssd_root.join(".dasobjectstore").join("stores.json"),
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("portable-generated").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+                bucket_name: Some("portable-generated".to_string()),
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "list",
+            "--portable",
+            "--ssd-root",
+            ssd_root.to_str().expect("utf8 ssd root"),
+        ])
+        .expect("store list parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store list runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("portable-generated"));
+        assert!(output.contains("bucket=portable-generated"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -3125,6 +3403,16 @@ mod tests {
             "dasobjectstore-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    fn create_known_ssd_marker(ssd_root: &Path) {
+        let marker_dir = ssd_root.join(".dasobjectstore");
+        fs::create_dir_all(&marker_dir).expect("create SSD marker directory");
+        fs::write(
+            marker_dir.join("device.env"),
+            "role=ssd\ndevice=/dev/disk/by-id/test-ssd\nfilesystem=ext4\n",
+        )
+        .expect("write SSD marker");
     }
 
     fn valid_nas_nfs_endpoint_definition() -> serde_json::Value {

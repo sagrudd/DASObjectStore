@@ -18,8 +18,9 @@ pub use provider::{
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus, StoreBucketBinding,
 };
 pub use registry::{
-    default_store_registry_path, read_store_registry, upsert_store_definition, StoreRegistryAction,
-    StoreRegistryUpdateReport, STORE_REGISTRY_ENV,
+    default_store_registry_path, portable_store_registry_path, read_store_registry,
+    upsert_store_definition, StoreRegistryAction, StoreRegistryUpdateReport,
+    PORTABLE_STORE_REGISTRY_RELATIVE_PATH, STORE_REGISTRY_ENV,
 };
 
 /// Returns the object service crate version.
