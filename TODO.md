@@ -208,10 +208,13 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Add bounded Docker daemon responsiveness check to benchmark preflight.
 - [x] Add bounded Docker Compose availability and action checks for benchmark
   provider/workload scripts.
+- [x] Install Docker, Compose v2, and AWS CLI on the DAS host and pass remote
+  benchmark preflight at `192.168.1.192`.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
-  `benchmarks/output/object-services/`. Automation attempt on 2026-06-25 was
-  blocked because local Docker commands hung before provider startup completed.
+  `benchmarks/output/object-services/`. Remote DAS host preflight passed on
+  2026-07-07 after installing Docker, Compose v2, and AWS CLI; the next slice
+  should start providers and run the bounded workload matrix.
 - [ ] Produce first benchmark report and recommend MVP object service.
   Blocked until the complete Garage and RustFS workload set exists under
   `benchmarks/output/object-services/`.
@@ -337,10 +340,13 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Reconcile standalone auth with the appliance charter for local OS users
   and sudo-derived administrator status before expanding administrator
   workflows.
-- [ ] If OS-local auth is selected, add local-user discovery, sudo-rights
+- [x] If OS-local auth is selected, add local-user discovery, sudo-rights
   administrator detection, current-user metadata, and auth tests.
-- [ ] If product-local auth remains authoritative, document the host-mode
+- [x] If product-local auth remains authoritative, document the host-mode
   decision and why it supersedes OS-local sudo administrator semantics.
+  Not applicable: OS-local authority is selected for standalone appliances, and
+  the product-local auth store is documented as a transitional Web session
+  layer.
 
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 

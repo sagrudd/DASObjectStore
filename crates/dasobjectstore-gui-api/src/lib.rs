@@ -18,8 +18,9 @@ pub use actions::{
 };
 pub use auth::{
     AuthRegistry, AuthTokenResetReport, AuthenticatedUser, LocalAuthStore, LocalAuthStoreError,
-    LoginResponse, LogoutResponse, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
-    SessionTokenRecord, UserSummary,
+    LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, LogoutResponse, RegisterResponse,
+    RegistrationTokenRecord, SessionCheckResponse, SessionTokenRecord, UserSummary,
+    SUDO_ADMIN_GROUPS,
 };
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
