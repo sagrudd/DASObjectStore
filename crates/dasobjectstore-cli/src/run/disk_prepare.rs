@@ -198,7 +198,12 @@ fn inspect_existing_layout(device_path: &Path) -> Result<ExistingLayout, Prepare
         });
     }
 
-    Ok(parse_lsblk_pairs(&String::from_utf8_lossy(&output.stdout)))
+    let mut layout = parse_lsblk_pairs(&String::from_utf8_lossy(&output.stdout));
+    let active_swaps = active_swap_paths();
+    layout
+        .swap_paths
+        .retain(|path| active_swaps.iter().any(|active| active == path));
+    Ok(layout)
 }
 
 fn parse_lsblk_pairs(output: &str) -> ExistingLayout {
@@ -231,6 +236,18 @@ fn value_for_key(line: &str, key: &str) -> Option<String> {
     let rest = &line[start..];
     let end = rest.find('"')?;
     Some(rest[..end].to_string())
+}
+
+fn active_swap_paths() -> Vec<String> {
+    let Ok(swaps) = fs::read_to_string("/proc/swaps") else {
+        return Vec::new();
+    };
+    swaps
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn partition_path_for(device_path: &Path) -> PathBuf {
@@ -413,6 +430,11 @@ mod tests {
         assert_eq!(parsed.child_paths, ["/dev/sda1", "/dev/sda2"]);
         assert_eq!(parsed.mountpoints, ["/run/media/disk-a"]);
         assert_eq!(parsed.swap_paths, ["/dev/sda2"]);
+    }
+
+    #[test]
+    fn inactive_swap_detection_is_empty_on_missing_proc_data() {
+        let _ = super::active_swap_paths();
     }
 
     #[test]
