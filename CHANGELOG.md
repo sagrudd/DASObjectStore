@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.7 - 2026-07-07
+
+- Repair managed SSD/HDD root ownership and modes during package install or
+  upgrade so existing object directories remain writable by `dasobjectstored`.
+- Prepare Linux source ACLs before daemon-backed file ingest so the service can
+  traverse private user home directories and read the selected import tree.
+
 ## 0.1.6 - 2026-07-07
 
 - Remove the public `--live-sqlite-path` requirement from `store drain`; the

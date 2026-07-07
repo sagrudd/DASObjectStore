@@ -51,14 +51,11 @@ example above, membership in ``mnemosyne`` is required. Ingest does not require
 ``sudo`` because the daemon, not the user's shell process, owns managed storage
 mutation.
 
-The packaged daemon reads the path supplied with ``--source``. For now the
-systemd service exposes home directories read-only so operators can submit
-ingests from ordinary user-provided paths, but Linux filesystem permissions
-still apply to the ``dasobjectstore`` service identity. If the source is under a
-private home directory, shared project directory, or external mount, grant the
-daemon read and execute access to the directory tree before submitting the job,
-for example through a shared group or ACL. The daemon does not need write access
-to the source path.
+The packaged daemon reads the path supplied with ``--source``. On Linux, the CLI
+prepares source ACLs before submitting the job so the ``dasobjectstore`` service
+can traverse private home directories and read the selected import tree without
+requiring ``sudo`` or broad home-directory mode changes. The daemon does not
+need write access to the source path.
 
 DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
@@ -297,11 +294,11 @@ The normal CLI path builds a daemon ingest request and reports daemon job
 progress. The hidden ``--local-direct`` mode exists only for developer tests and
 should not be used as the production ingest path.
 
-Packaged Linux services currently allow read-only daemon access to home
-directories so user-provided source paths can be ingested without falling back to
-direct local mutation. This is a service sandbox choice, not an authorization
-bypass: the daemon still evaluates the ingest request and the source path must
-be readable by the ``dasobjectstore`` service user.
+Packaged Linux services allow read-only daemon access to home directories so
+user-provided source paths can be ingested without falling back to direct local
+mutation. This is a service sandbox choice, not an authorization bypass: the
+daemon still evaluates the ingest request, and the CLI grants the service
+identity read/traverse ACLs for the selected source tree before submission.
 
 Interrupted imports should be inspected through daemon job status and store
 state before retrying.

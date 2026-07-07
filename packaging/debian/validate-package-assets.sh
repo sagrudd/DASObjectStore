@@ -51,6 +51,8 @@ require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.
 require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
 require_text "$postinst" "-exec chmod 0640 {} +"
 require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
+require_text "$postinst" 'repair_managed_tree "$managed_root/ssd"'
+require_text "$postinst" 'repair_managed_tree "$root"'
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 
 require_text "$build_deb" "cargo build --release -p dasobjectstore-daemon"

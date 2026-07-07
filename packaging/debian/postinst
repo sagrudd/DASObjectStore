@@ -28,6 +28,25 @@ ensure_owned_dir() {
   install -d -o "$service_user" -g "$service_group" -m "$mode" "$path"
 }
 
+repair_managed_tree() {
+  local root="$1"
+  if [[ ! -d "$root" ]]; then
+    return 0
+  fi
+
+  chown "$service_user:$service_group" "$root"
+  chmod 0750 "$root"
+  find "$root" \
+    -path "$root/lost+found" -prune \
+    -o -mindepth 1 -exec chown "$service_user:$service_group" {} +
+  find "$root" \
+    -path "$root/lost+found" -prune \
+    -o -type d -exec chmod 0750 {} +
+  find "$root" \
+    -path "$root/lost+found" -prune \
+    -o -type f -exec chmod 0640 {} +
+}
+
 reject_user_owned_managed_root() {
   local path="$1"
   if [[ ! -e "$path" ]]; then
@@ -62,6 +81,14 @@ find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' \
 
 reject_user_owned_managed_root "$managed_root"
 ensure_owned_dir "$managed_root" 0750
+repair_managed_tree "$managed_root/ssd"
+if [[ -d "$managed_root/hdd" ]]; then
+  chown root:root "$managed_root/hdd"
+  chmod 0755 "$managed_root/hdd"
+  for root in "$managed_root"/hdd/*; do
+    repair_managed_tree "$root"
+  done
+fi
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true

@@ -102,6 +102,8 @@ use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -1728,6 +1730,7 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
         return run_ingest_files_local_direct(args, writer);
     }
 
+    prepare_source_access_for_packaged_daemon(args.source())?;
     let config = DaemonRuntimeConfig::default_packaged();
     let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
     run_ingest_files_with_client(args, &client, writer)?;
@@ -1831,6 +1834,121 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
     }
 }
 
+#[cfg(target_os = "linux")]
+fn prepare_source_access_for_packaged_daemon(source: &Path) -> Result<(), CliError> {
+    const SERVICE_USER: &str = "dasobjectstore";
+
+    let source = source.canonicalize().map_err(|err| {
+        CliError::CommandFailed(format!(
+            "failed to resolve ingest source {} before daemon submission: {err}",
+            source.display()
+        ))
+    })?;
+    if !source.exists() {
+        return Err(CliError::CommandFailed(format!(
+            "ingest source {} does not exist",
+            source.display()
+        )));
+    }
+
+    for ancestor in acl_ancestors_requiring_execute(&source)? {
+        run_setfacl(
+            &[
+                "-m",
+                &format!("u:{SERVICE_USER}:--x"),
+                path_arg(&ancestor).as_str(),
+            ],
+            &ancestor,
+            "grant daemon traversal",
+        )?;
+    }
+
+    if source_requires_read_acl(&source)? {
+        run_setfacl(
+            &[
+                "-R",
+                "-m",
+                &format!("u:{SERVICE_USER}:rX"),
+                path_arg(&source).as_str(),
+            ],
+            &source,
+            "grant daemon source read",
+        )?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn prepare_source_access_for_packaged_daemon(_source: &Path) -> Result<(), CliError> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn acl_ancestors_requiring_execute(source: &Path) -> Result<Vec<PathBuf>, CliError> {
+    let mut ancestors = source.ancestors().skip(1).collect::<Vec<_>>();
+    ancestors.reverse();
+    let mut required = Vec::new();
+    for ancestor in ancestors {
+        if ancestor.parent().is_none() {
+            continue;
+        }
+        let metadata = fs::metadata(ancestor).map_err(|err| {
+            CliError::CommandFailed(format!(
+                "failed to inspect ingest source ancestor {}: {err}",
+                ancestor.display()
+            ))
+        })?;
+        if metadata.permissions().mode() & 0o001 == 0 {
+            required.push(ancestor.to_path_buf());
+        }
+    }
+    Ok(required)
+}
+
+#[cfg(target_os = "linux")]
+fn source_requires_read_acl(source: &Path) -> Result<bool, CliError> {
+    let metadata = fs::metadata(source).map_err(|err| {
+        CliError::CommandFailed(format!(
+            "failed to inspect ingest source {}: {err}",
+            source.display()
+        ))
+    })?;
+    let required_bits = if metadata.is_dir() { 0o005 } else { 0o004 };
+    Ok(metadata.permissions().mode() & required_bits != required_bits)
+}
+
+#[cfg(target_os = "linux")]
+fn run_setfacl(args: &[&str], path: &Path, action: &str) -> Result<(), CliError> {
+    let output = ProcessCommand::new("setfacl")
+        .args(args)
+        .output()
+        .map_err(|err| {
+            CliError::CommandFailed(format!(
+                "failed to run setfacl to {action} for {}: {err}",
+                path.display()
+            ))
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            output.status.to_string()
+        } else {
+            stderr
+        };
+        return Err(CliError::CommandFailed(format!(
+            "failed to {action} for {}: {detail}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn path_arg(path: &Path) -> String {
+    path.to_string_lossy().to_string()
+}
+
 fn write_daemon_ingest_submission(
     args: &IngestFilesArgs,
     response: &SubmitIngestFilesResponse,
@@ -1862,7 +1980,7 @@ impl UploadInterruptGuard {
         unsafe {
             libc::sigemptyset(&mut previous.sa_mask);
             let mut handler: libc::sigaction = std::mem::zeroed();
-            handler.sa_sigaction = upload_sigint_handler as usize;
+            handler.sa_sigaction = upload_sigint_handler as *const () as usize;
             handler.sa_flags = 0;
             libc::sigemptyset(&mut handler.sa_mask);
             libc::sigaction(libc::SIGINT, &handler, &mut previous);
