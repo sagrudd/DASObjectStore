@@ -206,6 +206,8 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Support containerized AWS CLI for benchmark workloads.
 - [x] Autogenerate Garage benchmark S3 keys and bucket permissions.
 - [x] Add bounded Docker daemon responsiveness check to benchmark preflight.
+- [x] Add bounded Docker Compose availability and action checks for benchmark
+  provider/workload scripts.
 - [ ] Run first complete Garage and RustFS workload set.
   Blocked until Garage and RustFS workload reports exist under
   `benchmarks/output/object-services/`. Automation attempt on 2026-06-25 was

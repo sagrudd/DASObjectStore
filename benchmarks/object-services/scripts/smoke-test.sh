@@ -54,4 +54,37 @@ fi
 DASOBJECTSTORE_BENCHMARK_DATE=2026-06-25 "$script_dir/draft-report.sh" | grep -q '## Raw Input Inventory'
 "$script_dir/environment-snapshot.sh" | grep -q '| Host OS |'
 
+fake_bin="$tmpdir/fake-bin"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/docker" <<'FAKE_DOCKER'
+#!/usr/bin/env sh
+if [ "$1" = "info" ]; then
+  exit 0
+fi
+if [ "$1" = "compose" ] && [ "$2" = "version" ]; then
+  sleep 5
+  exit 0
+fi
+exit 0
+FAKE_DOCKER
+chmod +x "$fake_bin/docker"
+cat > "$fake_bin/docker-compose" <<'FAKE_DOCKER_COMPOSE'
+#!/usr/bin/env sh
+if [ "$1" = "version" ]; then
+  sleep 5
+  exit 0
+fi
+exit 0
+FAKE_DOCKER_COMPOSE
+chmod +x "$fake_bin/docker-compose"
+
+if PATH="$fake_bin:$PATH" \
+  DASOBJECTSTORE_BENCH_DOCKER_CHECK_TIMEOUT_SECONDS=1 \
+  DASOBJECTSTORE_BENCH_COMPOSE_CHECK_TIMEOUT_SECONDS=1 \
+  "$script_dir/preflight.sh" >/dev/null 2>"$tmpdir/preflight-timeout.err"; then
+  echo "expected preflight to fail when docker compose version times out" >&2
+  exit 65
+fi
+grep -q 'missing command: docker compose or docker-compose' "$tmpdir/preflight-timeout.err"
+
 echo "benchmark smoke test passed"

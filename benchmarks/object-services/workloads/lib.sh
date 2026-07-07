@@ -60,10 +60,13 @@ load_garage_credentials() {
 require_compose_command() {
   message="$1"
 
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  timeout_seconds="${DASOBJECTSTORE_BENCH_COMPOSE_CHECK_TIMEOUT_SECONDS:-15}"
+  if command -v docker >/dev/null 2>&1 \
+    && command_finishes_within "$timeout_seconds" docker compose version >/dev/null 2>&1; then
     return
   fi
-  if command -v docker-compose >/dev/null 2>&1; then
+  if command -v docker-compose >/dev/null 2>&1 \
+    && command_finishes_within "$timeout_seconds" docker-compose version >/dev/null 2>&1; then
     return
   fi
 
@@ -71,16 +74,52 @@ require_compose_command() {
   exit 69
 }
 
+command_finishes_within() {
+  seconds="$1"
+  shift
+
+  "$@" &
+  command_pid="$!"
+
+  (
+    sleep "$seconds"
+    if kill "$command_pid" >/dev/null 2>&1; then
+      echo "command timed out after ${seconds}s: $*" >&2
+    fi
+  ) &
+  timer_pid="$!"
+
+  if wait "$command_pid"; then
+    status=0
+  else
+    status="$?"
+  fi
+
+  kill "$timer_pid" >/dev/null 2>&1 || true
+  wait "$timer_pid" >/dev/null 2>&1 || true
+
+  return "$status"
+}
+
+run_compose_command() {
+  timeout_seconds="${DASOBJECTSTORE_BENCH_COMPOSE_TIMEOUT_SECONDS:-120}"
+  require_positive_integer DASOBJECTSTORE_BENCH_COMPOSE_TIMEOUT_SECONDS "$timeout_seconds"
+  command_finishes_within "$timeout_seconds" "$@"
+}
+
 docker_compose() {
   compose_file="$1"
   shift
 
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    docker compose -f "$compose_file" "$@"
+  timeout_seconds="${DASOBJECTSTORE_BENCH_COMPOSE_CHECK_TIMEOUT_SECONDS:-15}"
+  if command -v docker >/dev/null 2>&1 \
+    && command_finishes_within "$timeout_seconds" docker compose version >/dev/null 2>&1; then
+    run_compose_command docker compose -f "$compose_file" "$@"
     return
   fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    docker-compose -f "$compose_file" "$@"
+  if command -v docker-compose >/dev/null 2>&1 \
+    && command_finishes_within "$timeout_seconds" docker-compose version >/dev/null 2>&1; then
+    run_compose_command docker-compose -f "$compose_file" "$@"
     return
   fi
 

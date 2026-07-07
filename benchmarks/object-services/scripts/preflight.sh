@@ -45,9 +45,11 @@ require_hash_command() {
 }
 
 require_compose_command() {
-  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+  timeout_seconds="${DASOBJECTSTORE_BENCH_COMPOSE_CHECK_TIMEOUT_SECONDS:-15}"
+  if command -v docker >/dev/null 2>&1 && command_finishes_within "$timeout_seconds" docker compose version; then
     echo "ok command: docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
+  elif command -v docker-compose >/dev/null 2>&1 \
+    && command_finishes_within "$timeout_seconds" docker-compose version; then
     echo "ok command: docker-compose"
   else
     record_failure "missing command: docker compose or docker-compose"

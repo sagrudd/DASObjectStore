@@ -32,7 +32,12 @@ benchmarks/object-services/scripts/preflight.sh
 If the local preflight fails, fix the missing command, Docker daemon, or Docker
 Compose issue before starting provider containers. The Docker daemon
 responsiveness check defaults to 15 seconds and can be adjusted with
-`DASOBJECTSTORE_BENCH_DOCKER_CHECK_TIMEOUT_SECONDS`.
+`DASOBJECTSTORE_BENCH_DOCKER_CHECK_TIMEOUT_SECONDS`. Docker Compose availability
+checks default to 15 seconds and can be adjusted with
+`DASOBJECTSTORE_BENCH_COMPOSE_CHECK_TIMEOUT_SECONDS`. Provider and workload
+Compose actions default to 120 seconds and can be adjusted with
+`DASOBJECTSTORE_BENCH_COMPOSE_TIMEOUT_SECONDS`; use this for slow remote image
+pulls rather than allowing unbounded Docker calls.
 
 When `aws` is not installed locally, the workload scripts run S3 commands via
 Docker using `${DASOBJECTSTORE_AWS_CLI_IMAGE:-amazon/aws-cli:2}`. Local

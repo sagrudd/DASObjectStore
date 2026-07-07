@@ -62,6 +62,13 @@ Check local tools before running the real matrix:
 benchmarks/object-services/scripts/preflight.sh
 ```
 
+Docker daemon checks default to 15 seconds. Docker Compose availability checks
+also default to 15 seconds, and Compose actions default to 120 seconds. Override
+these bounds with `DASOBJECTSTORE_BENCH_DOCKER_CHECK_TIMEOUT_SECONDS`,
+`DASOBJECTSTORE_BENCH_COMPOSE_CHECK_TIMEOUT_SECONDS`, and
+`DASOBJECTSTORE_BENCH_COMPOSE_TIMEOUT_SECONDS` when remote hardware or image
+pulls need a longer window.
+
 Run the complete provider/workload matrix:
 
 ```sh
