@@ -130,6 +130,25 @@ impl IngestJournalContentHash {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IngestJournalChecksumManifest {
+    pub content_hash: IngestJournalContentHash,
+    pub size_bytes: u64,
+    pub content_address: String,
+}
+
+impl IngestJournalChecksumManifest {
+    pub fn new(content_hash: IngestJournalContentHash, size_bytes: u64) -> Self {
+        let content_address = format!("{}:{}", content_hash.algorithm, content_hash.value);
+
+        Self {
+            content_hash,
+            size_bytes,
+            content_address,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct IngestJournalHddWrite {
     pub disk_id: DiskId,
     pub copy_number: u8,
@@ -163,6 +182,35 @@ pub struct IngestJournalFinalizationReadiness {
     pub ready: bool,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum IngestJournalResumeAction {
+    ResumeSsdStaging,
+    ResumeHddWrite,
+    ResumeVerification,
+    RetryFailed,
+    CancelTerminal,
+    AlreadyFinalized,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IngestJournalPartialHddWrite {
+    pub disk_id: DiskId,
+    pub copy_number: u8,
+    pub planned_bytes: u64,
+    pub written_bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IngestJournalResumePlan {
+    pub ingest_job_id: IngestJobId,
+    pub action: IngestJournalResumeAction,
+    pub state: IngestJournalFileState,
+    pub expected_size_bytes: u64,
+    pub staged_bytes: u64,
+    pub partial_hdd_writes: Vec<IngestJournalPartialHddWrite>,
+    pub finalization_readiness: IngestJournalFinalizationReadiness,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct IngestJournalFileRecord {
     pub ingest_job_id: IngestJobId,
@@ -170,6 +218,8 @@ pub struct IngestJournalFileRecord {
     pub expected_size_bytes: u64,
     pub staged_bytes: u64,
     pub content_hash: Option<IngestJournalContentHash>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum_manifest: Option<IngestJournalChecksumManifest>,
     pub hdd_writes: Vec<IngestJournalHddWrite>,
     pub required_hdd_copies: u8,
     pub retry_count: u32,
@@ -190,6 +240,7 @@ impl IngestJournalFileRecord {
             expected_size_bytes,
             staged_bytes: 0,
             content_hash: None,
+            checksum_manifest: None,
             hdd_writes: Vec::new(),
             required_hdd_copies,
             retry_count: 0,
@@ -212,6 +263,9 @@ impl IngestJournalFileRecord {
         }
 
         self.staged_bytes = staged_bytes;
+        if self.staged_bytes < self.expected_size_bytes {
+            self.checksum_manifest = None;
+        }
         self.refresh_progress_state();
         Ok(())
     }
@@ -223,10 +277,12 @@ impl IngestJournalFileRecord {
     ) -> Result<(), IngestJournalTransitionError> {
         self.ensure_active("mark staged")?;
         self.staged_bytes = self.expected_size_bytes;
-        self.content_hash = Some(IngestJournalContentHash::new(
-            content_hash_algorithm,
-            content_hash,
+        let content_hash = IngestJournalContentHash::new(content_hash_algorithm, content_hash);
+        self.checksum_manifest = Some(IngestJournalChecksumManifest::new(
+            content_hash.clone(),
+            self.expected_size_bytes,
         ));
+        self.content_hash = Some(content_hash);
         self.state = IngestJournalFileState::Staged;
         self.failure_message = None;
         Ok(())
@@ -369,6 +425,34 @@ impl IngestJournalFileRecord {
         }
     }
 
+    pub fn resume_action(&self) -> IngestJournalResumeAction {
+        match self.state {
+            IngestJournalFileState::Finalized => IngestJournalResumeAction::AlreadyFinalized,
+            IngestJournalFileState::Cancelled => IngestJournalResumeAction::CancelTerminal,
+            IngestJournalFileState::Failed => IngestJournalResumeAction::RetryFailed,
+            _ if !self.is_staged() => IngestJournalResumeAction::ResumeSsdStaging,
+            IngestJournalFileState::Verified | IngestJournalFileState::Written => {
+                IngestJournalResumeAction::ResumeVerification
+            }
+            _ if self.fully_written_hdd_copies() >= self.required_hdd_copies => {
+                IngestJournalResumeAction::ResumeVerification
+            }
+            _ => IngestJournalResumeAction::ResumeHddWrite,
+        }
+    }
+
+    pub fn resume_plan(&self) -> IngestJournalResumePlan {
+        IngestJournalResumePlan {
+            ingest_job_id: self.ingest_job_id.clone(),
+            action: self.resume_action(),
+            state: self.state,
+            expected_size_bytes: self.expected_size_bytes,
+            staged_bytes: self.staged_bytes,
+            partial_hdd_writes: self.partial_hdd_writes(),
+            finalization_readiness: self.finalization_readiness(),
+        }
+    }
+
     fn ensure_not_terminal(
         &self,
         action: &'static str,
@@ -415,6 +499,19 @@ impl IngestJournalFileRecord {
 
     fn is_staged(&self) -> bool {
         self.staged_bytes == self.expected_size_bytes && self.content_hash.is_some()
+    }
+
+    fn partial_hdd_writes(&self) -> Vec<IngestJournalPartialHddWrite> {
+        self.hdd_writes
+            .iter()
+            .filter(|write| write.written_bytes < write.planned_bytes)
+            .map(|write| IngestJournalPartialHddWrite {
+                disk_id: write.disk_id.clone(),
+                copy_number: write.copy_number,
+                planned_bytes: write.planned_bytes,
+                written_bytes: write.written_bytes,
+            })
+            .collect()
     }
 
     fn fully_written_hdd_copies(&self) -> u8 {
@@ -555,8 +652,9 @@ pub(crate) fn encode_path_component(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        IngestJournalFileRecord, IngestJournalFileState, IngestJournalTransitionError,
-        IngestStagingLayout, INGEST_CONTENT_HASH_ALGORITHM, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
+        IngestJournalContentHash, IngestJournalFileRecord, IngestJournalFileState,
+        IngestJournalResumeAction, IngestJournalTransitionError, IngestStagingLayout,
+        INGEST_CONTENT_HASH_ALGORITHM, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
         INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
     };
     #[cfg(unix)]
@@ -704,6 +802,26 @@ mod tests {
     }
 
     #[test]
+    fn journal_record_captures_checksum_manifest_when_staged() {
+        let mut record = journal_record("job-manifest", 128, 1);
+
+        record
+            .mark_staged(INGEST_CONTENT_HASH_ALGORITHM, "hash-a")
+            .expect("staged");
+
+        let manifest = record
+            .checksum_manifest
+            .as_ref()
+            .expect("checksum manifest captured");
+        assert_eq!(
+            manifest.content_hash,
+            IngestJournalContentHash::new(INGEST_CONTENT_HASH_ALGORITHM, "hash-a")
+        );
+        assert_eq!(manifest.size_bytes, 128);
+        assert_eq!(manifest.content_address, "sha256:hash-a");
+    }
+
+    #[test]
     fn journal_record_preserves_interrupted_partial_stage_and_write_progress() {
         let mut record = journal_record("job-partial", 100, 1);
         let disk_a = disk_id("disk-a");
@@ -736,6 +854,130 @@ mod tests {
             record.mark_hdd_verified(&disk_a, 1),
             Err(IngestJournalTransitionError::VerificationBeforeWriteComplete { .. })
         ));
+    }
+
+    #[test]
+    fn resume_plan_restarts_partial_ssd_staging() {
+        let mut record = journal_record("job-partial-stage", 100, 1);
+
+        record
+            .record_staged_progress(40)
+            .expect("partial stage recorded");
+
+        let plan = record.resume_plan();
+        assert_eq!(plan.action, IngestJournalResumeAction::ResumeSsdStaging);
+        assert_eq!(plan.staged_bytes, 40);
+        assert_eq!(plan.partial_hdd_writes, Vec::new());
+    }
+
+    #[test]
+    fn resume_plan_restarts_ssd_staging_when_full_stage_has_no_hash() {
+        let mut record = journal_record("job-missing-hash", 100, 1);
+
+        record
+            .record_staged_progress(100)
+            .expect("stage bytes recorded");
+
+        assert_eq!(record.content_hash, None);
+        let plan = record.resume_plan();
+        assert_eq!(plan.action, IngestJournalResumeAction::ResumeSsdStaging);
+        assert_eq!(plan.staged_bytes, 100);
+    }
+
+    #[test]
+    fn resume_plan_restarts_partial_hdd_write() {
+        let mut record = journal_record("job-partial-hdd", 100, 1);
+        let disk_a = disk_id("disk-a");
+
+        record
+            .mark_staged(INGEST_CONTENT_HASH_ALGORITHM, "hash-a")
+            .expect("staged");
+        record
+            .record_hdd_write_progress(disk_a.clone(), 1, 64)
+            .expect("partial hdd write recorded");
+
+        let plan = record.resume_plan();
+        assert_eq!(plan.action, IngestJournalResumeAction::ResumeHddWrite);
+        assert_eq!(plan.partial_hdd_writes.len(), 1);
+        assert_eq!(plan.partial_hdd_writes[0].disk_id, disk_a);
+        assert_eq!(plan.partial_hdd_writes[0].copy_number, 1);
+        assert_eq!(plan.partial_hdd_writes[0].planned_bytes, 100);
+        assert_eq!(plan.partial_hdd_writes[0].written_bytes, 64);
+    }
+
+    #[test]
+    fn resume_plan_restarts_verification_for_written_records() {
+        let mut record = journal_record("job-written", 100, 1);
+        let disk_a = disk_id("disk-a");
+
+        record
+            .mark_staged(INGEST_CONTENT_HASH_ALGORITHM, "hash-a")
+            .expect("staged");
+        record
+            .record_hdd_write_progress(disk_a, 1, 100)
+            .expect("hdd write recorded");
+
+        let plan = record.resume_plan();
+        assert_eq!(record.state, IngestJournalFileState::Written);
+        assert_eq!(plan.action, IngestJournalResumeAction::ResumeVerification);
+        assert_eq!(plan.finalization_readiness.fully_written_hdd_copies, 1);
+        assert_eq!(plan.finalization_readiness.verified_hdd_copies, 0);
+    }
+
+    #[test]
+    fn resume_plan_keeps_verified_but_not_finalized_in_verification_reconcile() {
+        let mut record = journal_record("job-verified", 100, 1);
+        let disk_a = disk_id("disk-a");
+
+        record
+            .mark_staged(INGEST_CONTENT_HASH_ALGORITHM, "hash-a")
+            .expect("staged");
+        record
+            .record_hdd_write_progress(disk_a.clone(), 1, 100)
+            .expect("hdd write recorded");
+        record.mark_hdd_verified(&disk_a, 1).expect("verified");
+
+        let plan = record.resume_plan();
+        assert_eq!(record.state, IngestJournalFileState::Verified);
+        assert_eq!(plan.action, IngestJournalResumeAction::ResumeVerification);
+        assert!(plan.finalization_readiness.ready);
+    }
+
+    #[test]
+    fn resume_plan_retries_failed_records() {
+        let mut record = journal_record("job-failed", 100, 1);
+
+        record.mark_failed("source read failed").expect("failed");
+
+        let plan = record.resume_plan();
+        assert_eq!(plan.action, IngestJournalResumeAction::RetryFailed);
+        assert_eq!(plan.state, IngestJournalFileState::Failed);
+    }
+
+    #[test]
+    fn resume_plan_classifies_cancelled_and_finalized_terminal_states() {
+        let mut cancelled = journal_record("job-cancelled", 100, 1);
+        cancelled.cancel().expect("cancelled");
+
+        let mut finalized = journal_record("job-already-finalized", 100, 1);
+        let disk_a = disk_id("disk-a");
+        finalized
+            .mark_staged(INGEST_CONTENT_HASH_ALGORITHM, "hash-a")
+            .expect("staged");
+        finalized
+            .record_hdd_write_progress(disk_a.clone(), 1, 100)
+            .expect("hdd write recorded");
+        finalized.mark_hdd_verified(&disk_a, 1).expect("verified");
+        finalized.finalize().expect("finalized");
+
+        assert_eq!(
+            cancelled.resume_action(),
+            IngestJournalResumeAction::CancelTerminal
+        );
+        assert_eq!(
+            finalized.resume_action(),
+            IngestJournalResumeAction::AlreadyFinalized
+        );
     }
 
     #[test]
