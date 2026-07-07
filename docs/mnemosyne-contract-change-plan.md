@@ -141,6 +141,39 @@ Required UI/API behavior:
 - prevent raw path display as the primary durable contract;
 - allow degraded endpoints to remain visible while blocking new unsafe bindings.
 
+### C6: Add Managed Mutation Request Context
+
+Every storage-mutating DASObjectStore action exposed through Synoptikon, Mneion,
+the standalone Axum API, or the Web UI must be submitted to `dasobjectstored`
+through the daemon API. Mneion and Synoptikon product code may request or render
+storage operations, but they must not write managed DAS roots, update portable
+metadata, settle object copies, drain disks, retire disks, or change store
+policy by bypassing the daemon.
+
+Add a managed mutation envelope shared by DASObjectStore product routes and
+Mneion adapters:
+
+- `actor_id`;
+- `actor_display`;
+- `actor_roles`;
+- `entitlements`;
+- `governance_domain_id`;
+- `project_id` where applicable;
+- `storage_definition_id`;
+- `storage_binding_id` where applicable;
+- `client_request_id` for idempotency;
+- `correlation_id`;
+- `audit_origin`: `standalone`, `synoptikon`, `mneion`, or future product host;
+- `requested_action`;
+- `requested_at_utc`.
+
+Standalone deployments populate the envelope from local sessions and local
+writer/admin groups. Synoptikon-integrated deployments populate it from the host
+request context. `dasobjectstored` remains the final storage authorization point
+and emits authoritative storage-mutation audit events. Synoptikon remains the
+authority for account/session, entitlement, product routing, central audit
+correlation, and governance-domain binding.
+
 ## Storage-Definition Schema Change Inventory
 
 These are the required Mneion storage-definition schema changes identified from
@@ -160,6 +193,7 @@ record:
 | `object_contract` | enum | yes | `object_style` for DASObjectStore endpoints; raw path contracts are not allowed for managed endpoints. |
 | `validation_contract` | string or null | recommended | Schema id for validation evidence, initially `dasobjectstore.nas_nfs_endpoint.v1` or later DAS pool equivalent. |
 | `health_contract` | string or null | recommended | Schema id for endpoint health summaries exposed by DASObjectStore. |
+| `mutation_contract` | string or null | required for managed endpoints | Schema id for daemon-backed mutation requests, initially `dasobjectstore.managed_mutation.v1`. |
 | `capabilities` | string array | yes | Examples: `ssd_ingest`, `hdd_destage`, `copy_redundancy`, `disk_health`, `direct_reproducible_import`. |
 
 Existing `backend_kind` should be retained during the transition for backwards
@@ -280,11 +314,16 @@ automation. This plan is the handoff boundary for coordinated Mnemosyne work.
   NFS paths.
 - Add validation evidence tests for healthy, degraded, and unsafe endpoints.
 - Add Web/API tests for managed-appliance visibility and binding readiness.
+- Add product-route and adapter tests proving storage-mutating actions construct
+  daemon API requests with actor, entitlement, correlation, and audit context
+  rather than mutating DAS filesystems directly.
 
 ## Non-Changes
 
 - Do not change Synoptikon request-context ownership: Synoptikon remains the
   authority for account/session, entitlement, project, audit, and correlation.
+- Do not let Synoptikon, Mneion, Axum routes, Yew actions, or CLI client paths
+  bypass `dasobjectstored` for storage-mutating operations.
 - Do not expose DASObjectStore's standalone HTTPS port `8448` through
   Synoptikon catalogue entries.
 - Do not make Mneion a DAS disk manager. DASObjectStore owns disk, enclosure,

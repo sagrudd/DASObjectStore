@@ -84,6 +84,28 @@ Integrated authentication SHALL treat Synoptikon as authoritative. Product API
 handlers SHALL reject mutating actions when required host context, entitlement,
 or role claims are absent.
 
+## Daemon-Owned Mutation Boundary
+
+`dasobjectstored` SHALL be the storage authority in standalone and
+Synoptikon-integrated modes. Every storage-mutating action from the CLI, Axum
+API, Yew UI, Synoptikon product mount, or Mneion adapter SHALL call the daemon
+API and submit a request or job. Product code SHALL NOT write managed SSD/HDD
+roots, edit live portable metadata, settle objects, drain disks, retire disks,
+or change store policy by touching DAS filesystems directly.
+
+Standalone mode maps local sessions and local user groups into daemon actor
+claims. Synoptikon-integrated mode maps host-provided account, role,
+entitlement, project, governance-domain, correlation ID, and audit context into
+the same daemon request envelope. The daemon enforces storage permissions and
+emits the authoritative storage-mutation audit trail; Synoptikon remains the
+authority for login, entitlement, product routing, central audit correlation,
+and governance-domain binding.
+
+Read-only views MAY consume daemon health summaries, endpoint inventories, job
+status, and object/store view models. Mutating views SHALL use daemon job
+submission and progress streams so the Web GUI, CLI, and Synoptikon paths share
+the same safety, authorization, audit, and cancellation semantics.
+
 ## Storage Endpoint Model
 
 DASObjectStore SHALL be a native storage endpoint across Mneion. It SHALL support

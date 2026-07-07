@@ -51,11 +51,36 @@ fn contract_change_plan_preserves_storage_boundaries() {
 }
 
 #[test]
+fn contract_change_plan_requires_daemon_mutation_boundary() {
+    let plan = contract_change_plan();
+
+    assert_contains(&plan, "dasobjectstored");
+    assert_contains(&plan, "daemon API");
+    assert_contains(&plan, "storage-mutating");
+    assert_contains(&plan, "managed mutation envelope");
+    assert_contains(&plan, "correlation_id");
+    assert_contains(&plan, "audit_origin");
+    assert_contains(&plan, "mutation_contract");
+}
+
+#[test]
 fn plugin_spec_links_to_contract_change_plan() {
     let spec = fs::read_to_string(repo_root().join("docs/web-gui-and-mnemosyne-plugin.md"))
         .expect("read plugin spec");
 
     assert_contains(&spec, "mnemosyne-contract-change-plan.md");
+}
+
+#[test]
+fn plugin_spec_requires_daemon_backed_mutations() {
+    let spec = fs::read_to_string(repo_root().join("docs/web-gui-and-mnemosyne-plugin.md"))
+        .expect("read plugin spec");
+
+    assert_contains(&spec, "Daemon-Owned Mutation Boundary");
+    assert_contains(&spec, "dasobjectstored");
+    assert_contains(&spec, "Every storage-mutating action");
+    assert_contains(&spec, "authority for login");
+    assert_contains(&spec, "governance-domain");
 }
 
 #[test]
