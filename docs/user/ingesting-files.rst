@@ -35,6 +35,34 @@ DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
 for normal file ingest.
 
+Group Requirements
+------------------
+
+Store creation and writer-group assignment are administrator actions:
+
+.. code-block:: console
+
+   sudo groupadd mnemosyne
+   sudo dasobjectstore store create zymo_fecal_2025.05 \
+     --class reproducible_cache \
+     --writer-group mnemosyne
+
+Add ingest users to the writer group:
+
+.. code-block:: console
+
+   sudo usermod -aG mnemosyne "$USER"
+
+The user must start a new login session before the new group is visible to
+normal processes. Check membership with:
+
+.. code-block:: console
+
+   id
+
+The output must include ``mnemosyne`` before non-root ingest will be allowed.
+If the group already exists, skip ``groupadd``.
+
 The copy count defaults to the store policy. Use ``--copies`` only when the
 override is intentional:
 
