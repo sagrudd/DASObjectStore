@@ -1,3 +1,4 @@
+use crate::schema::LIVE_SCHEMA_SQL;
 use crate::SsdPressure;
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::IngestJobState;
@@ -218,6 +219,7 @@ fn read_ingest_queue_inner(
     store_id: Option<&StoreId>,
 ) -> Result<IngestQueueSnapshot, IngestQueueReadError> {
     let connection = Connection::open(live_sqlite_path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
     let query = match store_id {
         Some(_) => {
             "SELECT
@@ -285,6 +287,7 @@ pub fn drain_ingest_queue(
     request: &IngestQueueDrainRequest,
 ) -> Result<IngestQueueDrainReport, IngestQueueDrainError> {
     let mut connection = Connection::open(&request.live_sqlite_path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
     let cancelled_job_ids = active_job_ids_for_store(&connection, &request.store_id)?;
 
     if !request.dry_run && !cancelled_job_ids.is_empty() {
@@ -677,6 +680,44 @@ mod tests {
         assert_eq!(snapshot.jobs[0].priority, 20);
         assert_eq!(snapshot.jobs[0].received_bytes, 64);
         assert_eq!(snapshot.jobs[1].ingest_job_id.as_str(), "job-low");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn reads_empty_queue_from_older_live_sqlite_without_ingest_jobs_table() {
+        let root = temp_root("ingest-queue-old-schema");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open sqlite");
+        connection
+            .execute_batch(
+                "CREATE TABLE stores (
+                    store_id TEXT PRIMARY KEY NOT NULL,
+                    pool_id TEXT NOT NULL,
+                    class TEXT NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    updated_at_utc TEXT NOT NULL
+                );",
+            )
+            .expect("old schema applies");
+        drop(connection);
+
+        let snapshot = read_ingest_queue(&live_sqlite_path).expect("queue reads");
+        let connection = Connection::open(&live_sqlite_path).expect("reopen sqlite");
+        let table_count: usize = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'table' AND name = 'ingest_jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("table count reads");
+
+        assert!(snapshot.jobs.is_empty());
+        assert_eq!(table_count, 1);
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

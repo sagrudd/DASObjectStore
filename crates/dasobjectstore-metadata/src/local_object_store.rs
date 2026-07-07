@@ -103,10 +103,7 @@ pub fn put_object_ssd_first_with_controlled_progress(
     let job_paths = layout.job_paths(&job_id);
 
     let report = put_object_ssd_first_inner(request, &job_paths, &mut progress);
-    if report.is_err() {
-        let _ = fs::remove_dir_all(&job_paths.job_root);
-    }
-
+    let _ = fs::remove_dir_all(&job_paths.job_root);
     report
 }
 
@@ -353,9 +350,9 @@ mod tests {
         assert_eq!(report.bytes_staged, payload.len() as u64);
         assert_eq!(report.content_hash, expected_hash);
         assert_eq!(report.placements.len(), 2);
-        assert_eq!(
-            fs::read(&report.staged_payload_path).expect("read staged"),
-            payload
+        assert!(
+            !report.staged_payload_path.exists(),
+            "verified HDD settlement should remove the temporary SSD staging payload"
         );
         for placement in &report.placements {
             assert_eq!(placement.bytes_written, payload.len() as u64);

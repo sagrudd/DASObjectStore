@@ -151,6 +151,14 @@ where
         writeln!(self.terminal.backend_mut(), "{message}")
     }
 
+    pub fn cancel(mut self, message: impl Display) -> io::Result<()> {
+        let message = format!("upload cancelled: {message}");
+        let last_event = self.last_event.clone();
+        self.render_frame(last_event.as_ref(), &message)?;
+        self.restore_terminal()?;
+        writeln!(self.terminal.backend_mut(), "{message}")
+    }
+
     fn render_frame(
         &mut self,
         event: Option<&DaemonIngestProgressEvent>,

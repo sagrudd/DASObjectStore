@@ -1942,6 +1942,10 @@ where
     ) {
         Ok(response) => response,
         Err(err) => {
+            if matches!(err, DaemonClientError::Cancelled(_)) {
+                let _ = tui.into_inner().cancel(&err);
+                return Ok(());
+            }
             let _ = tui.into_inner().fail(&err);
             return Err(err.into());
         }

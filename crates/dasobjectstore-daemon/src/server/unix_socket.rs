@@ -4,7 +4,7 @@ use crate::server::{DaemonRequestHandler, DaemonRequestHandlerError, DaemonServi
 use crate::DaemonClock;
 use std::fmt::{self, Display};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -35,7 +35,13 @@ where
         let listener = bind_listener(&self.socket_path)?;
         for stream in listener.incoming() {
             let stream = stream.map_err(UnixSocketDaemonServerError::Accept)?;
-            self.handle_stream(stream)?;
+            if let Err(error) = self.handle_stream(stream) {
+                if error.is_client_disconnect() {
+                    eprintln!("daemon client disconnected: {error}");
+                    continue;
+                }
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -153,6 +159,26 @@ impl Display for UnixSocketDaemonServerError {
 
 impl std::error::Error for UnixSocketDaemonServerError {}
 
+impl UnixSocketDaemonServerError {
+    fn is_client_disconnect(&self) -> bool {
+        match self {
+            Self::Io(error) => client_disconnect_kind(error.kind()),
+            Self::Encode(error) => error.io_error_kind().is_some_and(client_disconnect_kind),
+            Self::Handler(DaemonRequestHandlerError::IngestRuntime(
+                DaemonIngestFilesRuntimeError::ClientDisconnected(_),
+            )) => true,
+            _ => false,
+        }
+    }
+}
+
+fn client_disconnect_kind(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected
+    )
+}
+
 fn bind_listener(socket_path: &Path) -> Result<UnixListener, UnixSocketDaemonServerError> {
     let runtime_dir =
         socket_path
@@ -174,6 +200,20 @@ fn handle_stream(
     mut stream: UnixStream,
     handler: &impl DaemonApiHandler,
 ) -> Result<(), UnixSocketDaemonServerError> {
+    let result = handle_stream_inner(&mut stream, handler);
+    if result
+        .as_ref()
+        .is_err_and(UnixSocketDaemonServerError::is_client_disconnect)
+    {
+        return Ok(());
+    }
+    result
+}
+
+fn handle_stream_inner(
+    stream: &mut UnixStream,
+    handler: &impl DaemonApiHandler,
+) -> Result<(), UnixSocketDaemonServerError> {
     let mut line = String::new();
     BufReader::new(
         stream
@@ -185,11 +225,11 @@ fn handle_stream(
 
     match serde_json::from_str::<DaemonApiRequest>(&line) {
         Ok(request) => {
-            let mut emit_response = |response| write_response_frame(&mut stream, &response);
+            let mut emit_response = |response| write_response_frame(stream, &response);
             handler.handle_api_request_streaming(request, &mut emit_response)?;
         }
         Err(error) => write_response_frame(
-            &mut stream,
+            stream,
             &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "bad_request",
                 format!("failed to decode daemon request: {error}"),
@@ -377,5 +417,72 @@ mod tests {
             final_response,
             DaemonApiResponse::SubmitIngestFiles(SubmitIngestFilesResponse { .. })
         ));
+    }
+
+    #[test]
+    fn treats_streaming_client_disconnect_as_handled_stream() {
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+
+        struct DisconnectingHandler;
+
+        impl super::DaemonApiHandler for DisconnectingHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                panic!("streaming handler should be used")
+            }
+
+            fn handle_api_request_streaming(
+                &self,
+                _request: DaemonApiRequest,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                emit_response(DaemonApiResponse::IngestProgress(
+                    DaemonIngestProgressEvent {
+                        job_id: IngestJobId::new("ingest-files-1").expect("job id"),
+                        endpoint: StoreId::new("zymo").expect("store id"),
+                        stage: DaemonIngestStage::SsdIngest,
+                        pipeline_stage: Some(DaemonIngestPipelineStage::SsdStage),
+                        work_bytes_done: 50,
+                        work_bytes_total: Some(100),
+                        stage_bytes_done: Some(50),
+                        stage_bytes_total: Some(100),
+                        files_done: 0,
+                        files_total: Some(1),
+                        current_object_id: None,
+                        ssd_pressure: None,
+                        telemetry: None,
+                        resource_policy: None,
+                        message: Some("copying".to_string()),
+                    },
+                ))
+            }
+        }
+
+        let server =
+            UnixSocketDaemonServer::new("/tmp/dasobjectstored-test.sock", DisconnectingHandler);
+        serde_json::to_writer(
+            &mut client,
+            &DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                endpoint: StoreId::new("zymo").expect("store id"),
+                source_path: "/tmp/source".into(),
+                object_type: ObjectType::Naive,
+                copies: None,
+                conflict_policy: crate::api::DaemonIngestConflictPolicy::Strict,
+                dry_run: false,
+                client_request_id: None,
+            }),
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+        drop(client);
+
+        server
+            .handle_stream(server_stream)
+            .expect("client disconnect does not fail the server stream");
     }
 }

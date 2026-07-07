@@ -6,6 +6,19 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.11 - 2026-07-07
+
+- Keep `dasobjectstored` running when an upload client disconnects during
+  streaming progress or final response delivery; broken client pipes are now
+  handled as per-client disconnects rather than daemon-fatal errors.
+- Render Ctrl-C upload interruption once as a clean cancellation in the
+  embedded upload TUI.
+- Remove temporary SSD ingest job roots after verified HDD settlement as well
+  as after cancelled or failed object puts, preventing settled uploads from
+  filling the SSD staging area.
+- Apply additive live SQLite schema repair before reading or draining ingest
+  queues so older live metadata files gain the `ingest_jobs` table.
+
 ## 0.1.10 - 2026-07-07
 
 - Render upload TUI byte counters with binary size units such as MiB, GiB, and
