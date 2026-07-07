@@ -124,6 +124,7 @@ pub enum DaemonRequestValidationError {
     InvalidCopyCount { copies: u8 },
     BlankClientRequestId,
     BlankCancellationReason,
+    UnsupportedServiceProvider { provider: String },
 }
 
 impl Display for DaemonRequestValidationError {
@@ -145,6 +146,10 @@ impl Display for DaemonRequestValidationError {
             Self::BlankCancellationReason => {
                 formatter.write_str("cancellation reason must not be blank")
             }
+            Self::UnsupportedServiceProvider { provider } => write!(
+                formatter,
+                "unsupported object service provider for daemon lifecycle operation: {provider}"
+            ),
         }
     }
 }

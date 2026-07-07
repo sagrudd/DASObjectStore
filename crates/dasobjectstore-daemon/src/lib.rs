@@ -12,7 +12,9 @@ pub use api::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
     DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress, DaemonJobState,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonJobValidationError,
-    DaemonRequestValidationError, DaemonSsdPressure, IngestJobStatusRequest,
+    DaemonRequestValidationError, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+    DaemonServiceOperation, DaemonServiceStatusDetail, DaemonServiceStatusRequest,
+    DaemonServiceStatusResponse, DaemonSsdPressure, IngestJobStatusRequest,
     IngestJobStatusResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };

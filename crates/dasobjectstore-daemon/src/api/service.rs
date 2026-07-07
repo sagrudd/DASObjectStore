@@ -1,0 +1,168 @@
+use crate::api::{
+    DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind, DaemonRequestValidationError,
+};
+use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceStatusRequest {
+    pub include_detail: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceStatusResponse {
+    pub provider_id: ObjectServiceProviderId,
+    pub state: ServiceState,
+    pub endpoint: Option<String>,
+    pub message: Option<String>,
+    pub detail: Option<DaemonServiceStatusDetail>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceStatusDetail {
+    pub compose_project: String,
+    pub service_name: String,
+    pub config_path: String,
+    pub metadata_path: String,
+    pub data_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceLifecycleRequest {
+    pub operation: DaemonServiceOperation,
+    pub provider_id: ObjectServiceProviderId,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+}
+
+impl DaemonServiceLifecycleRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.provider_id != ObjectServiceProviderId::Garage {
+            return Err(DaemonRequestValidationError::UnsupportedServiceProvider {
+                provider: self.provider_id.name().to_string(),
+            });
+        }
+        if self
+            .client_request_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(DaemonRequestValidationError::BlankClientRequestId);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonServiceOperation {
+    Start,
+    Stop,
+    Restart,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonServiceLifecycleResponse {
+    pub accepted: DaemonJobAcceptedResponse,
+    pub operation: DaemonServiceOperation,
+    pub provider_id: ObjectServiceProviderId,
+}
+
+impl DaemonServiceLifecycleResponse {
+    pub fn accepted(
+        job_id: DaemonJobId,
+        accepted_at_utc: impl Into<String>,
+        dry_run: bool,
+        operation: DaemonServiceOperation,
+        provider_id: ObjectServiceProviderId,
+    ) -> Self {
+        Self {
+            accepted: DaemonJobAcceptedResponse {
+                job_id,
+                kind: DaemonJobKind::ServiceOperation,
+                accepted_at_utc: accepted_at_utc.into(),
+                dry_run,
+            },
+            operation,
+            provider_id,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
+        DaemonServiceStatusDetail, DaemonServiceStatusResponse,
+    };
+    use crate::api::{DaemonJobId, DaemonJobKind, DaemonRequestValidationError};
+    use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
+
+    #[test]
+    fn service_status_serializes_selected_provider() {
+        let response = DaemonServiceStatusResponse {
+            provider_id: ObjectServiceProviderId::Garage,
+            state: ServiceState::Running,
+            endpoint: Some("http://127.0.0.1:3900".to_string()),
+            message: None,
+            detail: Some(DaemonServiceStatusDetail {
+                compose_project: "dasobjectstore".to_string(),
+                service_name: "garage".to_string(),
+                config_path: "/etc/dasobjectstore/garage.toml".to_string(),
+                metadata_path: "/var/lib/dasobjectstore/garage/meta".to_string(),
+                data_path: "/srv/dasobjectstore/hdd/garage".to_string(),
+            }),
+        };
+
+        let encoded = serde_json::to_value(response).expect("status serializes");
+
+        assert_eq!(encoded["provider_id"], "Garage");
+        assert_eq!(encoded["state"], "Running");
+        assert_eq!(encoded["detail"]["service_name"], "garage");
+    }
+
+    #[test]
+    fn lifecycle_request_accepts_garage() {
+        let request = DaemonServiceLifecycleRequest {
+            operation: DaemonServiceOperation::Start,
+            provider_id: ObjectServiceProviderId::Garage,
+            dry_run: false,
+            client_request_id: Some("request-1".to_string()),
+        };
+
+        request.validate().expect("Garage lifecycle is valid");
+    }
+
+    #[test]
+    fn lifecycle_request_rejects_non_selected_provider() {
+        let request = DaemonServiceLifecycleRequest {
+            operation: DaemonServiceOperation::Start,
+            provider_id: ObjectServiceProviderId::Rustfs,
+            dry_run: false,
+            client_request_id: None,
+        };
+
+        let err = request.validate().expect_err("RustFS is not selected");
+
+        assert_eq!(
+            err,
+            DaemonRequestValidationError::UnsupportedServiceProvider {
+                provider: "rustfs".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn lifecycle_response_uses_service_operation_job_kind() {
+        let response = DaemonServiceLifecycleResponse::accepted(
+            DaemonJobId::new("service-1").expect("job id"),
+            "2026-07-07T11:38:12Z",
+            true,
+            DaemonServiceOperation::Restart,
+            ObjectServiceProviderId::Garage,
+        );
+
+        assert_eq!(response.accepted.kind, DaemonJobKind::ServiceOperation);
+        assert!(response.accepted.dry_run);
+    }
+}

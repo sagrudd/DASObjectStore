@@ -10,8 +10,9 @@ pub use unix_socket::UnixSocketDaemonTransport;
 
 use crate::api::{
     CancelIngestJobRequest, CancelIngestJobResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonHealthSummaryRequest, DaemonHealthSummaryResponse, IngestJobStatusRequest,
-    IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
+    DaemonHealthSummaryRequest, DaemonHealthSummaryResponse, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    IngestJobStatusRequest, IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 
@@ -85,6 +86,26 @@ where
             response => Err(unexpected("cancel_ingest_job", response)),
         }
     }
+
+    pub fn service_status(
+        &self,
+        request: DaemonServiceStatusRequest,
+    ) -> Result<DaemonServiceStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ServiceStatus(request))? {
+            DaemonApiResponse::ServiceStatus(response) => Ok(response),
+            response => Err(unexpected("service_status", response)),
+        }
+    }
+
+    pub fn service_lifecycle(
+        &self,
+        request: DaemonServiceLifecycleRequest,
+    ) -> Result<DaemonServiceLifecycleResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ServiceLifecycle(request))? {
+            DaemonApiResponse::ServiceLifecycle(response) => Ok(response),
+            response => Err(unexpected("service_lifecycle", response)),
+        }
+    }
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -101,6 +122,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",
         DaemonApiResponse::CancelIngestJob(_) => "cancel_ingest_job",
+        DaemonApiResponse::ServiceStatus(_) => "service_status",
+        DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }
@@ -110,10 +133,13 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
 mod tests {
     use super::{DaemonClient, DaemonClientError, InProcessDaemonTransport};
     use crate::api::{
-        DaemonApiRequest, DaemonApiResponse, StoreInventoryRequest, StoreInventoryResponse,
+        DaemonApiRequest, DaemonApiResponse, DaemonServiceLifecycleRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
         SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::cell::RefCell;
 
     #[test]
@@ -177,6 +203,69 @@ mod tests {
                 expected: "health_summary",
                 actual: "store_inventory",
             }
+        ));
+    }
+
+    #[test]
+    fn service_status_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ServiceStatus(
+                DaemonServiceStatusResponse {
+                    provider_id: ObjectServiceProviderId::Garage,
+                    state: ServiceState::Running,
+                    endpoint: Some("http://127.0.0.1:3900".to_string()),
+                    message: None,
+                    detail: None,
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .service_status(DaemonServiceStatusRequest {
+                include_detail: true,
+            })
+            .expect("service status response");
+
+        assert_eq!(response.provider_id, ObjectServiceProviderId::Garage);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ServiceStatus(_)]
+        ));
+    }
+
+    #[test]
+    fn service_lifecycle_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ServiceLifecycle(
+                DaemonServiceLifecycleResponse::accepted(
+                    crate::api::DaemonJobId::new("service-1").expect("job id"),
+                    "2026-07-07T11:38:12Z",
+                    true,
+                    DaemonServiceOperation::Start,
+                    ObjectServiceProviderId::Garage,
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .service_lifecycle(DaemonServiceLifecycleRequest {
+                operation: DaemonServiceOperation::Start,
+                provider_id: ObjectServiceProviderId::Garage,
+                dry_run: true,
+                client_request_id: Some("request-1".to_string()),
+            })
+            .expect("service lifecycle response");
+
+        assert!(response.accepted.dry_run);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ServiceLifecycle(_)]
         ));
     }
 }

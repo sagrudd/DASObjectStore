@@ -3,6 +3,7 @@
 mod health;
 mod ingest;
 mod jobs;
+mod service;
 mod stores;
 
 pub use health::{
@@ -19,6 +20,10 @@ pub use jobs::{
     DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress, DaemonJobState,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonJobValidationError,
 };
+pub use service::{
+    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
+    DaemonServiceStatusDetail, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +36,8 @@ pub enum DaemonApiRequest {
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
     CancelIngestJob(CancelIngestJobRequest),
+    ServiceStatus(DaemonServiceStatusRequest),
+    ServiceLifecycle(DaemonServiceLifecycleRequest),
 }
 
 impl DaemonApiRequest {
@@ -38,7 +45,11 @@ impl DaemonApiRequest {
         match self {
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::CancelIngestJob(request) => request.validate(),
-            Self::HealthSummary(_) | Self::StoreInventory(_) | Self::IngestJobStatus(_) => Ok(()),
+            Self::ServiceLifecycle(request) => request.validate(),
+            Self::HealthSummary(_)
+            | Self::StoreInventory(_)
+            | Self::IngestJobStatus(_)
+            | Self::ServiceStatus(_) => Ok(()),
         }
     }
 }
@@ -51,6 +62,8 @@ pub enum DaemonApiResponse {
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
     CancelIngestJob(CancelIngestJobResponse),
+    ServiceStatus(DaemonServiceStatusResponse),
+    ServiceLifecycle(DaemonServiceLifecycleResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
 }
@@ -72,8 +85,12 @@ impl DaemonApiErrorResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{DaemonApiRequest, StoreInventoryRequest, SubmitIngestFilesRequest};
+    use super::{
+        DaemonApiRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
+        DaemonServiceStatusRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+    };
     use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_object_service::ObjectServiceProviderId;
 
     #[test]
     fn serializes_request_with_stable_command_name() {
@@ -90,6 +107,38 @@ mod tests {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "relative".into(),
             copies: None,
+            dry_run: false,
+            client_request_id: None,
+        });
+
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn service_commands_use_stable_command_names() {
+        let status = DaemonApiRequest::ServiceStatus(DaemonServiceStatusRequest {
+            include_detail: true,
+        });
+        let lifecycle = DaemonApiRequest::ServiceLifecycle(DaemonServiceLifecycleRequest {
+            operation: DaemonServiceOperation::Start,
+            provider_id: ObjectServiceProviderId::Garage,
+            dry_run: true,
+            client_request_id: None,
+        });
+
+        let status = serde_json::to_value(status).expect("status request serializes");
+        let lifecycle = serde_json::to_value(lifecycle).expect("lifecycle request serializes");
+
+        assert_eq!(status["command"], "service_status");
+        assert_eq!(lifecycle["command"], "service_lifecycle");
+        assert_eq!(lifecycle["payload"]["operation"], "start");
+    }
+
+    #[test]
+    fn delegates_service_lifecycle_validation() {
+        let request = DaemonApiRequest::ServiceLifecycle(DaemonServiceLifecycleRequest {
+            operation: DaemonServiceOperation::Start,
+            provider_id: ObjectServiceProviderId::Rustfs,
             dry_run: false,
             client_request_id: None,
         });

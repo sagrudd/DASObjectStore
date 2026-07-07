@@ -227,7 +227,9 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Create `dasobjectstore-object-service` crate with provider trait.
 - [x] Add Garage provider implementation with Garage-specific Compose rendering,
   config rendering, and CLI `service render-compose --provider garage` wiring.
-- [ ] Implement daemon-owned Garage service lifecycle and status inspection.
+- [x] Add daemon API/client contracts for Garage service lifecycle and status
+  inspection.
+- [ ] Implement daemon-owned Garage lifecycle executor and status probe.
   Milestone 8 selected Garage as the MVP provider on 2026-07-07.
 - [ ] Implement daemon-owned Garage bucket provisioning and per-store key
   permissions from store registry bindings.
