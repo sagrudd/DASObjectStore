@@ -170,20 +170,18 @@ SubObject path. For example, importing into ``Vervet`` beneath
 
 Symlinks and non-regular files are not imported by this path.
 
-Current Limits
---------------
+Operational Notes
+-----------------
 
-The normal CLI path now builds a daemon ingest request. Full Unix-socket event
-streaming and daemon-side execution are still being completed, so early package
-builds may report that daemon transport or runtime execution is not yet
-available. The hidden ``--local-direct`` mode exists only for developer tests
-and should not be used as the production ingest path.
+The normal CLI path builds a daemon ingest request and reports daemon job
+progress. The hidden ``--local-direct`` mode exists only for developer tests and
+should not be used as the production ingest path.
 
-Once the daemon runtime is active, interrupted imports should be inspected
-through daemon job status and store state before retrying.
+Interrupted imports should be inspected through daemon job status and store
+state before retrying.
 
-The planned operations TUI will make ingest a supported console workflow for
-planning, confirmation, launch, monitoring, reconnect, and completion review. It
-will use the same daemon job model as the CLI and Web UI, with visibility into
-file counts, scaled data volume, SSD staging, HDD fan-out, verification,
-resource policy, worker queues, pressure, bottlenecks, and throughput trends.
+The operations TUI provides the console workflow contract for planning,
+confirmation, launch, monitoring, reconnect, and completion review. It uses the
+same daemon job model as the CLI and Web UI, with visibility into file counts,
+scaled data volume, SSD staging, HDD fan-out, verification, resource policy,
+worker queues, pressure, bottlenecks, and throughput trends.

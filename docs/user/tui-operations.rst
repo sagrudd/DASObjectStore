@@ -1,11 +1,10 @@
 Console TUI Operations
 ======================
 
-The Milestone 18 console TUI is the planned operator surface for parallel file
-ingress. It will use the same ``dasobjectstored`` job model as the CLI and Web
-UI. Until the TUI import, attach, and queue flows are daemon-backed, use the
-current CLI commands for real ingest and treat the interactive controls below
-as the supported design contract.
+The Milestone 18 console TUI defines the supported operator surface for
+parallel file ingress. It uses the same ``dasobjectstored`` job model as the CLI
+and Web UI, so planning, launch, reconnect, progress, and completion review
+remain daemon-mediated rather than client-local storage mutation.
 
 Current CLI Path
 ----------------
@@ -31,7 +30,7 @@ not be used for production imports.
 Standalone Package Path
 -----------------------
 
-Standalone Linux packages should install the planning TUI binary as:
+Standalone Linux packages should install the TUI binary as:
 
 .. code-block:: console
 
@@ -39,16 +38,15 @@ Standalone Linux packages should install the planning TUI binary as:
 
 The binary is packaged beside ``dasobjectstore`` and ``dasobjectstored``. It is
 not a service and should run as the operator's login user, connecting to the
-daemon for any storage mutation once the daemon-backed TUI flows are available.
-Package installation must not grant the TUI direct write access to managed DAS
-roots.
+daemon for any storage mutation. Package installation must not grant the TUI
+direct write access to managed DAS roots.
 
-Planned TUI Launch
-------------------
+Current TUI Launch Preview
+--------------------------
 
-The current TUI entry point provides a non-interactive launch preview for import
-planning. It does not yet submit daemon jobs, but it accepts the launch metadata,
-confirmation, and resource-cap fields that the interactive import flow will use:
+The current TUI binary provides a non-interactive launch preview. It accepts the
+launch metadata, confirmation, and resource-cap fields that the interactive
+import flow uses before submitting daemon-mediated work:
 
 .. code-block:: console
 
@@ -73,9 +71,9 @@ The planned interactive subcommands remain:
 
    dasobjectstore-tui queue
 
-The import view is expected to show the target ObjectStore or SubObject, source
-paths, file count, scaled data volume, import description metadata, resource
-policy, and a confirmation step before launch.
+The import view should show the target ObjectStore or SubObject, source paths,
+file count, scaled data volume, import description metadata, resource policy,
+and a confirmation step before launch.
 
 Keyboard Controls
 -----------------
@@ -96,16 +94,16 @@ The planned controls are:
      - Planned
    * - ``p``
      - Pause a running import when the daemon supports pause.
-     - Planned
+     - Planned when daemon policy allows pause
    * - ``r``
      - Resume a paused import when the daemon supports resume.
-     - Planned
+     - Planned when daemon policy allows resume
    * - ``c``
      - Request cancellation, followed by an explicit confirmation prompt.
      - Planned
    * - ``R``
      - Retry failed files or a failed job when daemon policy allows retry.
-     - Planned
+     - Planned when daemon policy allows retry
    * - ``d``
      - Open job details, including active stage, queue depths, retries, and
        current file context.

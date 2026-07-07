@@ -5,13 +5,12 @@ Source roadmap: [ROADMAP.md](ROADMAP.md)
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
 developers
 
-Current priority: correct the architecture so DASObjectStore is an enterprise
-server/client storage appliance. `dasobjectstored` SHALL become the managed
-storage authority, and the CLI, standalone HTTPS API, Web UI, and Synoptikon
-plugin SHALL submit requests/jobs through that boundary instead of mutating
-managed DAS roots directly. Synoptikon/Mneion integration remains the strategic
-product target, but storage mutation must first move behind the daemon boundary
-so the integration is foundational rather than bolted onto a CLI-local model.
+Current status: the tracked MVP/current-round checklist is complete through
+Milestone 18 as of 2026-07-07. Milestone 12 is no longer the active priority;
+it remains recorded below as the completed daemon/client boundary that all
+normal CLI, HTTPS API, Web UI, TUI, and Synoptikon-facing storage mutation flows
+must preserve. New implementation work should be added as a new milestone or
+Post-MVP task instead of reopening stale current-priority language.
 
 ## Working Rules
 
@@ -21,7 +20,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - Keep persistent metadata, CLI behavior, and compatibility-impacting changes
   documented before merging implementation.
 
-## Current Priority: Milestone 12 Managed Daemon and Client Boundary
+## Milestone 12: Managed Daemon and Client Boundary
 
 - [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
   daemon configuration type, and unit tests for default runtime paths.

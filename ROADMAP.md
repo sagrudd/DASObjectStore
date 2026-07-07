@@ -1,6 +1,7 @@
 # DASObjectStore Roadmap
 
 Status: Draft  
+Tracked TODO status: complete through Milestone 18 as of 2026-07-07
 Scope: MVP for a DAS-based object store for bioinformatics development  
 Target platforms: Linux full support, macOS development/read-export support
 
@@ -36,6 +37,11 @@ appliance:
 - current Synoptikon and Mneion conventions are treated as mutable design inputs
   when a better integrated storage architecture requires coordinated changes
   across affected Mnemosyne software.
+
+Current completion-hardening work is limited to keeping the tracked status,
+operator documentation, and user-guide indexes coherent now that the checklist
+through Milestone 18 has no unchecked items. New implementation scope should be
+recorded as a future milestone or Post-MVP direction.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
