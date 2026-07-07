@@ -1,6 +1,7 @@
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = "workspaces/users-groups";
-pub const CREATE_LOCAL_GROUP_ACTION_ROUTE: &str = "actions/create-local-group";
-pub const ASSIGN_LOCAL_USER_TO_GROUP_ACTION_ROUTE: &str = "actions/assign-local-user-to-group";
+pub const CREATE_LOCAL_GROUP_ACTION_ROUTE: &str = "workspaces/users-groups/local-groups";
+pub const ASSIGN_LOCAL_USER_TO_GROUP_ACTION_ROUTE: &str =
+    "workspaces/users-groups/local-groups/members";
 pub const CREATE_LOCAL_GROUP_OPERATION: &str = "create_local_group";
 pub const ASSIGN_LOCAL_USER_TO_GROUP_OPERATION: &str = "assign_local_user_to_group";
 
@@ -116,11 +117,11 @@ mod tests {
     fn exposes_group_management_action_routes() {
         assert_eq!(
             CREATE_LOCAL_GROUP_ACTION_ROUTE,
-            "actions/create-local-group"
+            "workspaces/users-groups/local-groups"
         );
         assert_eq!(
             ASSIGN_LOCAL_USER_TO_GROUP_ACTION_ROUTE,
-            "actions/assign-local-user-to-group"
+            "workspaces/users-groups/local-groups/members"
         );
     }
 
@@ -128,7 +129,7 @@ mod tests {
     fn builds_create_local_group_action_api_path() {
         assert_eq!(
             create_local_group_action_api_path("/products/dasobjectstore/api/v1/"),
-            "/products/dasobjectstore/api/v1/actions/create-local-group"
+            "/products/dasobjectstore/api/v1/workspaces/users-groups/local-groups"
         );
     }
 
@@ -136,7 +137,7 @@ mod tests {
     fn builds_assign_local_user_to_group_action_api_path() {
         assert_eq!(
             assign_local_user_to_group_action_api_path("/products/dasobjectstore/api/v1/"),
-            "/products/dasobjectstore/api/v1/actions/assign-local-user-to-group"
+            "/products/dasobjectstore/api/v1/workspaces/users-groups/local-groups/members"
         );
     }
 }

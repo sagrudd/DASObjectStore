@@ -1,6 +1,7 @@
 //! Runtime configuration for the managed daemon.
 
 mod config;
+mod local_admin;
 mod service;
 
 pub use config::{
@@ -9,6 +10,12 @@ pub use config::{
     DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
     LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
     LINUX_DAEMON_STATE_DIR,
+};
+pub use local_admin::{
+    LocalAdminCommandOutput, LocalAdminCommandPlan, LocalAdminCommandRunner,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, LocalGroupAdministrationResponse, LocalGroupCommandPlanner,
+    SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
 };
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,

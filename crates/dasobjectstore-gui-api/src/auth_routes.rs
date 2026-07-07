@@ -9,6 +9,14 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
+use dasobjectstore_daemon::runtime::LOCAL_ADMIN_CONFIRMATION_MARKER;
+use dasobjectstore_daemon::{
+    AssignLocalUserToLocalGroupRequest as DaemonAssignLocalUserToLocalGroupRequest,
+    AssignLocalUserToLocalGroupResponse as DaemonAssignLocalUserToLocalGroupResponse,
+    CreateLocalGroupRequest as DaemonCreateLocalGroupRequest,
+    CreateLocalGroupResponse as DaemonCreateLocalGroupResponse, DaemonClient,
+    DaemonLocalAdminCommand, DaemonRuntimeConfig, UnixSocketDaemonTransport,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -78,7 +86,9 @@ impl StandaloneUsersGroupsRouteState {
         Self {
             auth_store,
             local_user_provider: Arc::new(SystemLocalUserAuthorityProvider),
-            local_group_admin_client: None,
+            local_group_admin_client: Some(Arc::new(
+                DaemonStandaloneLocalGroupAdminClient::default_packaged(),
+            )),
         }
     }
 }
@@ -191,11 +201,64 @@ struct StandaloneLocalGroupAdminDaemonRequest {
     username: Option<String>,
     dry_run: bool,
     client_request_id: Option<String>,
+    administrator_actor: Option<String>,
+    confirmation_marker: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct StandaloneLocalGroupAdminClientError {
     message: String,
+}
+
+struct DaemonStandaloneLocalGroupAdminClient {
+    client: DaemonClient<UnixSocketDaemonTransport>,
+}
+
+impl DaemonStandaloneLocalGroupAdminClient {
+    fn default_packaged() -> Self {
+        Self {
+            client: DaemonClient::new(UnixSocketDaemonTransport::new(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            )),
+        }
+    }
+}
+
+impl StandaloneLocalGroupAdminClient for DaemonStandaloneLocalGroupAdminClient {
+    fn submit_local_group_operation(
+        &self,
+        request: StandaloneLocalGroupAdminDaemonRequest,
+    ) -> Result<StandaloneLocalGroupAdminResponse, StandaloneLocalGroupAdminClientError> {
+        match request.operation {
+            StandaloneLocalGroupOperation::CreateGroup => self
+                .client
+                .create_local_group(DaemonCreateLocalGroupRequest {
+                    group_name: request.group_name,
+                    dry_run: request.dry_run,
+                    client_request_id: request.client_request_id,
+                    administrator_actor: request.administrator_actor,
+                    confirmation_marker: request.confirmation_marker,
+                })
+                .map(create_local_group_response_from_daemon)
+                .map_err(standalone_admin_client_error),
+            StandaloneLocalGroupOperation::AddUserToGroup => self
+                .client
+                .assign_local_user_to_local_group(DaemonAssignLocalUserToLocalGroupRequest {
+                    username: request.username.ok_or_else(|| {
+                        StandaloneLocalGroupAdminClientError {
+                            message: "username is required".to_string(),
+                        }
+                    })?,
+                    group_name: request.group_name,
+                    dry_run: request.dry_run,
+                    client_request_id: request.client_request_id,
+                    administrator_actor: request.administrator_actor,
+                    confirmation_marker: request.confirmation_marker,
+                })
+                .map(assign_local_user_to_group_response_from_daemon)
+                .map_err(standalone_admin_client_error),
+        }
+    }
 }
 
 async fn register(
@@ -270,8 +333,9 @@ async fn create_local_group(
     actor: AuthenticatedGuiActor,
     Json(request): Json<CreateLocalGroupRequest>,
 ) -> Result<Json<StandaloneLocalGroupAdminResponse>, (StatusCode, Json<AuthRouteError>)> {
-    let request = validate_create_local_group_request(request)?;
-    require_local_administrator(&state, &actor)?;
+    let mut request = validate_create_local_group_request(request)?;
+    let current_user = require_local_administrator(&state, &actor)?;
+    request.administrator_actor = Some(current_user.username);
     submit_local_group_admin_request(&state, request).map(Json)
 }
 
@@ -280,8 +344,9 @@ async fn assign_local_user_to_group(
     actor: AuthenticatedGuiActor,
     Json(request): Json<AssignLocalUserToGroupRequest>,
 ) -> Result<Json<StandaloneLocalGroupAdminResponse>, (StatusCode, Json<AuthRouteError>)> {
-    let request = validate_assign_local_user_to_group_request(request)?;
-    require_local_administrator(&state, &actor)?;
+    let mut request = validate_assign_local_user_to_group_request(request)?;
+    let current_user = require_local_administrator(&state, &actor)?;
+    request.administrator_actor = Some(current_user.username);
     submit_local_group_admin_request(&state, request).map(Json)
 }
 
@@ -290,11 +355,8 @@ fn validate_create_local_group_request(
 ) -> Result<StandaloneLocalGroupAdminDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
     let group_name = required_field("group_name", request.group_name)?;
     validate_client_request_id(request.client_request_id.as_deref())?;
-    validate_confirmation_marker(
-        request.dry_run,
-        request.confirmation_marker.as_deref(),
-        "confirm create local group",
-    )?;
+    let confirmation_marker =
+        validate_confirmation_marker(request.dry_run, request.confirmation_marker.as_deref())?;
 
     Ok(StandaloneLocalGroupAdminDaemonRequest {
         operation: StandaloneLocalGroupOperation::CreateGroup,
@@ -302,6 +364,8 @@ fn validate_create_local_group_request(
         username: None,
         dry_run: request.dry_run,
         client_request_id: request.client_request_id,
+        administrator_actor: None,
+        confirmation_marker,
     })
 }
 
@@ -311,11 +375,8 @@ fn validate_assign_local_user_to_group_request(
     let group_name = required_field("group_name", request.group_name)?;
     let username = required_field("username", request.username)?;
     validate_client_request_id(request.client_request_id.as_deref())?;
-    validate_confirmation_marker(
-        request.dry_run,
-        request.confirmation_marker.as_deref(),
-        "confirm assign local user to group",
-    )?;
+    let confirmation_marker =
+        validate_confirmation_marker(request.dry_run, request.confirmation_marker.as_deref())?;
 
     Ok(StandaloneLocalGroupAdminDaemonRequest {
         operation: StandaloneLocalGroupOperation::AddUserToGroup,
@@ -323,13 +384,15 @@ fn validate_assign_local_user_to_group_request(
         username: Some(username),
         dry_run: request.dry_run,
         client_request_id: request.client_request_id,
+        administrator_actor: None,
+        confirmation_marker,
     })
 }
 
 fn require_local_administrator(
     state: &StandaloneUsersGroupsRouteState,
     actor: &AuthenticatedGuiActor,
-) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+) -> Result<crate::LocalUserMetadata, (StatusCode, Json<AuthRouteError>)> {
     if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
         return Err(route_error(
             StatusCode::FORBIDDEN,
@@ -357,7 +420,7 @@ fn require_local_administrator(
         ));
     }
 
-    Ok(())
+    Ok(current_user)
 }
 
 fn submit_local_group_admin_request(
@@ -408,21 +471,77 @@ fn validate_client_request_id(
 fn validate_confirmation_marker(
     dry_run: bool,
     confirmation_marker: Option<&str>,
-    required_marker: &'static str,
-) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
+    let confirmation_marker = confirmation_marker
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     if dry_run {
-        return Ok(());
+        return Ok(confirmation_marker
+            .unwrap_or(LOCAL_ADMIN_CONFIRMATION_MARKER)
+            .to_string());
     }
 
-    if confirmation_marker.map(str::trim) == Some(required_marker) {
-        return Ok(());
+    if confirmation_marker == Some(LOCAL_ADMIN_CONFIRMATION_MARKER) {
+        return Ok(LOCAL_ADMIN_CONFIRMATION_MARKER.to_string());
     }
 
     Err(route_error(
         StatusCode::BAD_REQUEST,
         "confirmation_required",
-        format!("confirmation_marker must be `{required_marker}`"),
+        format!("confirmation_marker must be `{LOCAL_ADMIN_CONFIRMATION_MARKER}`"),
     ))
+}
+
+fn create_local_group_response_from_daemon(
+    response: DaemonCreateLocalGroupResponse,
+) -> StandaloneLocalGroupAdminResponse {
+    let client_request_id = response.accepted.client_request_id.clone();
+    StandaloneLocalGroupAdminResponse {
+        accepted: standalone_accepted_response_from_daemon(response.accepted),
+        operation: StandaloneLocalGroupOperation::CreateGroup,
+        group_name: response.group_name,
+        username: None,
+        client_request_id,
+    }
+}
+
+fn assign_local_user_to_group_response_from_daemon(
+    response: DaemonAssignLocalUserToLocalGroupResponse,
+) -> StandaloneLocalGroupAdminResponse {
+    let client_request_id = response.accepted.client_request_id.clone();
+    StandaloneLocalGroupAdminResponse {
+        accepted: standalone_accepted_response_from_daemon(response.accepted),
+        operation: StandaloneLocalGroupOperation::AddUserToGroup,
+        group_name: response.group_name,
+        username: Some(response.username),
+        client_request_id,
+    }
+}
+
+fn standalone_accepted_response_from_daemon(
+    accepted: dasobjectstore_daemon::DaemonLocalAdminAcceptedResponse,
+) -> StandaloneLocalGroupAdminAcceptedResponse {
+    StandaloneLocalGroupAdminAcceptedResponse {
+        job_id: accepted.job_id.to_string(),
+        kind: standalone_accepted_kind(accepted.command).to_string(),
+        accepted_at_utc: accepted.accepted_at_utc,
+        dry_run: accepted.dry_run,
+    }
+}
+
+fn standalone_accepted_kind(command: DaemonLocalAdminCommand) -> &'static str {
+    match command {
+        DaemonLocalAdminCommand::CreateLocalGroup
+        | DaemonLocalAdminCommand::AssignLocalUserToLocalGroup => "system_administration",
+    }
+}
+
+fn standalone_admin_client_error(
+    err: dasobjectstore_daemon::DaemonClientError,
+) -> StandaloneLocalGroupAdminClientError {
+    StandaloneLocalGroupAdminClientError {
+        message: err.to_string(),
+    }
 }
 
 fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteError>) {
@@ -478,7 +597,7 @@ mod tests {
         StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
         StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
         StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-        StandaloneUsersGroupsRouteState,
+        StandaloneUsersGroupsRouteState, LOCAL_ADMIN_CONFIRMATION_MARKER,
     };
     use crate::{
         LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata, LoginResponse,
@@ -870,6 +989,8 @@ mod tests {
                 username: None,
                 dry_run: true,
                 client_request_id: Some("request-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: LOCAL_ADMIN_CONFIRMATION_MARKER.to_string(),
             }]
         );
 
@@ -917,6 +1038,8 @@ mod tests {
                 username: Some("stephen".to_string()),
                 dry_run: true,
                 client_request_id: Some("request-2".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: LOCAL_ADMIN_CONFIRMATION_MARKER.to_string(),
             }]
         );
 

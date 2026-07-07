@@ -366,6 +366,7 @@ dependencies = [
  "argon2",
  "axum",
  "dasobjectstore-core",
+ "dasobjectstore-daemon",
  "rand_core",
  "rcgen",
  "serde",

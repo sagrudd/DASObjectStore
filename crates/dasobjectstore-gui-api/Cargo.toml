@@ -12,6 +12,7 @@ path = "src/lib.rs"
 argon2.workspace = true
 axum.workspace = true
 dasobjectstore-core.workspace = true
+dasobjectstore-daemon.workspace = true
 rand_core.workspace = true
 rcgen.workspace = true
 serde.workspace = true

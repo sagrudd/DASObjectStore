@@ -1,11 +1,14 @@
 use crate::api::{
-    DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+    CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest,
+    DaemonApiResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+    DaemonServiceStatusResponse,
 };
 use crate::runtime::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageServiceController,
-    ServiceCommandRunner,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_object_service::{default_store_registry_path, ObjectServiceProviderId};
 use std::fmt::{self, Display};
@@ -50,6 +53,16 @@ where
                 .provision(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::ServiceProvision)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
+            DaemonApiRequest::CreateLocalGroup(request) => self
+                .service_orchestrator
+                .create_local_group(request, &self.clock.now_utc())
+                .map(DaemonApiResponse::CreateLocalGroup)
+                .map_err(DaemonRequestHandlerError::LocalAdminRuntime),
+            DaemonApiRequest::AssignLocalUserToLocalGroup(request) => self
+                .service_orchestrator
+                .assign_local_user_to_local_group(request, &self.clock.now_utc())
+                .map(DaemonApiResponse::AssignLocalUserToLocalGroup)
+                .map_err(DaemonRequestHandlerError::LocalAdminRuntime),
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
                 format!(
@@ -78,6 +91,27 @@ pub trait DaemonServiceOrchestrator {
         request: DaemonServiceProvisionRequest,
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError>;
+
+    fn create_local_group(
+        &self,
+        _request: CreateLocalGroupRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<CreateLocalGroupResponse, LocalAdminRuntimeError> {
+        Err(LocalAdminRuntimeError::UnsupportedOperation {
+            operation: "create_local_group requires a local admin orchestrator".to_string(),
+        })
+    }
+
+    fn assign_local_user_to_local_group(
+        &self,
+        _request: AssignLocalUserToLocalGroupRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<AssignLocalUserToLocalGroupResponse, LocalAdminRuntimeError> {
+        Err(LocalAdminRuntimeError::UnsupportedOperation {
+            operation: "assign_local_user_to_local_group requires a local admin orchestrator"
+                .to_string(),
+        })
+    }
 }
 
 impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
@@ -133,6 +167,61 @@ where
             summary.commands,
         ))
     }
+
+    fn create_local_group(
+        &self,
+        request: CreateLocalGroupRequest,
+        accepted_at_utc: &str,
+    ) -> Result<CreateLocalGroupResponse, LocalAdminRuntimeError> {
+        let administrator_actor = request.administrator_actor.clone();
+        let response = LocalGroupAdminController::new(SystemLocalAdminCommandRunner).execute(
+            LocalGroupAdministrationRequest {
+                operation: LocalGroupAdministrationOperation::CreateGroup,
+                group_name: request.group_name,
+                username: None,
+                dry_run: request.dry_run,
+                client_request_id: request.client_request_id,
+                administrator_confirmation: Some(request.confirmation_marker),
+            },
+            accepted_at_utc,
+        )?;
+
+        Ok(CreateLocalGroupResponse {
+            accepted: response.accepted,
+            group_name: response.group_name,
+            administrator_actor,
+        })
+    }
+
+    fn assign_local_user_to_local_group(
+        &self,
+        request: AssignLocalUserToLocalGroupRequest,
+        accepted_at_utc: &str,
+    ) -> Result<AssignLocalUserToLocalGroupResponse, LocalAdminRuntimeError> {
+        let administrator_actor = request.administrator_actor.clone();
+        let response = LocalGroupAdminController::new(SystemLocalAdminCommandRunner).execute(
+            LocalGroupAdministrationRequest {
+                operation: LocalGroupAdministrationOperation::AssignUserToGroup,
+                group_name: request.group_name,
+                username: Some(request.username),
+                dry_run: request.dry_run,
+                client_request_id: request.client_request_id,
+                administrator_confirmation: Some(request.confirmation_marker),
+            },
+            accepted_at_utc,
+        )?;
+
+        let username = response
+            .username
+            .ok_or(LocalAdminRuntimeError::MissingField { field: "username" })?;
+
+        Ok(AssignLocalUserToLocalGroupResponse {
+            accepted: response.accepted,
+            username,
+            group_name: response.group_name,
+            administrator_actor,
+        })
+    }
 }
 
 pub trait DaemonClock {
@@ -175,6 +264,7 @@ impl DaemonClock for FixedDaemonClock {
 pub enum DaemonRequestHandlerError {
     RequestValidation(crate::api::DaemonRequestValidationError),
     ServiceRuntime(DaemonServiceRuntimeError),
+    LocalAdminRuntime(LocalAdminRuntimeError),
 }
 
 impl Display for DaemonRequestHandlerError {
@@ -182,6 +272,7 @@ impl Display for DaemonRequestHandlerError {
         match self {
             Self::RequestValidation(error) => Display::fmt(error, formatter),
             Self::ServiceRuntime(error) => Display::fmt(error, formatter),
+            Self::LocalAdminRuntime(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -218,12 +309,16 @@ mod tests {
         SystemDaemonClock,
     };
     use crate::api::{
-        DaemonApiRequest, DaemonApiResponse, DaemonRequestValidationError,
-        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, StoreInventoryRequest,
+        AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+        CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
+        DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+        StoreInventoryRequest,
     };
-    use crate::runtime::DaemonServiceRuntimeError;
+    use crate::runtime::{
+        DaemonServiceRuntimeError, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
+    };
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::cell::RefCell;
 
@@ -327,6 +422,92 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_create_local_group_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-07T12:25:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::CreateLocalGroup(
+                CreateLocalGroupRequest {
+                    group_name: "daswriters".to_string(),
+                    dry_run: true,
+                    client_request_id: None,
+                    administrator_actor: Some("operator".to_string()),
+                    confirmation_marker: "confirm local group administration".to_string(),
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::CreateLocalGroup(CreateLocalGroupResponse {
+                group_name,
+                ..
+            }) if group_name == "daswriters"
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .local_group_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-07T12:25:00Z".to_string(),
+                LocalGroupAdministrationOperation::CreateGroup,
+                "daswriters".to_string(),
+                None,
+                true,
+            )]
+        );
+    }
+
+    #[test]
+    fn dispatches_assign_local_user_to_local_group_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-07T12:28:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::AssignLocalUserToLocalGroup(
+                AssignLocalUserToLocalGroupRequest {
+                    username: "stephen".to_string(),
+                    group_name: "daswriters".to_string(),
+                    dry_run: true,
+                    client_request_id: Some("request-2".to_string()),
+                    administrator_actor: Some("operator".to_string()),
+                    confirmation_marker: "confirm local group administration".to_string(),
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::AssignLocalUserToLocalGroup(
+                AssignLocalUserToLocalGroupResponse {
+                    username,
+                    group_name,
+                    ..
+                }
+            ) if username == "stephen" && group_name == "daswriters"
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .local_group_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-07T12:28:00Z".to_string(),
+                LocalGroupAdministrationOperation::AssignUserToGroup,
+                "daswriters".to_string(),
+                Some("stephen".to_string()),
+                true,
+            )]
+        );
+    }
+
+    #[test]
     fn validates_request_before_dispatch() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -383,6 +564,15 @@ mod tests {
         status_calls: RefCell<Vec<bool>>,
         lifecycle_calls: RefCell<Vec<String>>,
         provision_calls: RefCell<Vec<String>>,
+        local_group_calls: RefCell<
+            Vec<(
+                String,
+                LocalGroupAdministrationOperation,
+                String,
+                Option<String>,
+                bool,
+            )>,
+        >,
     }
 
     impl DaemonServiceOrchestrator for FakeService {
@@ -435,6 +625,52 @@ mod tests {
                 1,
                 1,
                 3,
+            ))
+        }
+
+        fn create_local_group(
+            &self,
+            request: CreateLocalGroupRequest,
+            accepted_at_utc: &str,
+        ) -> Result<CreateLocalGroupResponse, LocalAdminRuntimeError> {
+            self.local_group_calls.borrow_mut().push((
+                accepted_at_utc.to_string(),
+                LocalGroupAdministrationOperation::CreateGroup,
+                request.group_name.clone(),
+                None,
+                request.dry_run,
+            ));
+            Ok(CreateLocalGroupResponse::accepted(
+                DaemonJobId::new("local-group-create-group-2026-07-07t12-25-00z").expect("job id"),
+                accepted_at_utc,
+                request.dry_run,
+                request.client_request_id,
+                request.group_name,
+                request.administrator_actor,
+            ))
+        }
+
+        fn assign_local_user_to_local_group(
+            &self,
+            request: AssignLocalUserToLocalGroupRequest,
+            accepted_at_utc: &str,
+        ) -> Result<AssignLocalUserToLocalGroupResponse, LocalAdminRuntimeError> {
+            self.local_group_calls.borrow_mut().push((
+                accepted_at_utc.to_string(),
+                LocalGroupAdministrationOperation::AssignUserToGroup,
+                request.group_name.clone(),
+                Some(request.username.clone()),
+                request.dry_run,
+            ));
+            Ok(AssignLocalUserToLocalGroupResponse::accepted(
+                DaemonJobId::new("local-group-assign-user-to-group-2026-07-07t12-28-00z")
+                    .expect("job id"),
+                accepted_at_utc,
+                request.dry_run,
+                request.client_request_id,
+                request.username,
+                request.group_name,
+                request.administrator_actor,
             ))
         }
     }

@@ -419,7 +419,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   existing SubObject registry/domain APIs are stable.
 - [x] Add Web UI tests for admin-only access, permission-denied states, group
   management operation surfaces, ObjectStore creation, and SubObject creation.
-- [ ] Add daemon-backed execution routes for local group creation and
+- [x] Add daemon-backed execution routes for local group creation and
   local-user-to-group assignment once daemon administrator policy APIs are
   available.
 

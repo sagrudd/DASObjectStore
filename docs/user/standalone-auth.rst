@@ -25,7 +25,8 @@ frontend must not mutate OS users or groups directly.
 Group creation and assignment actions are sudo-administrator gated and support a
 dry-run path before mutation. When a request would change the host, the UI must
 present the daemon plan and require explicit confirmation before submitting the
-confirmed operation.
+confirmed operation. The confirmation marker for host-local group mutation is
+``confirm local group administration``.
 
 After a user is added to a group, existing login sessions may not show the new
 membership. The user must start a new login session before DASObjectStore or
