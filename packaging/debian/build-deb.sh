@@ -16,6 +16,7 @@ bash "$packaging_debian/validate-package-assets.sh"
 
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-tui --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
 install -d \
@@ -29,6 +30,8 @@ install -d \
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$build_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
+install -m 0755 "$repo_root/target/release/dasobjectstore-tui" \
+  "$build_root/usr/bin/dasobjectstore-tui"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$build_root/usr/bin/dasobjectstored"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
@@ -52,7 +55,7 @@ Maintainer: DASObjectStore contributors
 Depends: ca-certificates, acl
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics
- DASObjectStore provides CLI and service binaries for staging objects on
+ DASObjectStore provides CLI, TUI, and service binaries for staging objects on
  SSD and settling verified copies onto DAS or NAS storage endpoints.
 CONTROL
 

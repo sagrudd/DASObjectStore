@@ -57,6 +57,7 @@ require_file "benchmarks/ingest/reports/report-template.md"
 require_file "$script_dir/matrix.sh"
 require_executable "$script_dir/run.sh"
 require_executable "$script_dir/run-matrix.sh"
+require_executable "$script_dir/profiling.sh"
 require_executable "$script_dir/smoke-test.sh"
 
 dry_run_tmpdir="$(mktemp -d)"

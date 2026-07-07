@@ -65,6 +65,13 @@ status and wall-clock seconds. The external runner is responsible for creating
 fixtures, submitting ingest jobs, applying interruption or pressure controls,
 and collecting daemon/TUI telemetry.
 
+An external runner can write profiling values to
+`$DASOBJECTSTORE_INGEST_BENCH_RUN_DIR/profiling.env`, or point
+`DASOBJECTSTORE_INGEST_PROFILE_ENV` at another env-style file. The scaffold
+records those values in `profiling.tsv` after the runner exits. Missing values
+remain `not_collected`, so local smoke runs do not require a daemon or real
+storage devices.
+
 ## Profiling Contract
 
 Each real benchmark run should collect these fields in addition to scenario
@@ -83,8 +90,41 @@ metadata:
 - Recovery: interrupted job ID, journal records reconciled, staged bytes reused,
   bytes rewritten, and time to reach a monitorable or completed state.
 
-The scaffold `metrics.tsv` uses stable column names for these measurements.
-Values remain `not_collected` until a real telemetry runner supplies them.
+The scaffold writes high-level run status to `metrics.tsv` and detailed
+profiling hook output to `profiling.tsv`. Values remain `not_collected` until a
+real telemetry runner supplies them. The profiling hook accepts these variables:
+
+- `DASOBJECTSTORE_INGEST_PROFILE_CPU_BOTTLENECK`
+- `DASOBJECTSTORE_INGEST_PROFILE_CPU_TOTAL_PERCENT`
+- `DASOBJECTSTORE_INGEST_PROFILE_CPU_HASH_PERCENT`
+- `DASOBJECTSTORE_INGEST_PROFILE_CPU_VERIFY_PERCENT`
+- `DASOBJECTSTORE_INGEST_PROFILE_MEMORY_BOTTLENECK`
+- `DASOBJECTSTORE_INGEST_PROFILE_MEMORY_RSS_PEAK_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_MEMORY_BUDGET_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_MEMORY_BUFFER_POOL_PEAK_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_MEMORY_QUEUE_DEPTH_PEAK`
+- `DASOBJECTSTORE_INGEST_PROFILE_MEMORY_GROWTH_CLASS`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_BOTTLENECK`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_STAGE_BYTES_PER_SECOND`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_STAGED_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_USED_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_FREE_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_RESERVE_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_PRESSURE_STATE`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_THROTTLE_STATE`
+- `DASOBJECTSTORE_INGEST_PROFILE_SSD_BLOCK_STATE`
+- `DASOBJECTSTORE_INGEST_PROFILE_HDD_BOTTLENECK`
+- `DASOBJECTSTORE_INGEST_PROFILE_HDD_FANOUT_BYTES_PER_SECOND`
+- `DASOBJECTSTORE_INGEST_PROFILE_HDD_BACKLOG_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_HDD_RETRY_COUNT`
+- `DASOBJECTSTORE_INGEST_PROFILE_HDD_SATURATED_TARGETS`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_BOTTLENECK`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_BYTES_PER_SECOND`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_VERIFIED_BYTES`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_VERIFIED_FILES`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_RETRY_COUNT`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_FAILURES`
+- `DASOBJECTSTORE_INGEST_PROFILE_VERIFICATION_LIMITING_FINALIZATION`
 
 ## Acceptance Targets
 

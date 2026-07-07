@@ -50,6 +50,8 @@ require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 
 require_text "$build_deb" "cargo build --release -p dasobjectstore-daemon"
+require_text "$build_deb" "cargo build --release -p dasobjectstore-tui"
+require_text "$build_deb" 'target/release/dasobjectstore-tui'
 require_text "$build_deb" 'target/release/dasobjectstored'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'

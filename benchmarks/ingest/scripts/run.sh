@@ -23,6 +23,7 @@ pressure="$(scenario_pressure "$scenario")"
 output_root="${DASOBJECTSTORE_INGEST_BENCH_OUTPUT_DIR:-benchmarks/output/ingest}"
 run_id="${DASOBJECTSTORE_INGEST_BENCH_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 run_dir="$output_root/$scenario/$run_id"
+profile_env="${DASOBJECTSTORE_INGEST_PROFILE_ENV:-$run_dir/profiling.env}"
 
 if [ "${DASOBJECTSTORE_INGEST_BENCH_DRY_RUN:-0}" = "1" ]; then
   printf 'scenario=%s kind=%s file_count=%s total_bytes=%s pressure=%s output=%s\n' \
@@ -31,6 +32,14 @@ if [ "${DASOBJECTSTORE_INGEST_BENCH_DRY_RUN:-0}" = "1" ]; then
 fi
 
 mkdir -p "$run_dir"
+
+export DASOBJECTSTORE_INGEST_BENCH_SCENARIO="$scenario"
+export DASOBJECTSTORE_INGEST_BENCH_KIND="$kind"
+export DASOBJECTSTORE_INGEST_BENCH_FILE_COUNT="$file_count"
+export DASOBJECTSTORE_INGEST_BENCH_TOTAL_BYTES="$total_bytes"
+export DASOBJECTSTORE_INGEST_BENCH_PRESSURE="$pressure"
+export DASOBJECTSTORE_INGEST_BENCH_RUN_DIR="$run_dir"
+export DASOBJECTSTORE_INGEST_BENCH_RUN_ID="$run_id"
 
 {
   printf 'field\tvalue\n'
@@ -63,14 +72,9 @@ mkdir -p "$run_dir"
   printf 'recovery_seconds\tnot_applicable\n'
 } > "$run_dir/metrics.tsv"
 
-if [ -n "${DASOBJECTSTORE_INGEST_BENCH_COMMAND:-}" ]; then
-  export DASOBJECTSTORE_INGEST_BENCH_SCENARIO="$scenario"
-  export DASOBJECTSTORE_INGEST_BENCH_KIND="$kind"
-  export DASOBJECTSTORE_INGEST_BENCH_FILE_COUNT="$file_count"
-  export DASOBJECTSTORE_INGEST_BENCH_TOTAL_BYTES="$total_bytes"
-  export DASOBJECTSTORE_INGEST_BENCH_PRESSURE="$pressure"
-  export DASOBJECTSTORE_INGEST_BENCH_RUN_DIR="$run_dir"
+"$script_dir/profiling.sh" "$run_dir/profiling.tsv" "$profile_env"
 
+if [ -n "${DASOBJECTSTORE_INGEST_BENCH_COMMAND:-}" ]; then
   started_at="$(date -u +%s)"
   if sh -c "$DASOBJECTSTORE_INGEST_BENCH_COMMAND"; then
     runner_status=0
@@ -84,6 +88,7 @@ if [ -n "${DASOBJECTSTORE_INGEST_BENCH_COMMAND:-}" ]; then
     printf 'runner_exit_code\t%s\n' "$runner_status"
     printf 'runner_wall_seconds\t%s\n' "$wall_seconds"
   } >> "$run_dir/metrics.tsv"
+  "$script_dir/profiling.sh" "$run_dir/profiling.tsv" "$profile_env"
 
   exit "$runner_status"
 fi

@@ -3,9 +3,9 @@ Console TUI Operations
 
 The Milestone 18 console TUI is the planned operator surface for parallel file
 ingress. It will use the same ``dasobjectstored`` job model as the CLI and Web
-UI. Until the TUI binary or subcommand lands, use the current CLI commands for
-real ingest and treat the TUI controls below as the supported design contract,
-not executable commands.
+UI. Until the TUI import, attach, and queue flows are daemon-backed, use the
+current CLI commands for real ingest and treat the interactive controls below
+as the supported design contract.
 
 Current CLI Path
 ----------------
@@ -28,6 +28,21 @@ Inspect known ingest jobs:
 The hidden ``--local-direct`` developer mode is not a TUI workflow and should
 not be used for production imports.
 
+Standalone Package Path
+-----------------------
+
+Standalone Linux packages should install the planning TUI binary as:
+
+.. code-block:: console
+
+   /usr/bin/dasobjectstore-tui
+
+The binary is packaged beside ``dasobjectstore`` and ``dasobjectstored``. It is
+not a service and should run as the operator's login user, connecting to the
+daemon for any storage mutation once the daemon-backed TUI flows are available.
+Package installation must not grant the TUI direct write access to managed DAS
+roots.
+
 Planned TUI Launch
 ------------------
 
@@ -36,12 +51,12 @@ executable until that implementation is merged:
 
 .. code-block:: console
 
-   dasobjectstore tui import zymo_fecal_2025.05 \
+   dasobjectstore-tui import zymo_fecal_2025.05 \
      --source /mnt/external/zymo_fecal_2025.05
 
-   dasobjectstore tui attach <job-id>
+   dasobjectstore-tui attach <job-id>
 
-   dasobjectstore tui queue
+   dasobjectstore-tui queue
 
 The import view is expected to show the target ObjectStore or SubObject, source
 paths, file count, scaled data volume, import description metadata, resource
@@ -132,6 +147,12 @@ The live view should classify bottlenecks across CPU, memory, SSD pressure, HDD
 fan-out, verification, daemon connectivity, and source-read limits. It should
 show when source-to-SSD streaming is throttled by policy rather than by device
 speed.
+
+Benchmark profiling output should mirror those bottleneck dimensions. Offline
+benchmark smoke runs write ``profiling.tsv`` with CPU, memory, SSD, HDD, and
+verification fields set to ``not_collected``. Hardware benchmark runners should
+replace those placeholders with measured values from daemon telemetry and host
+profilers before a result is used for Milestone 18 acceptance.
 
 If the terminal disconnects or the TUI exits, the daemon job should continue
 according to daemon policy. Operators should be able to attach to a running job
