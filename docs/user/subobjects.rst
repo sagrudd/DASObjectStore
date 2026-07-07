@@ -26,7 +26,9 @@ Create the root object store first:
 
 .. code-block:: console
 
-   sudo dasobjectstore store create --class reproducible_cache ENA
+   sudo dasobjectstore store create ENA \
+     --class reproducible_cache \
+     --writer-group mnemosyne
 
 Create the top-level SubObject:
 
@@ -59,9 +61,8 @@ would otherwise be used:
 
 .. code-block:: console
 
-   sudo dasobjectstore ingest files Vervet \
-     --source /mnt/external/ena/xenognostikon/vervet \
-     --disk-root hdd-a=/srv/dasobjectstore/hdd-a
+   dasobjectstore ingest files Vervet \
+     --source /mnt/external/ena/xenognostikon/vervet
 
 The source directory structure is preserved in logical object IDs beneath the
 SubObject prefix. For example, this source file:

@@ -632,6 +632,10 @@ pub(super) fn write_store_create_report(
     if let Some(bucket_name) = &report.bucket_name {
         writeln!(writer, "Bucket: {bucket_name}")?;
     }
+    match &report.definition.writer_group {
+        Some(writer_group) => writeln!(writer, "Writer group: {writer_group}")?,
+        None => writeln!(writer, "Writer group: not configured")?,
+    }
     if let Some(credential_reference) = &report.credential_reference {
         writeln!(writer, "Credential reference: {credential_reference}")?;
     }
@@ -650,13 +654,18 @@ pub(super) fn write_store_list_report(
 
     for definition in definitions {
         let bucket = definition.bucket_name.as_deref().unwrap_or("(default)");
+        let writer_group = definition
+            .writer_group
+            .as_deref()
+            .unwrap_or("(not configured)");
         writeln!(
             writer,
-            "- {} class={} copies={} bucket={} ingest={:?} export={:?}",
+            "- {} class={} copies={} bucket={} writer_group={} ingest={:?} export={:?}",
             definition.store_id,
             definition.policy.class.name(),
             definition.policy.copies,
             bucket,
+            writer_group,
             definition.policy.ingest_mode,
             definition.policy.export_policy
         )?;

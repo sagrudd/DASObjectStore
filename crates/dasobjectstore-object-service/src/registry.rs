@@ -341,6 +341,7 @@ mod tests {
             store_id: StoreId::new(store_id).expect("store id"),
             policy: StorePolicy::defaults_for(class),
             bucket_name,
+            writer_group: None,
         }
     }
 

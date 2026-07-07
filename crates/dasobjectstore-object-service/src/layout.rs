@@ -15,6 +15,8 @@ pub struct StoreServiceDefinition {
     pub store_id: StoreId,
     pub policy: StorePolicy,
     pub bucket_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writer_group: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -277,6 +279,7 @@ mod tests {
             store_id: StoreId::new(store_id).expect("store id"),
             policy,
             bucket_name: None,
+            writer_group: None,
         }
     }
 }

@@ -8,31 +8,42 @@ stores-file path for normal operations.
 Create a Store
 --------------
 
-Create a generated-data store:
+Create a generated-data store. Store creation and policy changes are privileged
+operations:
 
 .. code-block:: console
 
-   dasobjectstore store create generated-data --class generated_data
+   sudo dasobjectstore store create generated-data \
+     --class generated_data \
+     --writer-group mnemosyne
 
 The command uses built-in defaults for the class. For ``generated_data`` this
 currently means two verified HDD copies, SSD-first ingest, and acknowledgement
 after HDD placement.
 
+``--writer-group`` is the Unix group whose members may ingest files into the
+store without root privileges. A store without a writer group is not writable by
+normal users. On Linux, ``store create`` grants that group ACL access to the
+known DAS SSD and managed HDD roots when they are present, so users can ingest
+through DASObjectStore without direct ad hoc disk access.
+
 Override the copy count only when the policy is intentional:
 
 .. code-block:: console
 
-   dasobjectstore store create generated-data \
+   sudo dasobjectstore store create generated-data \
      --class generated_data \
-     --copies 3
+     --copies 3 \
+     --writer-group mnemosyne
 
 Create with an explicit S3 bucket name:
 
 .. code-block:: console
 
-   dasobjectstore store create generated-data \
+   sudo dasobjectstore store create generated-data \
      --class generated_data \
-     --bucket generated-data
+     --bucket generated-data \
+     --writer-group mnemosyne
 
 Portable Registry
 -----------------
@@ -50,10 +61,13 @@ root:
 .. code-block:: console
 
    DASOBJECTSTORE_SSD_ROOT=/mnt/das-ssd \
-     dasobjectstore store create generated-data --class generated_data
+     sudo dasobjectstore store create generated-data \
+       --class generated_data \
+       --writer-group mnemosyne
 
-   dasobjectstore store create generated-data \
+   sudo dasobjectstore store create generated-data \
      --class generated_data \
+     --writer-group mnemosyne \
      --ssd-root /mnt/das-ssd
 
 The SSD root must contain ``.dasobjectstore/device.env`` with ``role=ssd``. This
@@ -107,4 +121,3 @@ Before creating a store, inspect the class defaults:
    dasobjectstore store defaults --class generated_data
 
 See :doc:`store-classes` for class meanings and redundancy defaults.
-

@@ -26,7 +26,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates
+Depends: ca-certificates, acl
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics
  DASObjectStore provides CLI and service binaries for staging objects on

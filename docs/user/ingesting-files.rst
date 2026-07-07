@@ -5,9 +5,9 @@ Use ``dasobjectstore ingest files`` to load a directory tree from an external
 disk into a system-managed object store or SubObject endpoint. Do not copy files
 directly onto DAS member disks.
 
-The command reads the store policy, stages each file through the DAS SSD, writes
-the requested verified HDD copies, and reports byte-level progress while the
-copy is running.
+The command reads the store policy, discovers managed HDD members, selects copy
+placements, stages each file through the DAS SSD, writes the requested verified
+HDD copies, and reports byte-level progress while the copy is running.
 
 Example
 -------
@@ -16,33 +16,32 @@ For a store created as:
 
 .. code-block:: console
 
-   sudo dasobjectstore store create --class reproducible_cache zymo_fecal_2025.05
+   sudo dasobjectstore store create zymo_fecal_2025.05 \
+     --class reproducible_cache \
+     --writer-group mnemosyne
 
 import files from a mounted external disk:
 
 .. code-block:: console
 
-   sudo dasobjectstore ingest files zymo_fecal_2025.05 \
-     --source /mnt/external/zymo_fecal_2025.05 \
-     --disk-root hdd-a=/srv/dasobjectstore/hdd-a
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05
 
-Add more ``--disk-root`` entries when the store policy requires more copies:
+The user running ingest must be a member of the store's writer group. For the
+example above, membership in ``mnemosyne`` is required. Ingest does not require
+``sudo``.
 
-.. code-block:: console
-
-   sudo dasobjectstore ingest files generated-data \
-     --source /mnt/external/generated-data \
-     --disk-root hdd-a=/srv/dasobjectstore/hdd-a \
-     --disk-root hdd-b=/srv/dasobjectstore/hdd-b
+DASObjectStore discovers prepared HDD members under the managed mount root and
+chooses placements for each object. Operators must not choose individual disks
+for normal file ingest.
 
 The copy count defaults to the store policy. Use ``--copies`` only when the
 override is intentional:
 
 .. code-block:: console
 
-   sudo dasobjectstore ingest files zymo_fecal_2025.05 \
+   dasobjectstore ingest files zymo_fecal_2025.05 \
      --source /mnt/external/zymo_fecal_2025.05 \
-     --disk-root hdd-a=/srv/dasobjectstore/hdd-a \
      --copies 1
 
 Use ``--dry-run`` to inspect the planned file set without importing:
@@ -51,7 +50,6 @@ Use ``--dry-run`` to inspect the planned file set without importing:
 
    dasobjectstore ingest files zymo_fecal_2025.05 \
      --source /mnt/external/zymo_fecal_2025.05 \
-     --disk-root hdd-a=/srv/dasobjectstore/hdd-a \
      --dry-run
 
 Progress Output
@@ -73,7 +71,8 @@ Stages:
 * ``ssd-ingest`` means DASObjectStore is reading from the mounted source disk
   and landing the file on the mandatory SSD.
 * ``hdd-copy:<disk-id>:<copy-number>`` means DASObjectStore is settling and
-  verifying one HDD copy from the SSD payload.
+  verifying one HDD copy from the SSD payload. The disk ID is reported for
+  auditability; it is selected by DASObjectStore.
 
 SSD Stress
 ----------

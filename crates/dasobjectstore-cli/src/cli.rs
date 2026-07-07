@@ -534,6 +534,9 @@ pub(crate) struct StoreCreateArgs {
     /// Explicit S3 bucket name; defaults to a stable name derived from the store ID.
     #[arg(long)]
     bucket: Option<String>,
+    /// Unix group allowed to write objects to this store.
+    #[arg(long)]
+    writer_group: Option<String>,
     /// DAS SSD root used for portable store metadata.
     #[arg(long)]
     ssd_root: Option<PathBuf>,
@@ -560,6 +563,10 @@ impl StoreCreateArgs {
 
     pub(crate) fn bucket(&self) -> Option<&str> {
         self.bucket.as_deref()
+    }
+
+    pub(crate) fn writer_group(&self) -> Option<&str> {
+        self.writer_group.as_deref()
     }
 
     pub(crate) fn ssd_root(&self) -> Option<&Path> {
@@ -695,9 +702,9 @@ pub(crate) struct IngestFilesArgs {
     /// SSD ingest root; defaults to DASOBJECTSTORE_SSD_ROOT or /srv/dasobjectstore/ssd.
     #[arg(long)]
     ssd_root: Option<PathBuf>,
-    /// Disk root mapping in the form disk-id=/mounted/disk/root.
-    #[arg(long = "disk-root")]
-    disk_roots: Vec<String>,
+    /// Advanced override for the managed HDD root.
+    #[arg(long, hide = true)]
+    hdd_root: Option<PathBuf>,
     /// Override the store policy copy count for this import.
     #[arg(long)]
     copies: Option<u8>,
@@ -725,8 +732,8 @@ impl IngestFilesArgs {
         self.ssd_root.as_deref()
     }
 
-    pub(crate) fn disk_roots(&self) -> &[String] {
-        &self.disk_roots
+    pub(crate) fn hdd_root(&self) -> Option<&Path> {
+        self.hdd_root.as_deref()
     }
 
     pub(crate) fn copies(&self) -> Option<u8> {
@@ -1981,8 +1988,6 @@ mod tests {
             "/mnt/external/zymo",
             "--ssd-root",
             "/srv/dasobjectstore/ssd",
-            "--disk-root",
-            "hdd-a=/srv/dasobjectstore/hdd-a",
             "--copies",
             "1",
             "--dry-run",
@@ -1997,10 +2002,6 @@ mod tests {
                 assert_eq!(files.endpoint().as_str(), "zymo_fecal_2025.05");
                 assert_eq!(files.source(), Path::new("/mnt/external/zymo"));
                 assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
-                assert_eq!(
-                    files.disk_roots(),
-                    &["hdd-a=/srv/dasobjectstore/hdd-a".to_string()]
-                );
                 assert_eq!(files.copies(), Some(1));
                 assert!(files.dry_run());
             }
@@ -2153,6 +2154,8 @@ mod tests {
             "2",
             "--bucket",
             "generated-data",
+            "--writer-group",
+            "mnemosyne",
             "--ssd-root",
             "/srv/dasobjectstore/ssd",
             "--json",
@@ -2168,6 +2171,7 @@ mod tests {
                 assert_eq!(create.class(), StoreClass::GeneratedData);
                 assert_eq!(create.copies(), Some(2));
                 assert_eq!(create.bucket(), Some("generated-data"));
+                assert_eq!(create.writer_group(), Some("mnemosyne"));
                 assert_eq!(
                     create.ssd_root(),
                     Some(Path::new("/srv/dasobjectstore/ssd"))

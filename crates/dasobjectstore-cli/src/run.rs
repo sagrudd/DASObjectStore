@@ -35,6 +35,9 @@ use self::output::{
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::PoolState;
+use dasobjectstore_core::placement::{
+    plan_copy_count_for_store, PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad,
+};
 use dasobjectstore_core::risk::{
     ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
 };
@@ -80,10 +83,12 @@ use dasobjectstore_platform::{
 };
 use std::fmt::{self, Display};
 use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::Instant;
+use std::{collections::hash_map::DefaultHasher, collections::BTreeMap};
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
@@ -803,6 +808,7 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         store_id: args.store_id().clone(),
         policy,
         bucket_name: args.bucket().map(ToOwned::to_owned),
+        writer_group: args.writer_group().map(ToOwned::to_owned),
     };
     let registry_path = args
         .registry_path()
@@ -810,6 +816,11 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         .unwrap_or_else(default_store_registry_path);
     let report = upsert_store_definition(&registry_path, definition)?;
     let portable_report = upsert_portable_store_definition(args.ssd_root(), &report.definition)?;
+    if let Some(writer_group) = &report.definition.writer_group {
+        grant_store_writer_group_access(args.ssd_root(), writer_group)?;
+        grant_writer_group_registry_access(&registry_path, writer_group)?;
+        grant_writer_group_registry_access(&default_subobject_registry_path(), writer_group)?;
+    }
 
     if args.json() {
         serde_json::to_writer_pretty(
@@ -951,6 +962,153 @@ fn known_ssd_root_for_optional_mirror(
     }
 }
 
+fn grant_store_writer_group_access(
+    ssd_root: Option<&Path>,
+    writer_group: &str,
+) -> Result<(), CliError> {
+    #[cfg(target_os = "linux")]
+    {
+        ensure_group_exists(writer_group)?;
+        let mut roots = Vec::new();
+        if let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root)? {
+            roots.push(ssd_root);
+        }
+        roots.extend(
+            discover_managed_hdd_roots(&default_hdd_root())?
+                .into_iter()
+                .map(|root| root.root_path),
+        );
+        for root in roots {
+            grant_group_acl(&root, writer_group)?;
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = ssd_root;
+        let _ = writer_group;
+    }
+
+    Ok(())
+}
+
+fn grant_subobject_writer_group_registry_access(
+    args: &SubobjectCreateArgs,
+    definition: &SubObjectDefinition,
+    registry_path: &Path,
+) -> Result<(), CliError> {
+    let stores_registry_path = args
+        .stores_registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_store_registry_path);
+    let stores = read_store_registry(&stores_registry_path)?;
+    let Some(store) = stores
+        .iter()
+        .find(|store| store.store_id == definition.store_id)
+    else {
+        return Ok(());
+    };
+    let Some(writer_group) = &store.writer_group else {
+        return Ok(());
+    };
+
+    grant_writer_group_registry_access(registry_path, writer_group)
+}
+
+fn grant_writer_group_registry_access(
+    registry_path: &Path,
+    writer_group: &str,
+) -> Result<(), CliError> {
+    #[cfg(target_os = "linux")]
+    {
+        ensure_group_exists(writer_group)?;
+        if let Some(parent) = registry_path.parent() {
+            grant_group_read_dir_acl(parent, writer_group)?;
+        }
+        if registry_path.is_file() {
+            grant_group_read_file_acl(registry_path, writer_group)?;
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = registry_path;
+        let _ = writer_group;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_group_exists(group: &str) -> Result<(), CliError> {
+    let status = ProcessCommand::new("getent")
+        .args(["group", group])
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(CliError::CommandFailed(format!(
+        "writer group does not exist: {group}"
+    )))
+}
+
+#[cfg(target_os = "linux")]
+fn grant_group_acl(root: &Path, group: &str) -> Result<(), CliError> {
+    let acl = format!("g:{group}:rwx");
+    let default_acl = format!("d:g:{group}:rwx");
+    let status = ProcessCommand::new("setfacl")
+        .args(["-R", "-m", &acl, "-m", &default_acl])
+        .arg(root)
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(CliError::CommandFailed(format!(
+        "setfacl failed for {} with status {}",
+        root.display(),
+        status
+    )))
+}
+
+#[cfg(target_os = "linux")]
+fn grant_group_read_dir_acl(path: &Path, group: &str) -> Result<(), CliError> {
+    let acl = format!("g:{group}:rx");
+    let default_acl = format!("d:g:{group}:rx");
+    let status = ProcessCommand::new("setfacl")
+        .args(["-m", &acl, "-m", &default_acl])
+        .arg(path)
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(CliError::CommandFailed(format!(
+        "setfacl failed for {} with status {}",
+        path.display(),
+        status
+    )))
+}
+
+#[cfg(target_os = "linux")]
+fn grant_group_read_file_acl(path: &Path, group: &str) -> Result<(), CliError> {
+    let acl = format!("g:{group}:r");
+    let status = ProcessCommand::new("setfacl")
+        .args(["-m", &acl])
+        .arg(path)
+        .status()?;
+    if status.success() {
+        return Ok(());
+    }
+
+    Err(CliError::CommandFailed(format!(
+        "setfacl failed for {} with status {}",
+        path.display(),
+        status
+    )))
+}
+
 fn known_ssd_root_for_adopt(ssd_root: Option<&Path>) -> Result<PathBuf, CliError> {
     let path = ssd_root
         .map(Path::to_path_buf)
@@ -964,6 +1122,12 @@ fn default_ssd_root() -> PathBuf {
     std::env::var_os("DASOBJECTSTORE_SSD_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/srv/dasobjectstore/ssd"))
+}
+
+fn default_hdd_root() -> PathBuf {
+    std::env::var_os("DASOBJECTSTORE_HDD_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/srv/dasobjectstore/hdd"))
 }
 
 fn is_known_ssd_root(path: &Path) -> bool {
@@ -989,6 +1153,51 @@ fn validate_known_ssd_root(path: &Path) -> Result<(), CliError> {
 
 fn read_device_marker(path: &Path) -> Result<String, std::io::Error> {
     fs::read_to_string(path.join(".dasobjectstore").join("device.env"))
+}
+
+fn discover_managed_hdd_roots(hdd_root: &Path) -> Result<Vec<DiskCopyRoot>, CliError> {
+    let mut roots = Vec::new();
+    let entries = match fs::read_dir(hdd_root) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(roots),
+        Err(err) => return Err(CliError::Io(err)),
+    };
+
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let root_path = entry.path();
+        let marker = match read_device_marker(&root_path) {
+            Ok(marker) => marker,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(CliError::Io(err)),
+        };
+        let Some(disk_id) = hdd_disk_id_from_marker(&marker)? else {
+            continue;
+        };
+        roots.push(DiskCopyRoot::new(disk_id, root_path));
+    }
+
+    roots.sort_by(|left, right| left.disk_id.cmp(&right.disk_id));
+    Ok(roots)
+}
+
+fn hdd_disk_id_from_marker(marker: &str) -> Result<Option<DiskId>, CliError> {
+    for line in marker.lines() {
+        let Some(role) = line.strip_prefix("role=") else {
+            continue;
+        };
+        let Some(disk_id) = role.strip_prefix("hdd:") else {
+            return Ok(None);
+        };
+        return DiskId::new(disk_id)
+            .map(Some)
+            .map_err(|err| CliError::CommandFailed(format!("invalid managed HDD marker: {err}")));
+    }
+
+    Ok(None)
 }
 
 fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1020,6 +1229,7 @@ fn run_subobject_create(
     let report = create_subobject_definition(&registry_path, args.name(), parent)?;
     let portable_report =
         mirror_portable_subobject_definition(args.ssd_root(), &report.definition)?;
+    grant_subobject_writer_group_registry_access(args, &report.definition, &registry_path)?;
 
     write_subobject_create_report(&report, portable_report.as_ref(), writer)
 }
@@ -1181,7 +1391,10 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
         .map(Path::to_path_buf)
         .unwrap_or_else(default_ssd_root);
     validate_known_ssd_root(&ssd_root)?;
-    let disk_roots = parse_disk_roots(args.disk_roots())?;
+    let hdd_root = args
+        .hdd_root()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_hdd_root);
     let registry_path = args
         .registry_path()
         .map(Path::to_path_buf)
@@ -1192,11 +1405,13 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
         .unwrap_or_else(default_subobject_registry_path);
     let endpoint =
         resolve_ingest_endpoint(args.endpoint(), &registry_path, &subobject_registry_path)?;
+    authorize_store_write(&endpoint.store)?;
+    let managed_disk_roots = discover_managed_hdd_roots(&hdd_root)?;
     let copies = args.copies().unwrap_or(endpoint.store.policy.copies);
-    if copies == 0 || disk_roots.len() < copies as usize {
+    if copies == 0 || managed_disk_roots.len() < copies as usize {
         return Err(CliError::CommandFailed(format!(
-            "ingest files requires at least {copies} disk root mapping(s), got {}",
-            disk_roots.len()
+            "ingest files requires at least {copies} managed HDD root(s), got {}",
+            managed_disk_roots.len()
         )));
     }
     let files = collect_ingest_files(args.source(), &endpoint.object_prefix)?;
@@ -1211,6 +1426,7 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
     writeln!(writer, "Class: {}", endpoint.store.policy.class.name())?;
     writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
     writeln!(writer, "SSD root: {}", ssd_root.to_string_lossy())?;
+    writeln!(writer, "Managed HDD roots: {}", managed_disk_roots.len())?;
     writeln!(writer, "Files: {}", files.len())?;
     writeln!(writer, "Source bytes: {total_source_bytes}")?;
     writeln!(writer, "Copies: {copies}")?;
@@ -1251,7 +1467,7 @@ fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(
             entry.object_id.clone(),
             &entry.source_path,
             &ssd_root,
-            disk_roots.clone(),
+            plan_disk_roots_for_entry(&managed_disk_roots, entry, &endpoint.store.policy, copies)?,
             copies,
         );
         let mut stage_key = String::new();
@@ -1371,6 +1587,128 @@ fn resolve_ingest_endpoint(
         store_registry_path.display(),
         subobject_registry_path.display()
     )))
+}
+
+fn authorize_store_write(store: &StoreServiceDefinition) -> Result<(), CliError> {
+    let Some(writer_group) = &store.writer_group else {
+        return Err(CliError::CommandFailed(format!(
+            "store {} has no writer group configured; ask an administrator to set --writer-group",
+            store.store_id
+        )));
+    };
+
+    if current_user_is_root()? {
+        return Ok(());
+    }
+
+    let groups = current_user_group_names()?;
+    if groups.iter().any(|group| group == writer_group) {
+        return Ok(());
+    }
+
+    Err(CliError::CommandFailed(format!(
+        "current user is not allowed to write store {}; required group: {}",
+        store.store_id, writer_group
+    )))
+}
+
+fn current_user_is_root() -> Result<bool, CliError> {
+    let output = ProcessCommand::new("id").arg("-u").output()?;
+    if !output.status.success() {
+        return Err(CliError::CommandFailed(format!(
+            "id -u exited with status {}",
+            output.status
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim() == "0")
+}
+
+fn current_user_group_names() -> Result<Vec<String>, CliError> {
+    let output = ProcessCommand::new("id").arg("-Gn").output()?;
+    if !output.status.success() {
+        return Err(CliError::CommandFailed(format!(
+            "id -Gn exited with status {}",
+            output.status
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .map(ToOwned::to_owned)
+        .collect())
+}
+
+fn plan_disk_roots_for_entry(
+    roots: &[DiskCopyRoot],
+    entry: &FileIngestEntry,
+    policy: &StorePolicy,
+    copies: u8,
+) -> Result<Vec<DiskCopyRoot>, CliError> {
+    let root_by_disk = roots
+        .iter()
+        .map(|root| (root.disk_id.clone(), root.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let candidates = placement_candidates_for_entry(roots, entry)?;
+    let request = if copies > 1 {
+        PlacementRequest::protected(entry.size_bytes)
+    } else {
+        PlacementRequest::cache(entry.size_bytes)
+    };
+    let plan = plan_copy_count_for_store(&candidates, &request, policy, copies)
+        .map_err(|err| CliError::CommandFailed(format!("copy placement failed: {err:?}")))?;
+    if !plan.is_complete() {
+        return Err(CliError::CommandFailed(format!(
+            "copy placement for {} planned {} of {} required copy/copies",
+            entry.object_id,
+            plan.planned_copies.len(),
+            copies
+        )));
+    }
+
+    plan.planned_copies
+        .into_iter()
+        .map(|copy| {
+            root_by_disk.get(&copy.disk_id).cloned().ok_or_else(|| {
+                CliError::CommandFailed(format!(
+                    "copy placement selected unknown disk {}",
+                    copy.disk_id
+                ))
+            })
+        })
+        .collect()
+}
+
+fn placement_candidates_for_entry(
+    roots: &[DiskCopyRoot],
+    entry: &FileIngestEntry,
+) -> Result<Vec<PlacementCandidate>, CliError> {
+    roots
+        .iter()
+        .map(|root| {
+            let capacity = measure_ssd_capacity(&root.root_path)?;
+            Ok(PlacementCandidate::new(
+                root.disk_id.clone(),
+                None,
+                capacity.available_bytes,
+                dasobjectstore_core::lifecycle::HealthState::Healthy,
+                PerformanceClass::Unknown,
+                deterministic_write_load(&entry.object_id, &root.disk_id),
+            ))
+        })
+        .collect()
+}
+
+fn deterministic_write_load(object_id: &ObjectId, disk_id: &DiskId) -> WriteLoad {
+    let mut hasher = DefaultHasher::new();
+    object_id.as_str().hash(&mut hasher);
+    disk_id.as_str().hash(&mut hasher);
+    match hasher.finish() % 4 {
+        0 => WriteLoad::Idle,
+        1 => WriteLoad::Light,
+        2 => WriteLoad::Busy,
+        _ => WriteLoad::Saturated,
+    }
 }
 
 fn collect_ingest_files(
@@ -2021,9 +2359,9 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        connection_status_from_probe, run, write_health_json, write_health_summary,
-        write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
-        ConnectionAssessment, DiskHealthSummary, HealthReport,
+        connection_status_from_probe, current_user_group_names, run, write_health_json,
+        write_health_summary, write_health_verbose, write_host_connection_status,
+        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -2812,6 +3150,7 @@ mod tests {
                 store_id: StoreId::new("public-reference").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("public-reference".to_string()),
+                writer_group: Some(test_writer_group()),
             }],
         );
         let cli = Cli::try_parse_from([
@@ -2854,6 +3193,7 @@ mod tests {
                 store_id: StoreId::new("portable-generated").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: Some("portable-generated".to_string()),
+                writer_group: Some(test_writer_group()),
             }],
         );
         let cli = Cli::try_parse_from([
@@ -2887,6 +3227,7 @@ mod tests {
                 store_id: StoreId::new("generated-data").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: Some("generated-data".to_string()),
+                writer_group: Some(test_writer_group()),
             }],
         );
         let cli = Cli::try_parse_from([
@@ -2922,6 +3263,7 @@ mod tests {
                 store_id: StoreId::new("public-reference").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: None,
+                writer_group: Some(test_writer_group()),
             }],
         );
         let cli = Cli::try_parse_from([
@@ -3058,11 +3400,12 @@ mod tests {
         let root = temp_root("ingest-files");
         let source_root = root.join("external");
         let ssd_root = root.join("ssd");
-        let hdd_root = root.join("hdd-a");
+        let hdd_base = root.join("hdd");
+        let hdd_root = hdd_base.join("disk-a");
         let registry_path = root.join("stores.json");
         let subobject_registry_path = root.join("subobjects.json");
         fs::create_dir_all(source_root.join("nested")).expect("create source");
-        fs::create_dir_all(&hdd_root).expect("create hdd root");
+        create_known_hdd_marker(&hdd_root, "disk-a");
         create_known_ssd_marker(&ssd_root);
         fs::write(
             source_root.join("nested").join("sample.fastq.gz"),
@@ -3075,6 +3418,7 @@ mod tests {
                 store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-zymo-fecal-2025-05".to_string()),
+                writer_group: Some(test_writer_group()),
             }],
         );
         let cli = Cli::try_parse_from([
@@ -3086,8 +3430,8 @@ mod tests {
             source_root.to_str().expect("utf8 source root"),
             "--ssd-root",
             ssd_root.to_str().expect("utf8 ssd root"),
-            "--disk-root",
-            &format!("disk-a={}", hdd_root.to_string_lossy()),
+            "--hdd-root",
+            hdd_base.to_str().expect("utf8 hdd root"),
             "--registry-path",
             registry_path.to_str().expect("utf8 registry path"),
             "--subobject-registry-path",
@@ -3127,6 +3471,7 @@ mod tests {
                 store_id: StoreId::new("ENA").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-ena".to_string()),
+                writer_group: Some(test_writer_group()),
             }],
         );
 
@@ -3160,6 +3505,8 @@ mod tests {
                     .expect("utf8 subobject path"),
                 "--ssd-root",
                 ssd_root.to_str().expect("utf8 ssd root"),
+                "--stores-registry-path",
+                stores_registry_path.to_str().expect("utf8 store path"),
             ],
         ] {
             let cli = Cli::try_parse_from(args).expect("subobject create parses");
@@ -3202,11 +3549,12 @@ mod tests {
         let root = temp_root("ingest-files-subobject");
         let source_root = root.join("external");
         let ssd_root = root.join("ssd");
-        let hdd_root = root.join("hdd-a");
+        let hdd_base = root.join("hdd");
+        let hdd_root = hdd_base.join("disk-a");
         let registry_path = root.join("stores.json");
         let subobject_registry_path = root.join("subobjects.json");
         fs::create_dir_all(source_root.join("nested")).expect("create source");
-        fs::create_dir_all(&hdd_root).expect("create hdd root");
+        create_known_hdd_marker(&hdd_root, "disk-a");
         create_known_ssd_marker(&ssd_root);
         fs::write(
             source_root.join("nested").join("sample.fastq.gz"),
@@ -3219,6 +3567,7 @@ mod tests {
                 store_id: StoreId::new("ENA").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-ena".to_string()),
+                writer_group: Some(test_writer_group()),
             }],
         );
         run(
@@ -3252,6 +3601,8 @@ mod tests {
                 subobject_registry_path
                     .to_str()
                     .expect("utf8 subobject path"),
+                "--stores-registry-path",
+                registry_path.to_str().expect("utf8 registry path"),
             ])
             .expect("subobject create parses"),
             &mut Vec::new(),
@@ -3266,8 +3617,8 @@ mod tests {
             source_root.to_str().expect("utf8 source root"),
             "--ssd-root",
             ssd_root.to_str().expect("utf8 ssd root"),
-            "--disk-root",
-            &format!("disk-a={}", hdd_root.to_string_lossy()),
+            "--hdd-root",
+            hdd_base.to_str().expect("utf8 hdd root"),
             "--registry-path",
             registry_path.to_str().expect("utf8 registry path"),
             "--subobject-registry-path",
@@ -3576,6 +3927,7 @@ mod tests {
                 store_id: StoreId::new("generated").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: None,
+                writer_group: Some(test_writer_group()),
             }],
         );
         let cli = Cli::try_parse_from([
@@ -4212,6 +4564,24 @@ mod tests {
             "role=ssd\ndevice=/dev/disk/by-id/test-ssd\nfilesystem=ext4\n",
         )
         .expect("write SSD marker");
+    }
+
+    fn create_known_hdd_marker(hdd_root: &Path, disk_id: &str) {
+        let marker_dir = hdd_root.join(".dasobjectstore");
+        fs::create_dir_all(&marker_dir).expect("create HDD marker directory");
+        fs::write(
+            marker_dir.join("device.env"),
+            format!("role=hdd:{disk_id}\ndevice=/dev/disk/by-id/test-{disk_id}\nfilesystem=ext4\n"),
+        )
+        .expect("write HDD marker");
+    }
+
+    fn test_writer_group() -> String {
+        current_user_group_names()
+            .expect("current user groups available")
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "staff".to_string())
     }
 
     fn valid_nas_nfs_endpoint_definition() -> serde_json::Value {
