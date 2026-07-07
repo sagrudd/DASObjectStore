@@ -87,6 +87,16 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - Treat persistent metadata formats as compatibility-sensitive public surfaces.
 - Prefer explicit state machines for disk, pool, object, ingest, and repair
   lifecycle behavior.
+- Treat file ingress as a performance-critical product surface. SSD-first
+  streaming, parallel HDD fan-out, verification, bounded resource use,
+  backpressure, crash recovery, and resumability must be designed together.
+- Treat the console TUI as a supported operator surface, not a developer
+  diagnostic. It must consume the same daemon job model/events as CLI, Web UI,
+  and Synoptikon-facing adapters.
+- Reconcile standalone local authentication with the product charter before
+  expanding administrator workflows: local OS users and sudo-derived
+  administrator status are preferred for appliance-style standalone operation
+  unless a documented host-mode decision supersedes that model.
 
 ## Safety
 

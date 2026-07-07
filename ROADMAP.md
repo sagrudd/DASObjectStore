@@ -31,6 +31,8 @@ appliance:
   flows submit daemon requests or jobs instead of mutating DAS roots directly.
 - the Web GUI design language, host-mode authentication model, and Mneion
   storage endpoint conventions are documented before implementation.
+- console users have a supported TUI for file ingress planning, execution,
+  reconnect, pressure/bottleneck inspection, and completion review.
 - current Synoptikon and Mneion conventions are treated as mutable design inputs
   when a better integrated storage architecture requires coordinated changes
   across affected Mnemosyne software.
@@ -368,6 +370,9 @@ Scope:
 - add host-mode selection for `standalone` and `synoptikon_integrated`;
 - implement local standalone login, logout, session validation, and local user
   storage using the Mnematikon pattern;
+- reconcile the Mnematikon-style local auth store with the appliance charter for
+  local OS users and sudo-derived administrator status before enabling broader
+  standalone administrator workflows;
 - disable local auth routes in Synoptikon-integrated mode;
 - ensure risky operations still require operation-level confirmation after
   login;
@@ -379,6 +384,9 @@ Exit criteria:
 - integrated mode rejects local login endpoints and relies on host context;
 - authentication tests cover login, session expiry, logout, and integrated
   session behavior;
+- the standalone administrator model is explicit: either OS-local sudo users are
+  authoritative, or the documented host-mode decision explains why product-local
+  users supersede that requirement;
 - package/service docs state the permanent port policy.
 
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
@@ -427,6 +435,10 @@ Scope:
 - implement Endpoints workspace for DAS pools, external NAS/NFS endpoints,
   S3-compatible service state, Mneion export, and governance-domain binding
   readiness;
+- implement Users/Groups workspace for standalone administration where host mode
+  allows local user and group management;
+- expose ObjectStore and SubObject creation/configuration through Web UI routes
+  and Yew surfaces when the existing CLI/domain APIs are stable enough;
 - define reusable Yew components for dense tables, inspector drawers, status
   badges, capacity bars, segmented controls, and risky-operation confirmation;
 - align visual language with Mneion and Mnematikon while remaining usable as a
@@ -439,6 +451,55 @@ Exit criteria:
 - the UI follows `docs/web-gui-and-mnemosyne-plugin.md`;
 - Synoptikon and standalone hosting use the same domain view models;
 - risky flows are visibly gated and auditable.
+
+## Milestone 18: Parallel Ingress Operations TUI
+
+Goal: make file ingress fast, reliable, observable, and operable from a normal
+console session as well as the Web UI and Synoptikon-facing adapters.
+
+Priority: this milestone hardens the existing SSD ingest, HDD settlement, daemon
+job, CLI progress, and Web Activity work into a supported operations surface. It
+SHALL not reintroduce direct CLI mutation of managed DAS roots; all normal
+ingest execution remains daemon-owned.
+
+Scope:
+
+- implement a daemon-owned parallel ingress pipeline with distinct stages for
+  path scanning, source read, SSD staging, checksum/manifest capture, HDD
+  placement, per-target HDD write queues, verification, and finalization;
+- prioritize streaming source files to SSD staging while bounded backpressure
+  protects SSD capacity, RAM, HDD backlog, verification backlog, and error
+  rates;
+- use available CPU cores and memory headroom through explicit resource policy,
+  bounded buffers, queue limits, and safety reserves;
+- distribute staged payloads to final HDD locations through parallel per-disk or
+  per-target queues so one slow disk does not stall the whole job;
+- emit shared daemon telemetry for file counts, MiB/GiB/TiB data volume,
+  staged/written/verified fractions, worker counts, queue depths, SSD pressure,
+  HDD pressure, CPU/memory use, bottleneck classification, verification state,
+  and throughput trend;
+- add durable ingest journals/manifests so interrupted jobs can be resumed,
+  cancelled, retried, or reconciled without silent data loss;
+- implement a supported Rust TUI that can plan, describe, confirm, launch,
+  monitor, reconnect to, control, and summarize ingest jobs;
+- ensure the TUI, CLI progress renderer, Yew Activity view, and Synoptikon
+  adapters consume the same daemon job model and event stream;
+- add benchmark/profiling coverage for small-file, large-file, mixed-file,
+  slow-HDD, full-SSD, and interrupted-import scenarios.
+
+Exit criteria:
+
+- before import, users can see file count and total import volume scaled to MiB,
+  GiB, or TiB;
+- during import, users can see SSD-staged, HDD-written, and verified fractions;
+- the TUI shows resource policy, active workers, queue depths, SSD/HDD pressure,
+  bottleneck stage, throughput trend, verification status, and warnings without
+  requiring log inspection;
+- interrupted jobs can be resumed or reconciled from the daemon journal;
+- benchmark evidence shows configured resource policies can be saturated without
+  unbounded memory growth or unverified persistence claims;
+- TUI and Web views agree on job state because both consume the same backend
+  events.
 
 ## Post-MVP Direction
 

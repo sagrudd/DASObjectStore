@@ -152,3 +152,9 @@ This command performs synchronous ingest and settlement. It gives clear operator
 progress for large local imports, but it is not yet a resumable job scheduler.
 If an import is interrupted, inspect the output and rerun after checking the
 store state.
+
+The planned operations TUI will make ingest a supported console workflow for
+planning, confirmation, launch, monitoring, reconnect, and completion review. It
+will use the same daemon job model as the CLI and Web UI, with visibility into
+file counts, scaled data volume, SSD staging, HDD fan-out, verification,
+resource policy, worker queues, pressure, bottlenecks, and throughput trends.

@@ -332,6 +332,13 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   integrated mode route omission.
 - [x] Document packaging/service behavior for `https://127.0.0.1:8448` and
   optional Linux appliance binding to `0.0.0.0:8448`.
+- [ ] Reconcile standalone auth with the appliance charter for local OS users
+  and sudo-derived administrator status before expanding administrator
+  workflows.
+- [ ] If OS-local auth is selected, add local-user discovery, sudo-rights
+  administrator detection, current-user metadata, and auth tests.
+- [ ] If product-local auth remains authoritative, document the host-mode
+  decision and why it supersedes OS-local sudo administrator semantics.
 
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 
@@ -377,6 +384,100 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   and mobile-width layouts.
 - [x] Verify the UI does not use a landing-page pattern after login and opens
   directly into the operations Overview.
+- [ ] Add standalone Users/Groups API and Yew workspace where host mode allows
+  local user and group management.
+- [ ] Add group creation and local-user-to-group assignment surfaces that align
+  with daemon writer/admin policy.
+- [ ] Add ObjectStore creation/configuration surfaces through the Web UI where
+  the existing store registry/domain APIs are stable.
+- [ ] Add SubObject creation/configuration surfaces through the Web UI where the
+  existing SubObject registry/domain APIs are stable.
+- [ ] Add Web UI tests for admin-only access, permission-denied states, group
+  membership changes, ObjectStore creation, and SubObject creation.
+
+## Milestone 18: Parallel Ingress Operations TUI
+
+- [ ] Define the parallel daemon ingress pipeline stages: scan, source read, SSD
+  stage, checksum/manifest capture, HDD placement, HDD write, verification, and
+  finalization.
+- [ ] Make streaming source files to SSD staging the first priority while
+  maintaining bounded queues and pressure controls.
+- [ ] Add adaptive worker scheduling that uses available CPU cores for hashing,
+  verification, metadata, and coordination without overdriving saturated disks.
+- [ ] Add configurable resource policy for worker counts, memory budget, SSD
+  reserve, HDD queue depth, verification parallelism, and system safety reserve.
+- [ ] Default resource policy should use available cores and memory headroom for
+  standalone performance while preserving explicit safety limits.
+- [ ] Add bounded memory pools for read/write/verify buffers so high throughput
+  does not become unbounded allocation.
+- [ ] Add per-disk or per-target HDD write queues to distribute staged data
+  quickly to final persistence locations.
+- [ ] Add placement scheduler inputs for target capacity, current queue depth,
+  write throughput, health, and failure/pressure state.
+- [ ] Add backpressure rules that slow source reads only when SSD pressure, RAM
+  pressure, HDD backlog, verification backlog, or error rate requires it.
+- [ ] Extend daemon ingest telemetry with queue depths for scan, source read,
+  SSD stage, HDD write, and verification stages.
+- [ ] Extend daemon ingest telemetry with active/idle worker counts for scan,
+  read, stage, write, verify, and finalization workers.
+- [ ] Extend daemon ingest telemetry with CPU use, memory use, resource policy,
+  and bottleneck classification.
+- [ ] Extend daemon ingest telemetry with current throughput, moving average,
+  recent high/low, and trend direction: up, down, or flat.
+- [ ] Extend daemon ingest telemetry with staged-on-SSD, written-to-HDD, and
+  verified byte/file fractions.
+- [ ] Add crash-safe ingest journal states for planned, staged, written,
+  verified, failed, retried, cancelled, and finalized file records.
+- [ ] Add resume/reconcile behavior for interrupted jobs, including partially
+  staged and partially written data.
+- [ ] Add checksum or content-address manifest capture during SSD staging where
+  compatible with the existing object model.
+- [ ] Add atomic finalization rules so files are not reported as persisted until
+  HDD write and verification requirements are satisfied.
+- [ ] Add daemon API/event fields required by CLI, TUI, Yew, and Synoptikon
+  adapters without duplicating progress logic.
+- [ ] Choose the Rust TUI framework and terminal event model for the supported
+  console surface.
+- [ ] Add TUI binary/entry point and packaging path for standalone deployment.
+- [ ] Implement TUI import planning with target ObjectStore/SubObject context,
+  source paths, file count, and data volume scaled to MiB, GiB, or TiB.
+- [ ] Implement TUI import description metadata capture and confirmation before
+  launch.
+- [ ] Show resource policy before launch: worker counts, memory budget, SSD
+  reserve, HDD queue depth, and verification parallelism.
+- [ ] Allow administrators to choose automatic resource use or explicit caps for
+  cores, memory, SSD reserve, and HDD write concurrency.
+- [ ] Show live TUI progress for discovered/scanned, staged on SSD, written to
+  HDD, and verified data.
+- [ ] Show active workers, queue depths, current bottleneck classification, and
+  whether source-to-SSD streaming is throttled.
+- [ ] Show SSD pressure with capacity, used/free space, trend, and
+  throttle/block state.
+- [ ] Show HDD write pressure with backlog, write throughput, retries, and
+  detected bottlenecks.
+- [ ] Show verification progress, failures, retries, and final status.
+- [ ] Show throughput current rate, moving average, recent high/low, and
+  up/down/flat trend.
+- [ ] Provide TUI keyboard actions for pause, resume, cancel, retry, and job
+  details where the daemon safely supports them.
+- [ ] Ensure the TUI can attach to an existing running import job after
+  reconnecting.
+- [ ] Add supported terminal-size behavior for compact and standard console
+  layouts.
+- [ ] Add TUI error states for authentication failure, permission denial, lost
+  daemon/event connection, stalled job, SSD pressure, HDD write failure, and
+  verification failure.
+- [ ] Add TUI tests or scripted terminal snapshots for planning, launch
+  confirmation, live monitoring, reconnect, and completed summary flows.
+- [ ] Add benchmark harness for small-file, large-file, mixed-file, slow-HDD,
+  full-SSD, and interrupted-import scenarios.
+- [ ] Add profiling hooks to prove CPU, memory, SSD, HDD, and verification
+  bottlenecks are identified correctly.
+- [ ] Add performance acceptance targets for sustained source-to-SSD staging,
+  HDD fan-out, verification throughput, bounded memory growth, and recovery time
+  after interruption.
+- [ ] Document TUI launch commands, keyboard controls, supported terminal sizes,
+  resource policy, and operational expectations.
 
 ## Cross-Cutting Tasks
 
