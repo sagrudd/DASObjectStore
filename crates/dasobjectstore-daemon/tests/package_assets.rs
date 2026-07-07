@@ -9,7 +9,9 @@ const SYSUSERS: &str = include_str!("../../../packaging/linux/sysusers.d/dasobje
 const TMPFILES: &str = include_str!("../../../packaging/linux/tmpfiles.d/dasobjectstore.conf");
 const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobjectstore/daemon.json");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
+const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
+const MAKEFILE: &str = include_str!("../../../Makefile");
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -64,12 +66,48 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
 #[test]
 fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(
+        BUILD_DEB,
+        "dpkg-deb is required to build the DASObjectStore Debian package.",
+    );
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
     assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
     assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
     assert_contains(BUILD_DEB, "Depends: ca-certificates, acl");
+}
+
+#[test]
+fn rpm_build_installs_daemon_boundary_assets() {
+    assert_contains(BUILD_RPM, "rpmbuild");
+    assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(BUILD_RPM, "target/release/dasobjectstored");
+    assert_contains(BUILD_RPM, "usr/lib/systemd/system/dasobjectstored.service");
+    assert_contains(BUILD_RPM, "usr/lib/sysusers.d/dasobjectstore.conf");
+    assert_contains(BUILD_RPM, "usr/lib/tmpfiles.d/dasobjectstore.conf");
+    assert_contains(
+        BUILD_RPM,
+        "systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf",
+    );
+    assert_contains(
+        BUILD_RPM,
+        "systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf",
+    );
+    assert_contains(BUILD_RPM, "Requires:       ca-certificates");
+    assert_contains(BUILD_RPM, "Requires:       acl");
+}
+
+#[test]
+fn makefile_exposes_distribution_targets() {
+    assert_contains(MAKEFILE, "build:");
+    assert_contains(MAKEFILE, "cargo build --release --workspace");
+    assert_contains(MAKEFILE, "deb:");
+    assert_contains(MAKEFILE, "bash packaging/debian/build-deb.sh");
+    assert_contains(MAKEFILE, "rpm:");
+    assert_contains(MAKEFILE, "bash packaging/rpm/build-rpm.sh");
+    assert_contains(MAKEFILE, "package: deb rpm");
+    assert_contains(MAKEFILE, "distclean: clean");
 }
 
 #[test]

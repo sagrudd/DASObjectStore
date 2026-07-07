@@ -521,6 +521,9 @@ fn collect_ingest_files_into(
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     for entry in fs::read_dir(current)? {
         let entry = entry?;
+        if is_hidden_entry_name(&entry.file_name()) {
+            continue;
+        }
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
@@ -541,6 +544,10 @@ fn collect_ingest_files_into(
     }
 
     Ok(())
+}
+
+fn is_hidden_entry_name(name: &std::ffi::OsStr) -> bool {
+    name.to_string_lossy().starts_with('.')
 }
 
 fn object_id_for_ingested_file(
@@ -710,7 +717,7 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 
 #[cfg(test)]
 mod tests {
-    use super::{LocalFileIngestExecutor, SSD_ROOT_ENV};
+    use super::{collect_ingest_files, LocalFileIngestExecutor, SSD_ROOT_ENV};
     use crate::api::{DaemonIngestConflictPolicy, SubmitIngestFilesRequest};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::object_type::ObjectType;
@@ -765,6 +772,33 @@ mod tests {
         );
         assert!(response.dry_run);
         assert!(!ssd_root.join("ingest").exists());
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn directory_ingest_skips_hidden_files_and_hidden_directories() {
+        let root = temp_root("daemon-ingest-hidden");
+        let source_root = root.join("source");
+        fs::create_dir_all(source_root.join("nested")).expect("source nested dir");
+        fs::create_dir_all(source_root.join(".partial")).expect("hidden source dir");
+        fs::write(source_root.join("nested").join("sample.fastq.gz"), b"ACGT")
+            .expect("visible source file");
+        fs::write(source_root.join(".hidden.pod5.tmp"), b"temporary payload")
+            .expect("hidden source file");
+        fs::write(
+            source_root.join(".partial").join("sample.fastq.gz"),
+            b"temporary payload",
+        )
+        .expect("hidden directory file");
+
+        let files = collect_ingest_files(&source_root, "zymo_fecal_2025.05").expect("files scan");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].relative_path,
+            PathBuf::from("nested/sample.fastq.gz")
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

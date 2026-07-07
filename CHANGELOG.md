@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.2.0 - 2026-07-07
+
+- Add a top-level Makefile with standard build, test, check, clean, DEB, RPM,
+  and combined package targets for Ubuntu and AlmaLinux development.
+- Add native RPM package generation through `packaging/rpm/build-rpm.sh`,
+  reusing the shared Linux daemon service, sysusers, tmpfiles, and packaged
+  runtime configuration assets.
+- Skip hidden files and hidden directories during folder ingest so transient
+  dotfiles in source trees do not abort daemon-backed uploads.
+
 ## 0.1.12 - 2026-07-07
 
 - Keep `dasobjectstore ingest queue` read-only for normal users; older live

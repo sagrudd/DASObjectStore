@@ -2553,6 +2553,9 @@ fn collect_ingest_files_into(
 ) -> Result<(), CliError> {
     for entry in fs::read_dir(current)? {
         let entry = entry?;
+        if is_hidden_entry_name(&entry.file_name()) {
+            continue;
+        }
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
@@ -2573,6 +2576,10 @@ fn collect_ingest_files_into(
     }
 
     Ok(())
+}
+
+fn is_hidden_entry_name(name: &std::ffi::OsStr) -> bool {
+    name.to_string_lossy().starts_with('.')
 }
 
 fn object_id_for_ingested_file(
@@ -3362,7 +3369,7 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        connection_status_from_probe, current_user_group_names, run,
+        collect_ingest_files, connection_status_from_probe, current_user_group_names, run,
         validate_managed_hdds_on_supported_das, write_health_json, write_health_summary,
         write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
         ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
@@ -4953,6 +4960,33 @@ mod tests {
         assert!(output.contains("SubObjects matched: 1"));
         assert!(output.contains("Vervet"));
         assert!(output.contains("prefix=ENA/Xenognostikon/Vervet"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn local_directory_ingest_skips_hidden_files_and_hidden_directories() {
+        let root = temp_root("ingest-files-hidden");
+        let source_root = root.join("external");
+        fs::create_dir_all(source_root.join("nested")).expect("create source");
+        fs::create_dir_all(source_root.join(".partial")).expect("create hidden source dir");
+        fs::write(source_root.join("nested").join("sample.fastq.gz"), b"ACGT")
+            .expect("write visible source");
+        fs::write(source_root.join(".hidden.pod5.tmp"), b"temporary payload")
+            .expect("write hidden source");
+        fs::write(
+            source_root.join(".partial").join("sample.fastq.gz"),
+            b"temporary payload",
+        )
+        .expect("write hidden nested source");
+
+        let files = collect_ingest_files(&source_root, "zymo_fecal_2025.05").expect("files scan");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].relative_path,
+            PathBuf::from("nested/sample.fastq.gz")
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
