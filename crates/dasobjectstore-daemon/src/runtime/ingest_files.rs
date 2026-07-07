@@ -1,6 +1,8 @@
 use crate::api::{
-    DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestStage,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestQueueDepths,
+    DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
+    DaemonIngestWorkerTelemetry, DaemonSsdPressure, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::HealthState;
@@ -10,8 +12,9 @@ use dasobjectstore_core::placement::{
 };
 use dasobjectstore_core::store::StorePolicy;
 use dasobjectstore_metadata::{
-    measure_ssd_capacity, put_object_ssd_first_with_controlled_progress, DiskCopyRoot,
-    ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
+    measure_ssd_capacity, settle_staged_object_to_hdd_with_controlled_progress,
+    stage_object_on_ssd_with_controlled_progress, DiskCopyRoot, ObjectPutError, ObjectPutProgress,
+    ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
@@ -23,11 +26,14 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::thread;
 
 const SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
 const HDD_ROOT_ENV: &str = "DASOBJECTSTORE_HDD_ROOT";
 const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
+const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonFileIngestSummary {
@@ -190,12 +196,24 @@ impl LocalFileIngestExecutor {
             return Ok(summary);
         }
 
-        let mut completed_files = 0_u64;
-        let mut completed_work_bytes = 0_u64;
-        let mut completed_source_bytes = 0_u64;
+        let mut state =
+            PipelineProgressState::new(files.len() as u64, source_bytes, total_work_bytes);
+        let capacity_policy = SsdCapacityPolicy::default();
+        let (settle_tx, settle_rx) =
+            mpsc::sync_channel::<HddSettlementWork>(HDD_SETTLEMENT_QUEUE_CAPACITY);
+        let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
+        let hdd_worker = spawn_hdd_settlement_worker(settle_rx, event_tx);
+
         for entry in &files {
-            let mut stage_key = String::new();
-            let mut stage_offset_bytes = 0_u64;
+            wait_for_ssd_admission(
+                &self.ssd_root,
+                &capacity_policy,
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+            )?;
             let put_request = ObjectPutRequest::new(
                 entry.object_id.clone(),
                 &entry.source_path,
@@ -209,67 +227,70 @@ impl LocalFileIngestExecutor {
                 copies,
             )
             .with_object_type(request.object_type);
-            put_object_ssd_first_with_controlled_progress(&put_request, |object_progress| {
-                let next_stage_key = object_progress_stage_key(&object_progress);
-                if next_stage_key != stage_key {
-                    stage_key = next_stage_key;
-                    stage_offset_bytes = 0;
-                }
-                let delta = object_progress
-                    .bytes_written
-                    .saturating_sub(stage_offset_bytes);
-                stage_offset_bytes = object_progress.bytes_written;
-                completed_work_bytes = completed_work_bytes.saturating_add(delta);
-                let current_source_bytes = completed_source_bytes.saturating_add(
-                    source_bytes_for_object_progress(&object_progress, entry.size_bytes),
-                );
-                progress(object_progress_event(
-                    job_id,
-                    &request.endpoint,
-                    entry,
-                    completed_work_bytes,
-                    total_work_bytes,
-                    current_source_bytes,
-                    source_bytes,
-                    completed_files,
-                    files.len() as u64,
-                    &object_progress,
-                ))
-                .map_err(|err| {
-                    if matches!(err, DaemonIngestFilesRuntimeError::ClientDisconnected(_)) {
-                        dasobjectstore_metadata::ObjectPutError::Cancelled
-                    } else {
-                        dasobjectstore_metadata::ObjectPutError::Io(io::Error::other(
-                            err.to_string(),
-                        ))
-                    }
-                })
-            })?;
-            completed_files = completed_files.saturating_add(1);
-            completed_source_bytes = completed_source_bytes.saturating_add(entry.size_bytes);
-            progress(DaemonIngestProgressEvent {
-                job_id: job_id.clone(),
-                endpoint: request.endpoint.clone(),
-                stage: DaemonIngestStage::SsdIngest,
-                pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
-                work_bytes_done: completed_work_bytes,
-                work_bytes_total: Some(total_work_bytes),
-                source_bytes_done: Some(completed_source_bytes),
-                source_bytes_total: Some(source_bytes),
-                stage_bytes_done: Some(entry.size_bytes),
-                stage_bytes_total: Some(entry.size_bytes),
-                files_done: completed_files,
-                files_total: Some(files.len() as u64),
-                current_object_id: Some(entry.object_id.clone()),
-                ssd_pressure: None,
-                telemetry: None,
-                resource_policy: None,
-                message: Some(format!(
-                    "file complete: {}",
-                    entry.relative_path.to_string_lossy()
-                )),
-            })?;
+
+            state.ssd_active = 1;
+            let staged =
+                stage_object_on_ssd_with_controlled_progress(&put_request, |object_progress| {
+                    drain_hdd_settlement_events(
+                        &event_rx,
+                        &mut state,
+                        job_id,
+                        &request.endpoint,
+                        &mut progress,
+                        false,
+                    )
+                    .map_err(runtime_error_to_object_put_error)?;
+                    state.apply_object_progress(entry, &object_progress);
+                    progress(object_progress_event(
+                        job_id,
+                        &request.endpoint,
+                        entry,
+                        &state,
+                        &object_progress,
+                    ))
+                    .map_err(runtime_error_to_object_put_error)
+                })?;
+            state.ssd_active = 0;
+            state.staged_files = state.staged_files.saturating_add(1);
+            state.hdd_queued = state.hdd_queued.saturating_add(1);
+            enqueue_hdd_settlement_work(
+                &settle_tx,
+                HddSettlementWork {
+                    entry: entry.clone(),
+                    staged,
+                },
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+            )?;
+            drain_hdd_settlement_events(
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+                false,
+            )?;
         }
+        drop(settle_tx);
+
+        while state.completed_files < files.len() as u64 {
+            drain_hdd_settlement_events(
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+                true,
+            )?;
+        }
+        hdd_worker.join().map_err(|_| {
+            DaemonIngestFilesRuntimeError::CommandFailed(
+                "HDD settlement worker panicked".to_string(),
+            )
+        })?;
 
         progress(DaemonIngestProgressEvent {
             job_id: job_id.clone(),
@@ -285,8 +306,8 @@ impl LocalFileIngestExecutor {
             files_done: files.len() as u64,
             files_total: Some(files.len() as u64),
             current_object_id: None,
-            ssd_pressure: None,
-            telemetry: None,
+            ssd_pressure: Some(state.ssd_pressure),
+            telemetry: Some(state.telemetry()),
             resource_policy: None,
             message: Some("file ingest complete".to_string()),
         })?;
@@ -295,16 +316,354 @@ impl LocalFileIngestExecutor {
     }
 }
 
+#[derive(Debug)]
+struct HddSettlementWork {
+    entry: FileIngestEntry,
+    staged: StagedObjectPut,
+}
+
+#[derive(Debug)]
+enum HddSettlementEvent {
+    Started {
+        entry: FileIngestEntry,
+    },
+    Progress {
+        entry: FileIngestEntry,
+        progress: ObjectPutProgress,
+    },
+    Settled {
+        entry: FileIngestEntry,
+    },
+    Failed {
+        error: ObjectPutError,
+    },
+}
+
+#[derive(Debug)]
+struct PipelineProgressState {
+    total_files: u64,
+    source_bytes_total: u64,
+    work_bytes_total: u64,
+    completed_files: u64,
+    staged_files: u64,
+    completed_source_bytes: u64,
+    completed_work_bytes: u64,
+    ssd_active: u16,
+    hdd_active: u16,
+    hdd_queued: u32,
+    ssd_pressure: DaemonSsdPressure,
+    progress_offsets: BTreeMap<(ObjectId, String), u64>,
+}
+
+impl PipelineProgressState {
+    fn new(total_files: u64, source_bytes_total: u64, work_bytes_total: u64) -> Self {
+        Self {
+            total_files,
+            source_bytes_total,
+            work_bytes_total,
+            completed_files: 0,
+            staged_files: 0,
+            completed_source_bytes: 0,
+            completed_work_bytes: 0,
+            ssd_active: 0,
+            hdd_active: 0,
+            hdd_queued: 0,
+            ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+            progress_offsets: BTreeMap::new(),
+        }
+    }
+
+    fn apply_object_progress(&mut self, entry: &FileIngestEntry, progress: &ObjectPutProgress) {
+        let key = (
+            progress.object_id.clone(),
+            object_progress_stage_key(progress),
+        );
+        let previous = *self.progress_offsets.get(&key).unwrap_or(&0);
+        let current = progress.bytes_written;
+        let delta = current.saturating_sub(previous);
+        self.progress_offsets.insert(key, current);
+        self.completed_work_bytes = self.completed_work_bytes.saturating_add(delta);
+        if matches!(progress.stage, ObjectPutProgressStage::SsdIngest) {
+            let previous_source = previous.min(entry.size_bytes);
+            let current_source = current.min(entry.size_bytes);
+            self.completed_source_bytes = self
+                .completed_source_bytes
+                .saturating_add(current_source.saturating_sub(previous_source));
+        }
+    }
+
+    fn source_pending(&self) -> u32 {
+        self.total_files
+            .saturating_sub(self.staged_files)
+            .saturating_sub(u64::from(self.ssd_active))
+            .min(u64::from(u32::MAX)) as u32
+    }
+
+    fn telemetry(&self) -> DaemonIngestTelemetry {
+        let mut telemetry = DaemonIngestTelemetry::default();
+        telemetry.queue_depths = DaemonIngestQueueDepths {
+            source_read: self.source_pending(),
+            hdd_write: self.hdd_queued,
+            ..DaemonIngestQueueDepths::default()
+        };
+        telemetry.workers = DaemonIngestWorkerTelemetry {
+            ssd_stage: DaemonIngestWorkerActivity {
+                active: self.ssd_active,
+                idle: u16::from(self.ssd_active == 0),
+            },
+            hdd_write: DaemonIngestWorkerActivity {
+                active: self.hdd_active,
+                idle: u16::from(self.hdd_active == 0),
+            },
+            ..DaemonIngestWorkerTelemetry::default()
+        };
+        telemetry.pressure.ssd = self.ssd_pressure;
+        telemetry
+    }
+}
+
+fn spawn_hdd_settlement_worker(
+    settle_rx: mpsc::Receiver<HddSettlementWork>,
+    event_tx: mpsc::Sender<HddSettlementEvent>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for work in settle_rx {
+            let _ = event_tx.send(HddSettlementEvent::Started {
+                entry: work.entry.clone(),
+            });
+            let entry = work.entry.clone();
+            let result =
+                settle_staged_object_to_hdd_with_controlled_progress(work.staged, |progress| {
+                    event_tx
+                        .send(HddSettlementEvent::Progress {
+                            entry: entry.clone(),
+                            progress,
+                        })
+                        .map_err(|_| ObjectPutError::Cancelled)
+                });
+            match result {
+                Ok(_report) => {
+                    let _ = event_tx.send(HddSettlementEvent::Settled { entry: work.entry });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(HddSettlementEvent::Failed { error });
+                    break;
+                }
+            }
+        }
+    })
+}
+
+fn enqueue_hdd_settlement_work(
+    settle_tx: &mpsc::SyncSender<HddSettlementWork>,
+    mut work: HddSettlementWork,
+    event_rx: &mpsc::Receiver<HddSettlementEvent>,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    loop {
+        match settle_tx.try_send(work) {
+            Ok(()) => return Ok(()),
+            Err(mpsc::TrySendError::Full(returned_work)) => {
+                work = returned_work;
+                drain_hdd_settlement_events(event_rx, state, job_id, endpoint, progress, true)?;
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+                    "HDD settlement worker stopped before accepting staged object".to_string(),
+                ));
+            }
+        }
+    }
+}
+
+fn wait_for_ssd_admission(
+    ssd_root: &Path,
+    capacity_policy: &SsdCapacityPolicy,
+    event_rx: &mpsc::Receiver<HddSettlementEvent>,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    loop {
+        state.ssd_pressure = read_daemon_ssd_pressure(ssd_root, capacity_policy)?;
+        match state.ssd_pressure {
+            DaemonSsdPressure::AcceptingWrites => return Ok(()),
+            DaemonSsdPressure::High if state.hdd_active == 0 && state.hdd_queued == 0 => {
+                return Ok(());
+            }
+            DaemonSsdPressure::Critical if state.hdd_active == 0 && state.hdd_queued == 0 => {
+                return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+                    "SSD pressure is critical and no staged HDD settlement work is available to drain"
+                        .to_string(),
+                ));
+            }
+            DaemonSsdPressure::High | DaemonSsdPressure::Critical => {
+                progress(DaemonIngestProgressEvent {
+                    job_id: job_id.clone(),
+                    endpoint: endpoint.clone(),
+                    stage: DaemonIngestStage::Queued,
+                    pipeline_stage: Some(DaemonIngestPipelineStage::SourceRead),
+                    work_bytes_done: state.completed_work_bytes,
+                    work_bytes_total: Some(state.work_bytes_total),
+                    source_bytes_done: Some(state.completed_source_bytes),
+                    source_bytes_total: Some(state.source_bytes_total),
+                    stage_bytes_done: Some(0),
+                    stage_bytes_total: Some(0),
+                    files_done: state.completed_files,
+                    files_total: Some(state.total_files),
+                    current_object_id: None,
+                    ssd_pressure: Some(state.ssd_pressure),
+                    telemetry: Some(state.telemetry()),
+                    resource_policy: None,
+                    message: Some(format!(
+                        "SSD pressure {:?}; pausing source ingress while HDD settlement drains",
+                        state.ssd_pressure
+                    )),
+                })?;
+                drain_hdd_settlement_events(event_rx, state, job_id, endpoint, progress, true)?;
+            }
+        }
+    }
+}
+
+fn read_daemon_ssd_pressure(
+    ssd_root: &Path,
+    capacity_policy: &SsdCapacityPolicy,
+) -> Result<DaemonSsdPressure, DaemonIngestFilesRuntimeError> {
+    let capacity = measure_ssd_capacity(ssd_root)?;
+    let pressure = capacity_policy
+        .evaluate(&capacity)
+        .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))?;
+    Ok(match pressure {
+        SsdPressure::AcceptingWrites => DaemonSsdPressure::AcceptingWrites,
+        SsdPressure::HighWatermark => DaemonSsdPressure::High,
+        SsdPressure::Critical => DaemonSsdPressure::Critical,
+    })
+}
+
+fn drain_hdd_settlement_events(
+    event_rx: &mpsc::Receiver<HddSettlementEvent>,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    block: bool,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    loop {
+        let event = if block {
+            event_rx.recv().map_err(|_| {
+                DaemonIngestFilesRuntimeError::CommandFailed(
+                    "HDD settlement worker stopped before completing all staged objects"
+                        .to_string(),
+                )
+            })?
+        } else {
+            match event_rx.try_recv() {
+                Ok(event) => event,
+                Err(mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
+            }
+        };
+
+        match event {
+            HddSettlementEvent::Started { entry } => {
+                state.hdd_queued = state.hdd_queued.saturating_sub(1);
+                state.hdd_active = 1;
+                progress(DaemonIngestProgressEvent {
+                    job_id: job_id.clone(),
+                    endpoint: endpoint.clone(),
+                    stage: DaemonIngestStage::HddCopy {
+                        disk_id: DiskId::new("pending").expect("valid pending disk id"),
+                        copy_number: 1,
+                    },
+                    pipeline_stage: Some(DaemonIngestPipelineStage::HddWrite),
+                    work_bytes_done: state.completed_work_bytes,
+                    work_bytes_total: Some(state.work_bytes_total),
+                    source_bytes_done: Some(state.completed_source_bytes),
+                    source_bytes_total: Some(state.source_bytes_total),
+                    stage_bytes_done: Some(0),
+                    stage_bytes_total: Some(entry.size_bytes),
+                    files_done: state.completed_files,
+                    files_total: Some(state.total_files),
+                    current_object_id: Some(entry.object_id),
+                    ssd_pressure: Some(state.ssd_pressure),
+                    telemetry: Some(state.telemetry()),
+                    resource_policy: None,
+                    message: Some(format!(
+                        "HDD settlement started: {}",
+                        entry.relative_path.to_string_lossy()
+                    )),
+                })?;
+            }
+            HddSettlementEvent::Progress {
+                entry,
+                progress: object_progress,
+            } => {
+                state.apply_object_progress(&entry, &object_progress);
+                progress(object_progress_event(
+                    job_id,
+                    endpoint,
+                    &entry,
+                    state,
+                    &object_progress,
+                ))?;
+            }
+            HddSettlementEvent::Settled { entry } => {
+                state.hdd_active = 0;
+                state.completed_files = state.completed_files.saturating_add(1);
+                progress(DaemonIngestProgressEvent {
+                    job_id: job_id.clone(),
+                    endpoint: endpoint.clone(),
+                    stage: DaemonIngestStage::HddCopy {
+                        disk_id: DiskId::new("settled").expect("valid settled disk id"),
+                        copy_number: 1,
+                    },
+                    pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
+                    work_bytes_done: state.completed_work_bytes,
+                    work_bytes_total: Some(state.work_bytes_total),
+                    source_bytes_done: Some(state.completed_source_bytes),
+                    source_bytes_total: Some(state.source_bytes_total),
+                    stage_bytes_done: Some(entry.size_bytes),
+                    stage_bytes_total: Some(entry.size_bytes),
+                    files_done: state.completed_files,
+                    files_total: Some(state.total_files),
+                    current_object_id: Some(entry.object_id),
+                    ssd_pressure: Some(state.ssd_pressure),
+                    telemetry: Some(state.telemetry()),
+                    resource_policy: None,
+                    message: Some(format!(
+                        "file settled: {}",
+                        entry.relative_path.to_string_lossy()
+                    )),
+                })?;
+            }
+            HddSettlementEvent::Failed { error } => return Err(error.into()),
+        }
+
+        if !block {
+            continue;
+        }
+        return Ok(());
+    }
+}
+
+fn runtime_error_to_object_put_error(error: DaemonIngestFilesRuntimeError) -> ObjectPutError {
+    if matches!(error, DaemonIngestFilesRuntimeError::ClientDisconnected(_)) {
+        ObjectPutError::Cancelled
+    } else {
+        ObjectPutError::Io(io::Error::other(error.to_string()))
+    }
+}
+
 fn object_progress_event(
     job_id: &IngestJobId,
     endpoint: &StoreId,
     entry: &FileIngestEntry,
-    completed_work_bytes: u64,
-    total_work_bytes: u64,
-    source_bytes_done: u64,
-    source_bytes_total: u64,
-    completed_files: u64,
-    total_files: u64,
+    state: &PipelineProgressState,
     progress: &ObjectPutProgress,
 ) -> DaemonIngestProgressEvent {
     DaemonIngestProgressEvent {
@@ -312,26 +671,19 @@ fn object_progress_event(
         endpoint: endpoint.clone(),
         stage: daemon_stage_for_object_progress(progress),
         pipeline_stage: Some(pipeline_stage_for_object_progress(progress)),
-        work_bytes_done: completed_work_bytes,
-        work_bytes_total: Some(total_work_bytes),
-        source_bytes_done: Some(source_bytes_done),
-        source_bytes_total: Some(source_bytes_total),
+        work_bytes_done: state.completed_work_bytes,
+        work_bytes_total: Some(state.work_bytes_total),
+        source_bytes_done: Some(state.completed_source_bytes),
+        source_bytes_total: Some(state.source_bytes_total),
         stage_bytes_done: Some(progress.bytes_written),
         stage_bytes_total: Some(entry.size_bytes),
-        files_done: completed_files,
-        files_total: Some(total_files),
+        files_done: state.completed_files,
+        files_total: Some(state.total_files),
         current_object_id: Some(entry.object_id.clone()),
-        ssd_pressure: None,
-        telemetry: None,
+        ssd_pressure: Some(state.ssd_pressure),
+        telemetry: Some(state.telemetry()),
         resource_policy: None,
         message: Some(stage_message_for_object_progress(progress, entry)),
-    }
-}
-
-fn source_bytes_for_object_progress(progress: &ObjectPutProgress, entry_size_bytes: u64) -> u64 {
-    match progress.stage {
-        ObjectPutProgressStage::SsdIngest => progress.bytes_written.min(entry_size_bytes),
-        ObjectPutProgressStage::HddCopy { .. } => entry_size_bytes,
     }
 }
 
@@ -743,11 +1095,15 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_ingest_files, LocalFileIngestExecutor, SSD_ROOT_ENV};
-    use crate::api::{DaemonIngestConflictPolicy, SubmitIngestFilesRequest};
-    use dasobjectstore_core::ids::StoreId;
+    use super::{
+        collect_ingest_files, FileIngestEntry, LocalFileIngestExecutor, PipelineProgressState,
+        SSD_ROOT_ENV,
+    };
+    use crate::api::{DaemonIngestConflictPolicy, DaemonSsdPressure, SubmitIngestFilesRequest};
+    use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
+    use dasobjectstore_metadata::{ObjectPutProgress, ObjectPutProgressStage};
     use dasobjectstore_object_service::StoreServiceDefinition;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -836,6 +1192,51 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn pipeline_progress_tracks_concurrent_workers_fifo_depth_and_pressure() {
+        let mut state = PipelineProgressState::new(10, 1_000, 2_000);
+        state.staged_files = 3;
+        state.ssd_active = 1;
+        state.hdd_active = 1;
+        state.hdd_queued = 2;
+        state.ssd_pressure = DaemonSsdPressure::High;
+        let entry = FileIngestEntry {
+            source_path: PathBuf::from("/source/a.fastq.gz"),
+            relative_path: PathBuf::from("a.fastq.gz"),
+            object_id: ObjectId::new("store/a.fastq.gz").expect("object id"),
+            size_bytes: 100,
+        };
+
+        state.apply_object_progress(
+            &entry,
+            &ObjectPutProgress {
+                object_id: entry.object_id.clone(),
+                stage: ObjectPutProgressStage::SsdIngest,
+                bytes_written: 40,
+            },
+        );
+        state.apply_object_progress(
+            &entry,
+            &ObjectPutProgress {
+                object_id: entry.object_id.clone(),
+                stage: ObjectPutProgressStage::HddCopy {
+                    disk_id: "disk-a".to_string(),
+                    copy_number: 1,
+                },
+                bytes_written: 25,
+            },
+        );
+
+        let telemetry = state.telemetry();
+        assert_eq!(state.completed_source_bytes, 40);
+        assert_eq!(state.completed_work_bytes, 65);
+        assert_eq!(telemetry.queue_depths.source_read, 6);
+        assert_eq!(telemetry.queue_depths.hdd_write, 2);
+        assert_eq!(telemetry.workers.ssd_stage.active, 1);
+        assert_eq!(telemetry.workers.hdd_write.active, 1);
+        assert_eq!(telemetry.pressure.ssd, DaemonSsdPressure::High);
     }
 
     #[test]

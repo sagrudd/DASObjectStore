@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.4 - 2026-07-07
+
+- Pipeline folder ingest so source-to-SSD staging can run concurrently with
+  FIFO HDD settlement, bounded by a small staged-object queue to protect SSD
+  capacity.
+- Surface concurrent SSD/HDD worker activity, HDD queue depth, and SSD pressure
+  in upload progress telemetry and the embedded `--tui` view.
+- Pause source ingress under high or critical SSD pressure while queued HDD
+  settlement drains.
+
 ## 0.3.3 - 2026-07-07
 
 - Distinguish logical source data size from replicated SSD/HDD work in ingest

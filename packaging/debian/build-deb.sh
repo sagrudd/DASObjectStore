@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
-version="${version:-0.3.3}"
+version="${version:-0.3.4}"
 
 if ! command -v dpkg-deb >/dev/null 2>&1; then
   cat >&2 <<ERROR

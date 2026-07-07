@@ -75,8 +75,9 @@ pub use initialize::{
 pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
 pub use local_object_store::{
     put_object_ssd_first, put_object_ssd_first_with_controlled_progress,
-    put_object_ssd_first_with_progress, ObjectPutError, ObjectPutPlacementReport,
-    ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport, ObjectPutRequest,
+    put_object_ssd_first_with_progress, settle_staged_object_to_hdd_with_controlled_progress,
+    stage_object_on_ssd_with_controlled_progress, ObjectPutError, ObjectPutPlacementReport,
+    ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport, ObjectPutRequest, StagedObjectPut,
 };
 pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,

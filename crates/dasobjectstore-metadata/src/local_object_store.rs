@@ -1,13 +1,13 @@
 use crate::copy::{write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest};
 use crate::evacuation::DiskCopyRoot;
-use crate::ingest::{encode_path_component, IngestStagingLayout, IngestWriteReport};
+use crate::ingest::{encode_path_component, IngestStagingLayout};
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId};
 use dasobjectstore_core::object_type::ObjectType;
 use serde::Serialize;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectPutRequest {
@@ -55,6 +55,20 @@ pub struct ObjectPutReport {
     pub placements: Vec<ObjectPutPlacementReport>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagedObjectPut {
+    pub object_id: ObjectId,
+    pub object_type: ObjectType,
+    pub source_path: PathBuf,
+    pub job_root: PathBuf,
+    pub staged_payload_path: PathBuf,
+    pub bytes_staged: u64,
+    pub content_hash_algorithm: String,
+    pub content_hash: String,
+    pub disk_roots: Vec<DiskCopyRoot>,
+    pub copy_count: u8,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ObjectPutPlacementReport {
     pub disk_id: String,
@@ -95,6 +109,14 @@ pub fn put_object_ssd_first_with_controlled_progress(
     request: &ObjectPutRequest,
     mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
 ) -> Result<ObjectPutReport, ObjectPutError> {
+    let staged = stage_object_on_ssd_with_controlled_progress(request, &mut progress)?;
+    settle_staged_object_to_hdd_with_controlled_progress(staged, progress)
+}
+
+pub fn stage_object_on_ssd_with_controlled_progress(
+    request: &ObjectPutRequest,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<StagedObjectPut, ObjectPutError> {
     validate_request(request)?;
 
     let layout = IngestStagingLayout::for_ssd_root(&request.ssd_root);
@@ -102,16 +124,27 @@ pub fn put_object_ssd_first_with_controlled_progress(
     let job_id = IngestJobId::new(format!("put-{}", request.object_id.as_str()))?;
     let job_paths = layout.job_paths(&job_id);
 
-    let report = put_object_ssd_first_inner(request, &job_paths, &mut progress);
-    let _ = fs::remove_dir_all(&job_paths.job_root);
+    let staged = stage_object_on_ssd_inner(request, &job_paths, &mut progress);
+    if staged.is_err() {
+        let _ = fs::remove_dir_all(&job_paths.job_root);
+    }
+    staged
+}
+
+pub fn settle_staged_object_to_hdd_with_controlled_progress(
+    staged: StagedObjectPut,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<ObjectPutReport, ObjectPutError> {
+    let report = settle_staged_object_to_hdd_inner(&staged, &mut progress);
+    let _ = fs::remove_dir_all(&staged.job_root);
     report
 }
 
-fn put_object_ssd_first_inner(
+fn stage_object_on_ssd_inner(
     request: &ObjectPutRequest,
     job_paths: &crate::ingest::IngestJobPaths,
     progress: &mut impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
-) -> Result<ObjectPutReport, ObjectPutError> {
+) -> Result<StagedObjectPut, ObjectPutError> {
     let mut source = File::open(&request.source_path)?;
     let write_report = job_paths
         .write_payload_with_hash_controlled_progress(&mut source, |bytes_written| {
@@ -123,17 +156,35 @@ fn put_object_ssd_first_inner(
             .map_err(object_put_error_to_io)
         })
         .map_err(object_put_error_from_io)?;
-    let placements =
-        write_requested_copies(request, &job_paths.payload_path, &write_report, progress)?;
 
-    Ok(ObjectPutReport {
+    Ok(StagedObjectPut {
         object_id: request.object_id.clone(),
         object_type: request.object_type,
         source_path: request.source_path.clone(),
+        job_root: job_paths.job_root.clone(),
         staged_payload_path: job_paths.payload_path.clone(),
         bytes_staged: write_report.bytes_written,
         content_hash_algorithm: write_report.content_hash_algorithm,
         content_hash: write_report.content_hash,
+        disk_roots: request.disk_roots.clone(),
+        copy_count: request.copy_count,
+    })
+}
+
+fn settle_staged_object_to_hdd_inner(
+    staged: &StagedObjectPut,
+    progress: &mut impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<ObjectPutReport, ObjectPutError> {
+    let placements = write_requested_copies(staged, progress)?;
+
+    Ok(ObjectPutReport {
+        object_id: staged.object_id.clone(),
+        object_type: staged.object_type,
+        source_path: staged.source_path.clone(),
+        staged_payload_path: staged.staged_payload_path.clone(),
+        bytes_staged: staged.bytes_staged,
+        content_hash_algorithm: staged.content_hash_algorithm.clone(),
+        content_hash: staged.content_hash.clone(),
         placements,
     })
 }
@@ -153,32 +204,30 @@ fn validate_request(request: &ObjectPutRequest) -> Result<(), ObjectPutError> {
 }
 
 fn write_requested_copies(
-    request: &ObjectPutRequest,
-    source_path: &Path,
-    write_report: &IngestWriteReport,
+    staged: &StagedObjectPut,
     progress: &mut impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
 ) -> Result<Vec<ObjectPutPlacementReport>, ObjectPutError> {
-    request
+    staged
         .disk_roots
         .iter()
-        .take(request.copy_count as usize)
+        .take(staged.copy_count as usize)
         .enumerate()
         .map(|(index, disk_root)| {
             let copy_number = (index + 1) as u8;
             let destination_path =
-                object_copy_path(disk_root, &request.object_id, &write_report.content_hash);
+                object_copy_path(disk_root, &staged.object_id, &staged.content_hash);
             let copy_report = write_verified_hdd_copy_with_controlled_progress(
                 &HddCopyRequest::new(
-                    request.object_id.clone(),
+                    staged.object_id.clone(),
                     disk_root.disk_id.clone(),
                     copy_number,
-                    source_path,
+                    &staged.staged_payload_path,
                     destination_path,
-                    write_report.content_hash.clone(),
+                    staged.content_hash.clone(),
                 ),
                 |bytes_written| {
                     progress(ObjectPutProgress {
-                        object_id: request.object_id.clone(),
+                        object_id: staged.object_id.clone(),
                         stage: ObjectPutProgressStage::HddCopy {
                             disk_id: disk_root.disk_id.as_str().to_string(),
                             copy_number,

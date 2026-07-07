@@ -5,7 +5,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use dasobjectstore_daemon::{
-    DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestStage,
+    DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestStage, DaemonSsdPressure,
     SubmitIngestFilesResponse,
 };
 use ratatui::{
@@ -49,7 +49,7 @@ where
 #[derive(Clone, Copy, Debug)]
 struct RateSample {
     at: Instant,
-    bytes_done: u64,
+    source_bytes_done: u64,
 }
 
 impl<'a, W> UploadTui<'a, W>
@@ -249,14 +249,17 @@ where
         let now = Instant::now();
         if let Some(sample) = self.last_rate_sample {
             let elapsed = now.duration_since(sample.at).as_secs_f64();
-            let delta = event.work_bytes_done.saturating_sub(sample.bytes_done);
+            let delta = event
+                .source_bytes_done
+                .unwrap_or(event.work_bytes_done)
+                .saturating_sub(sample.source_bytes_done);
             if elapsed > 0.0 {
                 self.upload_rate_bytes_per_second = Some((delta as f64 / elapsed).round() as u64);
             }
         }
         self.last_rate_sample = Some(RateSample {
             at: now,
-            bytes_done: event.work_bytes_done,
+            source_bytes_done: event.source_bytes_done.unwrap_or(event.work_bytes_done),
         });
     }
 
@@ -336,6 +339,7 @@ fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'sta
 fn queue_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
     vec![
         Line::from(queue_label(event)),
+        Line::from(format!("SSD pressure: {}", ssd_pressure_label(event))),
         Line::from(format!("SSD settling: {}", ssd_settling_label(event))),
         Line::from(format!("HDD migration: {}", hdd_migration_label(event))),
     ]
@@ -369,6 +373,17 @@ fn pipeline_stage_label(stage: DaemonIngestPipelineStage) -> &'static str {
 }
 
 fn queue_label(event: &DaemonIngestProgressEvent) -> String {
+    if let Some(telemetry) = event.telemetry {
+        return format!(
+            "source pending {} file(s), SSD active {}, HDD active {}, HDD queued {}, completed {}",
+            telemetry.queue_depths.source_read,
+            telemetry.workers.ssd_stage.active,
+            telemetry.workers.hdd_write.active,
+            telemetry.queue_depths.hdd_write,
+            event.files_done
+        );
+    }
+
     let total = event.files_total.unwrap_or(event.files_done);
     let active = if matches!(
         event.stage,
@@ -388,31 +403,57 @@ fn queue_label(event: &DaemonIngestProgressEvent) -> String {
         Some(DaemonIngestPipelineStage::HddWrite)
     );
     format!(
-        "source pending {pending} file(s), SSD active {}, HDD active {}, completed {}",
+        "source pending {pending} file(s), SSD active {}, HDD active {}, HDD queued 0, completed {}",
         usize::from(ssd_active),
         usize::from(hdd_active),
         event.files_done
     )
 }
 
+fn ssd_pressure_label(event: &DaemonIngestProgressEvent) -> &'static str {
+    match event
+        .ssd_pressure
+        .or_else(|| event.telemetry.map(|telemetry| telemetry.pressure.ssd))
+        .unwrap_or(DaemonSsdPressure::AcceptingWrites)
+    {
+        DaemonSsdPressure::AcceptingWrites => "accepting writes",
+        DaemonSsdPressure::High => "high - source ingress may pause",
+        DaemonSsdPressure::Critical => "critical - source ingress blocked",
+    }
+}
+
 fn ssd_settling_label(event: &DaemonIngestProgressEvent) -> String {
-    if !matches!(
+    if matches!(
         event.pipeline_stage,
         Some(DaemonIngestPipelineStage::SsdStage)
     ) {
-        return "idle".to_string();
+        return stage_bytes_label(event);
     }
-    stage_bytes_label(event)
+    if event
+        .telemetry
+        .is_some_and(|telemetry| telemetry.workers.ssd_stage.active > 0)
+    {
+        return "active".to_string();
+    }
+    "idle".to_string()
 }
 
 fn hdd_migration_label(event: &DaemonIngestProgressEvent) -> String {
-    if !matches!(
+    if matches!(
         event.pipeline_stage,
         Some(DaemonIngestPipelineStage::HddWrite)
     ) {
-        return "idle".to_string();
+        return stage_bytes_label(event);
     }
-    stage_bytes_label(event)
+    if let Some(telemetry) = event.telemetry {
+        if telemetry.workers.hdd_write.active > 0 {
+            return "active".to_string();
+        }
+        if telemetry.queue_depths.hdd_write > 0 {
+            return format!("queued {} file(s)", telemetry.queue_depths.hdd_write);
+        }
+    }
+    "idle".to_string()
 }
 
 fn stage_bytes_label(event: &DaemonIngestProgressEvent) -> String {
@@ -453,7 +494,7 @@ fn average_bytes_per_second(event: Option<&DaemonIngestProgressEvent>, elapsed: 
     if elapsed <= 0.0 {
         return 0;
     }
-    (event.work_bytes_done as f64 / elapsed).round() as u64
+    (event.source_bytes_done.unwrap_or(event.work_bytes_done) as f64 / elapsed).round() as u64
 }
 
 #[derive(Debug)]
@@ -472,8 +513,9 @@ mod tests {
     use super::{UploadTui, UploadTuiContext};
     use dasobjectstore_core::ids::{DiskId, IngestJobId, StoreId};
     use dasobjectstore_daemon::{
-        DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestStage,
-        SubmitIngestFilesResponse,
+        DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestQueueDepths,
+        DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
+        DaemonIngestWorkerTelemetry, DaemonSsdPressure, SubmitIngestFilesResponse,
     };
     use std::path::PathBuf;
 
@@ -505,8 +547,20 @@ mod tests {
             files_done: 1,
             files_total: Some(2),
             current_object_id: None,
-            ssd_pressure: None,
-            telemetry: None,
+            ssd_pressure: Some(DaemonSsdPressure::High),
+            telemetry: Some(DaemonIngestTelemetry {
+                queue_depths: DaemonIngestQueueDepths {
+                    source_read: 7,
+                    hdd_write: 2,
+                    ..DaemonIngestQueueDepths::default()
+                },
+                workers: DaemonIngestWorkerTelemetry {
+                    ssd_stage: DaemonIngestWorkerActivity { active: 1, idle: 0 },
+                    hdd_write: DaemonIngestWorkerActivity { active: 1, idle: 0 },
+                    ..DaemonIngestWorkerTelemetry::default()
+                },
+                ..DaemonIngestTelemetry::default()
+            }),
             resource_policy: None,
             message: Some("copying".to_string()),
         };
@@ -519,8 +573,13 @@ mod tests {
         assert!(details.contains("Data: 5.0 GiB/2.0 TiB"));
         assert!(details.contains("Work: 5.0 GiB/4.0 TiB"));
         assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
-        assert!(format!("{:?}", super::queue_lines(&event))
-            .contains("HDD migration: 512.0 MiB/2.0 GiB"));
+        let queues = format!("{:?}", super::queue_lines(&event));
+        assert!(queues.contains(
+            "source pending 7 file(s), SSD active 1, HDD active 1, HDD queued 2, completed 1"
+        ));
+        assert!(queues.contains("SSD pressure: high - source ingress may pause"));
+        assert!(queues.contains("SSD settling: active"));
+        assert!(queues.contains("HDD migration: 512.0 MiB/2.0 GiB"));
         assert!(speed.contains("current 180.0 MiB/s, avg 512.0 MiB/s"));
 
         let mut tui = UploadTui::start_with_fixed_viewport(
