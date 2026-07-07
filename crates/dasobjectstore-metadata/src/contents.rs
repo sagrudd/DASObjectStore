@@ -59,12 +59,20 @@ pub fn read_store_contents(
 ) -> Result<StoreContentsSnapshot, StoreContentsReadError> {
     let connection =
         Connection::open_with_flags(&request.live_sqlite_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    ensure_store_exists(&connection, &request.store_id)?;
     let filter = request
         .filter
         .as_ref()
         .map(|pattern| Regex::new(pattern))
         .transpose()?;
+    if !table_exists(&connection, "stores")? || !table_exists(&connection, "objects")? {
+        return Ok(StoreContentsSnapshot {
+            live_sqlite_path: request.live_sqlite_path.clone(),
+            store_id: request.store_id.clone(),
+            filter: request.filter.clone(),
+            objects: Vec::new(),
+        });
+    }
+    ensure_store_exists(&connection, &request.store_id)?;
     let mut statement = connection.prepare(
         "SELECT object_id, object_type, state, COALESCE(size_bytes, 0), updated_at_utc
          FROM objects
@@ -99,6 +107,18 @@ pub fn read_store_contents(
         filter: request.filter.clone(),
         objects,
     })
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool, StoreContentsReadError> {
+    let count = connection.query_row(
+        "SELECT COUNT(*)
+         FROM sqlite_master
+         WHERE type = 'table'
+           AND name = ?1",
+        params![table_name],
+        |row| row.get::<_, i64>(0),
+    )?;
+    Ok(count > 0)
 }
 
 fn ensure_store_exists(
@@ -246,6 +266,24 @@ mod tests {
 
         assert_eq!(snapshot.objects.len(), 1);
         assert_eq!(snapshot.objects[0].path, "raw/sample.pod5");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn reads_empty_contents_from_older_live_sqlite_without_contents_tables() {
+        let root = temp_root("contents-old-schema");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        Connection::open(&live_sqlite_path).expect("open empty sqlite");
+
+        let snapshot = read_store_contents(&StoreContentsRequest::new(
+            &live_sqlite_path,
+            StoreId::new("zymo_fecal_2025.05").expect("store id"),
+        ))
+        .expect("contents read");
+
+        assert!(snapshot.objects.is_empty());
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

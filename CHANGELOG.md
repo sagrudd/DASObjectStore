@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.1 - 2026-07-07
+
+- Make `dasobjectstore store contents` tolerate older or empty live SQLite
+  metadata files without contents tables by rendering an empty contents snapshot
+  instead of failing with a missing-table error.
+
 ## 0.3.0 - 2026-07-07
 
 - Add `dasobjectstore store contents` to inspect logical object-store contents
