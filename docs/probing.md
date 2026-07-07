@@ -86,9 +86,17 @@ disks are in different enclosures unless the evidence is strong enough for the
 selected store policy.
 
 On Linux, the QNAP TL-D800C is treated as an explicitly recognized USB DAS
-enclosure when udev exposes QNAP vendor metadata, TL-D800C product metadata, and
-a shared USB `ID_PATH`. Disks with the same normalized USB enclosure path are
-reported as physically associated with the same TL-D800C.
+enclosure when udev exposes either direct QNAP TL-D800C device metadata or a
+QNAP parent USB hub topology. The TL-D800C commonly presents each drive as an
+individual block device behind ASMedia bridges while the QNAP identity appears
+on parent USB hubs. DASObjectStore therefore maps TL-D800C disks to the
+upstream QNAP hub path, so downstream branches of the same unit are reported as
+one physical enclosure while other host USB ports remain separate.
+
+Production object store creation requires managed HDDs to map to a supported,
+identifiable DAS enclosure. Initially, that supported enclosure set is limited
+to QNAP TL-D800C. If the probe cannot link prepared HDDs to the supported
+enclosure family, `store create` fails before writing store registry state.
 
 For protected stores that require enclosure-aware placement, uncertain topology
 should be treated conservatively:

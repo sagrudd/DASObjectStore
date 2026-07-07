@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.9 - 2026-07-07
+
+- Detect QNAP TL-D800C enclosures from Linux udev parent hub topology when the
+  per-disk block devices only expose the individual drive and ASMedia bridge.
+- Group TL-D800C members by the upstream QNAP USB hub path so downstream hub
+  branches such as `5.3.*` and `5.4.*` are treated as one physical enclosure
+  while other host USB ports remain separate.
+- Require production `store create` to map managed HDDs to a supported,
+  identifiable DAS enclosure. Initially supported: QNAP TL-D800C.
+
 ## 0.1.8 - 2026-07-07
 
 - Detect QNAP TL-D800C USB DAS enclosures on Linux through udev metadata and

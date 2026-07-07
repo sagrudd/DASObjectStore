@@ -107,7 +107,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use std::{collections::hash_map::DefaultHasher, collections::BTreeMap};
+use std::{collections::hash_map::DefaultHasher, collections::BTreeMap, collections::BTreeSet};
 
 #[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -832,6 +832,7 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         policy.copies = copies;
     }
     policy.validate()?;
+    enforce_supported_das_for_store_create(args)?;
 
     let definition = StoreServiceDefinition {
         store_id: args.store_id().clone(),
@@ -875,6 +876,136 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
     }
 
     Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ManagedHddDevice {
+    disk_id: DiskId,
+    root_path: PathBuf,
+    device_path: PathBuf,
+}
+
+fn enforce_supported_das_for_store_create(args: &StoreCreateArgs) -> Result<(), CliError> {
+    if args.registry_path().is_some() {
+        return Ok(());
+    }
+
+    let managed_hdds = managed_hdd_devices(&default_hdd_root())?;
+    let mut report = probe_current_platform()?;
+    report.enclosures = group_enclosures(&report.disks);
+    validate_managed_hdds_on_supported_das(&managed_hdds, &report)
+}
+
+fn managed_hdd_devices(hdd_root: &Path) -> Result<Vec<ManagedHddDevice>, CliError> {
+    let roots = discover_managed_hdd_roots(hdd_root)?;
+    let mut devices = Vec::new();
+
+    for root in roots {
+        let marker = read_device_marker(&root.root_path)?;
+        let device_path = device_path_from_marker(&marker).ok_or_else(|| {
+            CliError::CommandFailed(format!(
+                "managed HDD {} at {} is missing device= in .dasobjectstore/device.env",
+                root.disk_id,
+                root.root_path.display()
+            ))
+        })?;
+        devices.push(ManagedHddDevice {
+            disk_id: root.disk_id,
+            root_path: root.root_path,
+            device_path: PathBuf::from(device_path),
+        });
+    }
+
+    Ok(devices)
+}
+
+fn validate_managed_hdds_on_supported_das(
+    managed_hdds: &[ManagedHddDevice],
+    report: &ProbeReport,
+) -> Result<(), CliError> {
+    if managed_hdds.is_empty() {
+        return Err(CliError::CommandFailed(
+            "object store creation requires at least one managed HDD on a supported, identifiable DAS enclosure; currently supported: QNAP TL-D800C".to_string(),
+        ));
+    }
+
+    let supported_topology_paths = supported_das_topology_paths(report);
+    if supported_topology_paths.is_empty() {
+        return Err(CliError::CommandFailed(
+            "object store creation requires supported, identifiable DAS enclosure mapping; no QNAP TL-D800C enclosure was detected in the current probe".to_string(),
+        ));
+    }
+
+    for managed_hdd in managed_hdds {
+        let Some(disk) = report
+            .disks
+            .iter()
+            .find(|disk| probed_disk_matches_device(disk, &managed_hdd.device_path))
+        else {
+            return Err(CliError::CommandFailed(format!(
+                "managed HDD {} at {} points to {}, but that device was not found in the current probe",
+                managed_hdd.disk_id,
+                managed_hdd.root_path.display(),
+                managed_hdd.device_path.display()
+            )));
+        };
+
+        let Some(topology_path) = disk.enclosure_topology_path.as_deref() else {
+            return Err(CliError::CommandFailed(format!(
+                "managed HDD {} at {} is not mapped to a supported DAS enclosure; currently supported: QNAP TL-D800C",
+                managed_hdd.disk_id,
+                managed_hdd.root_path.display()
+            )));
+        };
+
+        if !supported_topology_paths.contains(topology_path) {
+            return Err(CliError::CommandFailed(format!(
+                "managed HDD {} at {} is mapped to unsupported enclosure topology {}; currently supported: QNAP TL-D800C",
+                managed_hdd.disk_id,
+                managed_hdd.root_path.display(),
+                topology_path
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn supported_das_topology_paths(report: &ProbeReport) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for enclosure in &report.enclosures {
+        if enclosure.identity.vendor_hint.as_deref() == Some("QNAP")
+            && enclosure.identity.product_hint.as_deref() == Some("TL-D800C")
+        {
+            if let Some(topology_path) = enclosure.identity.usb_topology_path.as_deref() {
+                paths.insert(format!("qnap-tl-d800c@{topology_path}"));
+            }
+        }
+    }
+    paths
+}
+
+fn probed_disk_matches_device(disk: &ObservedDisk, expected_device_path: &Path) -> bool {
+    let Some(probed_path) = disk.device_path.as_deref() else {
+        return false;
+    };
+    paths_refer_to_same_device(Path::new(probed_path), expected_device_path)
+}
+
+fn paths_refer_to_same_device(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn device_path_from_marker(marker: &str) -> Option<String> {
+    marker
+        .lines()
+        .find_map(|line| line.strip_prefix("device=").map(ToOwned::to_owned))
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -3227,9 +3358,10 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        connection_status_from_probe, current_user_group_names, run, write_health_json,
-        write_health_summary, write_health_verbose, write_host_connection_status,
-        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
+        connection_status_from_probe, current_user_group_names, run,
+        validate_managed_hdds_on_supported_das, write_health_json, write_health_summary,
+        write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
+        ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -4029,6 +4161,128 @@ mod tests {
         assert!(output.contains(".dasobjectstore/stores.json"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_create_das_guard_accepts_managed_hdd_on_qnap_tl_d800c() {
+        let managed_hdds = vec![ManagedHddDevice {
+            disk_id: DiskId::new("disk-a").expect("disk id"),
+            root_path: PathBuf::from("/srv/dasobjectstore/hdd/disk-a"),
+            device_path: PathBuf::from("/dev/sda"),
+        }];
+        let report = ProbeReport {
+            platform: HostPlatform::Linux,
+            disks: vec![ObservedDisk {
+                device_path: Some("/dev/sda".to_string()),
+                size_bytes: Some(4_000_000_000_000),
+                serial_hint: None,
+                model_hint: Some("ST4000VN008".to_string()),
+                partition_hints: Vec::new(),
+                filesystem_hints: Vec::new(),
+                direct_attached_hint: Some(true),
+                removable_hint: Some(false),
+                transport: Transport::Usb,
+                enclosure_topology_path: Some("qnap-tl-d800c@pci-0000:00:14.0-usb-0:5".to_string()),
+            }],
+            enclosures: vec![ObservedEnclosure {
+                identity: EnclosureIdentity {
+                    usb_topology_path: Some("pci-0000:00:14.0-usb-0:5".to_string()),
+                    vendor_hint: Some("QNAP".to_string()),
+                    product_hint: Some("TL-D800C".to_string()),
+                    bridge_hint: Some("usb-jbod".to_string()),
+                    user_assigned_name: None,
+                },
+                disk_device_paths: vec!["/dev/sda".to_string()],
+            }],
+            warnings: Vec::new(),
+        };
+
+        validate_managed_hdds_on_supported_das(&managed_hdds, &report)
+            .expect("supported DAS passes");
+    }
+
+    #[test]
+    fn store_create_das_guard_rejects_generic_usb_hdd() {
+        let managed_hdds = vec![ManagedHddDevice {
+            disk_id: DiskId::new("disk-a").expect("disk id"),
+            root_path: PathBuf::from("/srv/dasobjectstore/hdd/disk-a"),
+            device_path: PathBuf::from("/dev/sda"),
+        }];
+        let report = ProbeReport {
+            platform: HostPlatform::Linux,
+            disks: vec![ObservedDisk {
+                device_path: Some("/dev/sda".to_string()),
+                size_bytes: Some(4_000_000_000_000),
+                serial_hint: None,
+                model_hint: Some("Generic USB Disk".to_string()),
+                partition_hints: Vec::new(),
+                filesystem_hints: Vec::new(),
+                direct_attached_hint: Some(true),
+                removable_hint: Some(false),
+                transport: Transport::Usb,
+                enclosure_topology_path: Some("pci-0000:00:14.0-usb-0:3:1.0".to_string()),
+            }],
+            enclosures: vec![ObservedEnclosure {
+                identity: EnclosureIdentity {
+                    usb_topology_path: Some("pci-0000:00:14.0-usb-0:3:1.0".to_string()),
+                    vendor_hint: None,
+                    product_hint: None,
+                    bridge_hint: None,
+                    user_assigned_name: None,
+                },
+                disk_device_paths: vec!["/dev/sda".to_string()],
+            }],
+            warnings: Vec::new(),
+        };
+
+        let err = validate_managed_hdds_on_supported_das(&managed_hdds, &report)
+            .expect_err("generic USB is rejected");
+
+        assert!(err
+            .to_string()
+            .contains("no QNAP TL-D800C enclosure was detected"));
+    }
+
+    #[test]
+    fn store_create_das_guard_rejects_unmatched_managed_hdd_device() {
+        let managed_hdds = vec![ManagedHddDevice {
+            disk_id: DiskId::new("disk-a").expect("disk id"),
+            root_path: PathBuf::from("/srv/dasobjectstore/hdd/disk-a"),
+            device_path: PathBuf::from("/dev/sdz"),
+        }];
+        let report = ProbeReport {
+            platform: HostPlatform::Linux,
+            disks: vec![ObservedDisk {
+                device_path: Some("/dev/sda".to_string()),
+                size_bytes: Some(4_000_000_000_000),
+                serial_hint: None,
+                model_hint: Some("ST4000VN008".to_string()),
+                partition_hints: Vec::new(),
+                filesystem_hints: Vec::new(),
+                direct_attached_hint: Some(true),
+                removable_hint: Some(false),
+                transport: Transport::Usb,
+                enclosure_topology_path: Some("qnap-tl-d800c@pci-0000:00:14.0-usb-0:5".to_string()),
+            }],
+            enclosures: vec![ObservedEnclosure {
+                identity: EnclosureIdentity {
+                    usb_topology_path: Some("pci-0000:00:14.0-usb-0:5".to_string()),
+                    vendor_hint: Some("QNAP".to_string()),
+                    product_hint: Some("TL-D800C".to_string()),
+                    bridge_hint: Some("usb-jbod".to_string()),
+                    user_assigned_name: None,
+                },
+                disk_device_paths: vec!["/dev/sda".to_string()],
+            }],
+            warnings: Vec::new(),
+        };
+
+        let err = validate_managed_hdds_on_supported_das(&managed_hdds, &report)
+            .expect_err("unmatched device is rejected");
+
+        assert!(err
+            .to_string()
+            .contains("device was not found in the current probe"));
     }
 
     #[test]
