@@ -1,10 +1,12 @@
 use crate::model::{
-    FilesystemHint, HostPlatform, ObservedDisk, PartitionHint, ProbeReport, Transport,
+    FilesystemHint, HostPlatform, ObservedDisk, PartitionHint, ProbeReport, ProbeWarning, Transport,
 };
 use crate::probe::{CommandRunner, ProbeError, ProbeProvider, SystemCommandRunner};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 pub const LSBLK_COMMAND: &str = "lsblk";
+pub const UDEVADM_COMMAND: &str = "udevadm";
 pub const LSBLK_ARGS: [&str; 6] = [
     "--json",
     "--bytes",
@@ -39,7 +41,9 @@ where
 {
     fn probe(&self) -> Result<ProbeReport, ProbeError> {
         let output = self.runner.run(LSBLK_COMMAND, &LSBLK_ARGS)?;
-        parse_lsblk_json(&output)
+        let mut report = parse_lsblk_json(&output)?;
+        enrich_linux_disks_from_udev(&self.runner, &mut report);
+        Ok(report)
     }
 }
 
@@ -141,11 +145,138 @@ fn transport_from_lsblk(value: &str) -> Transport {
     }
 }
 
+fn enrich_linux_disks_from_udev<R>(runner: &R, report: &mut ProbeReport)
+where
+    R: CommandRunner,
+{
+    for disk in &mut report.disks {
+        let Some(device_path) = disk.device_path.as_deref() else {
+            continue;
+        };
+        let result = runner.run(
+            UDEVADM_COMMAND,
+            &["info", "--query=property", "--name", device_path],
+        );
+        let output = match result {
+            Ok(output) => output,
+            Err(err) => {
+                report.warnings.push(ProbeWarning {
+                    code: "linux_udevadm_failed".to_string(),
+                    message: format!("failed to inspect {device_path}: {err}"),
+                });
+                continue;
+            }
+        };
+        let properties = parse_udev_properties(&output);
+        apply_udev_properties(disk, &properties);
+    }
+}
+
+fn apply_udev_properties(disk: &mut ObservedDisk, properties: &BTreeMap<String, String>) {
+    if disk.serial_hint.is_none() {
+        disk.serial_hint = property(properties, &["ID_SERIAL_SHORT", "ID_SERIAL"]).cloned();
+    }
+    if disk.model_hint.is_none() {
+        disk.model_hint = property(
+            properties,
+            &["ID_MODEL_FROM_DATABASE", "ID_MODEL", "ID_USB_MODEL"],
+        )
+        .cloned();
+    }
+
+    let Some(id_path) = property(properties, &["ID_PATH"]) else {
+        return;
+    };
+    let Some(usb_topology_path) = usb_enclosure_path_from_id_path(id_path) else {
+        return;
+    };
+
+    disk.enclosure_topology_path = Some(if is_qnap_tl_d800c(properties, disk) {
+        format!("qnap-tl-d800c@{usb_topology_path}")
+    } else {
+        usb_topology_path
+    });
+}
+
+fn parse_udev_properties(input: &str) -> BTreeMap<String, String> {
+    input
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let line = line.strip_prefix("E: ").unwrap_or(line);
+            let (key, value) = line.split_once('=')?;
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+fn usb_enclosure_path_from_id_path(id_path: &str) -> Option<String> {
+    if !id_path.contains("-usb-") {
+        return None;
+    }
+    let usb_path = id_path
+        .split_once("-scsi-")
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(id_path);
+    Some(usb_path.to_string())
+}
+
+fn is_qnap_tl_d800c(properties: &BTreeMap<String, String>, disk: &ObservedDisk) -> bool {
+    let vendor_match = values_contain_normalized(
+        properties,
+        &["ID_VENDOR", "ID_VENDOR_FROM_DATABASE", "ID_USB_VENDOR"],
+        "QNAP",
+    );
+    let product_match = values_contain_normalized(
+        properties,
+        &[
+            "ID_MODEL",
+            "ID_MODEL_FROM_DATABASE",
+            "ID_USB_MODEL",
+            "ID_SERIAL",
+        ],
+        "TLD800C",
+    ) || disk
+        .model_hint
+        .as_deref()
+        .is_some_and(|value| normalize_hardware_string(value).contains("TLD800C"));
+
+    vendor_match && product_match
+}
+
+fn values_contain_normalized(
+    properties: &BTreeMap<String, String>,
+    keys: &[&str],
+    needle: &str,
+) -> bool {
+    keys.iter().any(|key| {
+        properties
+            .get(*key)
+            .is_some_and(|value| normalize_hardware_string(value).contains(needle))
+    })
+}
+
+fn normalize_hardware_string(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(|character| character.to_uppercase())
+        .collect()
+}
+
+fn property<'a>(properties: &'a BTreeMap<String, String>, keys: &[&str]) -> Option<&'a String> {
+    keys.iter().find_map(|key| properties.get(*key))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_lsblk_json, LinuxProbeProvider, LSBLK_ARGS, LSBLK_COMMAND};
+    use super::{
+        parse_lsblk_json, parse_udev_properties, usb_enclosure_path_from_id_path,
+        LinuxProbeProvider, LSBLK_ARGS, LSBLK_COMMAND, UDEVADM_COMMAND,
+    };
     use crate::model::{HostPlatform, Transport};
     use crate::probe::{CommandRunner, ProbeError, ProbeProvider};
+    use std::collections::BTreeMap;
 
     const LSBLK_FIXTURE: &str = include_str!("../fixtures/linux/lsblk-usb-das.json");
 
@@ -187,6 +318,7 @@ mod tests {
     fn linux_probe_provider_runs_lsblk_and_parses_output() {
         let provider = LinuxProbeProvider::new(FixtureRunner {
             output: Ok(LSBLK_FIXTURE.to_string()),
+            udev_outputs: BTreeMap::new(),
         });
 
         let report = provider.probe().expect("probe succeeds");
@@ -202,6 +334,7 @@ mod tests {
                 command: LSBLK_COMMAND.to_string(),
                 message: "missing command".to_string(),
             }),
+            udev_outputs: BTreeMap::new(),
         });
 
         let err = provider.probe().expect_err("probe fails");
@@ -215,16 +348,125 @@ mod tests {
         );
     }
 
+    #[test]
+    fn linux_probe_provider_maps_qnap_tl_d800c_members_by_usb_topology() {
+        let mut udev_outputs = BTreeMap::new();
+        udev_outputs.insert(
+            "/dev/sda".to_string(),
+            "ID_VENDOR=QNAP\nID_MODEL=TL-D800C\nID_PATH=pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:0:0\n".to_string(),
+        );
+        udev_outputs.insert(
+            "/dev/sdb".to_string(),
+            "ID_VENDOR=QNAP\nID_MODEL=TL_D800C\nID_PATH=pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:1:0\n".to_string(),
+        );
+        udev_outputs.insert(
+            "/dev/sdc".to_string(),
+            "ID_VENDOR=Other\nID_MODEL=USB_DISK\nID_PATH=pci-0000:00:14.0-usb-0:8:1.0-scsi-0:0:0:0\n".to_string(),
+        );
+        let provider = LinuxProbeProvider::new(FixtureRunner {
+            output: Ok(QNAP_TL_D800C_LSBLK_FIXTURE.to_string()),
+            udev_outputs,
+        });
+
+        let report = provider.probe().expect("probe succeeds");
+
+        assert_eq!(report.disks.len(), 3);
+        assert_eq!(
+            report.disks[0].enclosure_topology_path.as_deref(),
+            Some("qnap-tl-d800c@pci-0000:00:14.0-usb-0:4:1.0")
+        );
+        assert_eq!(
+            report.disks[1].enclosure_topology_path.as_deref(),
+            Some("qnap-tl-d800c@pci-0000:00:14.0-usb-0:4:1.0")
+        );
+        assert_eq!(
+            report.disks[2].enclosure_topology_path.as_deref(),
+            Some("pci-0000:00:14.0-usb-0:8:1.0")
+        );
+    }
+
+    #[test]
+    fn normalizes_usb_id_path_to_physical_enclosure_path() {
+        assert_eq!(
+            usb_enclosure_path_from_id_path("pci-0000:00:14.0-usb-0:4:1.0-scsi-0:0:7:0").as_deref(),
+            Some("pci-0000:00:14.0-usb-0:4:1.0")
+        );
+        assert_eq!(
+            usb_enclosure_path_from_id_path("pci-0000:00:17.0-ata-1"),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_udev_property_output_with_optional_prefix() {
+        let properties = parse_udev_properties("E: ID_VENDOR=QNAP\nID_MODEL=TL-D800C\n");
+
+        assert_eq!(
+            properties.get("ID_VENDOR").map(String::as_str),
+            Some("QNAP")
+        );
+        assert_eq!(
+            properties.get("ID_MODEL").map(String::as_str),
+            Some("TL-D800C")
+        );
+    }
+
     struct FixtureRunner {
         output: Result<String, ProbeError>,
+        udev_outputs: BTreeMap<String, String>,
     }
 
     impl CommandRunner for FixtureRunner {
         fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
-            assert_eq!(command, LSBLK_COMMAND);
-            assert_eq!(args, LSBLK_ARGS);
-
-            self.output.clone()
+            match command {
+                LSBLK_COMMAND => {
+                    assert_eq!(args, LSBLK_ARGS);
+                    self.output.clone()
+                }
+                UDEVADM_COMMAND => {
+                    assert_eq!(&args[0..3], ["info", "--query=property", "--name"]);
+                    Ok(self.udev_outputs.get(args[3]).cloned().unwrap_or_default())
+                }
+                _ => panic!("unexpected command: {command}"),
+            }
         }
     }
+
+    const QNAP_TL_D800C_LSBLK_FIXTURE: &str = r#"{
+      "blockdevices": [
+        {
+          "name": "/dev/sda",
+          "path": "/dev/sda",
+          "size": 4000787030016,
+          "serial": "QNAP-0001",
+          "model": "WDC WD40EFRX",
+          "type": "disk",
+          "tran": "usb",
+          "rm": false,
+          "hotplug": true
+        },
+        {
+          "name": "/dev/sdb",
+          "path": "/dev/sdb",
+          "size": 4000787030016,
+          "serial": "QNAP-0002",
+          "model": "WDC WD40EFRX",
+          "type": "disk",
+          "tran": "usb",
+          "rm": false,
+          "hotplug": true
+        },
+        {
+          "name": "/dev/sdc",
+          "path": "/dev/sdc",
+          "size": 2000398934016,
+          "serial": "OTHER-0001",
+          "model": "Other USB Disk",
+          "type": "disk",
+          "tran": "usb",
+          "rm": false,
+          "hotplug": true
+        }
+      ]
+    }"#;
 }

@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
-version="${version:-0.1.7}"
+version="${version:-0.1.8}"
 arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 build_root="$repo_root/target/deb/${package_name}_${version}_${arch}"
 package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.8 - 2026-07-07
+
+- Detect QNAP TL-D800C USB DAS enclosures on Linux through udev metadata and
+  group physically associated disks by their shared USB enclosure path.
+- Show enclosure vendor, product, and bridge hints in pretty probe output.
+
 ## 0.1.7 - 2026-07-07
 
 - Repair managed SSD/HDD root ownership and modes during package install or

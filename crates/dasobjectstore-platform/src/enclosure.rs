@@ -26,16 +26,32 @@ pub fn group_enclosures(disks: &[ObservedDisk]) -> Vec<ObservedEnclosure> {
     grouped
         .into_iter()
         .map(|(topology_path, disk_device_paths)| ObservedEnclosure {
-            identity: EnclosureIdentity {
-                usb_topology_path: Some(topology_path.to_string()),
-                vendor_hint: None,
-                product_hint: None,
-                bridge_hint: None,
-                user_assigned_name: None,
-            },
+            identity: enclosure_identity_from_topology_path(topology_path),
             disk_device_paths,
         })
         .collect()
+}
+
+fn enclosure_identity_from_topology_path(topology_path: &str) -> EnclosureIdentity {
+    const QNAP_TL_D800C_PREFIX: &str = "qnap-tl-d800c@";
+
+    if let Some(usb_topology_path) = topology_path.strip_prefix(QNAP_TL_D800C_PREFIX) {
+        return EnclosureIdentity {
+            usb_topology_path: Some(usb_topology_path.to_string()),
+            vendor_hint: Some("QNAP".to_string()),
+            product_hint: Some("TL-D800C".to_string()),
+            bridge_hint: Some("usb-jbod".to_string()),
+            user_assigned_name: None,
+        };
+    }
+
+    EnclosureIdentity {
+        usb_topology_path: Some(topology_path.to_string()),
+        vendor_hint: None,
+        product_hint: None,
+        bridge_hint: None,
+        user_assigned_name: None,
+    }
 }
 
 #[cfg(test)]
@@ -97,6 +113,37 @@ mod tests {
 
         assert_eq!(report.enclosures.len(), 1);
         assert_eq!(report.warnings.len(), 1);
+    }
+
+    #[test]
+    fn identifies_qnap_tl_d800c_from_topology_marker() {
+        let disks = vec![
+            disk(
+                "/dev/sda",
+                Some("qnap-tl-d800c@pci-0000:00:14.0-usb-0:4:1.0"),
+            ),
+            disk(
+                "/dev/sdb",
+                Some("qnap-tl-d800c@pci-0000:00:14.0-usb-0:4:1.0"),
+            ),
+        ];
+
+        let enclosures = group_enclosures(&disks);
+
+        assert_eq!(enclosures.len(), 1);
+        assert_eq!(enclosures[0].identity.vendor_hint.as_deref(), Some("QNAP"));
+        assert_eq!(
+            enclosures[0].identity.product_hint.as_deref(),
+            Some("TL-D800C")
+        );
+        assert_eq!(
+            enclosures[0].identity.usb_topology_path.as_deref(),
+            Some("pci-0000:00:14.0-usb-0:4:1.0")
+        );
+        assert_eq!(
+            enclosures[0].disk_device_paths,
+            vec!["/dev/sda".to_string(), "/dev/sdb".to_string()]
+        );
     }
 
     fn disk(device_path: &str, topology_path: Option<&str>) -> ObservedDisk {

@@ -3528,7 +3528,36 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("Platform: Macos"));
         assert!(output.contains("- /dev/disk4 size=1000 transport=Usb serial=SERIAL-1"));
-        assert!(output.contains("- topology=usb@001/002 disks=/dev/disk4"));
+        assert!(output.contains(
+            "- topology=usb@001/002 vendor=<unknown> product=<unknown> bridge=<unknown> disks=/dev/disk4"
+        ));
+    }
+
+    #[test]
+    fn writes_pretty_probe_report_with_qnap_enclosure_identity() {
+        let report = ProbeReport {
+            platform: HostPlatform::Linux,
+            disks: Vec::new(),
+            enclosures: vec![ObservedEnclosure {
+                identity: EnclosureIdentity {
+                    usb_topology_path: Some("pci-0000:00:14.0-usb-0:4:1.0".to_string()),
+                    vendor_hint: Some("QNAP".to_string()),
+                    product_hint: Some("TL-D800C".to_string()),
+                    bridge_hint: Some("usb-jbod".to_string()),
+                    user_assigned_name: None,
+                },
+                disk_device_paths: vec!["/dev/sda".to_string(), "/dev/sdb".to_string()],
+            }],
+            warnings: Vec::new(),
+        };
+        let mut output = Vec::new();
+
+        write_pretty_report(&report, &mut output).expect("pretty output writes");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains(
+            "- topology=pci-0000:00:14.0-usb-0:4:1.0 vendor=QNAP product=TL-D800C bridge=usb-jbod disks=/dev/sda,/dev/sdb"
+        ));
     }
 
     #[test]

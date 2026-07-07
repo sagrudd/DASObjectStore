@@ -85,6 +85,11 @@ strings, and user-confirmed labels. The software should not assume that two
 disks are in different enclosures unless the evidence is strong enough for the
 selected store policy.
 
+On Linux, the QNAP TL-D800C is treated as an explicitly recognized USB DAS
+enclosure when udev exposes QNAP vendor metadata, TL-D800C product metadata, and
+a shared USB `ID_PATH`. Disks with the same normalized USB enclosure path are
+reported as physically associated with the same TL-D800C.
+
 For protected stores that require enclosure-aware placement, uncertain topology
 should be treated conservatively:
 

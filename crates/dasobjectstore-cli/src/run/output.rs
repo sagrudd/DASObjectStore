@@ -944,9 +944,24 @@ fn write_enclosure(
         .usb_topology_path
         .as_deref()
         .unwrap_or("<unknown>");
+    let vendor = enclosure
+        .identity
+        .vendor_hint
+        .as_deref()
+        .unwrap_or("<unknown>");
+    let product = enclosure
+        .identity
+        .product_hint
+        .as_deref()
+        .unwrap_or("<unknown>");
+    let bridge = enclosure
+        .identity
+        .bridge_hint
+        .as_deref()
+        .unwrap_or("<unknown>");
     writeln!(
         writer,
-        "- topology={topology} disks={}",
+        "- topology={topology} vendor={vendor} product={product} bridge={bridge} disks={}",
         enclosure.disk_device_paths.join(",")
     )
 }
