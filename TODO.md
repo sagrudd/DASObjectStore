@@ -423,16 +423,16 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 
 ## Milestone 18: Parallel Ingress Operations TUI
 
-- [ ] Define the parallel daemon ingress pipeline stages: scan, source read, SSD
+- [x] Define the parallel daemon ingress pipeline stages: scan, source read, SSD
   stage, checksum/manifest capture, HDD placement, HDD write, verification, and
   finalization.
 - [ ] Make streaming source files to SSD staging the first priority while
   maintaining bounded queues and pressure controls.
 - [ ] Add adaptive worker scheduling that uses available CPU cores for hashing,
   verification, metadata, and coordination without overdriving saturated disks.
-- [ ] Add configurable resource policy for worker counts, memory budget, SSD
+- [x] Add configurable resource policy for worker counts, memory budget, SSD
   reserve, HDD queue depth, verification parallelism, and system safety reserve.
-- [ ] Default resource policy should use available cores and memory headroom for
+- [x] Default resource policy should use available cores and memory headroom for
   standalone performance while preserving explicit safety limits.
 - [ ] Add bounded memory pools for read/write/verify buffers so high throughput
   does not become unbounded allocation.
@@ -442,34 +442,34 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   write throughput, health, and failure/pressure state.
 - [ ] Add backpressure rules that slow source reads only when SSD pressure, RAM
   pressure, HDD backlog, verification backlog, or error rate requires it.
-- [ ] Extend daemon ingest telemetry with queue depths for scan, source read,
+- [x] Extend daemon ingest telemetry with queue depths for scan, source read,
   SSD stage, HDD write, and verification stages.
-- [ ] Extend daemon ingest telemetry with active/idle worker counts for scan,
+- [x] Extend daemon ingest telemetry with active/idle worker counts for scan,
   read, stage, write, verify, and finalization workers.
-- [ ] Extend daemon ingest telemetry with CPU use, memory use, resource policy,
+- [x] Extend daemon ingest telemetry with CPU use, memory use, resource policy,
   and bottleneck classification.
-- [ ] Extend daemon ingest telemetry with current throughput, moving average,
+- [x] Extend daemon ingest telemetry with current throughput, moving average,
   recent high/low, and trend direction: up, down, or flat.
-- [ ] Extend daemon ingest telemetry with staged-on-SSD, written-to-HDD, and
+- [x] Extend daemon ingest telemetry with staged-on-SSD, written-to-HDD, and
   verified byte/file fractions.
-- [ ] Add crash-safe ingest journal states for planned, staged, written,
+- [x] Add crash-safe ingest journal states for planned, staged, written,
   verified, failed, retried, cancelled, and finalized file records.
 - [ ] Add resume/reconcile behavior for interrupted jobs, including partially
   staged and partially written data.
 - [ ] Add checksum or content-address manifest capture during SSD staging where
   compatible with the existing object model.
-- [ ] Add atomic finalization rules so files are not reported as persisted until
+- [x] Add atomic finalization rules so files are not reported as persisted until
   HDD write and verification requirements are satisfied.
-- [ ] Add daemon API/event fields required by CLI, TUI, Yew, and Synoptikon
+- [x] Add daemon API/event fields required by CLI, TUI, Yew, and Synoptikon
   adapters without duplicating progress logic.
-- [ ] Choose the Rust TUI framework and terminal event model for the supported
+- [x] Choose the Rust TUI framework and terminal event model for the supported
   console surface.
 - [ ] Add TUI binary/entry point and packaging path for standalone deployment.
-- [ ] Implement TUI import planning with target ObjectStore/SubObject context,
+- [x] Implement TUI import planning with target ObjectStore/SubObject context,
   source paths, file count, and data volume scaled to MiB, GiB, or TiB.
 - [ ] Implement TUI import description metadata capture and confirmation before
   launch.
-- [ ] Show resource policy before launch: worker counts, memory budget, SSD
+- [x] Show resource policy before launch: worker counts, memory budget, SSD
   reserve, HDD queue depth, and verification parallelism.
 - [ ] Allow administrators to choose automatic resource use or explicit caps for
   cores, memory, SSD reserve, and HDD write concurrency.
@@ -488,7 +488,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   details where the daemon safely supports them.
 - [ ] Ensure the TUI can attach to an existing running import job after
   reconnecting.
-- [ ] Add supported terminal-size behavior for compact and standard console
+- [x] Add supported terminal-size behavior for compact and standard console
   layouts.
 - [ ] Add TUI error states for authentication failure, permission denial, lost
   daemon/event connection, stalled job, SSD pressure, HDD write failure, and

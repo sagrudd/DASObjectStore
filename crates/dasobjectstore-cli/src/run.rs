@@ -3684,12 +3684,15 @@ mod tests {
                 disk_id: DiskId::new("disk-a").expect("disk id"),
                 copy_number: 1,
             },
+            pipeline_stage: None,
             work_bytes_done: 512,
             work_bytes_total: Some(1024),
             files_done: 2,
             files_total: Some(4),
             current_object_id: None,
             ssd_pressure: Some(DaemonSsdPressure::AcceptingWrites),
+            telemetry: None,
+            resource_policy: None,
             message: None,
         };
         let mut output = Vec::new();
