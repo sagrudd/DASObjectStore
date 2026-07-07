@@ -243,6 +243,10 @@ pub struct DaemonIngestProgressEvent {
     pub work_bytes_done: u64,
     pub work_bytes_total: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_bytes_done: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_bytes_total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_bytes_done: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_bytes_total: Option<u64>,
@@ -532,6 +536,8 @@ mod tests {
             pipeline_stage: Some(DaemonIngestPipelineStage::HddWrite),
             work_bytes_done: 150,
             work_bytes_total: Some(100),
+            source_bytes_done: Some(75),
+            source_bytes_total: Some(100),
             stage_bytes_done: Some(150),
             stage_bytes_total: Some(100),
             files_done: 1,
@@ -594,6 +600,8 @@ mod tests {
             serde_json::from_value(encoded).expect("legacy progress event deserializes");
 
         assert_eq!(event.pipeline_stage, None);
+        assert_eq!(event.source_bytes_done, None);
+        assert_eq!(event.source_bytes_total, None);
         assert_eq!(event.telemetry, None);
         assert_eq!(event.resource_policy, None);
     }

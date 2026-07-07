@@ -149,6 +149,8 @@ impl LocalFileIngestExecutor {
             pipeline_stage: Some(DaemonIngestPipelineStage::Scan),
             work_bytes_done: 0,
             work_bytes_total: Some(total_work_bytes),
+            source_bytes_done: Some(0),
+            source_bytes_total: Some(source_bytes),
             stage_bytes_done: Some(0),
             stage_bytes_total: Some(source_bytes),
             files_done: 0,
@@ -173,6 +175,8 @@ impl LocalFileIngestExecutor {
                 pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
                 work_bytes_done: 0,
                 work_bytes_total: Some(total_work_bytes),
+                source_bytes_done: Some(0),
+                source_bytes_total: Some(source_bytes),
                 stage_bytes_done: Some(0),
                 stage_bytes_total: Some(0),
                 files_done: files.len() as u64,
@@ -188,6 +192,7 @@ impl LocalFileIngestExecutor {
 
         let mut completed_files = 0_u64;
         let mut completed_work_bytes = 0_u64;
+        let mut completed_source_bytes = 0_u64;
         for entry in &files {
             let mut stage_key = String::new();
             let mut stage_offset_bytes = 0_u64;
@@ -215,12 +220,17 @@ impl LocalFileIngestExecutor {
                     .saturating_sub(stage_offset_bytes);
                 stage_offset_bytes = object_progress.bytes_written;
                 completed_work_bytes = completed_work_bytes.saturating_add(delta);
+                let current_source_bytes = completed_source_bytes.saturating_add(
+                    source_bytes_for_object_progress(&object_progress, entry.size_bytes),
+                );
                 progress(object_progress_event(
                     job_id,
                     &request.endpoint,
                     entry,
                     completed_work_bytes,
                     total_work_bytes,
+                    current_source_bytes,
+                    source_bytes,
                     completed_files,
                     files.len() as u64,
                     &object_progress,
@@ -236,6 +246,7 @@ impl LocalFileIngestExecutor {
                 })
             })?;
             completed_files = completed_files.saturating_add(1);
+            completed_source_bytes = completed_source_bytes.saturating_add(entry.size_bytes);
             progress(DaemonIngestProgressEvent {
                 job_id: job_id.clone(),
                 endpoint: request.endpoint.clone(),
@@ -243,6 +254,8 @@ impl LocalFileIngestExecutor {
                 pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
                 work_bytes_done: completed_work_bytes,
                 work_bytes_total: Some(total_work_bytes),
+                source_bytes_done: Some(completed_source_bytes),
+                source_bytes_total: Some(source_bytes),
                 stage_bytes_done: Some(entry.size_bytes),
                 stage_bytes_total: Some(entry.size_bytes),
                 files_done: completed_files,
@@ -265,6 +278,8 @@ impl LocalFileIngestExecutor {
             pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
             work_bytes_done: total_work_bytes,
             work_bytes_total: Some(total_work_bytes),
+            source_bytes_done: Some(source_bytes),
+            source_bytes_total: Some(source_bytes),
             stage_bytes_done: Some(0),
             stage_bytes_total: Some(0),
             files_done: files.len() as u64,
@@ -286,6 +301,8 @@ fn object_progress_event(
     entry: &FileIngestEntry,
     completed_work_bytes: u64,
     total_work_bytes: u64,
+    source_bytes_done: u64,
+    source_bytes_total: u64,
     completed_files: u64,
     total_files: u64,
     progress: &ObjectPutProgress,
@@ -297,6 +314,8 @@ fn object_progress_event(
         pipeline_stage: Some(pipeline_stage_for_object_progress(progress)),
         work_bytes_done: completed_work_bytes,
         work_bytes_total: Some(total_work_bytes),
+        source_bytes_done: Some(source_bytes_done),
+        source_bytes_total: Some(source_bytes_total),
         stage_bytes_done: Some(progress.bytes_written),
         stage_bytes_total: Some(entry.size_bytes),
         files_done: completed_files,
@@ -306,6 +325,13 @@ fn object_progress_event(
         telemetry: None,
         resource_policy: None,
         message: Some(stage_message_for_object_progress(progress, entry)),
+    }
+}
+
+fn source_bytes_for_object_progress(progress: &ObjectPutProgress, entry_size_bytes: u64) -> u64 {
+    match progress.stage {
+        ObjectPutProgressStage::SsdIngest => progress.bytes_written.min(entry_size_bytes),
+        ObjectPutProgressStage::HddCopy { .. } => entry_size_bytes,
     }
 }
 
@@ -750,6 +776,7 @@ mod tests {
             subobject_registry_path,
         };
 
+        let mut progress_events = Vec::new();
         let response = executor
             .submit(
                 SubmitIngestFilesRequest {
@@ -762,7 +789,10 @@ mod tests {
                     client_request_id: None,
                 },
                 "2026-07-07T10:27:12Z",
-                |_| Ok(()),
+                |event| {
+                    progress_events.push(event);
+                    Ok(())
+                },
             )
             .expect("dry run succeeds");
 
@@ -772,6 +802,11 @@ mod tests {
         );
         assert!(response.dry_run);
         assert!(!ssd_root.join("ingest").exists());
+        let planned = progress_events.first().expect("planned progress event");
+        assert_eq!(planned.source_bytes_done, Some(0));
+        assert_eq!(planned.source_bytes_total, Some(4));
+        assert_eq!(planned.work_bytes_done, 0);
+        assert_eq!(planned.work_bytes_total, Some(8));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

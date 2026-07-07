@@ -828,6 +828,8 @@ mod tests {
                 pipeline_stage: Some(crate::api::DaemonIngestPipelineStage::Scan),
                 work_bytes_done: 0,
                 work_bytes_total: Some(0),
+                source_bytes_done: Some(0),
+                source_bytes_total: Some(0),
                 stage_bytes_done: Some(0),
                 stage_bytes_total: Some(0),
                 files_done: 0,

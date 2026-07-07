@@ -5134,6 +5134,8 @@ mod tests {
             pipeline_stage: None,
             work_bytes_done: 512,
             work_bytes_total: Some(1024),
+            source_bytes_done: Some(512),
+            source_bytes_total: Some(1024),
             stage_bytes_done: Some(512),
             stage_bytes_total: Some(1024),
             files_done: 2,

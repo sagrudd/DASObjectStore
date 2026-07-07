@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.3 - 2026-07-07
+
+- Distinguish logical source data size from replicated SSD/HDD work in ingest
+  progress events and the embedded upload TUI, so `Data` matches the source
+  dataset while `Work` reports the full storage pipeline IO.
+
 ## 0.3.2 - 2026-07-07
 
 - Keep upload rate information visible in `dasobjectstore ingest files --tui`

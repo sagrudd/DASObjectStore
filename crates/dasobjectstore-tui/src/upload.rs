@@ -180,7 +180,7 @@ where
                     .constraints([
                         Constraint::Length(8),
                         Constraint::Length(3),
-                        Constraint::Length(7),
+                        Constraint::Length(8),
                         Constraint::Min(5),
                     ])
                     .split(frame.area());
@@ -301,13 +301,22 @@ fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'sta
                 .unwrap_or_else(|| "unknown".to_string())
         )),
         Line::from(format!(
-            "Bytes: {}/{}    Rate: {}",
+            "Data: {}/{}    Rate: {}",
+            format_size_label(event.source_bytes_done.unwrap_or(event.work_bytes_done)),
+            event
+                .source_bytes_total
+                .or(event.work_bytes_total)
+                .map(format_size_label)
+                .unwrap_or_else(|| "unknown".to_string()),
+            speed
+        )),
+        Line::from(format!(
+            "Work: {}/{}",
             format_size_label(event.work_bytes_done),
             event
                 .work_bytes_total
                 .map(format_size_label)
-                .unwrap_or_else(|| "unknown".to_string()),
-            speed
+                .unwrap_or_else(|| "unknown".to_string())
         )),
         Line::from(format!(
             "Current object: {}",
@@ -489,6 +498,8 @@ mod tests {
             pipeline_stage: Some(DaemonIngestPipelineStage::HddWrite),
             work_bytes_done: 5 * 1024 * 1024 * 1024,
             work_bytes_total: Some(4 * 1024 * 1024 * 1024 * 1024),
+            source_bytes_done: Some(5 * 1024 * 1024 * 1024),
+            source_bytes_total: Some(2 * 1024 * 1024 * 1024 * 1024),
             stage_bytes_done: Some(512 * 1024 * 1024),
             stage_bytes_total: Some(2 * 1024 * 1024 * 1024),
             files_done: 1,
@@ -505,7 +516,8 @@ mod tests {
             std::time::Duration::from_secs(10),
         );
         let details = format!("{:?}", super::detail_lines(&event, &speed));
-        assert!(details.contains("Bytes: 5.0 GiB/4.0 TiB"));
+        assert!(details.contains("Data: 5.0 GiB/2.0 TiB"));
+        assert!(details.contains("Work: 5.0 GiB/4.0 TiB"));
         assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
         assert!(format!("{:?}", super::queue_lines(&event))
             .contains("HDD migration: 512.0 MiB/2.0 GiB"));
