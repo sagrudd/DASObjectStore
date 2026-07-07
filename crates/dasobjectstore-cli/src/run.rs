@@ -7,7 +7,7 @@ use crate::cli::{
     MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
     ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs,
     ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs,
-    StoreCommand, StoreCreateArgs, StoreDefaultsArgs, StoreValidateArgs,
+    StoreCommand, StoreCreateArgs, StoreDefaultsArgs, StoreListArgs, StoreValidateArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -28,6 +28,7 @@ use self::output::{
     write_object_export_report, write_object_inspect_summary, write_object_put_report,
     write_pool_import_report, write_pool_inspect_summary, write_pool_repair_dry_run,
     write_prepare_das_report, write_pretty_report, write_store_create_report,
+    write_store_list_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -101,6 +102,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Store(args)) => match args.command() {
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
+            Some(StoreCommand::List(args)) => run_store_list(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Ok(()),
         },
@@ -803,6 +805,23 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         writer.write_all(b"\n")?;
     } else {
         write_store_create_report(&report, writer)?;
+    }
+
+    Ok(())
+}
+
+fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_store_registry_path);
+    let definitions = read_store_registry(&registry_path)?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &definitions)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_store_list_report(&definitions, writer)?;
     }
 
     Ok(())
@@ -2015,6 +2034,75 @@ mod tests {
             definitions[0].bucket_name.as_deref(),
             Some("generated-data")
         );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_list_reads_system_registry_definitions() {
+        let root = temp_root("store-list");
+        fs::create_dir_all(&root).expect("create temp root");
+        let registry_path = root.join("stores.json");
+        write_store_definitions_file(
+            &registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("generated-data").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+                bucket_name: Some("generated-data".to_string()),
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "list",
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+        ])
+        .expect("store list parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store list runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Object stores: 1"));
+        assert!(output.contains("generated-data"));
+        assert!(output.contains("class=generated_data"));
+        assert!(output.contains("copies=2"));
+        assert!(output.contains("bucket=generated-data"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_list_writes_json() {
+        let root = temp_root("store-list-json");
+        fs::create_dir_all(&root).expect("create temp root");
+        let registry_path = root.join("stores.json");
+        write_store_definitions_file(
+            &registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("public-reference").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+                bucket_name: None,
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "list",
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+            "--json",
+        ])
+        .expect("store list parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store list runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("store list output is json");
+        assert_eq!(output[0]["store_id"], "public-reference");
+        assert_eq!(output[0]["policy"]["class"], "ReproducibleCache");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

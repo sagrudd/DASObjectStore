@@ -11,7 +11,7 @@ use dasobjectstore_metadata::{
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
 };
-use dasobjectstore_object_service::StoreRegistryUpdateReport;
+use dasobjectstore_object_service::{StoreRegistryUpdateReport, StoreServiceDefinition};
 use dasobjectstore_platform::{ObservedDisk, ObservedEnclosure, ProbeReport};
 use std::io::{self, Write};
 
@@ -636,6 +636,33 @@ pub(super) fn write_store_create_report(
         writeln!(writer, "Credential reference: {credential_reference}")?;
     }
     writeln!(writer, "Registry: system-managed")
+}
+
+pub(super) fn write_store_list_report(
+    definitions: &[StoreServiceDefinition],
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Object stores: {}", definitions.len())?;
+    if definitions.is_empty() {
+        writeln!(writer, "No object stores are defined")?;
+        return Ok(());
+    }
+
+    for definition in definitions {
+        let bucket = definition.bucket_name.as_deref().unwrap_or("(default)");
+        writeln!(
+            writer,
+            "- {} class={} copies={} bucket={} ingest={:?} export={:?}",
+            definition.store_id,
+            definition.policy.class.name(),
+            definition.policy.copies,
+            bucket,
+            definition.policy.ingest_mode,
+            definition.policy.export_policy
+        )?;
+    }
+
+    Ok(())
 }
 
 pub(super) fn write_object_put_report(

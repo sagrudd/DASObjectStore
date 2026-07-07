@@ -501,6 +501,8 @@ pub(crate) enum StoreCommand {
     Create(StoreCreateArgs),
     /// Emit the built-in JSON policy defaults for a store class.
     Defaults(StoreDefaultsArgs),
+    /// List system-managed object stores.
+    List(StoreListArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
 }
@@ -543,6 +545,26 @@ impl StoreCreateArgs {
         self.bucket.as_deref()
     }
 
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreListArgs {
+    /// Emit store definitions as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl StoreListArgs {
     pub(crate) fn json(&self) -> bool {
         self.json
     }
@@ -1834,6 +1856,23 @@ mod tests {
                 assert_eq!(create.registry_path(), None);
             }
             _ => panic!("expected create command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_list() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "store", "list", "--json"])
+            .expect("store list parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::List(list)) => {
+                assert!(list.json());
+                assert_eq!(list.registry_path(), None);
+            }
+            _ => panic!("expected list command"),
         }
     }
 
