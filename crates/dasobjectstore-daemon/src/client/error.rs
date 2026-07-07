@@ -1,6 +1,5 @@
 use crate::api::{DaemonJobValidationError, DaemonRequestValidationError};
 use std::fmt::{self, Display};
-use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum DaemonClientError {
@@ -10,9 +9,6 @@ pub enum DaemonClientError {
     UnexpectedResponse {
         expected: &'static str,
         actual: &'static str,
-    },
-    UnixSocketTransportPlanned {
-        socket_path: PathBuf,
     },
 }
 
@@ -28,11 +24,6 @@ impl Display for DaemonClientError {
                     "daemon returned {actual} response where {expected} was expected"
                 )
             }
-            Self::UnixSocketTransportPlanned { socket_path } => write!(
-                formatter,
-                "Unix-domain socket daemon transport is planned but not implemented yet: {}",
-                socket_path.display()
-            ),
         }
     }
 }

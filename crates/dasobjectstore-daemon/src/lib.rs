@@ -36,8 +36,9 @@ pub use runtime::{
     LINUX_DAEMON_STATE_DIR,
 };
 pub use server::{
-    DaemonClock, DaemonRequestHandler, DaemonRequestHandlerError, DaemonServiceOrchestrator,
-    FixedDaemonClock, SystemDaemonClock,
+    DaemonApiHandler, DaemonClock, DaemonRequestHandler, DaemonRequestHandlerError,
+    DaemonServiceOrchestrator, FixedDaemonClock, SystemDaemonClock, UnixSocketDaemonServer,
+    UnixSocketDaemonServerError,
 };
 
 /// Returns the daemon crate version.

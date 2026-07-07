@@ -235,7 +235,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   status parsing on 2026-07-07.
 - [x] Wire daemon Garage lifecycle execution into a reusable `dasobjectstored`
   request handler.
-- [ ] Add the long-running Unix-domain socket listener loop that dispatches
+- [x] Add the long-running Unix-domain socket listener loop that dispatches
   requests through the `dasobjectstored` request handler.
 - [ ] Implement daemon-owned Garage bucket provisioning and per-store key
   permissions from store registry bindings.

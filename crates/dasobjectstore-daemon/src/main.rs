@@ -1,4 +1,9 @@
-use dasobjectstore_daemon::{DaemonRuntimeConfig, DEFAULT_DAEMON_CONFIG_PATH};
+use dasobjectstore_daemon::{
+    DaemonRequestHandler, DaemonRuntimeConfig, GarageServiceController, GarageServiceRuntimeConfig,
+    SystemDaemonClock, SystemServiceCommandRunner, UnixSocketDaemonServer,
+    DEFAULT_DAEMON_CONFIG_PATH,
+};
+use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
@@ -29,7 +34,36 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
-    Err("dasobjectstored runtime loop is not implemented yet; use --check-config for package validation".to_string())
+    let garage =
+        GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner);
+    let handler = DaemonRequestHandler::new(garage, SystemDaemonClock);
+    let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
+    println!(
+        "dasobjectstored listening on {}",
+        server.socket_path().display()
+    );
+    server.serve_forever().map_err(|err| err.to_string())
+}
+
+fn garage_runtime_config(
+    config: &DaemonRuntimeConfig,
+) -> Result<GarageServiceRuntimeConfig, String> {
+    let config_dir = config.config_path.parent().ok_or_else(|| {
+        format!(
+            "daemon config path has no parent: {}",
+            config.config_path.display()
+        )
+    })?;
+    Ok(GarageServiceRuntimeConfig {
+        compose_file: config_dir.join("garage.compose.yml"),
+        project_directory: Some(config.state_dir.join("garage")),
+        compose_project: "dasobjectstore".to_string(),
+        service_name: "garage".to_string(),
+        config_path: PathBuf::from(DEFAULT_GARAGE_CONFIG_PATH),
+        metadata_path: config.state_dir.join("garage/meta"),
+        data_path: PathBuf::from("/srv/dasobjectstore/hdd/garage"),
+        endpoint: format!("http://127.0.0.1:{DEFAULT_GARAGE_API_PORT}"),
+    })
 }
 
 fn read_config(path: &PathBuf) -> Result<DaemonRuntimeConfig, String> {
@@ -81,7 +115,8 @@ impl DaemonArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::DaemonArgs;
+    use super::{garage_runtime_config, DaemonArgs};
+    use dasobjectstore_daemon::DaemonRuntimeConfig;
     use std::path::PathBuf;
 
     #[test]
@@ -105,5 +140,22 @@ mod tests {
         let err = DaemonArgs::parse(["--config".to_string()]).expect_err("missing path rejected");
 
         assert_eq!(err, "--config requires a path");
+    }
+
+    #[test]
+    fn derives_garage_runtime_paths_from_daemon_config() {
+        let config = DaemonRuntimeConfig::linux_packaged();
+
+        let garage = garage_runtime_config(&config).expect("garage config");
+
+        assert_eq!(
+            garage.compose_file,
+            PathBuf::from("/etc/dasobjectstore/garage.compose.yml")
+        );
+        assert_eq!(
+            garage.project_directory,
+            Some(PathBuf::from("/var/lib/dasobjectstore/garage"))
+        );
+        assert_eq!(garage.endpoint, "http://127.0.0.1:3900");
     }
 }
