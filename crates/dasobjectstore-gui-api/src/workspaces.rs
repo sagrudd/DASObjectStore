@@ -3,6 +3,7 @@ use crate::dashboard::{
     ObjectStateView, PoolStatusView,
 };
 use crate::endpoints::EndpointInventoryView;
+use crate::{LocalUserMetadata, UserSummary, SUDO_ADMIN_GROUPS};
 use serde::{Deserialize, Serialize};
 
 pub const OPERATIONS_WORKSPACES_SCHEMA_VERSION: &str = "dasobjectstore.operations_workspaces.v1";
@@ -18,9 +19,11 @@ pub struct OperationsWorkspacesView {
     pub objects: ObjectsWorkspaceView,
     pub endpoints: EndpointsWorkspaceView,
     pub activity: ActivityWorkspaceView,
+    pub users_groups: Option<UsersGroupsWorkspaceView>,
 }
 
 impl OperationsWorkspacesView {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         active_workspace: OperationsWorkspaceKindView,
         overview: OverviewWorkspaceView,
@@ -29,6 +32,7 @@ impl OperationsWorkspacesView {
         objects: ObjectsWorkspaceView,
         endpoints: EndpointsWorkspaceView,
         activity: ActivityWorkspaceView,
+        users_groups: Option<UsersGroupsWorkspaceView>,
     ) -> Self {
         Self {
             schema_version: OPERATIONS_WORKSPACES_SCHEMA_VERSION.to_string(),
@@ -40,6 +44,7 @@ impl OperationsWorkspacesView {
             objects,
             endpoints,
             activity,
+            users_groups,
         }
     }
 }
@@ -53,6 +58,7 @@ pub enum OperationsWorkspaceKindView {
     Objects,
     Endpoints,
     Activity,
+    UsersGroups,
 }
 
 impl OperationsWorkspaceKindView {
@@ -64,6 +70,7 @@ impl OperationsWorkspaceKindView {
             Self::Objects => "Objects",
             Self::Endpoints => "Endpoints",
             Self::Activity => "Activity",
+            Self::UsersGroups => "Users/Groups",
         }
     }
 
@@ -75,6 +82,7 @@ impl OperationsWorkspaceKindView {
             Self::Objects => "objects",
             Self::Endpoints => "endpoints",
             Self::Activity => "activity",
+            Self::UsersGroups => "users-groups",
         }
     }
 }
@@ -110,6 +118,7 @@ pub fn workspace_navigation(
         OperationsWorkspaceKindView::Objects,
         OperationsWorkspaceKindView::Endpoints,
         OperationsWorkspaceKindView::Activity,
+        OperationsWorkspaceKindView::UsersGroups,
     ]
     .into_iter()
     .map(|workspace| WorkspaceNavigationItemView::new(workspace, active))
@@ -325,29 +334,177 @@ pub enum ActivityTaskStateView {
     Failed,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UsersGroupsWorkspaceView {
+    pub host_mode: UsersGroupsHostModeView,
+    pub current_user: Option<LocalUserAuthorityView>,
+    pub users: Vec<StandaloneUserAccountView>,
+    pub groups: Vec<LocalGroupMembershipView>,
+    pub capabilities: UsersGroupsCapabilitiesView,
+    pub selected_username: Option<String>,
+    pub selected_group_name: Option<String>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+impl UsersGroupsWorkspaceView {
+    pub fn standalone(
+        current_user: Option<LocalUserMetadata>,
+        users: Vec<UserSummary>,
+        mut warnings: Vec<DashboardWarning>,
+    ) -> Self {
+        let administrator_actions_enabled = current_user
+            .as_ref()
+            .is_some_and(|user| user.sudo_administrator);
+
+        if current_user.is_some() && !administrator_actions_enabled {
+            warnings.push(DashboardWarning::new(
+                "standalone_admin_authority_missing",
+                "Current OS user is not a sudo-derived DASObjectStore administrator.",
+            ));
+        }
+
+        let groups = current_user
+            .as_ref()
+            .map(local_group_memberships)
+            .unwrap_or_default();
+
+        Self {
+            host_mode: UsersGroupsHostModeView::Standalone,
+            current_user: current_user.map(LocalUserAuthorityView::from),
+            users: users
+                .into_iter()
+                .map(StandaloneUserAccountView::from)
+                .collect(),
+            groups,
+            capabilities: UsersGroupsCapabilitiesView {
+                product_local_user_registration: true,
+                os_local_user_management: administrator_actions_enabled,
+                os_local_group_management: administrator_actions_enabled,
+                administrator_actions_enabled,
+            },
+            selected_username: None,
+            selected_group_name: None,
+            warnings,
+        }
+    }
+
+    pub fn synoptikon_integrated() -> Self {
+        Self {
+            host_mode: UsersGroupsHostModeView::SynoptikonIntegrated,
+            current_user: None,
+            users: Vec::new(),
+            groups: Vec::new(),
+            capabilities: UsersGroupsCapabilitiesView {
+                product_local_user_registration: false,
+                os_local_user_management: false,
+                os_local_group_management: false,
+                administrator_actions_enabled: false,
+            },
+            selected_username: None,
+            selected_group_name: None,
+            warnings: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsersGroupsHostModeView {
+    Standalone,
+    SynoptikonIntegrated,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalUserAuthorityView {
+    pub username: String,
+    pub groups: Vec<String>,
+    pub sudo_administrator: bool,
+}
+
+impl From<LocalUserMetadata> for LocalUserAuthorityView {
+    fn from(user: LocalUserMetadata) -> Self {
+        Self {
+            username: user.username,
+            groups: user.groups,
+            sudo_administrator: user.sudo_administrator,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneUserAccountView {
+    pub username: String,
+    pub registered: bool,
+    pub created_at_unix_seconds: i64,
+    pub registered_at_unix_seconds: Option<i64>,
+    pub active_session_count: usize,
+}
+
+impl From<UserSummary> for StandaloneUserAccountView {
+    fn from(user: UserSummary) -> Self {
+        Self {
+            username: user.username,
+            registered: user.registered,
+            created_at_unix_seconds: user.created_at_unix_seconds,
+            registered_at_unix_seconds: user.registered_at_unix_seconds,
+            active_session_count: user.active_session_count,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LocalGroupMembershipView {
+    pub group_name: String,
+    pub current_user_member: bool,
+    pub sudo_administrator_group: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UsersGroupsCapabilitiesView {
+    pub product_local_user_registration: bool,
+    pub os_local_user_management: bool,
+    pub os_local_group_management: bool,
+    pub administrator_actions_enabled: bool,
+}
+
+fn local_group_memberships(user: &LocalUserMetadata) -> Vec<LocalGroupMembershipView> {
+    user.groups
+        .iter()
+        .map(|group| LocalGroupMembershipView {
+            group_name: group.clone(),
+            current_user_member: true,
+            sudo_administrator_group: SUDO_ADMIN_GROUPS.contains(&group.as_str()),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         workspace_navigation, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
-        ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, ObjectInventoryRowView,
+        ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView,
+        LocalGroupMembershipView, LocalUserAuthorityView, ObjectInventoryRowView,
         ObjectsWorkspaceView, OperationsWorkspaceKindView, OperationsWorkspacesView,
-        OverviewWorkspaceView, StorePolicySummaryView, StoresWorkspaceView,
-        OPERATIONS_WORKSPACES_SCHEMA_VERSION,
+        OverviewWorkspaceView, StandaloneUserAccountView, StorePolicySummaryView,
+        StoresWorkspaceView, UsersGroupsCapabilitiesView, UsersGroupsHostModeView,
+        UsersGroupsWorkspaceView, OPERATIONS_WORKSPACES_SCHEMA_VERSION,
     };
     use crate::dashboard::{DashboardAttentionView, ObjectStateView};
     use crate::endpoints::{EndpointInventoryItemView, EndpointInventoryView};
+    use crate::{LocalUserMetadata, UserSummary};
 
     #[test]
     fn builds_navigation_for_all_operations_workspaces() {
         let navigation = workspace_navigation(OperationsWorkspaceKindView::Endpoints);
 
-        assert_eq!(navigation.len(), 6);
+        assert_eq!(navigation.len(), 7);
         assert_eq!(navigation[0].route_segment, "overview");
         assert_eq!(
             navigation[4].workspace,
             OperationsWorkspaceKindView::Endpoints
         );
         assert!(navigation[4].selected);
+        assert_eq!(navigation[6].route_segment, "users-groups");
     }
 
     #[test]
@@ -359,6 +516,7 @@ mod tests {
         assert_eq!(encoded[0]["workspace"], "overview");
         assert_eq!(encoded[1]["workspace"], "disks");
         assert_eq!(encoded[1]["selected"], true);
+        assert_eq!(encoded[6]["workspace"], "users_groups");
     }
 
     #[test]
@@ -423,6 +581,7 @@ mod tests {
                 inventory: endpoints,
             },
             activity,
+            Some(UsersGroupsWorkspaceView::synoptikon_integrated()),
         );
 
         let encoded = serde_json::to_value(view).expect("workspace payload serializes");
@@ -434,12 +593,16 @@ mod tests {
         assert_eq!(encoded["active_workspace"], "overview");
         assert_eq!(
             encoded["navigation"].as_array().expect("navigation").len(),
-            6
+            7
         );
         assert_eq!(encoded["stores"]["stores"][0]["store_id"], "raw-public");
         assert_eq!(
             encoded["activity"]["tasks"][0]["kind"],
             "endpoint_validation"
+        );
+        assert_eq!(
+            encoded["users_groups"]["host_mode"],
+            "synoptikon_integrated"
         );
     }
 
@@ -514,5 +677,83 @@ mod tests {
         assert_eq!(encoded["destage"], serde_json::Value::Null);
         assert_eq!(encoded["tasks"].as_array().expect("tasks").len(), 0);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+    }
+
+    #[test]
+    fn builds_standalone_users_groups_workspace() {
+        let view = UsersGroupsWorkspaceView::standalone(
+            Some(LocalUserMetadata::from_username_and_groups(
+                "operator",
+                vec!["mnemosyne".to_string(), "sudo".to_string()],
+            )),
+            vec![UserSummary {
+                username: "operator".to_string(),
+                registered: true,
+                created_at_unix_seconds: 10,
+                registered_at_unix_seconds: Some(20),
+                active_session_count: 1,
+            }],
+            Vec::new(),
+        );
+
+        assert_eq!(view.host_mode, UsersGroupsHostModeView::Standalone);
+        assert_eq!(
+            view.current_user,
+            Some(LocalUserAuthorityView {
+                username: "operator".to_string(),
+                groups: vec!["mnemosyne".to_string(), "sudo".to_string()],
+                sudo_administrator: true,
+            })
+        );
+        assert_eq!(
+            view.users,
+            vec![StandaloneUserAccountView {
+                username: "operator".to_string(),
+                registered: true,
+                created_at_unix_seconds: 10,
+                registered_at_unix_seconds: Some(20),
+                active_session_count: 1,
+            }]
+        );
+        assert_eq!(
+            view.groups,
+            vec![
+                LocalGroupMembershipView {
+                    group_name: "mnemosyne".to_string(),
+                    current_user_member: true,
+                    sudo_administrator_group: false,
+                },
+                LocalGroupMembershipView {
+                    group_name: "sudo".to_string(),
+                    current_user_member: true,
+                    sudo_administrator_group: true,
+                }
+            ]
+        );
+        assert_eq!(
+            view.capabilities,
+            UsersGroupsCapabilitiesView {
+                product_local_user_registration: true,
+                os_local_user_management: true,
+                os_local_group_management: true,
+                administrator_actions_enabled: true,
+            }
+        );
+        assert!(view.warnings.is_empty());
+    }
+
+    #[test]
+    fn standalone_users_groups_warns_for_non_admin_actor() {
+        let view = UsersGroupsWorkspaceView::standalone(
+            Some(LocalUserMetadata::from_username_and_groups(
+                "viewer",
+                vec!["users".to_string()],
+            )),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert!(!view.capabilities.administrator_actions_enabled);
+        assert_eq!(view.warnings[0].code, "standalone_admin_authority_missing");
     }
 }

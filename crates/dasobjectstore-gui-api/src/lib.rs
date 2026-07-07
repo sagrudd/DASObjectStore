@@ -17,10 +17,10 @@ pub use actions::{
     GuiActionKind, GuiActionPlan, GuiActionPlanError, GuiActionPlanRequest, GuiActionSafety,
 };
 pub use auth::{
-    AuthRegistry, AuthTokenResetReport, AuthenticatedUser, LocalAuthStore, LocalAuthStoreError,
-    LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, LogoutResponse, RegisterResponse,
-    RegistrationTokenRecord, SessionCheckResponse, SessionTokenRecord, UserSummary,
-    SUDO_ADMIN_GROUPS,
+    discover_current_local_user, AuthRegistry, AuthTokenResetReport, AuthenticatedUser,
+    LocalAuthStore, LocalAuthStoreError, LocalUserDiscoveryError, LocalUserMetadata, LoginResponse,
+    LogoutResponse, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
+    SessionTokenRecord, UserSummary, SUDO_ADMIN_GROUPS,
 };
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
@@ -56,9 +56,11 @@ pub use tls_assets::{
 };
 pub use workspaces::{
     workspace_navigation, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
-    ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, ObjectInventoryFiltersView,
-    ObjectInventoryRowView, ObjectsWorkspaceView, OperationsWorkspaceKindView,
-    OperationsWorkspacesView, OverviewWorkspaceView, StorePolicySummaryView, StoresWorkspaceView,
+    ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, LocalGroupMembershipView,
+    LocalUserAuthorityView, ObjectInventoryFiltersView, ObjectInventoryRowView,
+    ObjectsWorkspaceView, OperationsWorkspaceKindView, OperationsWorkspacesView,
+    OverviewWorkspaceView, StandaloneUserAccountView, StorePolicySummaryView, StoresWorkspaceView,
+    UsersGroupsCapabilitiesView, UsersGroupsHostModeView, UsersGroupsWorkspaceView,
     WorkspaceNavigationItemView, OPERATIONS_WORKSPACES_SCHEMA_VERSION,
 };
 

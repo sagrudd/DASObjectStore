@@ -1,8 +1,14 @@
 use crate::{
-    LocalAuthStore, LocalAuthStoreError, LoginResponse, LogoutResponse, RegisterResponse,
-    SessionCheckResponse,
+    discover_current_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
+    LocalAuthStoreError, LoginResponse, LogoutResponse, RegisterResponse, SessionCheckResponse,
+    UsersGroupsWorkspaceView,
 };
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
+    Extension, Json, Router,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -21,9 +27,9 @@ pub fn gui_api_router_for_host_mode(
     auth_store: LocalAuthStore,
 ) -> Router {
     match host_mode {
-        GuiApiHostMode::Standalone => {
-            crate::gui_api_router().merge(standalone_auth_router(auth_store))
-        }
+        GuiApiHostMode::Standalone => crate::gui_api_router()
+            .merge(standalone_auth_router(auth_store.clone()))
+            .merge(standalone_users_groups_router(auth_store)),
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
 }
@@ -34,6 +40,16 @@ pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/session", post(session))
+        .with_state(auth_store)
+}
+
+pub fn standalone_users_groups_router(auth_store: LocalAuthStore) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/workspaces/users-groups",
+            get(users_groups_workspace),
+        )
+        .layer(Extension(auth_store.clone()))
         .with_state(auth_store)
 }
 
@@ -113,6 +129,29 @@ async fn session(
         .map_err(auth_route_error)
 }
 
+async fn users_groups_workspace(
+    State(auth_store): State<LocalAuthStore>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<UsersGroupsWorkspaceView>, (StatusCode, Json<AuthRouteError>)> {
+    let users = auth_store.list_users().map_err(auth_route_error)?;
+    let (current_user, warnings) = match discover_current_local_user() {
+        Ok(user) => (Some(user), Vec::new()),
+        Err(err) => (
+            None,
+            vec![DashboardWarning {
+                code: "local_user_discovery_failed".to_string(),
+                message: err.to_string(),
+            }],
+        ),
+    };
+
+    Ok(Json(UsersGroupsWorkspaceView::standalone(
+        current_user,
+        users,
+        warnings,
+    )))
+}
+
 fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteError>) {
     let status = match err {
         LocalAuthStoreError::UserNameRequired | LocalAuthStoreError::PasswordRequired => {
@@ -148,7 +187,9 @@ mod tests {
         gui_api_router_for_host_mode, standalone_auth_router, GuiApiHostMode, LoginRequest,
         LogoutRequest, RegisterRequest, SessionCheckRequest,
     };
-    use crate::{LocalAuthStore, LoginResponse};
+    use crate::{
+        LocalAuthStore, LoginResponse, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+    };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use serde::de::DeserializeOwned;
@@ -349,6 +390,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standalone_users_groups_workspace_requires_session() {
+        let root = temp_root("standalone-users-groups-auth");
+        let auth_store = registered_auth_store(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/workspaces/users-groups")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_users_groups_workspace_returns_authority_payload() {
+        let root = temp_root("standalone-users-groups");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/workspaces/users-groups")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&bytes).expect("response decodes");
+
+        assert_eq!(encoded["host_mode"], "standalone");
+        assert_eq!(encoded["users"][0]["username"], "admin");
+        assert_eq!(encoded["users"][0]["registered"], true);
+        assert_eq!(
+            encoded["capabilities"]["product_local_user_registration"],
+            true
+        );
+        assert!(encoded["current_user"].is_object() || encoded["warnings"].is_array());
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn synoptikon_integrated_host_mode_omits_local_auth_routes() {
         let root = temp_root("integrated-host-mode");
         let auth_store = LocalAuthStore::new(&root);
@@ -369,6 +470,28 @@ mod tests {
 
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
         }
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn synoptikon_integrated_host_mode_omits_users_groups_workspace() {
+        let root = temp_root("integrated-users-groups");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::SynoptikonIntegrated, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/workspaces/users-groups")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         cleanup(&root);
     }

@@ -29,7 +29,8 @@ main[data-host] {
 .dos-stores,
 .dos-objects,
 .dos-endpoints,
-.dos-activity {
+.dos-activity,
+.dos-users-groups {
   max-width: 1280px;
   margin: 0 auto;
 }
@@ -39,7 +40,8 @@ main[data-host] {
 .dos-stores__header,
 .dos-objects__header,
 .dos-endpoints__header,
-.dos-activity__header {
+.dos-activity__header,
+.dos-users-groups__header {
   margin-bottom: 20px;
 }
 
@@ -64,7 +66,8 @@ h2 {
 .dos-stores__layout,
 .dos-objects__layout,
 .dos-endpoints__layout,
-.dos-activity__layout {
+.dos-activity__layout,
+.dos-users-groups__layout {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
@@ -75,7 +78,8 @@ h2 {
 .dos-stores__panel,
 .dos-objects__panel,
 .dos-endpoints__panel,
-.dos-activity__panel {
+.dos-activity__panel,
+.dos-users-groups__panel {
   min-height: 138px;
   padding: 18px;
   border: 1px solid #d5dddc;
@@ -89,7 +93,8 @@ h2 {
 .dos-stores__panel::after,
 .dos-objects__panel::after,
 .dos-endpoints__panel::after,
-.dos-activity__panel::after {
+.dos-activity__panel::after,
+.dos-users-groups__panel::after {
   content: attr(data-panel);
   display: block;
   margin-top: 42px;
@@ -107,7 +112,8 @@ h2 {
   .dos-stores__layout,
   .dos-objects__layout,
   .dos-endpoints__layout,
-  .dos-activity__layout {
+  .dos-activity__layout,
+  .dos-users-groups__layout {
     grid-template-columns: 1fr;
   }
 }
