@@ -154,7 +154,12 @@ fn prepare_device(
         for command in &commands {
             command.run()?;
         }
-        write_device_marker(&mount_point, device, request.filesystem)?;
+        write_device_marker(
+            &mount_point,
+            device,
+            request.filesystem,
+            request.owner.as_deref(),
+        )?;
     }
 
     Ok(PrepareDasTargetReport {
@@ -286,6 +291,7 @@ fn write_device_marker(
     mount_point: &Path,
     device: &PrepareDasDevice,
     filesystem: PrepareFilesystem,
+    owner: Option<&str>,
 ) -> Result<(), PrepareDasError> {
     let marker_dir = mount_point.join(".dasobjectstore");
     fs::create_dir_all(&marker_dir)?;
@@ -296,6 +302,17 @@ fn write_device_marker(
         filesystem.name()
     );
     fs::write(marker_dir.join("device.env"), marker)?;
+    if let Some(owner) = owner {
+        ManagedCommand::new(
+            "chown",
+            vec![
+                "-R".into(),
+                format!("{owner}:{owner}"),
+                marker_dir.to_string_lossy().to_string(),
+            ],
+        )
+        .run()?;
+    }
     Ok(())
 }
 
