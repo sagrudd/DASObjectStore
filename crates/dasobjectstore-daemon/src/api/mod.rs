@@ -2,6 +2,7 @@
 
 mod health;
 mod ingest;
+mod jobs;
 mod stores;
 
 pub use health::{
@@ -12,6 +13,11 @@ pub use ingest::{
     CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestProgressEvent, DaemonIngestStage,
     DaemonRequestValidationError, IngestJobStatusRequest, IngestJobStatusResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+};
+pub use jobs::{
+    DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
+    DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress, DaemonJobState,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonJobValidationError,
 };
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 

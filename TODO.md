@@ -27,7 +27,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   daemon configuration type, and unit tests for default runtime paths.
 - [x] Define the daemon API contract for health summary, store inventory,
   ingest job submission, ingest progress events, job status, and cancellation.
-- [ ] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
+- [x] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
   view models, and Synoptikon adapters do not duplicate API shapes.
 - [ ] Add a daemon client abstraction with an in-process test transport and a
   planned Unix-domain socket transport.
