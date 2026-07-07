@@ -1,5 +1,6 @@
 pub const STORES_WORKSPACE_ROUTE: &str = "workspaces/stores";
 pub const STORE_CREATE_ACTION_ROUTE: &str = "actions/plan";
+pub const SUBOBJECT_CREATE_ACTION_ROUTE: &str = "actions/plan";
 
 pub fn stores_workspace_api_path(api_base_path: &str) -> String {
     format!(
@@ -17,6 +18,14 @@ pub fn store_create_action_api_path(api_base_path: &str) -> String {
     )
 }
 
+pub fn subobject_create_action_api_path(api_base_path: &str) -> String {
+    format!(
+        "{}/{}",
+        api_base_path.trim_end_matches('/'),
+        SUBOBJECT_CREATE_ACTION_ROUTE
+    )
+}
+
 #[cfg(target_arch = "wasm32")]
 use yew::prelude::*;
 
@@ -30,7 +39,8 @@ pub struct StoresWorkspaceProps {
 #[function_component(StoresWorkspace)]
 pub fn stores_workspace(props: &StoresWorkspaceProps) -> Html {
     let api_path = stores_workspace_api_path(&props.api_base_path);
-    let action_path = store_create_action_api_path(&props.api_base_path);
+    let store_create_action_path = store_create_action_api_path(&props.api_base_path);
+    let subobject_create_action_path = subobject_create_action_api_path(&props.api_base_path);
 
     html! {
         <section class="dos-stores" data-api-route={api_path}>
@@ -42,9 +52,17 @@ pub fn stores_workspace(props: &StoresWorkspaceProps) -> Html {
                     class="dos-stores__panel"
                     data-panel="objectstore-create"
                     data-action="store_create"
-                    data-action-route={action_path}
+                    data-action-route={store_create_action_path}
                 >
                     <h2>{ "ObjectStore Create" }</h2>
+                </section>
+                <section
+                    class="dos-stores__panel"
+                    data-panel="subobject-create"
+                    data-action="subobject_create"
+                    data-action-route={subobject_create_action_path}
+                >
+                    <h2>{ "SubObject Create" }</h2>
                 </section>
                 <section class="dos-stores__panel" data-panel="policy-create-modify">
                     <h2>{ "Policy Create and Modify" }</h2>
@@ -71,7 +89,9 @@ pub fn stores_workspace(props: &StoresWorkspaceProps) -> Html {
 
 #[cfg(test)]
 mod tests {
-    use super::{store_create_action_api_path, stores_workspace_api_path};
+    use super::{
+        store_create_action_api_path, stores_workspace_api_path, subobject_create_action_api_path,
+    };
 
     #[test]
     fn builds_stores_workspace_api_path() {
@@ -85,6 +105,14 @@ mod tests {
     fn builds_store_create_action_api_path() {
         assert_eq!(
             store_create_action_api_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/actions/plan"
+        );
+    }
+
+    #[test]
+    fn builds_subobject_create_action_api_path() {
+        assert_eq!(
+            subobject_create_action_api_path("/products/dasobjectstore/api/v1/"),
             "/products/dasobjectstore/api/v1/actions/plan"
         );
     }

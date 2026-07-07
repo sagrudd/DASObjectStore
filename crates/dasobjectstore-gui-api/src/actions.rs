@@ -40,6 +40,12 @@ impl GuiActionCatalog {
                     GuiActionSafety::ConfigurationMutation,
                     &["store_id", "store_class"],
                 ),
+                GuiActionDescriptor::confirmation_required(
+                    GuiActionKind::SubobjectCreate,
+                    "Create SubObject",
+                    GuiActionSafety::ConfigurationMutation,
+                    &["subobject_name", "parent_store_id_or_parent_subobject_name"],
+                ),
             ],
         }
     }
@@ -94,6 +100,7 @@ pub enum GuiActionKind {
     ServiceStop,
     PoolImportReadOnly,
     StoreCreate,
+    SubobjectCreate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -119,6 +126,9 @@ pub struct GuiActionPlanRequest {
     pub bucket: Option<String>,
     pub writer_group: Option<String>,
     pub ssd_root: Option<PathBuf>,
+    pub subobject_name: Option<String>,
+    pub parent_store_id: Option<String>,
+    pub parent_subobject_name: Option<String>,
 }
 
 impl Default for GuiActionPlanRequest {
@@ -136,6 +146,9 @@ impl Default for GuiActionPlanRequest {
             bucket: None,
             writer_group: None,
             ssd_root: None,
+            subobject_name: None,
+            parent_store_id: None,
+            parent_subobject_name: None,
         }
     }
 }
@@ -180,6 +193,7 @@ pub fn plan_action(request: GuiActionPlanRequest) -> Result<GuiActionPlan, GuiAc
         GuiActionKind::ServiceStop => plan_service_lifecycle(request, "down"),
         GuiActionKind::PoolImportReadOnly => plan_read_only_import(request),
         GuiActionKind::StoreCreate => plan_store_create(request),
+        GuiActionKind::SubobjectCreate => plan_subobject_create(request),
     }
 }
 
@@ -252,6 +266,61 @@ fn plan_store_create(request: GuiActionPlanRequest) -> Result<GuiActionPlan, Gui
         argv.push(path_arg(ssd_root));
     }
     argv.push("--json".to_string());
+
+    Ok(GuiActionPlan {
+        action: request.action,
+        execution: GuiActionExecution::PlannedCli,
+        argv,
+        mutates_pool: false,
+        writes_recovery_metadata: false,
+        confirmation_required: true,
+    })
+}
+
+fn plan_subobject_create(
+    request: GuiActionPlanRequest,
+) -> Result<GuiActionPlan, GuiActionPlanError> {
+    let mut missing = Vec::new();
+    if request
+        .subobject_name
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("subobject_name".to_string());
+    }
+
+    let parent_store_present = request
+        .parent_store_id
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let parent_subobject_present = request
+        .parent_subobject_name
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if parent_store_present == parent_subobject_present {
+        missing.push("parent_store_id_or_parent_subobject_name".to_string());
+    }
+
+    if !missing.is_empty() {
+        return Err(GuiActionPlanError {
+            action: request.action,
+            missing_fields: missing,
+        });
+    }
+
+    let mut argv = strings(["dasobjectstore", "subobject", "create"]);
+    argv.push(request.subobject_name.expect("validated SubObject name"));
+    if let Some(store_id) = request.parent_store_id {
+        argv.push("--store".to_string());
+        argv.push(store_id);
+    } else if let Some(parent) = request.parent_subobject_name {
+        argv.push("--parent".to_string());
+        argv.push(parent);
+    }
+    if let Some(ssd_root) = request.ssd_root {
+        argv.push("--ssd-root".to_string());
+        argv.push(path_arg(ssd_root));
+    }
 
     Ok(GuiActionPlan {
         action: request.action,
@@ -338,7 +407,7 @@ mod tests {
     fn catalog_lists_safe_web_actions() {
         let catalog = action_catalog();
 
-        assert_eq!(catalog.actions.len(), 5);
+        assert_eq!(catalog.actions.len(), 6);
         assert_eq!(catalog.actions[0].kind, GuiActionKind::HealthCheck);
         assert_eq!(catalog.actions[1].safety, GuiActionSafety::ServiceLifecycle);
         assert_eq!(
@@ -355,6 +424,12 @@ mod tests {
             catalog.actions[4].required_fields,
             ["store_id", "store_class"]
         );
+        assert_eq!(catalog.actions[5].kind, GuiActionKind::SubobjectCreate);
+        assert_eq!(
+            catalog.actions[5].required_fields,
+            ["subobject_name", "parent_store_id_or_parent_subobject_name"]
+        );
+        assert!(catalog.actions[5].confirmation_required);
     }
 
     #[test]
@@ -484,5 +559,89 @@ mod tests {
         .expect_err("store id and class are required");
 
         assert_eq!(err.missing_fields, ["store_id", "store_class"]);
+    }
+
+    #[test]
+    fn plans_top_level_subobject_create() {
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("Xenognostikon".to_string()),
+            parent_store_id: Some("ENA".to_string()),
+            ssd_root: Some(PathBuf::from("/srv/dasobjectstore/ssd")),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("SubObject create plan");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Xenognostikon",
+                "--store",
+                "ENA",
+                "--ssd-root",
+                "/srv/dasobjectstore/ssd"
+            ])
+        );
+        assert!(!plan.mutates_pool);
+        assert!(!plan.writes_recovery_metadata);
+        assert!(plan.confirmation_required);
+    }
+
+    #[test]
+    fn plans_nested_subobject_create() {
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("Vervet".to_string()),
+            parent_subobject_name: Some("Xenognostikon".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("nested SubObject create plan");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Vervet",
+                "--parent",
+                "Xenognostikon"
+            ])
+        );
+        assert!(plan.confirmation_required);
+    }
+
+    #[test]
+    fn rejects_subobject_create_without_required_fields() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("SubObject name and parent are required");
+
+        assert_eq!(
+            err.missing_fields,
+            ["subobject_name", "parent_store_id_or_parent_subobject_name"]
+        );
+    }
+
+    #[test]
+    fn rejects_subobject_create_with_ambiguous_parent_fields() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("Vervet".to_string()),
+            parent_store_id: Some("ENA".to_string()),
+            parent_subobject_name: Some("Xenognostikon".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("exactly one parent is required");
+
+        assert_eq!(
+            err.missing_fields,
+            ["parent_store_id_or_parent_subobject_name"]
+        );
     }
 }
