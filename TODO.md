@@ -436,13 +436,13 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   reserve, HDD queue depth, verification parallelism, and system safety reserve.
 - [x] Default resource policy should use available cores and memory headroom for
   standalone performance while preserving explicit safety limits.
-- [ ] Add bounded memory pools for read/write/verify buffers so high throughput
+- [x] Add bounded memory pools for read/write/verify buffers so high throughput
   does not become unbounded allocation.
-- [ ] Add per-disk or per-target HDD write queues to distribute staged data
+- [x] Add per-disk or per-target HDD write queues to distribute staged data
   quickly to final persistence locations.
-- [ ] Add placement scheduler inputs for target capacity, current queue depth,
+- [x] Add placement scheduler inputs for target capacity, current queue depth,
   write throughput, health, and failure/pressure state.
-- [ ] Add backpressure rules that slow source reads only when SSD pressure, RAM
+- [x] Add backpressure rules that slow source reads only when SSD pressure, RAM
   pressure, HDD backlog, verification backlog, or error rate requires it.
 - [x] Extend daemon ingest telemetry with queue depths for scan, source read,
   SSD stage, HDD write, and verification stages.
@@ -456,9 +456,9 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   verified byte/file fractions.
 - [x] Add crash-safe ingest journal states for planned, staged, written,
   verified, failed, retried, cancelled, and finalized file records.
-- [ ] Add resume/reconcile behavior for interrupted jobs, including partially
+- [x] Add resume/reconcile behavior for interrupted jobs, including partially
   staged and partially written data.
-- [ ] Add checksum or content-address manifest capture during SSD staging where
+- [x] Add checksum or content-address manifest capture during SSD staging where
   compatible with the existing object model.
 - [x] Add atomic finalization rules so files are not reported as persisted until
   HDD write and verification requirements are satisfied.
@@ -466,7 +466,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   adapters without duplicating progress logic.
 - [x] Choose the Rust TUI framework and terminal event model for the supported
   console surface.
-- [ ] Add TUI binary/entry point and packaging path for standalone deployment.
+- [x] Add TUI binary/entry point and packaging path for standalone deployment.
 - [x] Implement TUI import planning with target ObjectStore/SubObject context,
   source paths, file count, and data volume scaled to MiB, GiB, or TiB.
 - [ ] Implement TUI import description metadata capture and confirmation before
@@ -475,31 +475,31 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   reserve, HDD queue depth, and verification parallelism.
 - [ ] Allow administrators to choose automatic resource use or explicit caps for
   cores, memory, SSD reserve, and HDD write concurrency.
-- [ ] Show live TUI progress for discovered/scanned, staged on SSD, written to
+- [x] Show live TUI progress for discovered/scanned, staged on SSD, written to
   HDD, and verified data.
-- [ ] Show active workers, queue depths, current bottleneck classification, and
+- [x] Show active workers, queue depths, current bottleneck classification, and
   whether source-to-SSD streaming is throttled.
-- [ ] Show SSD pressure with capacity, used/free space, trend, and
+- [x] Show SSD pressure with capacity, used/free space, trend, and
   throttle/block state.
-- [ ] Show HDD write pressure with backlog, write throughput, retries, and
+- [x] Show HDD write pressure with backlog, write throughput, retries, and
   detected bottlenecks.
-- [ ] Show verification progress, failures, retries, and final status.
-- [ ] Show throughput current rate, moving average, recent high/low, and
+- [x] Show verification progress, failures, retries, and final status.
+- [x] Show throughput current rate, moving average, recent high/low, and
   up/down/flat trend.
-- [ ] Provide TUI keyboard actions for pause, resume, cancel, retry, and job
+- [x] Provide TUI keyboard actions for pause, resume, cancel, retry, and job
   details where the daemon safely supports them.
-- [ ] Ensure the TUI can attach to an existing running import job after
+- [x] Ensure the TUI can attach to an existing running import job after
   reconnecting.
 - [x] Add supported terminal-size behavior for compact and standard console
   layouts.
-- [ ] Add TUI error states for authentication failure, permission denial, lost
+- [x] Add TUI error states for authentication failure, permission denial, lost
   daemon/event connection, stalled job, SSD pressure, HDD write failure, and
   verification failure.
-- [ ] Add TUI tests or scripted terminal snapshots for planning, launch
+- [x] Add TUI tests or scripted terminal snapshots for planning, launch
   confirmation, live monitoring, reconnect, and completed summary flows.
 - [x] Add benchmark harness for small-file, large-file, mixed-file, slow-HDD,
   full-SSD, and interrupted-import scenarios.
-- [ ] Add profiling hooks to prove CPU, memory, SSD, HDD, and verification
+- [x] Add profiling hooks to prove CPU, memory, SSD, HDD, and verification
   bottlenecks are identified correctly.
 - [x] Add performance acceptance targets for sustained source-to-SSD staging,
   HDD fan-out, verification throughput, bounded memory growth, and recovery time
