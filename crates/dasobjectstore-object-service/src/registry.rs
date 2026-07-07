@@ -36,6 +36,13 @@ pub struct StoreRegistryUpdateReport {
     pub credential_reference: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StoreRegistryDeleteReport {
+    pub registry_path: PathBuf,
+    pub store_id: dasobjectstore_core::ids::StoreId,
+    pub removed: bool,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StoreRegistryAction {
@@ -124,6 +131,27 @@ pub fn upsert_store_definition(
         definition,
         bucket_name,
         credential_reference,
+    })
+}
+
+pub fn delete_store_definition(
+    path: impl AsRef<Path>,
+    store_id: &dasobjectstore_core::ids::StoreId,
+) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
+    let path = path.as_ref();
+    let mut definitions = read_store_registry(path)?;
+    let original_len = definitions.len();
+    definitions.retain(|definition| &definition.store_id != store_id);
+    let removed = definitions.len() != original_len;
+    if removed {
+        validate_store_registry(&definitions)?;
+        write_store_registry(path, &definitions)?;
+    }
+
+    Ok(StoreRegistryDeleteReport {
+        registry_path: path.to_path_buf(),
+        store_id: store_id.clone(),
+        removed,
     })
 }
 
@@ -217,7 +245,9 @@ fn restrict_dir(path: &Path) -> Result<(), ObjectServiceError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_store_registry, upsert_store_definition, StoreRegistryAction};
+    use super::{
+        delete_store_definition, read_store_registry, upsert_store_definition, StoreRegistryAction,
+    };
     use crate::layout::StoreServiceDefinition;
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
@@ -328,6 +358,30 @@ mod tests {
         .expect_err("duplicate bucket rejected");
 
         assert!(err.to_string().contains("duplicate bucket name"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn deletes_store_definition() {
+        let root = temp_root("store-registry-delete");
+        let registry_path = root.join("stores.json");
+        upsert_store_definition(
+            &registry_path,
+            definition("generated-data", StoreClass::GeneratedData, None),
+        )
+        .expect("store created");
+
+        let report = delete_store_definition(
+            &registry_path,
+            &StoreId::new("generated-data").expect("store id"),
+        )
+        .expect("store deleted");
+
+        assert!(report.removed);
+        assert!(read_store_registry(&registry_path)
+            .expect("registry reads")
+            .is_empty());
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

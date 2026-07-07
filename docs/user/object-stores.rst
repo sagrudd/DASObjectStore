@@ -94,6 +94,55 @@ List the portable registry on the DAS SSD:
 
    dasobjectstore store list --portable
 
+Drain and Delete Stores
+-----------------------
+
+Store drain and delete are administrative operations. They delete payload files
+from managed HDD roots and update live metadata so object, placement, and ingest
+job references are removed. Use them when a store contains data that is no
+longer required, especially reproducible public data that can be redownloaded if
+needed.
+
+Always inspect the plan first:
+
+.. code-block:: console
+
+   sudo dasobjectstore store drain generated-data \
+     --live-sqlite-path /srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite \
+     --dry-run
+
+To drain a store without deleting the store definition:
+
+.. code-block:: console
+
+   sudo dasobjectstore store drain generated-data \
+     --live-sqlite-path /srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite \
+     --allow-store-drain \
+     --confirm "confirm store drain"
+
+Drain removes the store's object rows, placement rows, ingest-job rows, and
+known payload files. It leaves the store definition in the host and portable
+registries, so the store can be reused after the contents are cleared.
+
+To delete a store entirely:
+
+.. code-block:: console
+
+   sudo dasobjectstore store delete generated-data \
+     --live-sqlite-path /srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite \
+     --allow-store-delete \
+     --confirm "confirm store delete"
+
+Delete performs the same content cleanup as drain, removes the store row from
+live metadata, removes the host registry entry, removes any SubObjects rooted in
+the store, and removes portable registry entries when a known DAS SSD root is
+available. Pass ``--ssd-root`` when the SSD is mounted somewhere other than the
+default path.
+
+Both commands use the default managed HDD root unless ``--hdd-root`` is passed.
+They refuse non-dry-run execution unless run by an administrative user and the
+matching policy allowance plus confirmation phrase are provided.
+
 Adopt Stores on a New Host
 --------------------------
 

@@ -29,14 +29,15 @@ pub use provisioning::{
     GarageProvisioningPlan,
 };
 pub use registry::{
-    default_store_registry_path, portable_store_registry_path, read_store_registry,
-    upsert_store_definition, StoreRegistryAction, StoreRegistryUpdateReport,
-    PORTABLE_STORE_REGISTRY_RELATIVE_PATH, STORE_REGISTRY_ENV,
+    default_store_registry_path, delete_store_definition, portable_store_registry_path,
+    read_store_registry, upsert_store_definition, StoreRegistryAction, StoreRegistryDeleteReport,
+    StoreRegistryUpdateReport, PORTABLE_STORE_REGISTRY_RELATIVE_PATH, STORE_REGISTRY_ENV,
 };
 pub use subobject::{
-    create_subobject_definition, default_subobject_registry_path, mirror_subobject_definition,
-    portable_subobject_registry_path, read_subobject_registry, search_subobjects,
-    SubObjectDefinition, SubObjectParent, SubObjectRegistryAction, SubObjectRegistryUpdateReport,
+    create_subobject_definition, default_subobject_registry_path, delete_subobjects_for_store,
+    mirror_subobject_definition, portable_subobject_registry_path, read_subobject_registry,
+    search_subobjects, SubObjectDefinition, SubObjectParent, SubObjectRegistryAction,
+    SubObjectRegistryStoreDeleteReport, SubObjectRegistryUpdateReport,
     PORTABLE_SUBOBJECT_REGISTRY_RELATIVE_PATH,
 };
 

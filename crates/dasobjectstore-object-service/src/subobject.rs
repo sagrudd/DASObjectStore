@@ -54,6 +54,14 @@ pub struct SubObjectRegistryUpdateReport {
     pub definition: SubObjectDefinition,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SubObjectRegistryStoreDeleteReport {
+    pub registry_path: PathBuf,
+    pub store_id: StoreId,
+    pub removed_count: usize,
+    pub removed_names: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubObjectRegistryAction {
@@ -185,6 +193,31 @@ pub fn mirror_subobject_definition(
         registry_path: path.to_path_buf(),
         action,
         definition,
+    })
+}
+
+pub fn delete_subobjects_for_store(
+    path: impl AsRef<Path>,
+    store_id: &StoreId,
+) -> Result<SubObjectRegistryStoreDeleteReport, ObjectServiceError> {
+    let path = path.as_ref();
+    let mut definitions = read_subobject_registry(path)?;
+    let mut removed_names = definitions
+        .iter()
+        .filter(|definition| &definition.store_id == store_id)
+        .map(|definition| definition.name.clone())
+        .collect::<Vec<_>>();
+    removed_names.sort();
+    definitions.retain(|definition| &definition.store_id != store_id);
+    if !removed_names.is_empty() {
+        write_subobject_registry(path, &definitions)?;
+    }
+
+    Ok(SubObjectRegistryStoreDeleteReport {
+        registry_path: path.to_path_buf(),
+        store_id: store_id.clone(),
+        removed_count: removed_names.len(),
+        removed_names,
     })
 }
 

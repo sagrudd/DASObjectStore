@@ -514,12 +514,145 @@ pub(crate) enum StoreCommand {
     Adopt(StoreAdoptArgs),
     /// Create or update a system-managed object store.
     Create(StoreCreateArgs),
+    /// Delete all objects and payload files in a store.
+    Drain(StoreDrainArgs),
+    /// Delete a drained object store and its registry entries.
+    Delete(StoreDeleteArgs),
     /// Emit the built-in JSON policy defaults for a store class.
     Defaults(StoreDefaultsArgs),
     /// List system-managed object stores.
     List(StoreListArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreDrainArgs {
+    /// Store identifier to drain.
+    store_id: StoreId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Managed HDD mount root.
+    #[arg(long)]
+    hdd_root: Option<PathBuf>,
+    /// Show affected objects and payloads without deleting.
+    #[arg(long)]
+    dry_run: bool,
+    /// Policy allowance for deleting all objects in the store.
+    #[arg(long)]
+    allow_store_drain: bool,
+    /// Action-time confirmation phrase: "confirm store drain".
+    #[arg(long, default_value = "")]
+    confirm: String,
+    /// Emit the drain report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreDrainArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn hdd_root(&self) -> Option<&Path> {
+        self.hdd_root.as_deref()
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    pub(crate) fn allow_store_drain(&self) -> bool {
+        self.allow_store_drain
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreDeleteArgs {
+    /// Store identifier to delete.
+    store_id: StoreId,
+    /// Path to live.sqlite for the pool.
+    #[arg(long)]
+    live_sqlite_path: PathBuf,
+    /// Managed HDD mount root.
+    #[arg(long)]
+    hdd_root: Option<PathBuf>,
+    /// DAS SSD root used for portable store and SubObject metadata.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
+    /// Show affected metadata, payloads, and registry entries without deleting.
+    #[arg(long)]
+    dry_run: bool,
+    /// Policy allowance for deleting the store and all of its contents.
+    #[arg(long)]
+    allow_store_delete: bool,
+    /// Action-time confirmation phrase: "confirm store delete".
+    #[arg(long, default_value = "")]
+    confirm: String,
+    /// Emit the delete report as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+    /// Advanced test override for the system-managed SubObject registry path.
+    #[arg(long, hide = true)]
+    subobject_registry_path: Option<PathBuf>,
+}
+
+impl StoreDeleteArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn live_sqlite_path(&self) -> &Path {
+        &self.live_sqlite_path
+    }
+
+    pub(crate) fn hdd_root(&self) -> Option<&Path> {
+        self.hdd_root.as_deref()
+    }
+
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    pub(crate) fn allow_store_delete(&self) -> bool {
+        self.allow_store_delete
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
+
+    pub(crate) fn subobject_registry_path(&self) -> Option<&Path> {
+        self.subobject_registry_path.as_deref()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -2250,6 +2383,89 @@ mod tests {
                 assert_eq!(create.registry_path(), None);
             }
             _ => panic!("expected create command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_drain() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "drain",
+            "generated-data",
+            "--live-sqlite-path",
+            "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
+            "--hdd-root",
+            "/srv/dasobjectstore/hdd",
+            "--allow-store-drain",
+            "--confirm",
+            "confirm store drain",
+            "--json",
+        ])
+        .expect("store drain parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Drain(drain)) => {
+                assert_eq!(drain.store_id().as_str(), "generated-data");
+                assert_eq!(
+                    drain.live_sqlite_path(),
+                    Path::new("/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite")
+                );
+                assert_eq!(drain.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
+                assert!(drain.allow_store_drain());
+                assert_eq!(drain.confirm(), "confirm store drain");
+                assert!(drain.json());
+            }
+            _ => panic!("expected drain command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_delete() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "delete",
+            "generated-data",
+            "--live-sqlite-path",
+            "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
+            "--hdd-root",
+            "/srv/dasobjectstore/hdd",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--allow-store-delete",
+            "--confirm",
+            "confirm store delete",
+            "--dry-run",
+        ])
+        .expect("store delete parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Delete(delete)) => {
+                assert_eq!(delete.store_id().as_str(), "generated-data");
+                assert_eq!(
+                    delete.live_sqlite_path(),
+                    Path::new("/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite")
+                );
+                assert_eq!(
+                    delete.hdd_root(),
+                    Some(Path::new("/srv/dasobjectstore/hdd"))
+                );
+                assert_eq!(
+                    delete.ssd_root(),
+                    Some(Path::new("/srv/dasobjectstore/ssd"))
+                );
+                assert!(delete.allow_store_delete());
+                assert_eq!(delete.confirm(), "confirm store delete");
+                assert!(delete.dry_run());
+            }
+            _ => panic!("expected delete command"),
         }
     }
 

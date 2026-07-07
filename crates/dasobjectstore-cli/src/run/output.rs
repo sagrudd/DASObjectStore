@@ -1,12 +1,14 @@
 use super::disk_lockdown::LockdownDasReport;
 use super::disk_prepare::PrepareDasReport;
-use super::{CliError, DiskHealthSummary, HealthReport, HostConnectionStatus};
+use super::{
+    CliError, DiskHealthSummary, HealthReport, HostConnectionStatus, StoreDeleteCommandReport,
+};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use dasobjectstore_metadata::{
     DestagePriorityPolicy, DirectHddImportReport, DiskDrainAction, DiskDrainObjectSummary,
     DiskDrainPlanSummary, DiskReplacementPlanSummary, DiskRetirementReport, ObjectExportReport,
     ObjectInspectSummary, ObjectPutReport, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity,
-    SsdCapacityPolicy, SsdPressure,
+    SsdCapacityPolicy, SsdPressure, StoreDrainReport,
 };
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
@@ -523,6 +525,105 @@ pub(super) fn write_disk_replacement_plan(
         writer,
         "Live metadata: {}",
         plan.live_sqlite_path.to_string_lossy()
+    )
+}
+
+pub(super) fn write_store_drain_report(
+    report: &StoreDrainReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    if report.dry_run {
+        writeln!(writer, "Store drain dry run: {}", report.store_id)?;
+    } else {
+        writeln!(writer, "Store drained: {}", report.store_id)?;
+    }
+    writeln!(writer, "Objects removed: {}", report.objects_removed)?;
+    writeln!(writer, "Placements removed: {}", report.placements_removed)?;
+    writeln!(
+        writer,
+        "Ingest jobs removed: {}",
+        report.ingest_jobs_removed
+    )?;
+    writeln!(
+        writer,
+        "Payload files removed: {}",
+        report.payload_files_removed
+    )?;
+    writeln!(
+        writer,
+        "Missing payload files: {}",
+        report.missing_payload_files
+    )?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        report.live_sqlite_path.to_string_lossy()
+    )
+}
+
+pub(super) fn write_store_delete_report(
+    report: &StoreDeleteCommandReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    if report.metadata.dry_run {
+        writeln!(writer, "Store delete dry run: {}", report.metadata.store_id)?;
+    } else {
+        writeln!(writer, "Store deleted: {}", report.metadata.store_id)?;
+    }
+    writeln!(
+        writer,
+        "Store metadata removed: {}",
+        report.metadata.store_metadata_removed
+    )?;
+    writeln!(
+        writer,
+        "Objects removed: {}",
+        report.metadata.drain.objects_removed
+    )?;
+    writeln!(
+        writer,
+        "Placements removed: {}",
+        report.metadata.drain.placements_removed
+    )?;
+    writeln!(
+        writer,
+        "Payload files removed: {}",
+        report.metadata.drain.payload_files_removed
+    )?;
+    writeln!(
+        writer,
+        "Host registry removed: {} ({})",
+        report.host_registry.removed,
+        report.host_registry.registry_path.to_string_lossy()
+    )?;
+    writeln!(
+        writer,
+        "Host SubObjects removed: {} ({})",
+        report.host_subobjects.removed_count,
+        report.host_subobjects.registry_path.to_string_lossy()
+    )?;
+    match &report.portable_registry {
+        Some(portable) => writeln!(
+            writer,
+            "Portable registry removed: {} ({})",
+            portable.removed,
+            portable.registry_path.to_string_lossy()
+        )?,
+        None => writeln!(writer, "Portable registry removed: not detected")?,
+    }
+    match &report.portable_subobjects {
+        Some(portable) => writeln!(
+            writer,
+            "Portable SubObjects removed: {} ({})",
+            portable.removed_count,
+            portable.registry_path.to_string_lossy()
+        )?,
+        None => writeln!(writer, "Portable SubObjects removed: not detected")?,
+    }
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        report.metadata.live_sqlite_path.to_string_lossy()
     )
 }
 

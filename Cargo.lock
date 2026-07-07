@@ -337,6 +337,7 @@ dependencies = [
  "dasobjectstore-object-service",
  "dasobjectstore-platform",
  "rusqlite",
+ "serde",
  "serde_json",
 ]
 

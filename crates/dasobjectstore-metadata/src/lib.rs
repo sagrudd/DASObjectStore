@@ -22,6 +22,7 @@ pub mod queue;
 pub mod schema;
 mod secure_fs;
 pub mod snapshot;
+pub mod store;
 
 pub use attach::{
     attach_clean_pool_read_only, import_dirty_pool_read_only, ReadOnlyAttachError,
@@ -94,6 +95,10 @@ pub use snapshot::{
     export_metadata_snapshot, import_metadata_snapshot, SnapshotExportError, SnapshotExportOptions,
     SnapshotExportReport, SnapshotImportError, SnapshotImportOptions, SnapshotImportReport,
     DISK_MANIFEST_FILE_NAME, PLACEMENT_LOG_FILE_NAME, POOL_MANIFEST_FILE_NAME,
+};
+pub use store::{
+    delete_store, drain_store, StoreCleanupError, StoreDeleteReport, StoreDeleteRequest,
+    StoreDrainReport, StoreDrainRequest, StorePayloadRemoval,
 };
 
 /// Returns the metadata crate version.
