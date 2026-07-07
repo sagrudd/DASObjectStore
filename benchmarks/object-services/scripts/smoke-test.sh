@@ -14,8 +14,10 @@ DASOBJECTSTORE_BENCH_DRY_RUN=1 \
 
 DASOBJECTSTORE_BENCH_DRY_RUN=1 \
   DASOBJECTSTORE_BENCH_OUTPUT_DIR="$provider_tmpdir" \
-  "$script_dir/provider.sh" garage up >/dev/null
-DASOBJECTSTORE_BENCH_DRY_RUN=1 "$script_dir/provider.sh" rustfs up >/dev/null
+  "$script_dir/provider.sh" garage up | grep -q "benchmark_uid=$(id -u)"
+DASOBJECTSTORE_BENCH_DRY_RUN=1 \
+  DASOBJECTSTORE_BENCH_OUTPUT_DIR="$provider_tmpdir" \
+  "$script_dir/provider.sh" rustfs up | grep -q "output_root=$provider_tmpdir"
 
 empty_tmpdir="$(mktemp -d)"
 cleanup_empty() {

@@ -3,6 +3,7 @@ services:
     image: ${DASOBJECTSTORE_GARAGE_IMAGE:-dxflrs/garage:v2.3.0}
     container_name: dasobjectstore-bench-garage
     restart: "no"
+    user: "${DASOBJECTSTORE_BENCH_UID:-1000}:${DASOBJECTSTORE_BENCH_GID:-1000}"
     ports:
       - "127.0.0.1:3900:3900"
       - "127.0.0.1:3901:3901"

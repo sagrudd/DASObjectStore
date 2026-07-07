@@ -27,6 +27,9 @@ The service binds S3 API traffic to `127.0.0.1:9000`, binds the console to
 ## Notes
 
 - The default benchmark credentials are `rustfsadmin` / `rustfsadmin`.
+- The provider wrapper pre-creates the benchmark bucket directories under the
+  RustFS data path before startup because this single-node container profile
+  may reject S3 `CreateBucket` calls from the default credentials.
 - The image is pinned to `rustfs/rustfs:1.0.0-beta.8-glibc` for repeatable
   benchmark runs.
 - RustFS containers run as UID/GID `10001`, so the Compose setup includes a

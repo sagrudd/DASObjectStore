@@ -26,6 +26,9 @@ esac
 
 compose_file="$(provider_compose_file "$provider")"
 service_name="$(provider_service_name "$provider")"
+output_root="${DASOBJECTSTORE_BENCH_OUTPUT_DIR:-benchmarks/output/object-services}"
+export DASOBJECTSTORE_BENCH_UID="${DASOBJECTSTORE_BENCH_UID:-$(id -u)}"
+export DASOBJECTSTORE_BENCH_GID="${DASOBJECTSTORE_BENCH_GID:-$(id -g)}"
 
 load_garage_env() {
   env_path="$("$script_dir/garage-credentials.sh" ensure)"
@@ -45,6 +48,10 @@ garage_buckets() {
     dasobjectstore-bench-disk-full \
     dasobjectstore-bench-disk-removal \
     dasobjectstore-bench-destage
+}
+
+rustfs_buckets() {
+  garage_buckets
 }
 
 wait_for_garage() {
@@ -74,6 +81,12 @@ provision_garage() {
   done
 }
 
+provision_rustfs_data_dirs() {
+  rustfs_buckets | while read -r bucket; do
+    mkdir -p "$output_root/$provider/data/$bucket"
+  done
+}
+
 if [ "$provider" = "garage" ]; then
   load_garage_env
 fi
@@ -83,6 +96,9 @@ if [ "$dry_run" = "1" ]; then
   echo "action=$action"
   echo "compose_file=$compose_file"
   echo "service_name=$service_name"
+  echo "output_root=$output_root"
+  echo "benchmark_uid=$DASOBJECTSTORE_BENCH_UID"
+  echo "benchmark_gid=$DASOBJECTSTORE_BENCH_GID"
   if [ "$provider" = "garage" ]; then
     echo "garage_env_path=$env_path"
     echo "garage_default_access_key=$GARAGE_DEFAULT_ACCESS_KEY"
@@ -93,6 +109,13 @@ fi
 
 case "$action" in
   up)
+    mkdir -p "$output_root/$provider/data" "$output_root/$provider/workloads"
+    if [ "$provider" = "garage" ]; then
+      normalize_benchmark_path_permissions "$output_root/garage"
+    fi
+    if [ "$provider" = "rustfs" ]; then
+      provision_rustfs_data_dirs
+    fi
     docker_compose "$compose_file" up -d "$service_name"
     if [ "$provider" = "garage" ]; then
       provision_garage

@@ -30,6 +30,7 @@ state_removed=0
 cleanup_removed_data() {
   if [ "$state_removed" = "1" ]; then
     docker_compose "$compose_file" down >/dev/null 2>&1 || true
+    normalize_benchmark_path_permissions "$data_path"
     safe_rm_rf_benchmark_path "$data_path"
     mv "$removed_dir/data" "$data_path"
     docker_compose "$compose_file" up -d "$service_name" >/dev/null 2>&1 || true
@@ -71,6 +72,7 @@ aws_s3 put-object --bucket "$bucket" --key "$object_key" --body "$payload_path" 
 
 safe_rm_rf_benchmark_path "$removed_dir"
 docker_compose "$compose_file" down >/dev/null
+normalize_benchmark_path_permissions "$data_path"
 mkdir -p "$removed_dir"
 mv "$data_path" "$removed_dir/data"
 state_removed=1

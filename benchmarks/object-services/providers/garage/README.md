@@ -32,6 +32,10 @@ under `benchmarks/output/object-services/garage/`.
 - Garage v2.3.0 starts with `--single-node --default-bucket`, then the provider
   wrapper provisions the benchmark buckets and grants the generated key read,
   write, and owner permissions.
+- Garage runs with the invoking benchmark user's UID/GID. The provider wrapper
+  also normalizes Garage output ownership before startup so metadata recovery
+  tests can snapshot and restore provider state without host-specific chown
+  commands.
 - The image is pinned to `dxflrs/garage:v2.3.0` for repeatable benchmark runs.
 - The Garage documentation recommends fixed image tags rather than `latest`.
 - Garage documentation recommends SSD-backed metadata and HDD-backed data

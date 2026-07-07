@@ -55,6 +55,18 @@ restore_state_from_snapshot() {
   esac
 }
 
+normalize_provider_state_permissions() {
+  case "$provider" in
+    garage)
+      normalize_benchmark_path_permissions "$output_root/garage/meta"
+      normalize_benchmark_path_permissions "$output_root/garage/data"
+      ;;
+    rustfs)
+      normalize_benchmark_path_permissions "$output_root/rustfs/data"
+      ;;
+  esac
+}
+
 if [ "$dry_run" = "1" ]; then
   echo "provider=$provider"
   echo "endpoint=$endpoint"
@@ -86,6 +98,7 @@ if [ "$source_hash" != "$before_hash" ]; then
 fi
 
 docker_compose "$compose_file" down >/dev/null
+normalize_provider_state_permissions
 copy_state_to_snapshot
 restore_state_from_snapshot
 docker_compose "$compose_file" up -d "$service_name" >/dev/null

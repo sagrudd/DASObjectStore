@@ -210,13 +210,16 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   provider/workload scripts.
 - [x] Install Docker, Compose v2, and AWS CLI on the DAS host and pass remote
   benchmark preflight at `192.168.1.192`.
-- [ ] Run first complete Garage and RustFS workload set.
-  Blocked until Garage and RustFS workload reports exist under
-  `benchmarks/output/object-services/`. Remote DAS host preflight passed on
-  2026-07-07 after installing Docker, Compose v2, and AWS CLI; the next slice
-  should start providers and run the bounded workload matrix.
+- [x] Pre-create provider output directories before Compose startup so RustFS
+  bind mounts do not leave report directories owned by container users.
+- [x] Pre-create RustFS benchmark bucket directories during provider bootstrap
+  because the single-node container profile rejects S3 `CreateBucket`.
+- [x] Run first complete Garage and RustFS workload set.
+  Completed on the remote DAS host at `192.168.1.192` on 2026-07-07 with a
+  bounded validation matrix; `check-report-inputs.sh` passed against
+  `benchmarks/output/object-services/`.
 - [ ] Produce first benchmark report and recommend MVP object service.
-  Blocked until the complete Garage and RustFS workload set exists under
+  Use the completed remote Garage and RustFS workload outputs under
   `benchmarks/output/object-services/`.
 
 ## Milestone 9: S3 Service Orchestration

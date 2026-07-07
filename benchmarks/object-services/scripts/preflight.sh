@@ -70,13 +70,18 @@ command_finishes_within() {
   seconds="$1"
   shift
 
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+    return
+  fi
+
   "$@" >/dev/null 2>&1 &
   command_pid="$!"
 
   (
     sleep "$seconds"
     kill "$command_pid" >/dev/null 2>&1 || true
-  ) &
+  ) >/dev/null 2>&1 &
   timer_pid="$!"
 
   if wait "$command_pid"; then

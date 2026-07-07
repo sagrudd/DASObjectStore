@@ -1,3 +1,7 @@
+if ! command -v normalize_benchmark_path_permissions >/dev/null 2>&1; then
+  . benchmarks/object-services/scripts/permissions.sh
+fi
+
 require_positive_integer() {
   name="$1"
   value="$2"
@@ -78,6 +82,11 @@ command_finishes_within() {
   seconds="$1"
   shift
 
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+    return
+  fi
+
   "$@" &
   command_pid="$!"
 
@@ -86,7 +95,7 @@ command_finishes_within() {
     if kill "$command_pid" >/dev/null 2>&1; then
       echo "command timed out after ${seconds}s: $*" >&2
     fi
-  ) &
+  ) >/dev/null 2>&1 &
   timer_pid="$!"
 
   if wait "$command_pid"; then
