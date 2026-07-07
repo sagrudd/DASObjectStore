@@ -1,6 +1,7 @@
 //! Managed daemon boundary for DASObjectStore.
 
 pub mod api;
+pub mod client;
 pub mod runtime;
 
 pub use api::{
@@ -13,6 +14,10 @@ pub use api::{
     DaemonRequestValidationError, DaemonSsdPressure, IngestJobStatusRequest,
     IngestJobStatusResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+};
+pub use client::{
+    DaemonClient, DaemonClientError, DaemonClientTransport, InProcessDaemonTransport,
+    UnixSocketDaemonTransport,
 };
 pub use runtime::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DEFAULT_DAEMON_CONFIG_PATH,

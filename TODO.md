@@ -29,7 +29,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   ingest job submission, ingest progress events, job status, and cancellation.
 - [x] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
   view models, and Synoptikon adapters do not duplicate API shapes.
-- [ ] Add a daemon client abstraction with an in-process test transport and a
+- [x] Add a daemon client abstraction with an in-process test transport and a
   planned Unix-domain socket transport.
 - [ ] Refactor `dasobjectstore ingest files` so the normal command path builds a
   daemon request and renders daemon progress events.
