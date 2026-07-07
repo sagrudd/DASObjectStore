@@ -67,6 +67,7 @@ mod tests {
     use super::gui_api_router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
+    use serde_json::json;
     use tower::ServiceExt;
 
     #[test]
@@ -211,5 +212,148 @@ mod tests {
         assert_eq!(encoded["destage"], serde_json::Value::Null);
         assert_eq!(encoded["tasks"].as_array().expect("tasks").len(), 0);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+    }
+
+    #[tokio::test]
+    async fn actions_route_advertises_store_and_subobject_creation() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/actions")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("actions response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+        let actions = encoded["actions"].as_array().expect("actions");
+
+        assert!(actions.iter().any(|action| {
+            action["kind"] == "store_create"
+                && action["safety"] == "configuration_mutation"
+                && action["confirmation_required"] == true
+        }));
+        assert!(actions.iter().any(|action| {
+            action["kind"] == "subobject_create"
+                && action["safety"] == "configuration_mutation"
+                && action["confirmation_required"] == true
+        }));
+    }
+
+    #[tokio::test]
+    async fn action_plan_route_returns_store_create_plan() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "store_create",
+                "store_id": "generated-data",
+                "store_class": "generated_data",
+                "store_copies": 2,
+                "writer_group": "mnemosyne",
+                "ssd_root": "/srv/dasobjectstore/ssd"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "store_create");
+        assert_eq!(encoded["confirmation_required"], true);
+        assert_eq!(encoded["mutates_pool"], false);
+        assert_eq!(
+            encoded["argv"],
+            json!([
+                "dasobjectstore",
+                "store",
+                "create",
+                "generated-data",
+                "--class",
+                "generated_data",
+                "--copies",
+                "2",
+                "--writer-group",
+                "mnemosyne",
+                "--ssd-root",
+                "/srv/dasobjectstore/ssd",
+                "--json"
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn action_plan_route_returns_subobject_create_plan() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "subobject_create",
+                "subobject_name": "Vervet",
+                "parent_subobject_name": "Xenognostikon"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "subobject_create");
+        assert_eq!(encoded["confirmation_required"], true);
+        assert_eq!(
+            encoded["argv"],
+            json!([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Vervet",
+                "--parent",
+                "Xenognostikon"
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn action_plan_route_rejects_invalid_subobject_create_request() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "subobject_create",
+                "subobject_name": "Vervet",
+                "parent_store_id": "ENA",
+                "parent_subobject_name": "Xenognostikon"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "subobject_create");
+        assert_eq!(
+            encoded["missing_fields"],
+            json!(["parent_store_id_or_parent_subobject_name"])
+        );
+    }
+
+    async fn post_json(path: &str, body: serde_json::Value) -> axum::response::Response {
+        gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("post response")
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        serde_json::from_slice(&body).expect("json body")
     }
 }
