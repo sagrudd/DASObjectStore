@@ -1,3 +1,4 @@
+use super::disk_lockdown::LockdownDasReport;
 use super::disk_prepare::PrepareDasReport;
 use super::{CliError, DiskHealthSummary, HealthReport, HostConnectionStatus};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
@@ -412,6 +413,35 @@ pub(super) fn write_prepare_das_report(
             for command in &target.commands {
                 writeln!(writer, "  $ {command}")?;
             }
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn write_lockdown_das_report(
+    report: &LockdownDasReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    if report.dry_run {
+        writeln!(writer, "DAS lockdown dry run")?;
+    } else {
+        writeln!(writer, "DAS lockdown complete")?;
+    }
+    writeln!(
+        writer,
+        "Mount root: {}",
+        report.mount_root.to_string_lossy()
+    )?;
+    writeln!(writer, "Service user: {}", report.service_user)?;
+    writeln!(writer, "Service group: {}", report.service_group)?;
+    writeln!(writer, "Protected roots: {}", report.protected_roots.len())?;
+    for root in &report.protected_roots {
+        writeln!(writer, "- {}", root.to_string_lossy())?;
+    }
+    if report.dry_run {
+        for command in &report.commands {
+            writeln!(writer, "$ {command}")?;
         }
     }
 

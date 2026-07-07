@@ -1,17 +1,21 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskPrepareDasArgs,
-    DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs, IngestCommand,
-    IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
+    Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
+    DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
+    IngestCommand, IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
     MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
     ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs,
     ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs,
     StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
 };
+mod disk_lockdown;
 mod disk_prepare;
 mod output;
 
+use self::disk_lockdown::{
+    lockdown_das, LockdownDasError, LockdownDasRequest, LOCKDOWN_CONFIRMATION,
+};
 use self::disk_prepare::{
     prepare_das, PrepareDasDevice, PrepareDasError, PrepareDasRequest, PrepareDasRole,
     PrepareFilesystem,
@@ -20,10 +24,10 @@ use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
     write_host_connection_status, write_ingest_direct_import_report, write_ingest_status,
-    write_nas_nfs_endpoint_validation_report, write_object_export_report,
-    write_object_inspect_summary, write_object_put_report, write_pool_import_report,
-    write_pool_inspect_summary, write_pool_repair_dry_run, write_prepare_das_report,
-    write_pretty_report,
+    write_lockdown_das_report, write_nas_nfs_endpoint_validation_report,
+    write_object_export_report, write_object_inspect_summary, write_object_put_report,
+    write_pool_import_report, write_pool_inspect_summary, write_pool_repair_dry_run,
+    write_prepare_das_report, write_pretty_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -88,6 +92,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Disk(args)) => match args.command() {
             DiskCommand::Drain(args) => run_disk_drain(args, writer),
             DiskCommand::ForceRetire(args) => run_disk_force_retire(args, writer),
+            DiskCommand::LockdownDas(args) => run_disk_lockdown_das(args, writer),
             DiskCommand::PrepareDas(args) => run_disk_prepare_das(args, writer),
             DiskCommand::Replace(args) => run_disk_replace(args, writer),
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
@@ -645,6 +650,28 @@ fn run_disk_force_retire(
     Ok(())
 }
 
+fn run_disk_lockdown_das(
+    args: &DiskLockdownDasArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if !args.dry_run() && args.confirm() != LOCKDOWN_CONFIRMATION {
+        return Err(CliError::CommandFailed(format!(
+            "action confirmation mismatch; pass `{LOCKDOWN_CONFIRMATION}`"
+        )));
+    }
+
+    let report = lockdown_das(&LockdownDasRequest {
+        mount_root: args.mount_root().to_path_buf(),
+        service_user: args.service_user().to_string(),
+        service_group: args.service_group().to_string(),
+        create_service_user: args.create_service_user(),
+        dry_run: args.dry_run(),
+    })?;
+    write_lockdown_das_report(&report, writer)?;
+
+    Ok(())
+}
+
 fn run_disk_prepare_das(
     args: &DiskPrepareDasArgs,
     writer: &mut impl Write,
@@ -1020,6 +1047,7 @@ pub(crate) enum CliError {
     MetadataInspect(PoolInspectError),
     PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
+    DiskLockdown(LockdownDasError),
     DiskPrepare(PrepareDasError),
     DiskRetirement(DiskRetirementError),
     DirectHddImport(DirectHddImportError),
@@ -1064,6 +1092,7 @@ impl Display for CliError {
             Self::MetadataInspect(err) => write!(formatter, "{err}"),
             Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
+            Self::DiskLockdown(err) => write!(formatter, "{err}"),
             Self::DiskPrepare(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::DirectHddImport(err) => write!(formatter, "{err}"),
@@ -1156,6 +1185,12 @@ impl From<DiskRetirementError> for CliError {
 impl From<DirectHddImportError> for CliError {
     fn from(err: DirectHddImportError) -> Self {
         Self::DirectHddImport(err)
+    }
+}
+
+impl From<LockdownDasError> for CliError {
+    fn from(err: LockdownDasError) -> Self {
+        Self::DiskLockdown(err)
     }
 }
 

@@ -218,6 +218,8 @@ pub(crate) enum DiskCommand {
     Drain(DiskDrainArgs),
     /// Force a disk into retired state after explicit risk confirmation.
     ForceRetire(DiskForceRetireArgs),
+    /// Lock mounted DAS roots so only the service account can access them.
+    LockdownDas(DiskLockdownDasArgs),
     /// Repartition, format, and mount DAS devices for DASObjectStore.
     PrepareDas(DiskPrepareDasArgs),
     /// Plan replacement work from an old disk onto a named new disk.
@@ -285,6 +287,54 @@ impl DiskForceRetireArgs {
 
     pub(crate) fn allow_force_retire(&self) -> bool {
         self.allow_force_retire
+    }
+
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DiskLockdownDasArgs {
+    /// Root containing prepared SSD and HDD mountpoints.
+    #[arg(long, default_value = "/srv/dasobjectstore")]
+    mount_root: PathBuf,
+    /// Dedicated account that owns object-store media.
+    #[arg(long, default_value = "dasobjectstore")]
+    service_user: String,
+    /// Dedicated group that owns object-store media.
+    #[arg(long, default_value = "dasobjectstore")]
+    service_group: String,
+    /// Create the service user and group if absent.
+    #[arg(long)]
+    create_service_user: bool,
+    /// Show the managed lockdown plan without changing permissions.
+    #[arg(long)]
+    dry_run: bool,
+    /// Action-time confirmation phrase: "confirm lockdown das".
+    #[arg(long, default_value = "")]
+    confirm: String,
+}
+
+impl DiskLockdownDasArgs {
+    pub(crate) fn mount_root(&self) -> &Path {
+        &self.mount_root
+    }
+
+    pub(crate) fn service_user(&self) -> &str {
+        &self.service_user
+    }
+
+    pub(crate) fn service_group(&self) -> &str {
+        &self.service_group
+    }
+
+    pub(crate) fn create_service_user(&self) -> bool {
+        self.create_service_user
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
     }
 
     pub(crate) fn confirm(&self) -> &str {
@@ -1197,7 +1247,9 @@ mod tests {
         match args.command() {
             DiskCommand::Drain(_) => panic!("expected retire command"),
             DiskCommand::ForceRetire(_) => panic!("expected retire command"),
-            DiskCommand::PrepareDas(_) => panic!("expected retire command"),
+            DiskCommand::LockdownDas(_) | DiskCommand::PrepareDas(_) => {
+                panic!("expected retire command")
+            }
             DiskCommand::Replace(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
                 assert_eq!(retire.disk_id().as_str(), "disk-a");
@@ -1239,6 +1291,41 @@ mod tests {
                 assert_eq!(force_retire.confirm(), "confirm force retire");
             }
             _ => panic!("expected force-retire command"),
+        }
+    }
+
+    #[test]
+    fn parses_disk_lockdown_das() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "disk",
+            "lockdown-das",
+            "--mount-root",
+            "/srv/dasobjectstore",
+            "--service-user",
+            "dasobjectstore",
+            "--service-group",
+            "dasobjectstore",
+            "--create-service-user",
+            "--dry-run",
+            "--confirm",
+            "confirm lockdown das",
+        ])
+        .expect("disk lockdown-das parses");
+
+        let Some(Command::Disk(args)) = cli.command() else {
+            panic!("expected disk command");
+        };
+        match args.command() {
+            DiskCommand::LockdownDas(lockdown) => {
+                assert_eq!(lockdown.mount_root(), Path::new("/srv/dasobjectstore"));
+                assert_eq!(lockdown.service_user(), "dasobjectstore");
+                assert_eq!(lockdown.service_group(), "dasobjectstore");
+                assert!(lockdown.create_service_user());
+                assert!(lockdown.dry_run());
+                assert_eq!(lockdown.confirm(), "confirm lockdown das");
+            }
+            _ => panic!("expected lockdown-das command"),
         }
     }
 
