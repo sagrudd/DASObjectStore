@@ -1811,15 +1811,12 @@ struct UploadInterruptGuard {
 impl UploadInterruptGuard {
     fn install() -> Self {
         UPLOAD_CANCELLED.store(false, Ordering::SeqCst);
-        let handler = libc::sigaction {
-            sa_sigaction: upload_sigint_handler as usize,
-            sa_mask: unsafe { std::mem::zeroed() },
-            sa_flags: 0,
-        };
         let mut previous: libc::sigaction = unsafe { std::mem::zeroed() };
         unsafe {
             libc::sigemptyset(&mut previous.sa_mask);
-            let mut handler = handler;
+            let mut handler: libc::sigaction = std::mem::zeroed();
+            handler.sa_sigaction = upload_sigint_handler as usize;
+            handler.sa_flags = 0;
             libc::sigemptyset(&mut handler.sa_mask);
             libc::sigaction(libc::SIGINT, &handler, &mut previous);
         }
