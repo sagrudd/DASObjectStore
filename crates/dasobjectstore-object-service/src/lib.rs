@@ -2,6 +2,7 @@
 
 pub mod compose;
 pub mod credentials;
+pub mod garage;
 pub mod layout;
 pub mod provider;
 pub mod registry;
@@ -12,6 +13,10 @@ pub use credentials::{
     generate_per_store_credentials, write_credential_reference_manifest, CredentialEntropy,
     CredentialReferenceManifest, SecretAccessKey, StoreCredentialReference, StoreCredentialRequest,
     StoreServiceCredential, SystemCredentialEntropy,
+};
+pub use garage::{
+    GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH,
+    DEFAULT_GARAGE_IMAGE, DEFAULT_GARAGE_SERVICE_NAME,
 };
 pub use layout::{plan_store_service_layout, StoreServiceDefinition, StoreServiceLayout};
 pub use provider::{

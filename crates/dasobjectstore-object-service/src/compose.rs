@@ -83,7 +83,9 @@ pub fn render_compose(
     })
 }
 
-fn validate_render_request(request: &ComposeRenderRequest) -> Result<(), ObjectServiceError> {
+pub(crate) fn validate_render_request(
+    request: &ComposeRenderRequest,
+) -> Result<(), ObjectServiceError> {
     reject_blank("project_name", &request.project_name)?;
     reject_blank("ssd_metadata_path", &request.ssd_metadata_path)?;
     reject_blank("hdd_data_path", &request.hdd_data_path)?;
@@ -132,7 +134,7 @@ fn reject_blank(field: &str, value: &str) -> Result<(), ObjectServiceError> {
     Ok(())
 }
 
-fn render_store_binding(binding: &StoreBucketBinding) -> String {
+pub(crate) fn render_store_binding(binding: &StoreBucketBinding) -> String {
     format!(
         "    - store_id: {}\n      class: {}\n      bucket: {}\n      credential_reference: {}\n",
         binding.store_id,

@@ -71,8 +71,9 @@ use dasobjectstore_object_service::{
     mirror_subobject_definition, plan_store_service_layout, portable_store_registry_path,
     portable_subobject_registry_path, read_store_registry, read_subobject_registry, render_compose,
     search_subobjects, upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig,
-    ObjectServiceError, StoreRegistryUpdateReport, StoreServiceDefinition, SubObjectDefinition,
-    SubObjectParent, SubObjectRegistryUpdateReport,
+    GarageProvider, GarageProviderConfig, ObjectServiceError, ObjectServiceProvider,
+    ObjectServiceProviderId, StoreRegistryUpdateReport, StoreServiceDefinition,
+    SubObjectDefinition, SubObjectParent, SubObjectRegistryUpdateReport,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -2145,17 +2146,41 @@ fn run_service_render_compose(
         hdd_data_path: args.hdd_data_path().to_string_lossy().to_string(),
         store_bindings: layout.bucket_bindings,
     };
-    let service = ComposeServiceConfig::new(
-        args.provider(),
-        args.service_name(),
-        args.image(),
-        args.api_port(),
-    );
-    let rendered = render_compose(&request, &service)?;
+    let rendered = match args.provider() {
+        ObjectServiceProviderId::Garage => {
+            let provider = GarageProvider::new(GarageProviderConfig {
+                service_name: args.service_name().to_string(),
+                image: args.image().to_string(),
+                api_port: args.api_port(),
+                rpc_port: garage_derived_port(args.api_port(), 1)?,
+                web_port: garage_derived_port(args.api_port(), 2)?,
+                admin_port: garage_derived_port(args.api_port(), 3)?,
+                ..GarageProviderConfig::default()
+            });
+            provider.render_compose(&request)?
+        }
+        ObjectServiceProviderId::Rustfs => {
+            let service = ComposeServiceConfig::new(
+                args.provider(),
+                args.service_name(),
+                args.image(),
+                args.api_port(),
+            );
+            render_compose(&request, &service)?
+        }
+    };
 
     writer.write_all(rendered.compose_yaml.as_bytes())?;
 
     Ok(())
+}
+
+fn garage_derived_port(api_port: u16, offset: u16) -> Result<u16, ObjectServiceError> {
+    api_port.checked_add(offset).ok_or_else(|| {
+        ObjectServiceError::InvalidConfiguration(
+            "Garage API port must leave room for RPC, web, and admin ports".to_string(),
+        )
+    })
 }
 
 fn run_mnemosyne_export(
@@ -4185,6 +4210,8 @@ mod tests {
         assert!(output.contains("image: garage:latest"));
         assert!(output.contains("DASOBJECTSTORE_PROVIDER: garage"));
         assert!(output.contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
+        assert!(output.contains("/etc/dasobjectstore/garage.toml:/etc/garage.toml:ro"));
+        assert!(output.contains("command: [\"/garage\", \"server\", \"--single-node\""));
         assert!(
             output.contains("credential_reference: secret://dasobjectstore/stores/generated/s3")
         );

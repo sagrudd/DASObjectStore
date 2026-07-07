@@ -225,8 +225,12 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 ## Milestone 9: S3 Service Orchestration
 
 - [x] Create `dasobjectstore-object-service` crate with provider trait.
-- [ ] Implement Garage provider for selected MVP object service.
+- [x] Add Garage provider implementation with Garage-specific Compose rendering,
+  config rendering, and CLI `service render-compose --provider garage` wiring.
+- [ ] Implement daemon-owned Garage service lifecycle and status inspection.
   Milestone 8 selected Garage as the MVP provider on 2026-07-07.
+- [ ] Implement daemon-owned Garage bucket provisioning and per-store key
+  permissions from store registry bindings.
 - [x] Generate Docker/Compose configuration from store and pool policy.
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.
