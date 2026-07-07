@@ -49,6 +49,20 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - Prefer generated or shared types over manually duplicated API structures once
   schemas stabilize.
 
+## User Documentation
+
+- Maintain user-facing documentation under `docs/user/` in Sphinx/readthedocs
+  `.rst` format when changing CLI workflows, disk-management behavior, store
+  policy, NAS/NFS endpoint handling, service operation, or portability behavior.
+- Keep user docs helpful but not excessive: explain the task, the safe command
+  path, important warnings, and how to inspect the result.
+- Do not document ad hoc shell procedures for storage mutations when a formal
+  `dasobjectstore` management command exists or is being introduced.
+- Keep examples aligned with current CLI names, defaults, confirmation phrases,
+  and risk boundaries.
+- Update `docs/index.rst` or `docs/user/index.rst` when adding, renaming, or
+  removing user guide pages.
+
 ## Project Architecture Preferences
 
 - Keep DASObjectStore public-core first.

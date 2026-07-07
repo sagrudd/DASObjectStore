@@ -54,6 +54,8 @@ The current MVP milestone plan is tracked in [ROADMAP.md](ROADMAP.md). The
 standalone Web application, Synoptikon plugin posture, Mneion endpoint model,
 and permanent HTTPS port policy are specified in
 [Web GUI and Mnemosyne Plugin Specification](docs/web-gui-and-mnemosyne-plugin.md).
+Operator-facing task documentation is maintained in Sphinx/readthedocs format
+under [docs/user](docs/user/index.rst).
 
 DASObjectStore is not:
 
