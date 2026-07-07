@@ -1,3 +1,4 @@
+use crate::{format_rate_label, format_size_label};
 use crossterm::{
     cursor::{Hide, Show},
     execute,
@@ -39,7 +40,7 @@ where
     started_at: Instant,
     last_render_at: Instant,
     last_rate_sample: Option<RateSample>,
-    upload_rate_mib_s: Option<f64>,
+    upload_rate_bytes_per_second: Option<u64>,
     active: bool,
     terminal_controls: bool,
     last_event: Option<DaemonIngestProgressEvent>,
@@ -89,7 +90,7 @@ where
             started_at: Instant::now(),
             last_render_at: Instant::now(),
             last_rate_sample: None,
-            upload_rate_mib_s: None,
+            upload_rate_bytes_per_second: None,
             active: true,
             terminal_controls,
             last_event: None,
@@ -158,10 +159,11 @@ where
         self.last_render_at = Instant::now();
         let context = self.context.clone();
         let elapsed = self.started_at.elapsed().as_secs_f64();
-        let speed = self
-            .upload_rate_mib_s
-            .map(|rate| format!("{rate:.1} MiB/s"))
-            .unwrap_or_else(|| "calculating".to_string());
+        let speed = speed_label(
+            self.upload_rate_bytes_per_second,
+            event,
+            self.started_at.elapsed(),
+        );
         let event = event.cloned();
         self.terminal
             .draw(|frame| {
@@ -188,7 +190,7 @@ where
                     Line::from(format!("Conflict policy: {}", context.conflict_policy)),
                     Line::from(format!("Dry run: {}", context.dry_run)),
                     Line::from(format!("Status: {status}")),
-                    Line::from(format!("Elapsed: {elapsed:.1}s    Upload speed: {speed}")),
+                    Line::from(format!("Elapsed: {elapsed:.1}s    Speed: {speed}")),
                 ];
                 frame.render_widget(
                     Paragraph::new(context_lines)
@@ -241,7 +243,7 @@ where
             let elapsed = now.duration_since(sample.at).as_secs_f64();
             let delta = event.work_bytes_done.saturating_sub(sample.bytes_done);
             if elapsed > 0.0 {
-                self.upload_rate_mib_s = Some(delta as f64 / elapsed / 1024.0 / 1024.0);
+                self.upload_rate_bytes_per_second = Some((delta as f64 / elapsed).round() as u64);
             }
         }
         self.last_rate_sample = Some(RateSample {
@@ -292,10 +294,10 @@ fn detail_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
         )),
         Line::from(format!(
             "Bytes: {}/{}",
-            event.work_bytes_done,
+            format_size_label(event.work_bytes_done),
             event
                 .work_bytes_total
-                .map(|value| value.to_string())
+                .map(format_size_label)
                 .unwrap_or_else(|| "unknown".to_string())
         )),
         Line::from(format!(
@@ -397,10 +399,43 @@ fn hdd_migration_label(event: &DaemonIngestProgressEvent) -> String {
 
 fn stage_bytes_label(event: &DaemonIngestProgressEvent) -> String {
     match (event.stage_bytes_done, event.stage_bytes_total) {
-        (Some(done), Some(total)) => format!("{done}/{total} bytes"),
-        (Some(done), None) => format!("{done} bytes"),
+        (Some(done), Some(total)) => {
+            format!("{}/{}", format_size_label(done), format_size_label(total))
+        }
+        (Some(done), None) => format_size_label(done),
         _ => "waiting for byte progress".to_string(),
     }
+}
+
+fn speed_label(
+    current_bytes_per_second: Option<u64>,
+    event: Option<&DaemonIngestProgressEvent>,
+    elapsed: Duration,
+) -> String {
+    let current = current_bytes_per_second
+        .or_else(|| {
+            event
+                .and_then(|event| event.telemetry.as_ref())
+                .map(|telemetry| telemetry.throughput.current_bytes_per_second)
+        })
+        .unwrap_or(0);
+    let average = average_bytes_per_second(event, elapsed);
+    format!(
+        "current {}, avg {}",
+        format_rate_label(current),
+        format_rate_label(average)
+    )
+}
+
+fn average_bytes_per_second(event: Option<&DaemonIngestProgressEvent>, elapsed: Duration) -> u64 {
+    let Some(event) = event else {
+        return 0;
+    };
+    let elapsed = elapsed.as_secs_f64();
+    if elapsed <= 0.0 {
+        return 0;
+    }
+    (event.work_bytes_done as f64 / elapsed).round() as u64
 }
 
 #[derive(Debug)]
@@ -443,10 +478,10 @@ mod tests {
                 copy_number: 1,
             },
             pipeline_stage: Some(DaemonIngestPipelineStage::HddWrite),
-            work_bytes_done: 50,
-            work_bytes_total: Some(100),
-            stage_bytes_done: Some(50),
-            stage_bytes_total: Some(100),
+            work_bytes_done: 5 * 1024 * 1024 * 1024,
+            work_bytes_total: Some(4 * 1024 * 1024 * 1024 * 1024),
+            stage_bytes_done: Some(512 * 1024 * 1024),
+            stage_bytes_total: Some(2 * 1024 * 1024 * 1024),
             files_done: 1,
             files_total: Some(2),
             current_object_id: None,
@@ -455,7 +490,15 @@ mod tests {
             resource_policy: None,
             message: Some("copying".to_string()),
         };
-        assert!(format!("{:?}", super::queue_lines(&event)).contains("HDD migration: 50/100 bytes"));
+        assert!(format!("{:?}", super::detail_lines(&event)).contains("Bytes: 5.0 GiB/4.0 TiB"));
+        assert!(format!("{:?}", super::queue_lines(&event))
+            .contains("HDD migration: 512.0 MiB/2.0 GiB"));
+        assert!(super::speed_label(
+            Some(180 * 1024 * 1024),
+            Some(&event),
+            std::time::Duration::from_secs(10),
+        )
+        .contains("current 180.0 MiB/s, avg 512.0 MiB/s"));
 
         let mut tui = UploadTui::start_with_fixed_viewport(
             &mut output,

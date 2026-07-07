@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.1.10 - 2026-07-07
+
+- Render upload TUI byte counters with binary size units such as MiB, GiB, and
+  TiB instead of raw byte integers.
+- Show current and average upload speed in the embedded upload TUI using binary
+  rate units such as MiB/s.
+
 ## 0.1.9 - 2026-07-07
 
 - Detect QNAP TL-D800C enclosures from Linux udev parent hub topology when the
