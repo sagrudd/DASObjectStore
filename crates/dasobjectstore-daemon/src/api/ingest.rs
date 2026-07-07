@@ -38,6 +38,8 @@ pub struct SubmitIngestFilesRequest {
     pub endpoint: StoreId,
     pub source_path: PathBuf,
     pub copies: Option<u8>,
+    #[serde(default)]
+    pub conflict_policy: DaemonIngestConflictPolicy,
     pub dry_run: bool,
     pub client_request_id: Option<String>,
 }
@@ -60,6 +62,123 @@ impl SubmitIngestFilesRequest {
             return Err(DaemonRequestValidationError::BlankClientRequestId);
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngestConflictPolicy {
+    #[default]
+    Strict,
+    Lazy,
+    Force,
+}
+
+impl DaemonIngestConflictPolicy {
+    pub fn decide_existing_object(
+        self,
+        existing: &DaemonIngestObjectSnapshot,
+        incoming: &DaemonIngestObjectSnapshot,
+    ) -> DaemonIngestConflictDecision {
+        match self {
+            Self::Force => DaemonIngestConflictDecision::new(
+                DaemonIngestConflictAction::IngestNewVersion,
+                DaemonIngestConflictReason::ForceRequested,
+            ),
+            Self::Lazy if existing.size_bytes == incoming.size_bytes => {
+                DaemonIngestConflictDecision::new(
+                    DaemonIngestConflictAction::SkipExistingVersion,
+                    DaemonIngestConflictReason::LazySizeMatch,
+                )
+            }
+            Self::Lazy => DaemonIngestConflictDecision::new(
+                DaemonIngestConflictAction::IngestNewVersion,
+                DaemonIngestConflictReason::SizeMismatch,
+            ),
+            Self::Strict => strict_existing_object_decision(existing, incoming),
+        }
+    }
+}
+
+impl Display for DaemonIngestConflictPolicy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Strict => "strict",
+            Self::Lazy => "lazy",
+            Self::Force => "force",
+        })
+    }
+}
+
+fn strict_existing_object_decision(
+    existing: &DaemonIngestObjectSnapshot,
+    incoming: &DaemonIngestObjectSnapshot,
+) -> DaemonIngestConflictDecision {
+    match (&existing.content_hash, &incoming.content_hash) {
+        (Some(existing_hash), Some(incoming_hash)) if existing_hash == incoming_hash => {
+            DaemonIngestConflictDecision::new(
+                DaemonIngestConflictAction::SkipExistingVersion,
+                DaemonIngestConflictReason::StrictChecksumMatch,
+            )
+        }
+        (Some(_), Some(_)) => DaemonIngestConflictDecision::new(
+            DaemonIngestConflictAction::IngestNewVersion,
+            DaemonIngestConflictReason::ChecksumMismatch,
+        ),
+        _ => DaemonIngestConflictDecision::new(
+            DaemonIngestConflictAction::IngestNewVersion,
+            DaemonIngestConflictReason::ChecksumUnavailable,
+        ),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonIngestObjectSnapshot {
+    pub size_bytes: u64,
+    pub content_hash: Option<String>,
+}
+
+impl DaemonIngestObjectSnapshot {
+    pub fn new(size_bytes: u64, content_hash: Option<impl Into<String>>) -> Self {
+        Self {
+            size_bytes,
+            content_hash: content_hash.map(Into::into),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngestConflictAction {
+    SkipExistingVersion,
+    IngestNewVersion,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngestConflictReason {
+    ForceRequested,
+    LazySizeMatch,
+    StrictChecksumMatch,
+    SizeMismatch,
+    ChecksumMismatch,
+    ChecksumUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonIngestConflictDecision {
+    pub action: DaemonIngestConflictAction,
+    pub reason: DaemonIngestConflictReason,
+    pub preserves_existing_version: bool,
+}
+
+impl DaemonIngestConflictDecision {
+    fn new(action: DaemonIngestConflictAction, reason: DaemonIngestConflictReason) -> Self {
+        Self {
+            action,
+            reason,
+            preserves_existing_version: true,
+        }
     }
 }
 
@@ -219,15 +338,17 @@ mod tests {
     use super::{
         CancelIngestJobRequest, DaemonIngestAdaptiveSchedulerInput,
         DaemonIngestAdaptiveSchedulingLimit, DaemonIngestBottleneck,
-        DaemonIngestCompletionFraction, DaemonIngestErrorRate, DaemonIngestHddQueueState,
-        DaemonIngestHddTargetQueue, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
-        DaemonIngestPlacementSchedulerInput, DaemonIngestPressure, DaemonIngestProgressEvent,
-        DaemonIngestResourcePolicy, DaemonIngestSchedulingPolicy, DaemonIngestStage,
-        DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry, DaemonIngestTargetCapacity,
-        DaemonIngestTargetFailureState, DaemonIngestTelemetry, DaemonIngestThroughputTrend,
-        DaemonIngestWorkerCounts, DaemonRequestValidationError, DaemonSourceReadBackpressureInput,
-        DaemonSourceReadBackpressurePolicy, DaemonSourceReadBackpressureReason,
-        DaemonSourceReadPriority, DaemonSourceToSsdQueueUsage, SubmitIngestFilesRequest,
+        DaemonIngestCompletionFraction, DaemonIngestConflictAction, DaemonIngestConflictPolicy,
+        DaemonIngestConflictReason, DaemonIngestErrorRate, DaemonIngestHddQueueState,
+        DaemonIngestHddTargetQueue, DaemonIngestObjectSnapshot, DaemonIngestPipelinePressure,
+        DaemonIngestPipelineStage, DaemonIngestPlacementSchedulerInput, DaemonIngestPressure,
+        DaemonIngestProgressEvent, DaemonIngestResourcePolicy, DaemonIngestSchedulingPolicy,
+        DaemonIngestStage, DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry,
+        DaemonIngestTargetCapacity, DaemonIngestTargetFailureState, DaemonIngestTelemetry,
+        DaemonIngestThroughputTrend, DaemonIngestWorkerCounts, DaemonRequestValidationError,
+        DaemonSourceReadBackpressureInput, DaemonSourceReadBackpressurePolicy,
+        DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdQueueUsage,
+        SubmitIngestFilesRequest,
     };
     use crate::api::health::DaemonSsdPressure;
     use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
@@ -239,6 +360,7 @@ mod tests {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "/mnt/external/zymo".into(),
             copies: Some(1),
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: Some("request-a".to_string()),
         };
@@ -252,6 +374,7 @@ mod tests {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "relative/source".into(),
             copies: Some(1),
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
         };
@@ -272,6 +395,7 @@ mod tests {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "/mnt/external/zymo".into(),
             copies: Some(0),
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
         };
@@ -282,6 +406,91 @@ mod tests {
             err,
             DaemonRequestValidationError::InvalidCopyCount { copies: 0 }
         );
+    }
+
+    #[test]
+    fn submit_ingest_defaults_legacy_conflict_policy_to_strict() {
+        let encoded = serde_json::json!({
+            "endpoint": "zymo",
+            "source_path": "/mnt/external/zymo",
+            "copies": null,
+            "dry_run": false,
+            "client_request_id": null
+        });
+
+        let request: SubmitIngestFilesRequest =
+            serde_json::from_value(encoded).expect("legacy request deserializes");
+
+        assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Strict);
+    }
+
+    #[test]
+    fn conflict_policy_serializes_as_stable_snake_case() {
+        let request = SubmitIngestFilesRequest {
+            endpoint: StoreId::new("zymo").expect("store id"),
+            source_path: "/mnt/external/zymo".into(),
+            copies: None,
+            conflict_policy: DaemonIngestConflictPolicy::Lazy,
+            dry_run: true,
+            client_request_id: None,
+        };
+
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["conflict_policy"], "lazy");
+    }
+
+    #[test]
+    fn strict_conflict_policy_skips_only_checksum_matches() {
+        let existing = DaemonIngestObjectSnapshot::new(4, Some("sha256:abc"));
+        let same = DaemonIngestObjectSnapshot::new(4, Some("sha256:abc"));
+        let changed = DaemonIngestObjectSnapshot::new(4, Some("sha256:def"));
+        let unhashed = DaemonIngestObjectSnapshot::new(4, None::<String>);
+
+        assert_eq!(
+            DaemonIngestConflictPolicy::Strict
+                .decide_existing_object(&existing, &same)
+                .action,
+            DaemonIngestConflictAction::SkipExistingVersion
+        );
+        assert_eq!(
+            DaemonIngestConflictPolicy::Strict
+                .decide_existing_object(&existing, &changed)
+                .reason,
+            DaemonIngestConflictReason::ChecksumMismatch
+        );
+        assert_eq!(
+            DaemonIngestConflictPolicy::Strict
+                .decide_existing_object(&existing, &unhashed)
+                .reason,
+            DaemonIngestConflictReason::ChecksumUnavailable
+        );
+    }
+
+    #[test]
+    fn lazy_and_force_conflict_policies_preserve_existing_versions() {
+        let existing = DaemonIngestObjectSnapshot::new(1024, Some("sha256:abc"));
+        let same_size = DaemonIngestObjectSnapshot::new(1024, Some("sha256:def"));
+        let different_size = DaemonIngestObjectSnapshot::new(2048, Some("sha256:def"));
+
+        let lazy_skip =
+            DaemonIngestConflictPolicy::Lazy.decide_existing_object(&existing, &same_size);
+        let lazy_ingest =
+            DaemonIngestConflictPolicy::Lazy.decide_existing_object(&existing, &different_size);
+        let forced =
+            DaemonIngestConflictPolicy::Force.decide_existing_object(&existing, &same_size);
+
+        assert_eq!(
+            lazy_skip.action,
+            DaemonIngestConflictAction::SkipExistingVersion
+        );
+        assert_eq!(lazy_skip.reason, DaemonIngestConflictReason::LazySizeMatch);
+        assert_eq!(
+            lazy_ingest.action,
+            DaemonIngestConflictAction::IngestNewVersion
+        );
+        assert_eq!(forced.reason, DaemonIngestConflictReason::ForceRequested);
+        assert!(forced.preserves_existing_version);
     }
 
     #[test]

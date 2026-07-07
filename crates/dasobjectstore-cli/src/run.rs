@@ -1438,6 +1438,7 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
         endpoint: args.endpoint().clone(),
         source_path: args.source().to_path_buf(),
         copies: args.copies(),
+        conflict_policy: args.conflict_policy(),
         dry_run: args.dry_run(),
         client_request_id: None,
     }
@@ -1454,6 +1455,7 @@ fn write_daemon_ingest_submission(
     if let Some(copies) = args.copies() {
         writeln!(writer, "Copies override: {copies}")?;
     }
+    writeln!(writer, "Conflict policy: {}", args.conflict_policy())?;
     writeln!(writer, "Dry run: {}", args.dry_run())?;
     writeln!(writer, "Job: {}", response.job_id)?;
     writeln!(writer, "Accepted at UTC: {}", response.accepted_at_utc)
@@ -1507,6 +1509,7 @@ fn run_ingest_files_local_direct(
     writeln!(writer, "Files: {}", files.len())?;
     writeln!(writer, "Source bytes: {total_source_bytes}")?;
     writeln!(writer, "Copies: {copies}")?;
+    writeln!(writer, "Conflict policy: {}", args.conflict_policy())?;
     writeln!(writer, "Work bytes: {total_work_bytes}")?;
 
     if args.dry_run() {
@@ -2535,8 +2538,9 @@ mod tests {
         CapacityBehavior, IngestMode, StoreClass, StorePolicy, StorePolicyValidationError,
     };
     use dasobjectstore_daemon::{
-        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonIngestProgressEvent,
-        DaemonIngestStage, DaemonSsdPressure, InProcessDaemonTransport, SubmitIngestFilesResponse,
+        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonIngestConflictPolicy,
+        DaemonIngestProgressEvent, DaemonIngestStage, DaemonSsdPressure, InProcessDaemonTransport,
+        SubmitIngestFilesResponse,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -3637,6 +3641,7 @@ mod tests {
             source_root.to_str().expect("utf8 source"),
             "--copies",
             "1",
+            "--force",
         ])
         .expect("ingest files parses");
         let Some(crate::cli::Command::Ingest(args)) = cli.command() else {
@@ -3651,6 +3656,7 @@ mod tests {
                     assert_eq!(request.endpoint.as_str(), "zymo_fecal_2025.05");
                     assert_eq!(request.source_path, source_root);
                     assert_eq!(request.copies, Some(1));
+                    assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
                     assert!(!request.dry_run);
                 }
                 _ => panic!("expected submit ingest files request"),
@@ -3672,6 +3678,7 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("Daemon ingest job submitted"));
         assert!(output.contains("Endpoint: zymo_fecal_2025.05"));
+        assert!(output.contains("Conflict policy: force"));
         assert!(output.contains("Job: job-zymo"));
     }
 

@@ -3,6 +3,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::store::StoreClass;
+use dasobjectstore_daemon::DaemonIngestConflictPolicy;
 use dasobjectstore_object_service::ObjectServiceProviderId;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -708,6 +709,15 @@ pub(crate) struct IngestFilesArgs {
     /// Override the store policy copy count for this import.
     #[arg(long)]
     copies: Option<u8>,
+    /// Reuse an existing object only when its recorded checksum matches the incoming file.
+    #[arg(long, conflicts_with_all = ["lazy", "force"])]
+    strict: bool,
+    /// Reuse an existing object when the object path and file size match.
+    #[arg(long, conflicts_with_all = ["strict", "force"])]
+    lazy: bool,
+    /// Always ingest every file as a new stored version/payload.
+    #[arg(long, conflicts_with_all = ["strict", "lazy"])]
+    force: bool,
     /// Show the planned file set without importing.
     #[arg(long)]
     dry_run: bool,
@@ -741,6 +751,16 @@ impl IngestFilesArgs {
 
     pub(crate) fn copies(&self) -> Option<u8> {
         self.copies
+    }
+
+    pub(crate) fn conflict_policy(&self) -> DaemonIngestConflictPolicy {
+        if self.force {
+            DaemonIngestConflictPolicy::Force
+        } else if self.lazy {
+            DaemonIngestConflictPolicy::Lazy
+        } else {
+            DaemonIngestConflictPolicy::Strict
+        }
     }
 
     pub(crate) fn dry_run(&self) -> bool {
@@ -1389,6 +1409,7 @@ mod tests {
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
+    use dasobjectstore_daemon::DaemonIngestConflictPolicy;
     use std::path::Path;
 
     #[test]
@@ -1997,6 +2018,7 @@ mod tests {
             "/srv/dasobjectstore/ssd",
             "--copies",
             "1",
+            "--lazy",
             "--dry-run",
         ])
         .expect("ingest files parses");
@@ -2010,10 +2032,51 @@ mod tests {
                 assert_eq!(files.source(), Path::new("/mnt/external/zymo"));
                 assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
                 assert_eq!(files.copies(), Some(1));
+                assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
                 assert!(files.dry_run());
             }
             _ => panic!("expected files command"),
         }
+    }
+
+    #[test]
+    fn defaults_ingest_files_conflict_policy_to_strict() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/mnt/external/zymo",
+        ])
+        .expect("ingest files parses");
+
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        match args.command() {
+            Some(IngestCommand::Files(files)) => {
+                assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Strict);
+            }
+            _ => panic!("expected files command"),
+        }
+    }
+
+    #[test]
+    fn rejects_ambiguous_ingest_files_conflict_policies() {
+        let err = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/mnt/external/zymo",
+            "--lazy",
+            "--force",
+        ])
+        .expect_err("conflicting conflict policies rejected");
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
     }
 
     #[test]

@@ -1,8 +1,9 @@
 use dasobjectstore_core::ids::{IngestJobId, StoreId};
 use dasobjectstore_daemon::{
     authorize_store_write, DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonClientError,
-    DaemonLocalActor, DaemonStoreAccessPolicy, InProcessDaemonTransport, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_SERVICE_USER,
+    DaemonIngestConflictPolicy, DaemonLocalActor, DaemonStoreAccessPolicy,
+    InProcessDaemonTransport, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_SERVICE_USER,
 };
 use std::path::PathBuf;
 
@@ -29,6 +30,7 @@ fn non_root_writer_submits_ingest_without_managed_root_write_access() {
             endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             source_path: PathBuf::from("/mnt/external/zymo"),
             copies: Some(1),
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: Some("request-1".to_string()),
         })
@@ -54,6 +56,7 @@ fn non_writer_is_rejected_even_when_daemon_owns_managed_root() {
             endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             source_path: PathBuf::from("/mnt/external/zymo"),
             copies: Some(1),
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: Some("request-2".to_string()),
         })

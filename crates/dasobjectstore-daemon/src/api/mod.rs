@@ -15,20 +15,21 @@ pub use ingest::{
     CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestAdaptiveSchedulerInput,
     DaemonIngestAdaptiveSchedulingLimit, DaemonIngestAdaptiveWorkerSchedule,
     DaemonIngestBottleneck, DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
-    DaemonIngestCompletionFraction, DaemonIngestErrorRate, DaemonIngestHddQueueState,
-    DaemonIngestHddTargetQueue, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
-    DaemonIngestPlacementSchedulerInput, DaemonIngestPressure, DaemonIngestProgressEvent,
-    DaemonIngestProgressFractions, DaemonIngestQueueDepths, DaemonIngestResourcePolicy,
-    DaemonIngestSchedulingPolicy, DaemonIngestStage, DaemonIngestSystemSafetyReserve,
-    DaemonIngestSystemTelemetry, DaemonIngestTargetCapacity, DaemonIngestTargetFailureState,
-    DaemonIngestTelemetry, DaemonIngestThroughputTelemetry, DaemonIngestThroughputTrend,
-    DaemonIngestWorkerActivity, DaemonIngestWorkerCounts, DaemonIngestWorkerTelemetry,
-    DaemonRequestValidationError, DaemonSourceReadBackpressureAction,
-    DaemonSourceReadBackpressureDecision, DaemonSourceReadBackpressureInput,
-    DaemonSourceReadBackpressurePolicy, DaemonSourceReadBackpressureReason,
-    DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy, DaemonSourceToSsdQueueUsage,
-    IngestJobStatusRequest, IngestJobStatusResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    DaemonIngestCompletionFraction, DaemonIngestConflictAction, DaemonIngestConflictDecision,
+    DaemonIngestConflictPolicy, DaemonIngestConflictReason, DaemonIngestErrorRate,
+    DaemonIngestHddQueueState, DaemonIngestHddTargetQueue, DaemonIngestObjectSnapshot,
+    DaemonIngestPipelinePressure, DaemonIngestPipelineStage, DaemonIngestPlacementSchedulerInput,
+    DaemonIngestPressure, DaemonIngestProgressEvent, DaemonIngestProgressFractions,
+    DaemonIngestQueueDepths, DaemonIngestResourcePolicy, DaemonIngestSchedulingPolicy,
+    DaemonIngestStage, DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry,
+    DaemonIngestTargetCapacity, DaemonIngestTargetFailureState, DaemonIngestTelemetry,
+    DaemonIngestThroughputTelemetry, DaemonIngestThroughputTrend, DaemonIngestWorkerActivity,
+    DaemonIngestWorkerCounts, DaemonIngestWorkerTelemetry, DaemonRequestValidationError,
+    DaemonSourceReadBackpressureAction, DaemonSourceReadBackpressureDecision,
+    DaemonSourceReadBackpressureInput, DaemonSourceReadBackpressurePolicy,
+    DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy,
+    DaemonSourceToSsdQueueUsage, IngestJobStatusRequest, IngestJobStatusResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
@@ -145,8 +146,9 @@ impl DaemonApiErrorResponse {
 mod tests {
     use super::{
         AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, DaemonApiRequest,
-        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceStatusRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        DaemonIngestConflictPolicy, DaemonServiceLifecycleRequest, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, StoreInventoryRequest,
+        SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -166,6 +168,7 @@ mod tests {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "relative".into(),
             copies: None,
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
         });

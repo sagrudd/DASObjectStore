@@ -171,10 +171,10 @@ mod tests {
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
-        SubmitIngestFilesRequest,
+        DaemonIngestConflictPolicy, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+        DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+        DaemonServiceStatusRequest, DaemonServiceStatusResponse, StoreInventoryRequest,
+        StoreInventoryResponse, SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -214,6 +214,7 @@ mod tests {
                 endpoint: StoreId::new("zymo").expect("store id"),
                 source_path: "relative".into(),
                 copies: None,
+                conflict_policy: DaemonIngestConflictPolicy::Strict,
                 dry_run: false,
                 client_request_id: None,
             })

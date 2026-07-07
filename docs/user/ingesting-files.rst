@@ -52,6 +52,7 @@ argument parsing and submits an ingest job request containing:
 * the target object store or SubObject endpoint;
 * the mounted source directory;
 * an optional copy-count override;
+* the existing-object conflict policy;
 * whether the request is a dry run.
 
 The daemon is responsible for authorization, policy lookup, SSD staging,
@@ -64,6 +65,52 @@ The daemon socket path in packaged Linux deployments is:
 .. code-block:: text
 
    /run/dasobjectstore/dasobjectstored.sock
+
+Existing Objects
+----------------
+
+Object IDs are derived from the endpoint prefix and the source-relative file
+path. If a later import contains a file that maps to an object ID already known
+to the store, DASObjectStore uses an explicit conflict policy.
+
+``--strict`` is the default and the safest commercial behavior. It reuses the
+existing object only when the incoming file checksum matches the stored object
+checksum. The local DAS metadata path records SHA-256 content hashes for this
+comparison. If a checksum is unavailable or differs, the daemon must ingest the
+incoming payload as a new stored version rather than silently overwrite the
+existing payload.
+
+``--lazy`` is a faster operator-selected policy for trusted repeat imports. It
+reuses the existing object when the object ID and size match. If the size
+differs, the incoming payload is ingested as a new stored version.
+
+``--force`` always ingests the incoming payload. Existing content is preserved;
+the new payload is treated as a new stored version even when the size or
+checksum matches.
+
+Examples:
+
+.. code-block:: console
+
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --strict
+
+.. code-block:: console
+
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --lazy
+
+.. code-block:: console
+
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --force
+
+The three policy flags are mutually exclusive. For normal operator use, prefer
+the default strict policy unless the source dataset is known to be immutable and
+the import is being repeated for operational recovery.
 
 Group Requirements
 ------------------
