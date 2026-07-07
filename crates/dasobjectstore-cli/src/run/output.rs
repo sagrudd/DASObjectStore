@@ -11,6 +11,7 @@ use dasobjectstore_metadata::{
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
 };
+use dasobjectstore_object_service::StoreRegistryUpdateReport;
 use dasobjectstore_platform::{ObservedDisk, ObservedEnclosure, ProbeReport};
 use std::io::{self, Write};
 
@@ -618,6 +619,23 @@ pub(super) fn write_object_export_report(
     )?;
     writeln!(writer, "Bytes written: {}", report.bytes_written)?;
     writeln!(writer, "Content hash: {}", report.content_hash)
+}
+
+pub(super) fn write_store_create_report(
+    report: &StoreRegistryUpdateReport,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Store {}", report.action.as_str())?;
+    writeln!(writer, "Store: {}", report.definition.store_id)?;
+    writeln!(writer, "Class: {}", report.definition.policy.class.name())?;
+    writeln!(writer, "Copies: {}", report.definition.policy.copies)?;
+    if let Some(bucket_name) = &report.bucket_name {
+        writeln!(writer, "Bucket: {bucket_name}")?;
+    }
+    if let Some(credential_reference) = &report.credential_reference {
+        writeln!(writer, "Credential reference: {credential_reference}")?;
+    }
+    writeln!(writer, "Registry: system-managed")
 }
 
 pub(super) fn write_object_put_report(

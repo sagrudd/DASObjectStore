@@ -1,7 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
-use dasobjectstore_core::ids::{DiskId, ObjectId};
+use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::store::StoreClass;
 use dasobjectstore_object_service::ObjectServiceProviderId;
 use std::io::{self, Write};
@@ -497,10 +497,59 @@ impl StoreArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum StoreCommand {
+    /// Create or update a system-managed object store.
+    Create(StoreCreateArgs),
     /// Emit the built-in JSON policy defaults for a store class.
     Defaults(StoreDefaultsArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreCreateArgs {
+    /// Store identifier to create or update.
+    store_id: StoreId,
+    /// Store class to create.
+    #[arg(long)]
+    class: StoreClass,
+    /// Override the default copy count for this store class.
+    #[arg(long)]
+    copies: Option<u8>,
+    /// Explicit S3 bucket name; defaults to a stable name derived from the store ID.
+    #[arg(long)]
+    bucket: Option<String>,
+    /// Emit the created or updated store definition as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl StoreCreateArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn class(&self) -> StoreClass {
+        self.class
+    }
+
+    pub(crate) fn copies(&self) -> Option<u8> {
+        self.copies
+    }
+
+    pub(crate) fn bucket(&self) -> Option<&str> {
+        self.bucket.as_deref()
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -911,9 +960,9 @@ impl ServiceStatusArgs {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct ServiceRenderComposeArgs {
-    /// Path to a JSON array of store service definitions.
-    #[arg(long)]
-    stores_file: PathBuf,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long = "stores-file", hide = true)]
+    stores_file: Option<PathBuf>,
     /// Docker Compose project name.
     #[arg(long)]
     project_name: String,
@@ -938,8 +987,8 @@ pub(crate) struct ServiceRenderComposeArgs {
 }
 
 impl ServiceRenderComposeArgs {
-    pub(crate) fn stores_file(&self) -> &Path {
-        &self.stores_file
+    pub(crate) fn stores_file(&self) -> Option<&Path> {
+        self.stores_file.as_deref()
     }
 
     pub(crate) fn project_name(&self) -> &str {
@@ -1423,8 +1472,6 @@ mod tests {
             "dasobjectstore",
             "service",
             "render-compose",
-            "--stores-file",
-            "/tmp/stores.json",
             "--project-name",
             "dasobjectstore-dev",
             "--ssd-metadata-path",
@@ -1447,7 +1494,7 @@ mod tests {
         };
         match args.command() {
             ServiceCommand::RenderCompose(render) => {
-                assert_eq!(render.stores_file(), Path::new("/tmp/stores.json"));
+                assert_eq!(render.stores_file(), None);
                 assert_eq!(render.project_name(), "dasobjectstore-dev");
                 assert_eq!(render.ssd_metadata_path(), Path::new("/ssd/meta"));
                 assert_eq!(render.hdd_data_path(), Path::new("/hdd/data"));
@@ -1754,6 +1801,39 @@ mod tests {
                 assert!(import.json());
             }
             _ => panic!("expected direct-import command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_create() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "create",
+            "generated-data",
+            "--class",
+            "generated_data",
+            "--copies",
+            "2",
+            "--bucket",
+            "generated-data",
+            "--json",
+        ])
+        .expect("store create parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Create(create)) => {
+                assert_eq!(create.store_id().as_str(), "generated-data");
+                assert_eq!(create.class(), StoreClass::GeneratedData);
+                assert_eq!(create.copies(), Some(2));
+                assert_eq!(create.bucket(), Some("generated-data"));
+                assert!(create.json());
+                assert_eq!(create.registry_path(), None);
+            }
+            _ => panic!("expected create command"),
         }
     }
 

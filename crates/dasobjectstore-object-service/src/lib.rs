@@ -4,6 +4,7 @@ pub mod compose;
 pub mod credentials;
 pub mod layout;
 pub mod provider;
+pub mod registry;
 
 pub use compose::{render_compose, ComposeServiceConfig};
 pub use credentials::{
@@ -15,6 +16,10 @@ pub use layout::{plan_store_service_layout, StoreServiceDefinition, StoreService
 pub use provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus, StoreBucketBinding,
+};
+pub use registry::{
+    default_store_registry_path, read_store_registry, upsert_store_definition, StoreRegistryAction,
+    StoreRegistryUpdateReport, STORE_REGISTRY_ENV,
 };
 
 /// Returns the object service crate version.

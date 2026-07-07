@@ -7,7 +7,7 @@ use crate::cli::{
     MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
     ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs,
     ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs,
-    StoreCommand, StoreDefaultsArgs, StoreValidateArgs,
+    StoreCommand, StoreCreateArgs, StoreDefaultsArgs, StoreValidateArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -27,7 +27,7 @@ use self::output::{
     write_lockdown_das_report, write_nas_nfs_endpoint_validation_report,
     write_object_export_report, write_object_inspect_summary, write_object_put_report,
     write_pool_import_report, write_pool_inspect_summary, write_pool_repair_dry_run,
-    write_prepare_das_report, write_pretty_report,
+    write_prepare_das_report, write_pretty_report, write_store_create_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::DiskId;
@@ -55,8 +55,9 @@ use dasobjectstore_mnemosyne::{
     NasNfsEndpointValidationError,
 };
 use dasobjectstore_object_service::{
-    plan_store_service_layout, render_compose, ComposeRenderRequest, ComposeServiceConfig,
-    ObjectServiceError, StoreServiceDefinition,
+    default_store_registry_path, plan_store_service_layout, read_store_registry, render_compose,
+    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, ObjectServiceError,
+    StoreServiceDefinition,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -98,6 +99,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             DiskCommand::Retire(args) => run_disk_retire(args, writer),
         },
         Some(Command::Store(args)) => match args.command() {
+            Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Ok(()),
@@ -778,6 +780,34 @@ fn run_store_validate(args: &StoreValidateArgs, writer: &mut impl Write) -> Resu
     Ok(())
 }
 
+fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let mut policy = StorePolicy::defaults_for(args.class());
+    if let Some(copies) = args.copies() {
+        policy.copies = copies;
+    }
+    policy.validate()?;
+
+    let definition = StoreServiceDefinition {
+        store_id: args.store_id().clone(),
+        policy,
+        bucket_name: args.bucket().map(ToOwned::to_owned),
+    };
+    let registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_store_registry_path);
+    let report = upsert_store_definition(&registry_path, definition)?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_store_create_report(&report, writer)?;
+    }
+
+    Ok(())
+}
+
 fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Result<(), CliError> {
     let policy = StorePolicy::defaults_for(args.class());
 
@@ -930,8 +960,11 @@ fn run_service_render_compose(
     args: &ServiceRenderComposeArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let file = File::open(args.stores_file())?;
-    let definitions: Vec<StoreServiceDefinition> = serde_json::from_reader(file)?;
+    let registry_path = args
+        .stores_file()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_store_registry_path);
+    let definitions = read_store_registry(&registry_path)?;
     let layout = plan_store_service_layout(&definitions)?;
     let request = ComposeRenderRequest {
         project_name: args.project_name().to_string(),
@@ -1937,6 +1970,51 @@ mod tests {
         assert_eq!(output["new_disk_id"], "disk-b");
         assert_eq!(output["protected_copy_tasks"], 1);
         assert_eq!(output["affected_objects"][0]["action"], "copy_planned");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_create_writes_system_registry_definition() {
+        let root = temp_root("store-create");
+        fs::create_dir_all(&root).expect("create temp root");
+        let registry_path = root.join("stores.json");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "create",
+            "generated-data",
+            "--class",
+            "generated_data",
+            "--copies",
+            "2",
+            "--bucket",
+            "generated-data",
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+        ])
+        .expect("store create parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store create runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Store created"));
+        assert!(output.contains("Store: generated-data"));
+        assert!(output.contains("Bucket: generated-data"));
+        assert!(output.contains("Registry: system-managed"));
+
+        let definitions: Vec<StoreServiceDefinition> =
+            serde_json::from_reader(File::open(&registry_path).expect("open registry"))
+                .expect("registry json");
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].store_id.as_str(), "generated-data");
+        assert_eq!(definitions[0].policy.class, StoreClass::GeneratedData);
+        assert_eq!(definitions[0].policy.copies, 2);
+        assert_eq!(
+            definitions[0].bucket_name.as_deref(),
+            Some("generated-data")
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
