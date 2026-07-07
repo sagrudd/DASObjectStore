@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.2 - 2026-07-07
+
+- Keep upload rate information visible in `dasobjectstore ingest files --tui`
+  by rendering current and average transfer rate on the visible transfer row.
+
 ## 0.3.1 - 2026-07-07
 
 - Make `dasobjectstore store contents` tolerate older or empty live SQLite

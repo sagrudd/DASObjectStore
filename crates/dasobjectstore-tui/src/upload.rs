@@ -221,7 +221,7 @@ where
 
                 let detail_lines = event
                     .as_ref()
-                    .map(detail_lines)
+                    .map(|event| detail_lines(event, &speed))
                     .unwrap_or_else(|| vec![Line::from("Waiting for first daemon event")]);
                 frame.render_widget(
                     Paragraph::new(detail_lines)
@@ -281,7 +281,7 @@ where
     }
 }
 
-fn detail_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
+fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'static>> {
     vec![
         Line::from(format!("Job: {}", event.job_id)),
         Line::from(format!("Stage: {}", stage_label(&event.stage))),
@@ -301,12 +301,13 @@ fn detail_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
                 .unwrap_or_else(|| "unknown".to_string())
         )),
         Line::from(format!(
-            "Bytes: {}/{}",
+            "Bytes: {}/{}    Rate: {}",
             format_size_label(event.work_bytes_done),
             event
                 .work_bytes_total
                 .map(format_size_label)
-                .unwrap_or_else(|| "unknown".to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            speed
         )),
         Line::from(format!(
             "Current object: {}",
@@ -498,15 +499,17 @@ mod tests {
             resource_policy: None,
             message: Some("copying".to_string()),
         };
-        assert!(format!("{:?}", super::detail_lines(&event)).contains("Bytes: 5.0 GiB/4.0 TiB"));
-        assert!(format!("{:?}", super::queue_lines(&event))
-            .contains("HDD migration: 512.0 MiB/2.0 GiB"));
-        assert!(super::speed_label(
+        let speed = super::speed_label(
             Some(180 * 1024 * 1024),
             Some(&event),
             std::time::Duration::from_secs(10),
-        )
-        .contains("current 180.0 MiB/s, avg 512.0 MiB/s"));
+        );
+        let details = format!("{:?}", super::detail_lines(&event, &speed));
+        assert!(details.contains("Bytes: 5.0 GiB/4.0 TiB"));
+        assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
+        assert!(format!("{:?}", super::queue_lines(&event))
+            .contains("HDD migration: 512.0 MiB/2.0 GiB"));
+        assert!(speed.contains("current 180.0 MiB/s, avg 512.0 MiB/s"));
 
         let mut tui = UploadTui::start_with_fixed_viewport(
             &mut output,
