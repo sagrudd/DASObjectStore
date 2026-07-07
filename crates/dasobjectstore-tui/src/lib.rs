@@ -9,10 +9,19 @@
 //! full terminal loop.
 
 pub mod layout;
+pub mod monitoring;
 pub mod planning;
 pub mod resource;
 
 pub use layout::{classify_terminal_layout, TerminalLayout};
+pub use monitoring::{
+    format_rate_label, AttachState, Bottleneck, CompletionFraction, DaemonActionSupport,
+    HddPressureTelemetry, IngestProgressTelemetry, IngestRunState, KeyboardActionDisplay,
+    KeyboardActionKind, KeyboardActionModel, LiveIngestTelemetry, LiveMonitoringDisplay,
+    PipelinePressureLevel, PressureTrend, QueueDepthTelemetry, SourceThrottleState,
+    SsdPressureLevel, SsdPressureTelemetry, ThroughputTelemetry, ThroughputTrend, TuiErrorKind,
+    TuiErrorState, VerificationStatus, VerificationTelemetry, WorkerActivity, WorkerTelemetry,
+};
 pub use planning::{
     format_size_label, ImportPlan, ImportPlanningSummary, ImportTarget, SourcePath,
 };
