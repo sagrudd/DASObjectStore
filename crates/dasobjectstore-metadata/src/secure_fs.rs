@@ -33,7 +33,12 @@ pub(crate) fn create_private_file(path: &Path) -> io::Result<File> {
 pub(crate) fn set_private_dir_permissions(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
-        fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIR_MODE))?;
+        if let Err(err) = fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIR_MODE)) {
+            if err.kind() == io::ErrorKind::PermissionDenied && path.is_dir() {
+                return Ok(());
+            }
+            return Err(err);
+        }
     }
 
     Ok(())
