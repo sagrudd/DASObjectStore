@@ -32,7 +32,8 @@ import files from a mounted external disk:
 .. code-block:: console
 
    dasobjectstore ingest files zymo_fecal_2025.05 \
-     --source /mnt/external/zymo_fecal_2025.05
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --object-type fastq
 
 The user running ingest must be authorized by the store's writer group. For the
 example above, membership in ``mnemosyne`` is required. Ingest does not require
@@ -51,6 +52,7 @@ argument parsing and submits an ingest job request containing:
 
 * the target object store or SubObject endpoint;
 * the mounted source directory;
+* the logical object type assigned to the imported files;
 * an optional copy-count override;
 * the existing-object conflict policy;
 * whether the request is a dry run.
@@ -59,6 +61,45 @@ The daemon is responsible for authorization, policy lookup, SSD staging,
 placement selection, HDD fan-out, verification, metadata mutation, and progress
 events. The operator sees job submission details first, followed by byte-level
 progress as daemon event streaming is available for the active job.
+
+Object Types
+------------
+
+Object type is workflow-facing metadata. It lets DASObjectStore make a folder of
+POD5 files, a FASTQ delivery, a BAM/CRAM alignment set, or an ENA/SRA public
+dataset discoverable without asking downstream orchestration to infer intent
+from paths alone.
+
+If no type is supplied, file ingress uses ``naive``. Use ``--object-type`` when
+the dataset is known:
+
+.. code-block:: console
+
+   dasobjectstore ingest files nanopore_run_42 \
+     --source /mnt/sequencer/run_42/pod5 \
+     --object-type pod5
+
+.. code-block:: console
+
+   dasobjectstore ingest files rnaseq_fastq \
+     --source /mnt/delivery/fastq \
+     --object-type fastq
+
+Discrete-file ingress uses the same vocabulary:
+
+.. code-block:: console
+
+   dasobjectstore object put cohort/sample.bam \
+     --source ./sample.bam \
+     --object-type bam \
+     --ssd-root /srv/dasobjectstore/ssd \
+     --disk-root disk-a=/srv/dasobjectstore/hdd/disk-a
+
+Supported object types are ``naive``, ``bam``, ``cram``, ``sam``, ``pod5``,
+``fastq``, ``fasta``, ``reference_genome``, ``ena_sra``, ``vcf``, ``bcf``,
+``bed``, ``gff_gtf``, ``count_matrix``, ``gene_expression_matrix``,
+``genome_assembly``, ``transcriptome_assembly``, ``alignment_index``,
+``nanopore_run``, ``illumina_run``, ``single_cell_fastq``, and ``ann_data``.
 
 The daemon socket path in packaged Linux deployments is:
 

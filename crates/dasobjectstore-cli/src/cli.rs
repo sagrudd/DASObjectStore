@@ -2,6 +2,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
+use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::StoreClass;
 use dasobjectstore_daemon::DaemonIngestConflictPolicy;
 use dasobjectstore_object_service::{ObjectServiceProviderId, RemoteS3AuthAuthority};
@@ -918,6 +919,9 @@ pub(crate) struct IngestFilesArgs {
     /// Mounted source directory containing files to import.
     #[arg(long)]
     source: PathBuf,
+    /// Logical object type assigned to imported files.
+    #[arg(long, default_value_t = ObjectType::Naive)]
+    object_type: ObjectType,
     /// SSD ingest root; defaults to DASOBJECTSTORE_SSD_ROOT or /srv/dasobjectstore/ssd.
     #[arg(long)]
     ssd_root: Option<PathBuf>,
@@ -957,6 +961,10 @@ impl IngestFilesArgs {
 
     pub(crate) fn source(&self) -> &Path {
         &self.source
+    }
+
+    pub(crate) fn object_type(&self) -> ObjectType {
+        self.object_type
     }
 
     pub(crate) fn ssd_root(&self) -> Option<&Path> {
@@ -1163,6 +1171,9 @@ pub(crate) struct IngestDirectImportArgs {
     /// Local source file to import.
     #[arg(long)]
     source: PathBuf,
+    /// Logical object type assigned to this direct import.
+    #[arg(long, default_value_t = ObjectType::Naive)]
+    object_type: ObjectType,
     /// Final HDD destination path to write.
     #[arg(long)]
     destination: PathBuf,
@@ -1197,6 +1208,10 @@ impl IngestDirectImportArgs {
 
     pub(crate) fn source(&self) -> &Path {
         &self.source
+    }
+
+    pub(crate) fn object_type(&self) -> ObjectType {
+        self.object_type
     }
 
     pub(crate) fn destination(&self) -> &Path {
@@ -1297,6 +1312,9 @@ pub(crate) struct ObjectPutArgs {
     /// Source file to import.
     #[arg(long)]
     source: PathBuf,
+    /// Logical object type assigned to this file.
+    #[arg(long, default_value_t = ObjectType::Naive)]
+    object_type: ObjectType,
     /// SSD ingest root used for the mandatory fast landing copy.
     #[arg(long)]
     ssd_root: PathBuf,
@@ -1318,6 +1336,10 @@ impl ObjectPutArgs {
 
     pub(crate) fn source(&self) -> &Path {
         &self.source
+    }
+
+    pub(crate) fn object_type(&self) -> ObjectType {
+        self.object_type
     }
 
     pub(crate) fn ssd_root(&self) -> &Path {
@@ -1626,6 +1648,7 @@ mod tests {
         StoreCommand, StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
+    use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::StoreClass;
     use dasobjectstore_daemon::DaemonIngestConflictPolicy;
     use std::path::Path;
@@ -2156,6 +2179,8 @@ mod tests {
             "object-a",
             "--source",
             "/tmp/input/object-a",
+            "--object-type",
+            "bam",
             "--ssd-root",
             "/tmp/ssd",
             "--disk-root",
@@ -2175,6 +2200,7 @@ mod tests {
             ObjectCommand::Put(put) => {
                 assert_eq!(put.object_id().as_str(), "object-a");
                 assert_eq!(put.source(), Path::new("/tmp/input/object-a"));
+                assert_eq!(put.object_type(), ObjectType::Bam);
                 assert_eq!(put.ssd_root(), Path::new("/tmp/ssd"));
                 assert_eq!(
                     put.disk_roots(),
@@ -2232,6 +2258,8 @@ mod tests {
             "zymo_fecal_2025.05",
             "--source",
             "/mnt/external/zymo",
+            "--object-type",
+            "pod5",
             "--ssd-root",
             "/srv/dasobjectstore/ssd",
             "--copies",
@@ -2248,6 +2276,7 @@ mod tests {
             Some(IngestCommand::Files(files)) => {
                 assert_eq!(files.endpoint().as_str(), "zymo_fecal_2025.05");
                 assert_eq!(files.source(), Path::new("/mnt/external/zymo"));
+                assert_eq!(files.object_type(), ObjectType::Pod5);
                 assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
                 assert_eq!(files.copies(), Some(1));
                 assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
@@ -2275,6 +2304,7 @@ mod tests {
         match args.command() {
             Some(IngestCommand::Files(files)) => {
                 assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Strict);
+                assert_eq!(files.object_type(), ObjectType::Naive);
             }
             _ => panic!("expected files command"),
         }
@@ -2357,6 +2387,8 @@ mod tests {
             "disk-a",
             "--source",
             "/tmp/downloads/reference.fa.zst",
+            "--object-type",
+            "ena_sra",
             "--destination",
             "/mnt/disk-a/objects/reference.fa.zst",
             "--expected-sha256",
@@ -2383,6 +2415,7 @@ mod tests {
                     import.source(),
                     Path::new("/tmp/downloads/reference.fa.zst")
                 );
+                assert_eq!(import.object_type(), ObjectType::EnaSra);
                 assert_eq!(
                     import.destination(),
                     Path::new("/mnt/disk-a/objects/reference.fa.zst")

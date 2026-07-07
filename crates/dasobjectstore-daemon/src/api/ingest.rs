@@ -1,6 +1,7 @@
 use crate::api::health::DaemonSsdPressure;
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::IngestJobState;
+use dasobjectstore_core::object_type::ObjectType;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::PathBuf;
@@ -37,6 +38,8 @@ pub use telemetry::{
 pub struct SubmitIngestFilesRequest {
     pub endpoint: StoreId,
     pub source_path: PathBuf,
+    #[serde(default)]
+    pub object_type: ObjectType,
     pub copies: Option<u8>,
     #[serde(default)]
     pub conflict_policy: DaemonIngestConflictPolicy,
@@ -359,6 +362,7 @@ mod tests {
         let request = SubmitIngestFilesRequest {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "/mnt/external/zymo".into(),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
@@ -373,6 +377,7 @@ mod tests {
         let request = SubmitIngestFilesRequest {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "relative/source".into(),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
@@ -394,6 +399,7 @@ mod tests {
         let request = SubmitIngestFilesRequest {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "/mnt/external/zymo".into(),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(0),
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
@@ -422,6 +428,10 @@ mod tests {
             serde_json::from_value(encoded).expect("legacy request deserializes");
 
         assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Strict);
+        assert_eq!(
+            request.object_type,
+            dasobjectstore_core::object_type::ObjectType::Naive
+        );
     }
 
     #[test]
@@ -429,6 +439,7 @@ mod tests {
         let request = SubmitIngestFilesRequest {
             endpoint: StoreId::new("zymo").expect("store id"),
             source_path: "/mnt/external/zymo".into(),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: None,
             conflict_policy: DaemonIngestConflictPolicy::Lazy,
             dry_run: true,

@@ -42,6 +42,12 @@ ingest mode, acknowledgement policy, priority, staging path, expected and
 received byte counts, content hash fields, failure messages, and indexes for
 state/priority queue views.
 
+Live SQLite format `0.3` adds object type metadata to both committed object
+rows and ingest job rows. Existing untyped data defaults to `naive`; typed
+bioinformatics ingress can record values such as `bam`, `pod5`, `fastq`, and
+`ena_sra` so downstream orchestration can route datasets without inferring type
+from paths alone.
+
 ## Snapshot Metadata
 
 Snapshot export writes recovery metadata into HDD metadata directories.

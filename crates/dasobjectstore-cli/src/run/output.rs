@@ -65,6 +65,7 @@ pub(super) fn write_ingest_direct_import_report(
 ) -> Result<(), io::Error> {
     writeln!(writer, "Direct-to-HDD import complete")?;
     writeln!(writer, "Object: {}", report.object_id)?;
+    writeln!(writer, "Object type: {}", report.object_type)?;
     writeln!(writer, "Disk: {}", report.disk_id)?;
     writeln!(writer, "Source: {}", report.source_path.to_string_lossy())?;
     if let Some(source_uri) = &report.source_uri {
@@ -673,6 +674,7 @@ pub(super) fn write_object_inspect_summary(
     writeln!(writer, "Object: {}", summary.object_id)?;
     writeln!(writer, "Store: {}", summary.store_id)?;
     writeln!(writer, "Store class: {}", summary.store_class)?;
+    writeln!(writer, "Object type: {}", summary.object_type)?;
     writeln!(writer, "State: {}", summary.state)?;
     writeln!(
         writer,
@@ -817,6 +819,7 @@ pub(super) fn write_object_put_report(
 ) -> Result<(), io::Error> {
     writeln!(writer, "Object put complete")?;
     writeln!(writer, "Object: {}", report.object_id)?;
+    writeln!(writer, "Object type: {}", report.object_type)?;
     writeln!(writer, "Source: {}", report.source_path.to_string_lossy())?;
     writeln!(
         writer,

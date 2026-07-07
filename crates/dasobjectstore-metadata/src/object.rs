@@ -1,4 +1,6 @@
 use dasobjectstore_core::ids::{DiskId, InvalidId, ObjectId, PlacementId, StoreId};
+use dasobjectstore_core::object_type::{ObjectType, ObjectTypeParseError};
+use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::fmt::{self, Display};
@@ -10,6 +12,7 @@ pub struct ObjectInspectSummary {
     pub object_id: ObjectId,
     pub store_id: StoreId,
     pub store_class: String,
+    pub object_type: ObjectType,
     pub state: String,
     pub size_bytes: Option<u64>,
     pub content_hash: Option<String>,
@@ -47,6 +50,10 @@ pub enum ObjectInspectError {
         field: &'static str,
         source: InvalidId,
     },
+    InvalidObjectType {
+        value: String,
+        source: ObjectTypeParseError,
+    },
     NegativeByteCount {
         field: &'static str,
         value: i64,
@@ -62,6 +69,12 @@ impl Display for ObjectInspectError {
             }
             Self::InvalidIdentifier { field, source } => {
                 write!(formatter, "invalid object metadata {field}: {source}")
+            }
+            Self::InvalidObjectType { value, source } => {
+                write!(
+                    formatter,
+                    "invalid object metadata object_type `{value}`: {source}"
+                )
             }
             Self::NegativeByteCount { field, value } => {
                 write!(
@@ -92,6 +105,7 @@ fn read_object_row(
                 objects.object_id,
                 objects.store_id,
                 stores.class,
+                objects.object_type,
                 objects.state,
                 objects.size_bytes,
                 objects.content_hash,
@@ -104,24 +118,36 @@ fn read_object_row(
             |row| {
                 let object_id = parse_id("object_id", row.get::<_, String>(0)?)?;
                 let store_id = parse_id("store_id", row.get::<_, String>(1)?)?;
-                let size_bytes = optional_u64("size_bytes", row.get::<_, Option<i64>>(4)?)?;
+                let object_type = parse_object_type(row.get::<_, String>(3)?)?;
+                let size_bytes = optional_u64("size_bytes", row.get::<_, Option<i64>>(5)?)?;
 
                 Ok(ObjectInspectSummary {
                     live_sqlite_path: live_sqlite_path.to_path_buf(),
                     object_id,
                     store_id,
                     store_class: row.get(2)?,
-                    state: row.get(3)?,
+                    object_type,
+                    state: row.get(4)?,
                     size_bytes,
-                    content_hash: row.get(5)?,
-                    created_at_utc: row.get(6)?,
-                    updated_at_utc: row.get(7)?,
+                    content_hash: row.get(6)?,
+                    created_at_utc: row.get(7)?,
+                    updated_at_utc: row.get(8)?,
                     placements: Vec::new(),
                 })
             },
         )
         .optional()?
         .ok_or_else(|| ObjectInspectError::ObjectNotFound(object_id.clone()))
+}
+
+fn parse_object_type(value: String) -> Result<ObjectType, rusqlite::Error> {
+    value.parse().map_err(|source| {
+        rusqlite::Error::FromSqlConversionFailure(
+            3,
+            Type::Text,
+            Box::new(ObjectInspectError::InvalidObjectType { value, source }),
+        )
+    })
 }
 
 fn read_object_placements(
@@ -189,6 +215,7 @@ mod tests {
     use super::{read_object_inspect, ObjectInspectError};
     use crate::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::ObjectId;
+    use dasobjectstore_core::object_type::ObjectType;
     use rusqlite::Connection;
     use std::fs;
     use std::path::PathBuf;
@@ -207,6 +234,7 @@ mod tests {
         assert_eq!(summary.object_id.as_str(), "object-a");
         assert_eq!(summary.store_id.as_str(), "store-a");
         assert_eq!(summary.store_class, "generated_data");
+        assert_eq!(summary.object_type, ObjectType::Bam);
         assert_eq!(summary.state, "Protected");
         assert_eq!(summary.size_bytes, Some(128));
         assert_eq!(summary.content_hash.as_deref(), Some("sha256:object-a"));
@@ -258,10 +286,10 @@ mod tests {
                     ('disk-b', 'pool-a', 'hdd_capacity', 'Healthy',
                      '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
                  INSERT INTO objects (
-                    object_id, store_id, state, size_bytes, content_hash,
+                    object_id, store_id, object_type, state, size_bytes, content_hash,
                     created_at_utc, updated_at_utc
                  ) VALUES (
-                    'object-a', 'store-a', 'Protected', 128, 'sha256:object-a',
+                    'object-a', 'store-a', 'bam', 'Protected', 128, 'sha256:object-a',
                     '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z'
                  );
                  INSERT INTO placements (

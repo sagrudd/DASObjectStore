@@ -2,6 +2,7 @@ use crate::hash::{copy_and_hash_with_progress, SHA256_ALGORITHM};
 use crate::initialize::METADATA_DIR_NAME;
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, IngestJobId};
+use dasobjectstore_core::object_type::ObjectType;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::io::Read;
@@ -215,6 +216,8 @@ pub struct IngestJournalResumePlan {
 pub struct IngestJournalFileRecord {
     pub ingest_job_id: IngestJobId,
     pub source_path: PathBuf,
+    #[serde(default)]
+    pub object_type: ObjectType,
     pub expected_size_bytes: u64,
     pub staged_bytes: u64,
     pub content_hash: Option<IngestJournalContentHash>,
@@ -237,6 +240,7 @@ impl IngestJournalFileRecord {
         Self {
             ingest_job_id,
             source_path: source_path.into(),
+            object_type: ObjectType::Naive,
             expected_size_bytes,
             staged_bytes: 0,
             content_hash: None,
@@ -247,6 +251,11 @@ impl IngestJournalFileRecord {
             failure_message: None,
             state: IngestJournalFileState::Planned,
         }
+    }
+
+    pub fn with_object_type(mut self, object_type: ObjectType) -> Self {
+        self.object_type = object_type;
+        self
     }
 
     pub fn record_staged_progress(
@@ -661,6 +670,7 @@ mod tests {
     use crate::secure_fs::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
     use crate::{initialize_pool, read_ingest_queue, PoolInitOptions};
     use dasobjectstore_core::ids::{DiskId, IngestJobId, PoolId};
+    use dasobjectstore_core::object_type::ObjectType;
     use rusqlite::Connection;
     use std::fs;
     use std::io::Cursor;
@@ -819,6 +829,16 @@ mod tests {
         );
         assert_eq!(manifest.size_bytes, 128);
         assert_eq!(manifest.content_address, "sha256:hash-a");
+    }
+
+    #[test]
+    fn journal_record_preserves_object_type() {
+        let record = journal_record("job-pod5", 128, 1).with_object_type(ObjectType::Pod5);
+
+        let encoded = serde_json::to_value(&record).expect("journal serializes");
+
+        assert_eq!(record.object_type, ObjectType::Pod5);
+        assert_eq!(encoded["object_type"], "pod5");
     }
 
     #[test]

@@ -17,7 +17,7 @@ Persistent metadata recovery behavior is defined in
 
 | Format | Artifact | Current version | Version carrier | Notes |
 | --- | --- | --- | --- | --- |
-| Live SQLite metadata | `live_sqlite` | `0.2` | `metadata_format_versions` table | Writable live metadata on the mandatory SSD. |
+| Live SQLite metadata | `live_sqlite` | `0.3` | `metadata_format_versions` table | Writable live metadata on the mandatory SSD; includes object type metadata for objects and ingest jobs. |
 | Pool manifest | `pool_manifest` | `0.1` | `format_version` object | Portable pool identity and artifact references. |
 | Disk manifest | `disk_manifest` | `0.1` | `format_version` object | Composite disk identity and recovery hints. |
 | Placement log | `placement_log` | `0.1` | `format_version` object per JSONL record | Append-only placement and recovery events. |

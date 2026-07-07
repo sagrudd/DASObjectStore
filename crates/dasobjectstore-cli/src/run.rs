@@ -1700,6 +1700,7 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
     SubmitIngestFilesRequest {
         endpoint: args.endpoint().clone(),
         source_path: args.source().to_path_buf(),
+        object_type: args.object_type(),
         copies: args.copies(),
         conflict_policy: args.conflict_policy(),
         dry_run: args.dry_run(),
@@ -1715,6 +1716,7 @@ fn write_daemon_ingest_submission(
     writeln!(writer, "Daemon ingest job submitted")?;
     writeln!(writer, "Endpoint: {}", args.endpoint())?;
     writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
+    writeln!(writer, "Object type: {}", args.object_type())?;
     if let Some(copies) = args.copies() {
         writeln!(writer, "Copies override: {copies}")?;
     }
@@ -1767,6 +1769,7 @@ fn run_ingest_files_local_direct(
     writeln!(writer, "Object prefix: {}", endpoint.object_prefix)?;
     writeln!(writer, "Class: {}", endpoint.store.policy.class.name())?;
     writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
+    writeln!(writer, "Object type: {}", args.object_type())?;
     writeln!(writer, "SSD root: {}", ssd_root.to_string_lossy())?;
     writeln!(writer, "Managed HDD roots: {}", managed_disk_roots.len())?;
     writeln!(writer, "Files: {}", files.len())?;
@@ -1812,7 +1815,8 @@ fn run_ingest_files_local_direct(
             &ssd_root,
             plan_disk_roots_for_entry(&managed_disk_roots, entry, &endpoint.store.policy, copies)?,
             copies,
-        );
+        )
+        .with_object_type(args.object_type());
         let mut stage_key = String::new();
         let mut stage_offset_bytes = 0_u64;
         let mut last_emit = Instant::now();
@@ -2306,6 +2310,7 @@ fn run_ingest_direct_import(
     if let Some(source_uri) = args.source_uri() {
         request = request.with_source_uri(source_uri);
     }
+    request = request.with_object_type(args.object_type());
 
     let report = import_reproducible_object_direct_to_hdd(&request)?;
     if args.json() {
@@ -2359,7 +2364,8 @@ fn run_object_put(args: &ObjectPutArgs, writer: &mut impl Write) -> Result<(), C
         args.ssd_root(),
         disk_roots,
         args.copies(),
-    );
+    )
+    .with_object_type(args.object_type());
     let report = put_object_ssd_first(&request)?;
 
     if args.json() {
@@ -3986,6 +3992,8 @@ mod tests {
             "zymo_fecal_2025.05",
             "--source",
             source_root.to_str().expect("utf8 source root"),
+            "--object-type",
+            "pod5",
             "--local-direct",
             "--ssd-root",
             ssd_root.to_str().expect("utf8 ssd root"),
@@ -4006,6 +4014,7 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("File ingest plan"));
         assert!(output.contains("Store: zymo_fecal_2025.05"));
+        assert!(output.contains("Object type: pod5"));
         assert!(output.contains("SSD stress before file: pressure="));
         assert!(output.contains("stage=ssd-ingest"));
         assert!(output.contains("stage=hdd-copy:disk-a:1"));
@@ -4026,6 +4035,8 @@ mod tests {
             "zymo_fecal_2025.05",
             "--source",
             source_root.to_str().expect("utf8 source"),
+            "--object-type",
+            "fastq",
             "--copies",
             "1",
             "--force",
@@ -4042,6 +4053,10 @@ mod tests {
                 DaemonApiRequest::SubmitIngestFiles(request) => {
                     assert_eq!(request.endpoint.as_str(), "zymo_fecal_2025.05");
                     assert_eq!(request.source_path, source_root);
+                    assert_eq!(
+                        request.object_type,
+                        dasobjectstore_core::object_type::ObjectType::Fastq
+                    );
                     assert_eq!(request.copies, Some(1));
                     assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
                     assert!(!request.dry_run);
@@ -4323,6 +4338,7 @@ mod tests {
         let output: serde_json::Value =
             serde_json::from_slice(&output).expect("queue output is json");
         assert_eq!(output["jobs"][0]["ingest_job_id"], "job-high");
+        assert_eq!(output["jobs"][0]["object_type"], "naive");
         assert_eq!(output["jobs"][0]["priority"], 10);
         assert_eq!(output["jobs"][1]["ingest_job_id"], "job-low");
 
@@ -4348,6 +4364,8 @@ mod tests {
             "disk-a",
             "--source",
             source_path.to_str().expect("utf8 source path"),
+            "--object-type",
+            "ena_sra",
             "--destination",
             destination_path.to_str().expect("utf8 destination path"),
             "--expected-sha256",
@@ -4368,6 +4386,7 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("Direct-to-HDD import complete"));
         assert!(output.contains("Object: object-a"));
+        assert!(output.contains("Object type: ena_sra"));
         assert!(output.contains("Warning: SSD ingest was bypassed"));
         assert_eq!(
             fs::read(&destination_path).expect("read destination"),
@@ -4450,6 +4469,7 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("Object: object-a"));
         assert!(output.contains("Store class: generated_data"));
+        assert!(output.contains("Object type: naive"));
         assert!(output.contains("Placements: 1"));
         assert!(output.contains("- placement-a disk=disk-a path=objects/aa/object-a"));
 
@@ -4478,6 +4498,7 @@ mod tests {
             serde_json::from_slice(&output).expect("object output is json");
         assert_eq!(output["object_id"], "object-a");
         assert_eq!(output["store_id"], "store-a");
+        assert_eq!(output["object_type"], "naive");
         assert_eq!(output["placements"][0]["disk_id"], "disk-a");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
@@ -4538,6 +4559,8 @@ mod tests {
             "object-a",
             "--source",
             source_path.to_str().expect("utf8 source path"),
+            "--object-type",
+            "fastq",
             "--ssd-root",
             ssd_root.to_str().expect("utf8 ssd path"),
             "--disk-root",
@@ -4555,6 +4578,7 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("Object put complete"));
         assert!(output.contains("Object: object-a"));
+        assert!(output.contains("Object type: fastq"));
         assert!(output.contains("Settled copies: 2"));
         assert!(output.contains("disk=disk-a"));
         assert!(output.contains("disk=disk-b"));

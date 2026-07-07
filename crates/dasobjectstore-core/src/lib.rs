@@ -5,6 +5,7 @@ pub mod file_export;
 pub mod health;
 pub mod ids;
 pub mod lifecycle;
+pub mod object_type;
 pub mod placement;
 pub mod protection;
 pub mod repair;

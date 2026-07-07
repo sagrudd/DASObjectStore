@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 2);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 3);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS stores (
 CREATE TABLE IF NOT EXISTS objects (
     object_id TEXT PRIMARY KEY NOT NULL,
     store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_type TEXT NOT NULL DEFAULT 'naive',
     state TEXT NOT NULL,
     size_bytes INTEGER,
     content_hash TEXT,
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     ingest_job_id TEXT PRIMARY KEY NOT NULL,
     store_id TEXT NOT NULL REFERENCES stores(store_id),
     object_id TEXT REFERENCES objects(object_id),
+    object_type TEXT NOT NULL DEFAULT 'naive',
     state TEXT NOT NULL,
     ingest_mode TEXT NOT NULL,
     acknowledgement_policy TEXT NOT NULL,
@@ -117,7 +119,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 2);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 3);
     }
 
     #[test]
@@ -191,6 +193,7 @@ mod tests {
                 "ingest_job_id",
                 "store_id",
                 "object_id",
+                "object_type",
                 "state",
                 "ingest_mode",
                 "acknowledgement_policy",
@@ -201,6 +204,30 @@ mod tests {
                 "content_hash",
                 "content_hash_algorithm",
                 "failure_message",
+                "created_at_utc",
+                "updated_at_utc",
+            ]
+        );
+    }
+
+    #[test]
+    fn live_schema_defines_object_type_columns() {
+        let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies cleanly");
+
+        let columns = table_columns(&connection, "objects");
+
+        assert_eq!(
+            columns,
+            vec![
+                "object_id",
+                "store_id",
+                "object_type",
+                "state",
+                "size_bytes",
+                "content_hash",
                 "created_at_utc",
                 "updated_at_utc",
             ]

@@ -2,6 +2,7 @@ use crate::copy::{write_verified_hdd_copy_with_progress, HddCopyError, HddCopyRe
 use crate::evacuation::DiskCopyRoot;
 use crate::ingest::{encode_path_component, IngestStagingLayout, IngestWriteReport};
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId};
+use dasobjectstore_core::object_type::ObjectType;
 use serde::Serialize;
 use std::fmt::{self, Display};
 use std::fs::File;
@@ -14,6 +15,7 @@ pub struct ObjectPutRequest {
     pub ssd_root: PathBuf,
     pub disk_roots: Vec<DiskCopyRoot>,
     pub copy_count: u8,
+    pub object_type: ObjectType,
 }
 
 impl ObjectPutRequest {
@@ -30,13 +32,20 @@ impl ObjectPutRequest {
             ssd_root: ssd_root.into(),
             disk_roots,
             copy_count,
+            object_type: ObjectType::Naive,
         }
+    }
+
+    pub fn with_object_type(mut self, object_type: ObjectType) -> Self {
+        self.object_type = object_type;
+        self
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ObjectPutReport {
     pub object_id: ObjectId,
+    pub object_type: ObjectType,
     pub source_path: PathBuf,
     pub staged_payload_path: PathBuf,
     pub bytes_staged: u64,
@@ -100,6 +109,7 @@ pub fn put_object_ssd_first_with_progress(
 
     Ok(ObjectPutReport {
         object_id: request.object_id.clone(),
+        object_type: request.object_type,
         source_path: request.source_path.clone(),
         staged_payload_path: job_paths.payload_path,
         bytes_staged: write_report.bytes_written,
@@ -246,6 +256,7 @@ mod tests {
     use crate::evacuation::DiskCopyRoot;
     use crate::hash::hash_file_sha256;
     use dasobjectstore_core::ids::{DiskId, ObjectId};
+    use dasobjectstore_core::object_type::ObjectType;
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -275,6 +286,7 @@ mod tests {
 
         let expected_hash = hash_file_sha256(&source_path).expect("hash source");
         assert_eq!(report.object_id.as_str(), "object-a");
+        assert_eq!(report.object_type, ObjectType::Naive);
         assert_eq!(report.bytes_staged, payload.len() as u64);
         assert_eq!(report.content_hash, expected_hash);
         assert_eq!(report.placements.len(), 2);

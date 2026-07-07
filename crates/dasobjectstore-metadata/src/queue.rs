@@ -1,6 +1,8 @@
 use crate::SsdPressure;
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::IngestJobState;
+use dasobjectstore_core::object_type::{ObjectType, ObjectTypeParseError};
+use rusqlite::types::Type;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::fmt::{self, Display};
@@ -165,6 +167,7 @@ pub struct IngestQueueJob {
     pub ingest_job_id: IngestJobId,
     pub store_id: StoreId,
     pub object_id: Option<ObjectId>,
+    pub object_type: ObjectType,
     pub state: String,
     pub ingest_mode: String,
     pub acknowledgement_policy: String,
@@ -189,6 +192,7 @@ pub fn read_ingest_queue(
             ingest_job_id,
             store_id,
             object_id,
+            object_type,
             state,
             ingest_mode,
             acknowledgement_policy,
@@ -224,6 +228,10 @@ pub enum IngestQueueReadError {
         field: &'static str,
         source: InvalidId,
     },
+    InvalidObjectType {
+        value: String,
+        source: ObjectTypeParseError,
+    },
     NegativeByteCount {
         field: &'static str,
         value: i64,
@@ -236,6 +244,12 @@ impl Display for IngestQueueReadError {
             Self::Sqlite(err) => write!(formatter, "failed to read ingest queue metadata: {err}"),
             Self::InvalidIdentifier { field, source } => {
                 write!(formatter, "invalid ingest queue {field}: {source}")
+            }
+            Self::InvalidObjectType { value, source } => {
+                write!(
+                    formatter,
+                    "invalid ingest queue object_type `{value}`: {source}"
+                )
             }
             Self::NegativeByteCount { field, value } => {
                 write!(formatter, "invalid negative ingest queue {field}: {value}")
@@ -267,25 +281,37 @@ fn read_ingest_queue_job(row: &rusqlite::Row<'_>) -> Result<IngestQueueJob, rusq
     let ingest_job_id = parse_id("ingest_job_id", row.get::<_, String>(0)?)?;
     let store_id = parse_id("store_id", row.get::<_, String>(1)?)?;
     let object_id = parse_optional_id("object_id", row.get::<_, Option<String>>(2)?)?;
-    let expected_size_bytes = optional_u64("expected_size_bytes", row.get::<_, Option<i64>>(8)?)?;
-    let received_bytes = required_u64("received_bytes", row.get::<_, i64>(9)?)?;
+    let object_type = parse_object_type(row.get::<_, String>(3)?)?;
+    let expected_size_bytes = optional_u64("expected_size_bytes", row.get::<_, Option<i64>>(9)?)?;
+    let received_bytes = required_u64("received_bytes", row.get::<_, i64>(10)?)?;
 
     Ok(IngestQueueJob {
         ingest_job_id,
         store_id,
         object_id,
-        state: row.get(3)?,
-        ingest_mode: row.get(4)?,
-        acknowledgement_policy: row.get(5)?,
-        priority: row.get(6)?,
-        staging_path: row.get(7)?,
+        object_type,
+        state: row.get(4)?,
+        ingest_mode: row.get(5)?,
+        acknowledgement_policy: row.get(6)?,
+        priority: row.get(7)?,
+        staging_path: row.get(8)?,
         expected_size_bytes,
         received_bytes,
-        content_hash: row.get(10)?,
-        content_hash_algorithm: row.get(11)?,
-        failure_message: row.get(12)?,
-        created_at_utc: row.get(13)?,
-        updated_at_utc: row.get(14)?,
+        content_hash: row.get(11)?,
+        content_hash_algorithm: row.get(12)?,
+        failure_message: row.get(13)?,
+        created_at_utc: row.get(14)?,
+        updated_at_utc: row.get(15)?,
+    })
+}
+
+fn parse_object_type(value: String) -> Result<ObjectType, rusqlite::Error> {
+    value.parse().map_err(|source| {
+        rusqlite::Error::FromSqlConversionFailure(
+            3,
+            Type::Text,
+            Box::new(IngestQueueReadError::InvalidObjectType { value, source }),
+        )
     })
 }
 
@@ -334,6 +360,7 @@ mod tests {
     use crate::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::IngestJobId;
     use dasobjectstore_core::lifecycle::IngestJobState;
+    use dasobjectstore_core::object_type::ObjectType;
     use rusqlite::Connection;
     use std::fs;
     use std::path::PathBuf;
@@ -503,6 +530,7 @@ mod tests {
         assert_eq!(snapshot.live_sqlite_path, live_sqlite_path);
         assert_eq!(snapshot.jobs.len(), 2);
         assert_eq!(snapshot.jobs[0].ingest_job_id.as_str(), "job-high");
+        assert_eq!(snapshot.jobs[0].object_type, ObjectType::Fastq);
         assert_eq!(snapshot.jobs[0].priority, 20);
         assert_eq!(snapshot.jobs[0].received_bytes, 64);
         assert_eq!(snapshot.jobs[1].ingest_job_id.as_str(), "job-low");
@@ -571,6 +599,7 @@ mod tests {
                 "INSERT INTO ingest_jobs (
                     ingest_job_id,
                     store_id,
+                    object_type,
                     state,
                     ingest_mode,
                     acknowledgement_policy,
@@ -580,7 +609,7 @@ mod tests {
                     received_bytes,
                     created_at_utc,
                     updated_at_utc
-                 ) VALUES (?1, 'store-a', ?2, 'SsdFirst', 'AfterHddPlacement', ?3, ?4, 256, ?5, ?6, ?6)",
+                 ) VALUES (?1, 'store-a', 'fastq', ?2, 'SsdFirst', 'AfterHddPlacement', ?3, ?4, 256, ?5, ?6, ?6)",
                 (
                     ingest_job_id,
                     state,

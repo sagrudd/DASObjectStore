@@ -213,6 +213,7 @@ mod tests {
             .submit_ingest_files(SubmitIngestFilesRequest {
                 endpoint: StoreId::new("zymo").expect("store id"),
                 source_path: "relative".into(),
+                object_type: dasobjectstore_core::object_type::ObjectType::Naive,
                 copies: None,
                 conflict_policy: DaemonIngestConflictPolicy::Strict,
                 dry_run: false,

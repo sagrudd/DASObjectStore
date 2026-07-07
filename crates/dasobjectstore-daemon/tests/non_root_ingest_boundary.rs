@@ -29,6 +29,7 @@ fn non_root_writer_submits_ingest_without_managed_root_write_access() {
         .submit_ingest_files(SubmitIngestFilesRequest {
             endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             source_path: PathBuf::from("/mnt/external/zymo"),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
@@ -55,6 +56,7 @@ fn non_writer_is_rejected_even_when_daemon_owns_managed_root() {
         .submit_ingest_files(SubmitIngestFilesRequest {
             endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             source_path: PathBuf::from("/mnt/external/zymo"),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,

@@ -1,5 +1,6 @@
 use crate::{write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
+use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::risk::{
     ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
 };
@@ -17,6 +18,7 @@ pub struct DirectHddImportRequest {
     pub source_path: PathBuf,
     pub destination_path: PathBuf,
     pub expected_content_hash: String,
+    pub object_type: ObjectType,
     pub source_uri: Option<String>,
     pub store_policy: StorePolicy,
     pub risk_policy: RiskPolicy,
@@ -40,6 +42,7 @@ impl DirectHddImportRequest {
             source_path: source_path.into(),
             destination_path: destination_path.into(),
             expected_content_hash: expected_content_hash.into(),
+            object_type: ObjectType::Naive,
             source_uri: None,
             store_policy,
             risk_policy,
@@ -51,6 +54,11 @@ impl DirectHddImportRequest {
         self.source_uri = Some(source_uri.into());
         self
     }
+
+    pub fn with_object_type(mut self, object_type: ObjectType) -> Self {
+        self.object_type = object_type;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -59,6 +67,7 @@ pub struct DirectHddImportReport {
     pub disk_id: DiskId,
     pub source_path: PathBuf,
     pub destination_path: PathBuf,
+    pub object_type: ObjectType,
     pub source_uri: Option<String>,
     pub bytes_written: u64,
     pub content_hash_algorithm: String,
@@ -158,6 +167,7 @@ fn report_from_copy(
         disk_id: copy_report.disk_id,
         source_path: request.source_path.clone(),
         destination_path: copy_report.destination_path,
+        object_type: request.object_type,
         source_uri: request.source_uri.clone(),
         bytes_written: copy_report.bytes_written,
         content_hash_algorithm: copy_report.content_hash_algorithm,
@@ -174,6 +184,7 @@ mod tests {
     };
     use crate::hash::hash_file_sha256;
     use dasobjectstore_core::ids::{DiskId, ObjectId};
+    use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::risk::{ActionConfirmation, RiskGateError, RiskPolicy};
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use std::fs;
@@ -189,12 +200,14 @@ mod tests {
         fs::write(&source_path, b"public reference payload").expect("source payload");
         let expected_hash = hash_file_sha256(&source_path).expect("source hash");
         let request = request(source_path, destination_path.clone(), expected_hash.clone())
-            .with_source_uri("https://example.invalid/reference.fa.zst");
+            .with_source_uri("https://example.invalid/reference.fa.zst")
+            .with_object_type(ObjectType::EnaSra);
 
         let report =
             import_reproducible_object_direct_to_hdd(&request).expect("direct import succeeds");
 
         assert_eq!(report.object_id.as_str(), "object-a");
+        assert_eq!(report.object_type, ObjectType::EnaSra);
         assert_eq!(report.disk_id.as_str(), "disk-a");
         assert_eq!(report.destination_path, destination_path);
         assert_eq!(report.content_hash, expected_hash);
