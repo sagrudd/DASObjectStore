@@ -229,8 +229,12 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   config rendering, and CLI `service render-compose --provider garage` wiring.
 - [x] Add daemon API/client contracts for Garage service lifecycle and status
   inspection.
-- [ ] Implement daemon-owned Garage lifecycle executor and status probe.
-  Milestone 8 selected Garage as the MVP provider on 2026-07-07.
+- [x] Implement daemon-owned Garage lifecycle executor and status probe.
+  Milestone 8 selected Garage as the MVP provider on 2026-07-07. Added a
+  daemon runtime controller with injectable Docker Compose execution and tested
+  status parsing on 2026-07-07.
+- [ ] Wire daemon Garage lifecycle execution into the long-running
+  `dasobjectstored` request loop.
 - [ ] Implement daemon-owned Garage bucket provisioning and per-store key
   permissions from store registry bindings.
 - [x] Generate Docker/Compose configuration from store and pool policy.
