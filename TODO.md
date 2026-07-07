@@ -40,7 +40,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
 - [x] Add package assets for `dasobjectstored`: system user, systemd service,
   socket/runtime directory, state directory, log directory, and permission
   expectations.
-- [ ] Update DEB validation to ensure managed DAS roots are owned by the daemon
+- [x] Update DEB validation to ensure managed DAS roots are owned by the daemon
   service identity, not ordinary ingest users.
 - [ ] Add integration tests proving normal non-root ingest succeeds through the
   daemon without granting direct write permission to managed DAS roots.

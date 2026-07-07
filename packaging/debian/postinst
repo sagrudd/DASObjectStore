@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+service_user="dasobjectstore"
+service_group="dasobjectstore"
+managed_root="/srv/dasobjectstore"
+
+ensure_group() {
+  if ! getent group "$service_group" >/dev/null; then
+    groupadd --system "$service_group"
+  fi
+}
+
+ensure_user() {
+  if ! id -u "$service_user" >/dev/null 2>&1; then
+    useradd --system \
+      --gid "$service_group" \
+      --home-dir /var/lib/dasobjectstore \
+      --no-create-home \
+      --shell /usr/sbin/nologin \
+      "$service_user"
+  fi
+}
+
+ensure_owned_dir() {
+  local path="$1"
+  local mode="$2"
+  install -d -o "$service_user" -g "$service_group" -m "$mode" "$path"
+}
+
+reject_user_owned_managed_root() {
+  local path="$1"
+  if [[ ! -e "$path" ]]; then
+    return 0
+  fi
+
+  local owner group
+  owner="$(stat -c '%U' "$path")"
+  group="$(stat -c '%G' "$path")"
+  if [[ "$owner" != "$service_user" || "$group" != "$service_group" ]]; then
+    cat >&2 <<ERROR
+DASObjectStore managed root $path is owned by $owner:$group.
+Managed DAS roots must be owned by $service_user:$service_group so normal users
+submit jobs through dasobjectstored instead of writing directly to member disks.
+Repair ownership with the formal DASObjectStore disk lockdown command before
+continuing package configuration.
+ERROR
+    exit 1
+  fi
+}
+
+ensure_group
+ensure_user
+
+ensure_owned_dir /run/dasobjectstore 0750
+ensure_owned_dir /var/lib/dasobjectstore 0750
+ensure_owned_dir /var/log/dasobjectstore 0750
+install -d -o root -g "$service_group" -m 0750 /etc/dasobjectstore
+
+reject_user_owned_managed_root "$managed_root"
+ensure_owned_dir "$managed_root" 0750
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+fi

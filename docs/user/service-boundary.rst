@@ -43,6 +43,11 @@ should be members of the relevant store writer group, for example
 ``mnemosyne``, but that group authorizes daemon job submission. It should not be
 used to grant broad write access to individual HDD filesystems.
 
+The Debian package configuration checks the managed root at
+``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
+user or group, package configuration stops and asks the operator to repair the
+ownership through the formal disk lockdown workflow before continuing.
+
 The hidden ``--local-direct`` ingest mode is a developer/test fallback while the
 daemon implementation is being completed. It is not the normal production
 storage path.

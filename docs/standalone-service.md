@@ -38,6 +38,12 @@ socket directory, state directory, log directory, configuration directory, and
 managed storage ownership expectations. The Rust daemon crate keeps tests that
 pin those assets to the packaged Linux runtime defaults.
 
+The Debian build script SHALL install these assets and the `dasobjectstored`
+binary into the package. Its maintainer script SHALL reject an existing
+`/srv/dasobjectstore` root unless it is owned by `dasobjectstore:dasobjectstore`;
+ordinary ingest users must receive store writer-group authorization rather than
+direct write ownership of managed DAS roots.
+
 ## Permanent Port Policy
 
 DASObjectStore standalone packages SHALL reserve HTTPS port `8448`.

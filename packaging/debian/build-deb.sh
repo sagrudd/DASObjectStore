@@ -10,14 +10,37 @@ arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 build_root="$repo_root/target/deb/${package_name}_${version}_${arch}"
 package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"
 
+packaging_debian="$repo_root/packaging/debian"
+packaging_linux="$repo_root/packaging/linux"
+bash "$packaging_debian/validate-package-assets.sh"
+
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
-install -d "$build_root/DEBIAN" "$build_root/usr/bin" "$build_root/usr/share/doc/$package_name"
+install -d \
+  "$build_root/DEBIAN" \
+  "$build_root/etc/dasobjectstore" \
+  "$build_root/lib/systemd/system" \
+  "$build_root/usr/bin" \
+  "$build_root/usr/lib/sysusers.d" \
+  "$build_root/usr/lib/tmpfiles.d" \
+  "$build_root/usr/share/doc/$package_name"
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$build_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
+install -m 0755 "$repo_root/target/release/dasobjectstored" \
+  "$build_root/usr/bin/dasobjectstored"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
+install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
+  "$build_root/etc/dasobjectstore/daemon.json"
+install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
+  "$build_root/lib/systemd/system/dasobjectstored.service"
+install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
+  "$build_root/usr/lib/sysusers.d/dasobjectstore.conf"
+install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
+  "$build_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
+install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 
 cat >"$build_root/DEBIAN/control" <<CONTROL
 Package: $package_name

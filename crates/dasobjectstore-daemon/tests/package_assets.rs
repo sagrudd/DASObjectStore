@@ -8,6 +8,8 @@ const SERVICE: &str = include_str!("../../../packaging/linux/systemd/dasobjectst
 const SYSUSERS: &str = include_str!("../../../packaging/linux/sysusers.d/dasobjectstore.conf");
 const TMPFILES: &str = include_str!("../../../packaging/linux/tmpfiles.d/dasobjectstore.conf");
 const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobjectstore/daemon.json");
+const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
+const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -55,6 +57,28 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
         &format!(
             "d {LINUX_DAEMON_LOG_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
         ),
+    );
+}
+
+#[test]
+fn deb_build_installs_daemon_boundary_assets() {
+    assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(BUILD_DEB, "target/release/dasobjectstored");
+    assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
+    assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
+    assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
+    assert_contains(BUILD_DEB, "DEBIAN/postinst");
+}
+
+#[test]
+fn deb_postinst_rejects_user_owned_managed_root() {
+    assert_contains(POSTINST, "service_user=\"dasobjectstore\"");
+    assert_contains(POSTINST, "service_group=\"dasobjectstore\"");
+    assert_contains(POSTINST, "managed_root=\"/srv/dasobjectstore\"");
+    assert_contains(POSTINST, "reject_user_owned_managed_root \"$managed_root\"");
+    assert_contains(
+        POSTINST,
+        "Managed DAS roots must be owned by $service_user:$service_group",
     );
 }
 
