@@ -8,8 +8,9 @@ use crate::cli::{
     ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
     PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreCreateArgs,
-    StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs, StoreValidateArgs,
-    SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
+    StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs, StoreS3UploadArgs,
+    StoreValidateArgs, SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs,
+    SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -29,8 +30,9 @@ use self::output::{
     write_lockdown_das_report, write_nas_nfs_endpoint_validation_report,
     write_object_export_report, write_object_inspect_summary, write_object_put_report,
     write_pool_import_report, write_pool_inspect_summary, write_pool_repair_dry_run,
-    write_prepare_das_report, write_pretty_report, write_store_create_report,
-    write_store_delete_report, write_store_drain_report, write_store_list_report,
+    write_prepare_das_report, write_pretty_report, write_remote_s3_upload_plan,
+    write_store_create_report, write_store_delete_report, write_store_drain_report,
+    write_store_list_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -69,12 +71,13 @@ use dasobjectstore_mnemosyne::{
     NasNfsEndpointValidationError,
 };
 use dasobjectstore_object_service::{
-    create_subobject_definition, default_store_registry_path, default_subobject_registry_path,
-    delete_store_definition, delete_subobjects_for_store, mirror_subobject_definition,
-    plan_store_service_layout, portable_store_registry_path, portable_subobject_registry_path,
-    read_store_registry, read_subobject_registry, render_compose, search_subobjects,
-    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, GarageProvider,
-    GarageProviderConfig, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
+    create_subobject_definition, credential_reference_for_store, default_store_registry_path,
+    default_subobject_registry_path, delete_store_definition, delete_subobjects_for_store,
+    mirror_subobject_definition, plan_remote_s3_upload, plan_store_service_layout,
+    portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
+    read_subobject_registry, render_compose, search_subobjects, upsert_store_definition,
+    ComposeRenderRequest, ComposeServiceConfig, GarageProvider, GarageProviderConfig,
+    ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId, RemoteS3UploadPlanRequest,
     StoreRegistryDeleteReport, StoreRegistryUpdateReport, StoreServiceDefinition,
     SubObjectDefinition, SubObjectParent, SubObjectRegistryStoreDeleteReport,
     SubObjectRegistryUpdateReport,
@@ -128,6 +131,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Delete(args)) => run_store_delete(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
+            Some(StoreCommand::S3Upload(args)) => run_store_s3_upload(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
         },
@@ -1137,6 +1141,61 @@ fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), C
         writer.write_all(b"\n")?;
     } else {
         write_store_list_report(&definitions, writer)?;
+    }
+
+    Ok(())
+}
+
+fn run_store_s3_upload(args: &StoreS3UploadArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let (bucket_name, credential_reference) = match args.bucket() {
+        Some(bucket_name) => (
+            bucket_name.to_string(),
+            credential_reference_for_store(args.store_id()),
+        ),
+        None => {
+            let registry_path = args
+                .registry_path()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(default_store_registry_path);
+            let definitions = read_store_registry(&registry_path)?;
+            let definition = definitions
+                .iter()
+                .find(|definition| definition.store_id == *args.store_id())
+                .cloned()
+                .ok_or_else(|| {
+                    CliError::CommandFailed(format!(
+                        "store {} was not found in {}",
+                        args.store_id(),
+                        registry_path.display()
+                    ))
+                })?;
+            let layout = plan_store_service_layout(&[definition])?;
+            let binding = layout.bucket_bindings.into_iter().next().ok_or_else(|| {
+                CliError::CommandFailed(format!("store {} is not S3-exported", args.store_id()))
+            })?;
+            (binding.bucket_name, binding.credential_reference)
+        }
+    };
+    let profile_name = args
+        .profile()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("dasobjectstore-{}", args.store_id()));
+    let plan = plan_remote_s3_upload(RemoteS3UploadPlanRequest {
+        store_id: args.store_id().clone(),
+        bucket_name,
+        endpoint_url: args.endpoint_url().to_string(),
+        region: args.region().to_string(),
+        profile_name,
+        credential_reference,
+        auth_authority: args.auth().into(),
+        username: args.username().map(ToOwned::to_owned),
+    })?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &plan)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_remote_s3_upload_plan(&plan, writer)?;
     }
 
     Ok(())
@@ -3668,6 +3727,122 @@ mod tests {
         assert_eq!(output[0]["policy"]["class"], "ReproducibleCache");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_s3_upload_renders_remote_aws_commands() {
+        let root = temp_root("store-s3-upload");
+        fs::create_dir_all(&root).expect("create temp root");
+        let registry_path = root.join("stores.json");
+        write_store_definitions_file(
+            &registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("generated-data").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+                bucket_name: Some("dos-generated-data".to_string()),
+                writer_group: Some(test_writer_group()),
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "s3-upload",
+            "generated-data",
+            "--endpoint-url",
+            "http://appliance.local:3900",
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+        ])
+        .expect("store s3-upload parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store s3-upload runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Remote S3 upload plan"));
+        assert!(output.contains("Bucket: dos-generated-data"));
+        assert!(output.contains("Credential authority: mneion"));
+        assert!(output.contains("aws --profile dasobjectstore-generated-data"));
+        assert!(output.contains("s3api put-object"));
+        assert!(output.contains("s3 cp <local-file>"));
+        assert!(output.contains("s3 sync <local-directory>"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_s3_upload_writes_json() {
+        let root = temp_root("store-s3-upload-json");
+        fs::create_dir_all(&root).expect("create temp root");
+        let registry_path = root.join("stores.json");
+        write_store_definitions_file(
+            &registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("generated-data").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+                bucket_name: Some("dos-generated-data".to_string()),
+                writer_group: Some(test_writer_group()),
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "s3-upload",
+            "generated-data",
+            "--endpoint-url",
+            "https://appliance.local:3900",
+            "--auth",
+            "local-password",
+            "--username",
+            "alice",
+            "--json",
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+        ])
+        .expect("store s3-upload parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store s3-upload runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("s3-upload output is json");
+        assert_eq!(output["auth_authority"], "local_password");
+        assert_eq!(output["username"], "alice");
+        assert_eq!(output["bucket_name"], "dos-generated-data");
+        assert!(output["aws_s3api_put_object_command"]
+            .as_str()
+            .expect("command string")
+            .contains("s3api put-object"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn store_s3_upload_accepts_explicit_bucket_without_registry() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "s3-upload",
+            "generated-data",
+            "--endpoint-url",
+            "https://appliance.local:3900",
+            "--bucket",
+            "dos-generated-data",
+            "--json",
+        ])
+        .expect("store s3-upload parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("store s3-upload runs");
+
+        let output: serde_json::Value =
+            serde_json::from_slice(&output).expect("s3-upload output is json");
+        assert_eq!(output["store_id"], "generated-data");
+        assert_eq!(output["bucket_name"], "dos-generated-data");
+        assert_eq!(
+            output["credential_reference"],
+            "secret://dasobjectstore/stores/generated-data/s3"
+        );
     }
 
     #[test]

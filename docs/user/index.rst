@@ -16,4 +16,5 @@ stabilized in the current MVP.
    object-stores
    subobjects
    ingesting-files
+   remote-s3-uploads
    tui-operations

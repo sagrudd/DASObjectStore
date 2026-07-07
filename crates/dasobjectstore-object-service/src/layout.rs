@@ -132,7 +132,7 @@ fn sanitize_bucket_component(value: &str) -> String {
     }
 }
 
-fn validate_bucket_name(bucket_name: &str) -> Result<(), ObjectServiceError> {
+pub(crate) fn validate_bucket_name(bucket_name: &str) -> Result<(), ObjectServiceError> {
     if bucket_name.len() < 3 || bucket_name.len() > MAX_BUCKET_NAME_LEN {
         return Err(ObjectServiceError::InvalidConfiguration(format!(
             "bucket name `{bucket_name}` must be 3 to 63 characters"

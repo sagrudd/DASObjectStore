@@ -4,7 +4,7 @@ use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::store::StoreClass;
 use dasobjectstore_daemon::DaemonIngestConflictPolicy;
-use dasobjectstore_object_service::ObjectServiceProviderId;
+use dasobjectstore_object_service::{ObjectServiceProviderId, RemoteS3AuthAuthority};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -522,8 +522,93 @@ pub(crate) enum StoreCommand {
     Defaults(StoreDefaultsArgs),
     /// List system-managed object stores.
     List(StoreListArgs),
+    /// Render AWS CLI commands for remote S3-compatible uploads.
+    S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum StoreS3UploadAuth {
+    Mneion,
+    LocalPassword,
+}
+
+impl From<StoreS3UploadAuth> for RemoteS3AuthAuthority {
+    fn from(value: StoreS3UploadAuth) -> Self {
+        match value {
+            StoreS3UploadAuth::Mneion => Self::Mneion,
+            StoreS3UploadAuth::LocalPassword => Self::LocalPassword,
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreS3UploadArgs {
+    /// Store identifier to expose for remote S3 uploads.
+    store_id: StoreId,
+    /// S3-compatible service URL reachable from the remote computer.
+    #[arg(long)]
+    endpoint_url: String,
+    /// Explicit bucket name for remote clients that cannot read the store registry.
+    #[arg(long)]
+    bucket: Option<String>,
+    /// AWS CLI region value to store in the generated profile.
+    #[arg(long, default_value = "garage")]
+    region: String,
+    /// AWS CLI profile name; defaults to dasobjectstore-<store>.
+    #[arg(long)]
+    profile: Option<String>,
+    /// Authority that manages remote S3 credential issuance.
+    #[arg(long, value_enum, default_value_t = StoreS3UploadAuth::Mneion)]
+    auth: StoreS3UploadAuth,
+    /// Local appliance user for --auth local-password.
+    #[arg(long)]
+    username: Option<String>,
+    /// Emit the remote upload plan as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl StoreS3UploadArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn endpoint_url(&self) -> &str {
+        &self.endpoint_url
+    }
+
+    pub(crate) fn bucket(&self) -> Option<&str> {
+        self.bucket.as_deref()
+    }
+
+    pub(crate) fn region(&self) -> &str {
+        &self.region
+    }
+
+    pub(crate) fn profile(&self) -> Option<&str> {
+        self.profile.as_deref()
+    }
+
+    pub(crate) fn auth(&self) -> StoreS3UploadAuth {
+        self.auth
+    }
+
+    pub(crate) fn username(&self) -> Option<&str> {
+        self.username.as_deref()
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -1538,7 +1623,7 @@ mod tests {
     use super::{
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
         MnemosyneCommand, ObjectCommand, PoolCommand, ProbeArgs, ServiceCommand, StoreArgs,
-        StoreCommand, SubobjectCommand,
+        StoreCommand, StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -2493,6 +2578,46 @@ mod tests {
                 assert_eq!(list.registry_path(), None);
             }
             _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_s3_upload() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "s3-upload",
+            "generated-data",
+            "--endpoint-url",
+            "https://dos.example.test:3900",
+            "--region",
+            "garage",
+            "--profile",
+            "generated",
+            "--auth",
+            "local-password",
+            "--username",
+            "alice",
+            "--json",
+        ])
+        .expect("store s3-upload parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::S3Upload(upload)) => {
+                assert_eq!(upload.store_id().as_str(), "generated-data");
+                assert_eq!(upload.endpoint_url(), "https://dos.example.test:3900");
+                assert_eq!(upload.bucket(), None);
+                assert_eq!(upload.region(), "garage");
+                assert_eq!(upload.profile(), Some("generated"));
+                assert_eq!(upload.auth(), StoreS3UploadAuth::LocalPassword);
+                assert_eq!(upload.username(), Some("alice"));
+                assert!(upload.json());
+                assert_eq!(upload.registry_path(), None);
+            }
+            _ => panic!("expected s3-upload command"),
         }
     }
 

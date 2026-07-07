@@ -13,7 +13,9 @@ use dasobjectstore_metadata::{
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
 };
-use dasobjectstore_object_service::{StoreRegistryUpdateReport, StoreServiceDefinition};
+use dasobjectstore_object_service::{
+    RemoteS3UploadPlan, StoreRegistryUpdateReport, StoreServiceDefinition,
+};
 use dasobjectstore_platform::{ObservedDisk, ObservedEnclosure, ProbeReport};
 use std::io::{self, Write};
 
@@ -773,6 +775,40 @@ pub(super) fn write_store_list_report(
     }
 
     Ok(())
+}
+
+pub(super) fn write_remote_s3_upload_plan(
+    plan: &RemoteS3UploadPlan,
+    writer: &mut impl Write,
+) -> Result<(), io::Error> {
+    writeln!(writer, "Remote S3 upload plan")?;
+    writeln!(writer, "Store: {}", plan.store_id)?;
+    writeln!(writer, "Bucket: {}", plan.bucket_name)?;
+    writeln!(writer, "Endpoint URL: {}", plan.endpoint_url)?;
+    writeln!(writer, "Region: {}", plan.region)?;
+    writeln!(writer, "AWS profile: {}", plan.profile_name)?;
+    writeln!(
+        writer,
+        "Credential authority: {}",
+        plan.auth_authority.as_str()
+    )?;
+    if let Some(username) = &plan.username {
+        writeln!(writer, "Username: {username}")?;
+    }
+    writeln!(
+        writer,
+        "Credential reference: {}",
+        plan.credential_reference
+    )?;
+    writeln!(writer, "Credential setup: {}", plan.credential_instruction)?;
+    writeln!(writer, "AWS profile commands:")?;
+    for command in &plan.aws_profile_commands {
+        writeln!(writer, "  {command}")?;
+    }
+    writeln!(writer, "Upload commands:")?;
+    writeln!(writer, "  {}", plan.aws_s3api_put_object_command)?;
+    writeln!(writer, "  {}", plan.aws_s3_cp_command)?;
+    writeln!(writer, "  {}", plan.aws_s3_sync_command)
 }
 
 pub(super) fn write_object_put_report(
