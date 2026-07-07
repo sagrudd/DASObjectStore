@@ -3,12 +3,12 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
-    IngestCommand, IngestDirectImportArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
-    MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
-    ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs,
-    ProbeArgs, ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs,
-    StoreAdoptArgs, StoreCommand, StoreCreateArgs, StoreDefaultsArgs, StoreListArgs,
-    StoreValidateArgs,
+    IngestCommand, IngestDirectImportArgs, IngestFilesArgs, IngestQueueArgs, IngestStatusArgs,
+    MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand,
+    ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
+    PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
+    ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreCreateArgs,
+    StoreDefaultsArgs, StoreListArgs, StoreValidateArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -32,7 +32,7 @@ use self::output::{
     write_store_list_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
-use dasobjectstore_core::ids::DiskId;
+use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::PoolState;
 use dasobjectstore_core::risk::{
     ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
@@ -41,11 +41,12 @@ use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, force_retire_disk,
     import_dirty_pool_read_only, import_reproducible_object_direct_to_hdd, inspect_pool_metadata,
-    measure_ssd_capacity, put_object_ssd_first, read_disk_drain_plan, read_disk_replacement_plan,
-    read_ingest_queue, read_object_inspect, request_disk_retirement, DestagePriorityPolicy,
-    DirectHddImportError, DirectHddImportRequest, DiskCopyRoot, DiskDrainError,
-    DiskRetirementError, IngestQueueReadError, ObjectExportError, ObjectExportRequest,
-    ObjectInspectError, ObjectPutError, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
+    measure_ssd_capacity, put_object_ssd_first, put_object_ssd_first_with_progress,
+    read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue, read_object_inspect,
+    request_disk_retirement, DestagePriorityPolicy, DirectHddImportError, DirectHddImportRequest,
+    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueReadError, ObjectExportError,
+    ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
+    ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
     ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
 };
 #[cfg(feature = "debug-commands")]
@@ -78,6 +79,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::time::Instant;
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
@@ -109,6 +111,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
         },
         Some(Command::Ingest(args)) => match args.command() {
+            Some(IngestCommand::Files(args)) => run_ingest_files(args, writer),
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),
             Some(IngestCommand::Queue(args)) => run_ingest_queue(args, writer),
             Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
@@ -990,6 +993,301 @@ fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Resu
     writer.write_all(b"\n")?;
 
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct FileIngestEntry {
+    source_path: PathBuf,
+    relative_path: PathBuf,
+    object_id: ObjectId,
+    size_bytes: u64,
+}
+
+fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let ssd_root = args
+        .ssd_root()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_ssd_root);
+    validate_known_ssd_root(&ssd_root)?;
+    let disk_roots = parse_disk_roots(args.disk_roots())?;
+    let registry_path = args
+        .registry_path()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_store_registry_path);
+    let store = read_store_registry(&registry_path)?
+        .into_iter()
+        .find(|definition| definition.store_id == *args.store_id())
+        .ok_or_else(|| {
+            CliError::CommandFailed(format!(
+                "store {} was not found in {}",
+                args.store_id(),
+                registry_path.display()
+            ))
+        })?;
+    let copies = args.copies().unwrap_or(store.policy.copies);
+    if copies == 0 || disk_roots.len() < copies as usize {
+        return Err(CliError::CommandFailed(format!(
+            "ingest files requires at least {copies} disk root mapping(s), got {}",
+            disk_roots.len()
+        )));
+    }
+    let files = collect_ingest_files(args.source(), args.store_id())?;
+    let total_source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
+    let total_work_bytes = total_source_bytes.saturating_mul(u64::from(copies) + 1);
+
+    writeln!(writer, "File ingest plan")?;
+    writeln!(writer, "Store: {}", args.store_id())?;
+    writeln!(writer, "Class: {}", store.policy.class.name())?;
+    writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
+    writeln!(writer, "SSD root: {}", ssd_root.to_string_lossy())?;
+    writeln!(writer, "Files: {}", files.len())?;
+    writeln!(writer, "Source bytes: {total_source_bytes}")?;
+    writeln!(writer, "Copies: {copies}")?;
+    writeln!(writer, "Work bytes: {total_work_bytes}")?;
+
+    if args.dry_run() {
+        writeln!(writer, "Dry run: no files imported")?;
+        for entry in &files {
+            writeln!(
+                writer,
+                "- {} bytes={} object={}",
+                entry.relative_path.to_string_lossy(),
+                entry.size_bytes,
+                entry.object_id
+            )?;
+        }
+        return Ok(());
+    }
+
+    let mut completed_files = 0_usize;
+    let mut completed_work_bytes = 0_u64;
+    let started_at = Instant::now();
+    let capacity_policy = SsdCapacityPolicy::default();
+
+    for entry in &files {
+        match read_ssd_stress(&ssd_root, &capacity_policy) {
+            Ok(stress) => writeln!(writer, "SSD stress before file: {stress}")?,
+            Err(err) => writeln!(writer, "SSD stress before file: unavailable ({err})")?,
+        }
+        writeln!(
+            writer,
+            "Importing {} as {}",
+            entry.relative_path.to_string_lossy(),
+            entry.object_id
+        )?;
+
+        let request = ObjectPutRequest::new(
+            entry.object_id.clone(),
+            &entry.source_path,
+            &ssd_root,
+            disk_roots.clone(),
+            copies,
+        );
+        let mut stage_key = String::new();
+        let mut stage_offset_bytes = 0_u64;
+        let mut last_emit = Instant::now();
+        let mut progress_write_error = None;
+        let report = put_object_ssd_first_with_progress(&request, |progress| {
+            let key = progress_stage_key(&progress);
+            if key != stage_key {
+                stage_key = key;
+                stage_offset_bytes = 0;
+                last_emit = Instant::now();
+            }
+            let delta = progress.bytes_written.saturating_sub(stage_offset_bytes);
+            stage_offset_bytes = progress.bytes_written;
+            completed_work_bytes = completed_work_bytes.saturating_add(delta);
+            if last_emit.elapsed().as_secs() == 0 && progress.bytes_written < entry.size_bytes {
+                return;
+            }
+            last_emit = Instant::now();
+            if progress_write_error.is_none() {
+                progress_write_error = write_file_ingest_progress(
+                    writer,
+                    completed_work_bytes,
+                    total_work_bytes,
+                    completed_files,
+                    files.len(),
+                    &progress,
+                    started_at,
+                    &ssd_root,
+                    &capacity_policy,
+                )
+                .err();
+            }
+        })?;
+        if let Some(err) = progress_write_error {
+            return Err(CliError::Io(err));
+        }
+
+        completed_files += 1;
+        writeln!(
+            writer,
+            "File complete: {} bytes={} hash={}:{} copies={}",
+            entry.relative_path.to_string_lossy(),
+            report.bytes_staged,
+            report.content_hash_algorithm,
+            report.content_hash,
+            report.placements.len()
+        )?;
+    }
+
+    writeln!(writer, "File ingest complete")?;
+    writeln!(writer, "Files imported: {}", completed_files)?;
+    writeln!(writer, "Source bytes imported: {total_source_bytes}")?;
+    writeln!(
+        writer,
+        "Elapsed seconds: {:.3}",
+        started_at.elapsed().as_secs_f64()
+    )?;
+
+    Ok(())
+}
+
+fn collect_ingest_files(root: &Path, store_id: &StoreId) -> Result<Vec<FileIngestEntry>, CliError> {
+    if !root.is_dir() {
+        return Err(CliError::CommandFailed(format!(
+            "ingest source must be a directory: {}",
+            root.display()
+        )));
+    }
+
+    let mut files = Vec::new();
+    collect_ingest_files_into(root, root, store_id, &mut files)?;
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+
+    Ok(files)
+}
+
+fn collect_ingest_files_into(
+    root: &Path,
+    current: &Path,
+    store_id: &StoreId,
+    files: &mut Vec<FileIngestEntry>,
+) -> Result<(), CliError> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_ingest_files_into(root, &path, store_id, files)?;
+        } else if file_type.is_file() {
+            let metadata = entry.metadata()?;
+            let relative_path = path
+                .strip_prefix(root)
+                .map_err(|err| CliError::CommandFailed(err.to_string()))?
+                .to_path_buf();
+            files.push(FileIngestEntry {
+                object_id: object_id_for_ingested_file(store_id, &relative_path)?,
+                source_path: path,
+                relative_path,
+                size_bytes: metadata.len(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn object_id_for_ingested_file(
+    store_id: &StoreId,
+    relative_path: &Path,
+) -> Result<ObjectId, CliError> {
+    let relative = relative_path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    ObjectId::new(format!("{}/{}", store_id.as_str(), relative))
+        .map_err(|err| CliError::CommandFailed(err.to_string()))
+}
+
+fn progress_stage_key(progress: &ObjectPutProgress) -> String {
+    match &progress.stage {
+        ObjectPutProgressStage::SsdIngest => "ssd-ingest".to_string(),
+        ObjectPutProgressStage::HddCopy {
+            disk_id,
+            copy_number,
+        } => format!("hdd-copy-{disk_id}-{copy_number}"),
+    }
+}
+
+fn progress_stage_label(progress: &ObjectPutProgress) -> String {
+    match &progress.stage {
+        ObjectPutProgressStage::SsdIngest => "ssd-ingest".to_string(),
+        ObjectPutProgressStage::HddCopy {
+            disk_id,
+            copy_number,
+        } => format!("hdd-copy:{disk_id}:{copy_number}"),
+    }
+}
+
+fn write_file_ingest_progress(
+    writer: &mut impl Write,
+    completed_work_bytes: u64,
+    total_work_bytes: u64,
+    completed_files: usize,
+    total_files: usize,
+    progress: &ObjectPutProgress,
+    started_at: Instant,
+    ssd_root: &Path,
+    capacity_policy: &SsdCapacityPolicy,
+) -> Result<(), io::Error> {
+    let percent = if total_work_bytes == 0 {
+        100.0
+    } else {
+        completed_work_bytes as f64 * 100.0 / total_work_bytes as f64
+    };
+    let elapsed = started_at.elapsed().as_secs_f64().max(0.001);
+    let rate = completed_work_bytes as f64 / elapsed;
+    let active_files = (completed_files + 1).min(total_files);
+    let remaining_files = total_files.saturating_sub(active_files);
+    let ssd_stress = match read_ssd_stress(ssd_root, capacity_policy) {
+        Ok(stress) => stress,
+        Err(_) => "unknown".to_string(),
+    };
+
+    writeln!(
+        writer,
+        "{:>12} {:>6.2}% {:>12}/s files={}/{} remaining={} stage={} stage_bytes={} ssd={}",
+        completed_work_bytes,
+        percent,
+        format_bytes(rate),
+        active_files,
+        total_files,
+        remaining_files,
+        progress_stage_label(progress),
+        progress.bytes_written,
+        ssd_stress
+    )
+}
+
+fn read_ssd_stress(
+    ssd_root: &Path,
+    capacity_policy: &SsdCapacityPolicy,
+) -> Result<String, CliError> {
+    let capacity = measure_ssd_capacity(ssd_root)?;
+    let pressure = capacity_policy.evaluate(&capacity)?;
+
+    Ok(format!(
+        "pressure={pressure:?} used={}%",
+        capacity.used_percent_floor()
+    ))
+}
+
+fn format_bytes(bytes: f64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes;
+    let mut unit = UNITS[0];
+    for next_unit in UNITS.iter().skip(1) {
+        if value < 1024.0 {
+            break;
+        }
+        value /= 1024.0;
+        unit = next_unit;
+    }
+
+    format!("{value:.1} {unit}")
 }
 
 fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -2519,6 +2817,61 @@ mod tests {
         assert!(output.contains("Pressure:"));
         assert!(output.contains("High watermark percent: 85"));
         assert!(output.contains("Critical watermark percent: 95"));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn ingest_files_reports_byte_progress_and_ssd_stress() {
+        let root = temp_root("ingest-files");
+        let source_root = root.join("external");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd-a");
+        let registry_path = root.join("stores.json");
+        fs::create_dir_all(source_root.join("nested")).expect("create source");
+        fs::create_dir_all(&hdd_root).expect("create hdd root");
+        create_known_ssd_marker(&ssd_root);
+        fs::write(
+            source_root.join("nested").join("sample.fastq.gz"),
+            b"ACGT".repeat(256),
+        )
+        .expect("write source file");
+        write_store_definitions_file(
+            &registry_path,
+            vec![StoreServiceDefinition {
+                store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+                bucket_name: Some("dos-zymo-fecal-2025-05".to_string()),
+            }],
+        );
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            source_root.to_str().expect("utf8 source root"),
+            "--ssd-root",
+            ssd_root.to_str().expect("utf8 ssd root"),
+            "--disk-root",
+            &format!("disk-a={}", hdd_root.to_string_lossy()),
+            "--registry-path",
+            registry_path.to_str().expect("utf8 registry path"),
+        ])
+        .expect("ingest files parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("ingest files runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("File ingest plan"));
+        assert!(output.contains("Store: zymo_fecal_2025.05"));
+        assert!(output.contains("SSD stress before file: pressure="));
+        assert!(output.contains("stage=ssd-ingest"));
+        assert!(output.contains("stage=hdd-copy:disk-a:1"));
+        assert!(output.contains("remaining=0"));
+        assert!(output.contains("File complete: nested/sample.fastq.gz"));
+        assert!(output.contains("File ingest complete"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

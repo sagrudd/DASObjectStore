@@ -1,0 +1,114 @@
+Ingesting Files from a Mounted Disk
+===================================
+
+Use ``dasobjectstore ingest files`` to load a directory tree from an external
+disk into a system-managed object store. Do not copy files directly onto DAS
+member disks.
+
+The command reads the store policy, stages each file through the DAS SSD, writes
+the requested verified HDD copies, and reports byte-level progress while the
+copy is running.
+
+Example
+-------
+
+For a store created as:
+
+.. code-block:: console
+
+   sudo dasobjectstore store create --class reproducible_cache zymo_fecal_2025.05
+
+import files from a mounted external disk:
+
+.. code-block:: console
+
+   sudo dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --disk-root hdd-a=/srv/dasobjectstore/hdd-a
+
+Add more ``--disk-root`` entries when the store policy requires more copies:
+
+.. code-block:: console
+
+   sudo dasobjectstore ingest files generated-data \
+     --source /mnt/external/generated-data \
+     --disk-root hdd-a=/srv/dasobjectstore/hdd-a \
+     --disk-root hdd-b=/srv/dasobjectstore/hdd-b
+
+The copy count defaults to the store policy. Use ``--copies`` only when the
+override is intentional:
+
+.. code-block:: console
+
+   sudo dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --disk-root hdd-a=/srv/dasobjectstore/hdd-a \
+     --copies 1
+
+Use ``--dry-run`` to inspect the planned file set without importing:
+
+.. code-block:: console
+
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /mnt/external/zymo_fecal_2025.05 \
+     --disk-root hdd-a=/srv/dasobjectstore/hdd-a \
+     --dry-run
+
+Progress Output
+---------------
+
+The progress output is intentionally similar to an ``rsync --info=progress2``
+operator view. It reports cumulative work bytes, percent complete, transfer
+rate, file counts, remaining files, current stage, stage-local bytes, and SSD
+stress.
+
+Example line:
+
+.. code-block:: text
+
+       104857600  42.13%    82.4 MiB/s files=3/12 remaining=8 stage=ssd-ingest stage_bytes=104857600 ssd=pressure=AcceptingWrites used=31%
+
+Stages:
+
+* ``ssd-ingest`` means DASObjectStore is reading from the mounted source disk
+  and landing the file on the mandatory SSD.
+* ``hdd-copy:<disk-id>:<copy-number>`` means DASObjectStore is settling and
+  verifying one HDD copy from the SSD payload.
+
+SSD Stress
+----------
+
+Each file starts with an SSD stress line, and progress lines include the latest
+sample when available:
+
+.. code-block:: text
+
+   SSD stress before file: pressure=AcceptingWrites used=31%
+
+Pressure states come from the SSD capacity policy:
+
+* ``AcceptingWrites``: normal ingest can continue.
+* ``High``: SSD pressure is elevated; destage work should be prioritized.
+* ``Critical``: SSD space is stretched; normal ingest may need to pause until
+  settlement frees space.
+
+Source Layout and Object IDs
+----------------------------
+
+The command imports regular files beneath ``--source``. Object IDs are derived
+from the store ID and relative path. For example:
+
+.. code-block:: text
+
+   zymo_fecal_2025.05/nested/sample.fastq.gz
+
+Symlinks and non-regular files are not imported by this path.
+
+Current Limits
+--------------
+
+This command performs synchronous ingest and settlement. It gives clear operator
+progress for large local imports, but it is not yet a resumable job scheduler.
+If an import is interrupted, inspect the output and rerun after checking the
+store state.
+

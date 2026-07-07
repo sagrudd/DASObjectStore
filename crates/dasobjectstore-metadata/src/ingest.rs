@@ -1,4 +1,4 @@
-use crate::hash::{copy_and_hash, SHA256_ALGORITHM};
+use crate::hash::{copy_and_hash_with_progress, SHA256_ALGORITHM};
 use crate::initialize::METADATA_DIR_NAME;
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::IngestJobId;
@@ -71,10 +71,18 @@ impl IngestJobPaths {
         &self,
         reader: &mut impl Read,
     ) -> Result<IngestWriteReport, std::io::Error> {
+        self.write_payload_with_hash_progress(reader, |_| {})
+    }
+
+    pub fn write_payload_with_hash_progress(
+        &self,
+        reader: &mut impl Read,
+        progress: impl FnMut(u64),
+    ) -> Result<IngestWriteReport, std::io::Error> {
         self.create_directories()?;
 
         let mut file = create_private_file(&self.payload_path)?;
-        let report = copy_and_hash(reader, &mut file)?;
+        let report = copy_and_hash_with_progress(reader, &mut file, progress)?;
         file.sync_all()?;
 
         Ok(IngestWriteReport {

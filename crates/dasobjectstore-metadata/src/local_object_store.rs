@@ -1,4 +1,4 @@
-use crate::copy::{write_verified_hdd_copy, HddCopyError, HddCopyRequest};
+use crate::copy::{write_verified_hdd_copy_with_progress, HddCopyError, HddCopyRequest};
 use crate::evacuation::DiskCopyRoot;
 use crate::ingest::{encode_path_component, IngestStagingLayout, IngestWriteReport};
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId};
@@ -54,7 +54,27 @@ pub struct ObjectPutPlacementReport {
     pub content_hash: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObjectPutProgress {
+    pub object_id: ObjectId,
+    pub stage: ObjectPutProgressStage,
+    pub bytes_written: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObjectPutProgressStage {
+    SsdIngest,
+    HddCopy { disk_id: String, copy_number: u8 },
+}
+
 pub fn put_object_ssd_first(request: &ObjectPutRequest) -> Result<ObjectPutReport, ObjectPutError> {
+    put_object_ssd_first_with_progress(request, |_| {})
+}
+
+pub fn put_object_ssd_first_with_progress(
+    request: &ObjectPutRequest,
+    mut progress: impl FnMut(ObjectPutProgress),
+) -> Result<ObjectPutReport, ObjectPutError> {
     validate_request(request)?;
 
     let layout = IngestStagingLayout::for_ssd_root(&request.ssd_root);
@@ -63,8 +83,20 @@ pub fn put_object_ssd_first(request: &ObjectPutRequest) -> Result<ObjectPutRepor
     let job_paths = layout.job_paths(&job_id);
 
     let mut source = File::open(&request.source_path)?;
-    let write_report = job_paths.write_payload_with_hash(&mut source)?;
-    let placements = write_requested_copies(request, &job_paths.payload_path, &write_report)?;
+    let write_report =
+        job_paths.write_payload_with_hash_progress(&mut source, |bytes_written| {
+            progress(ObjectPutProgress {
+                object_id: request.object_id.clone(),
+                stage: ObjectPutProgressStage::SsdIngest,
+                bytes_written,
+            });
+        })?;
+    let placements = write_requested_copies(
+        request,
+        &job_paths.payload_path,
+        &write_report,
+        &mut progress,
+    )?;
 
     Ok(ObjectPutReport {
         object_id: request.object_id.clone(),
@@ -95,6 +127,7 @@ fn write_requested_copies(
     request: &ObjectPutRequest,
     source_path: &Path,
     write_report: &IngestWriteReport,
+    progress: &mut impl FnMut(ObjectPutProgress),
 ) -> Result<Vec<ObjectPutPlacementReport>, ObjectPutError> {
     request
         .disk_roots
@@ -105,14 +138,26 @@ fn write_requested_copies(
             let copy_number = (index + 1) as u8;
             let destination_path =
                 object_copy_path(disk_root, &request.object_id, &write_report.content_hash);
-            let copy_report = write_verified_hdd_copy(&HddCopyRequest::new(
-                request.object_id.clone(),
-                disk_root.disk_id.clone(),
-                copy_number,
-                source_path,
-                destination_path,
-                write_report.content_hash.clone(),
-            ))?;
+            let copy_report = write_verified_hdd_copy_with_progress(
+                &HddCopyRequest::new(
+                    request.object_id.clone(),
+                    disk_root.disk_id.clone(),
+                    copy_number,
+                    source_path,
+                    destination_path,
+                    write_report.content_hash.clone(),
+                ),
+                |bytes_written| {
+                    progress(ObjectPutProgress {
+                        object_id: request.object_id.clone(),
+                        stage: ObjectPutProgressStage::HddCopy {
+                            disk_id: disk_root.disk_id.as_str().to_string(),
+                            copy_number,
+                        },
+                        bytes_written,
+                    });
+                },
+            )?;
 
             Ok(ObjectPutPlacementReport {
                 disk_id: copy_report.disk_id.as_str().to_string(),

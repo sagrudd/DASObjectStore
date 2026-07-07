@@ -33,8 +33,8 @@ pub use capacity::{
     DEFAULT_SSD_HIGH_WATERMARK_PERCENT,
 };
 pub use copy::{
-    verify_hdd_copy_hash, write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest,
-    HDD_COPY_CONTENT_HASH_ALGORITHM,
+    verify_hdd_copy_hash, write_verified_hdd_copy, write_verified_hdd_copy_with_progress,
+    HddCopyError, HddCopyReport, HddCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
@@ -65,7 +65,8 @@ pub use initialize::{
 };
 pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
 pub use local_object_store::{
-    put_object_ssd_first, ObjectPutError, ObjectPutPlacementReport, ObjectPutReport,
+    put_object_ssd_first, put_object_ssd_first_with_progress, ObjectPutError,
+    ObjectPutPlacementReport, ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport,
     ObjectPutRequest,
 };
 pub use manifest::{

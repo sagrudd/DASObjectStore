@@ -1,4 +1,4 @@
-use crate::hash::{copy_and_hash, hash_file_sha256, SHA256_ALGORITHM};
+use crate::hash::{copy_and_hash_with_progress, hash_file_sha256, SHA256_ALGORITHM};
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
 use std::fmt::{self, Display};
@@ -84,6 +84,13 @@ impl From<std::io::Error> for HddCopyError {
 }
 
 pub fn write_verified_hdd_copy(request: &HddCopyRequest) -> Result<HddCopyReport, HddCopyError> {
+    write_verified_hdd_copy_with_progress(request, |_| {})
+}
+
+pub fn write_verified_hdd_copy_with_progress(
+    request: &HddCopyRequest,
+    progress: impl FnMut(u64),
+) -> Result<HddCopyReport, HddCopyError> {
     if let Some(parent) = request.destination_path.parent() {
         create_private_dir_all(parent)?;
         restrict_object_tree_dirs(parent)?;
@@ -91,7 +98,7 @@ pub fn write_verified_hdd_copy(request: &HddCopyRequest) -> Result<HddCopyReport
 
     let mut source = File::open(&request.source_path)?;
     let mut destination = create_private_file(&request.destination_path)?;
-    let write_report = copy_and_hash(&mut source, &mut destination)?;
+    let write_report = copy_and_hash_with_progress(&mut source, &mut destination, progress)?;
     destination.sync_all()?;
 
     let content_hash = verify_hdd_copy_hash(

@@ -673,12 +673,68 @@ impl IngestArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum IngestCommand {
+    /// Import a directory tree of files into a store through SSD ingest.
+    Files(IngestFilesArgs),
     /// Report SSD ingest capacity and pressure state.
     Status(IngestStatusArgs),
     /// Emit live ingest queue entries as JSON.
     Queue(IngestQueueArgs),
     /// Import a reproducible object directly to HDD, bypassing SSD ingest.
     DirectImport(IngestDirectImportArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestFilesArgs {
+    /// Store receiving the imported files.
+    store_id: StoreId,
+    /// Mounted source directory containing files to import.
+    #[arg(long)]
+    source: PathBuf,
+    /// SSD ingest root; defaults to DASOBJECTSTORE_SSD_ROOT or /srv/dasobjectstore/ssd.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
+    /// Disk root mapping in the form disk-id=/mounted/disk/root.
+    #[arg(long = "disk-root")]
+    disk_roots: Vec<String>,
+    /// Override the store policy copy count for this import.
+    #[arg(long)]
+    copies: Option<u8>,
+    /// Show the planned file set without importing.
+    #[arg(long)]
+    dry_run: bool,
+    /// Advanced test override for the system-managed store registry path.
+    #[arg(long, hide = true)]
+    registry_path: Option<PathBuf>,
+}
+
+impl IngestFilesArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
+    }
+
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
+    }
+
+    pub(crate) fn disk_roots(&self) -> &[String] {
+        &self.disk_roots
+    }
+
+    pub(crate) fn copies(&self) -> Option<u8> {
+        self.copies
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    pub(crate) fn registry_path(&self) -> Option<&Path> {
+        self.registry_path.as_deref()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -1801,6 +1857,44 @@ mod tests {
                 assert_eq!(status.minimum_free_bytes(), 1024);
             }
             _ => panic!("expected status command"),
+        }
+    }
+
+    #[test]
+    fn parses_ingest_files() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/mnt/external/zymo",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--disk-root",
+            "hdd-a=/srv/dasobjectstore/hdd-a",
+            "--copies",
+            "1",
+            "--dry-run",
+        ])
+        .expect("ingest files parses");
+
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        match args.command() {
+            Some(IngestCommand::Files(files)) => {
+                assert_eq!(files.store_id().as_str(), "zymo_fecal_2025.05");
+                assert_eq!(files.source(), Path::new("/mnt/external/zymo"));
+                assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
+                assert_eq!(
+                    files.disk_roots(),
+                    &["hdd-a=/srv/dasobjectstore/hdd-a".to_string()]
+                );
+                assert_eq!(files.copies(), Some(1));
+                assert!(files.dry_run());
+            }
+            _ => panic!("expected files command"),
         }
     }
 
