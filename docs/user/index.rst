@@ -16,3 +16,4 @@ stabilized in the current MVP.
    object-stores
    subobjects
    ingesting-files
+   tui-operations

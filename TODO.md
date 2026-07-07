@@ -495,14 +495,14 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   verification failure.
 - [ ] Add TUI tests or scripted terminal snapshots for planning, launch
   confirmation, live monitoring, reconnect, and completed summary flows.
-- [ ] Add benchmark harness for small-file, large-file, mixed-file, slow-HDD,
+- [x] Add benchmark harness for small-file, large-file, mixed-file, slow-HDD,
   full-SSD, and interrupted-import scenarios.
 - [ ] Add profiling hooks to prove CPU, memory, SSD, HDD, and verification
   bottlenecks are identified correctly.
-- [ ] Add performance acceptance targets for sustained source-to-SSD staging,
+- [x] Add performance acceptance targets for sustained source-to-SSD staging,
   HDD fan-out, verification throughput, bounded memory growth, and recovery time
   after interruption.
-- [ ] Document TUI launch commands, keyboard controls, supported terminal sizes,
+- [x] Document TUI launch commands, keyboard controls, supported terminal sizes,
   resource policy, and operational expectations.
 
 ## Cross-Cutting Tasks
