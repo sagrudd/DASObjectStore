@@ -11,9 +11,15 @@ pub use health::{
     DaemonHealthSummaryResponse, DaemonIngestSummary, DaemonSsdPressure,
 };
 pub use ingest::{
-    CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestProgressEvent, DaemonIngestStage,
-    DaemonRequestValidationError, IngestJobStatusRequest, IngestJobStatusResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestBottleneck,
+    DaemonIngestCompletionFraction, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
+    DaemonIngestPressure, DaemonIngestProgressEvent, DaemonIngestProgressFractions,
+    DaemonIngestQueueDepths, DaemonIngestResourcePolicy, DaemonIngestStage,
+    DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry, DaemonIngestTelemetry,
+    DaemonIngestThroughputTelemetry, DaemonIngestThroughputTrend, DaemonIngestWorkerActivity,
+    DaemonIngestWorkerCounts, DaemonIngestWorkerTelemetry, DaemonRequestValidationError,
+    IngestJobStatusRequest, IngestJobStatusResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
