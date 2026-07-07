@@ -12,6 +12,10 @@ reads the store policy, discovers managed HDD members, selects copy placements,
 stages each file through the DAS SSD, writes the requested verified HDD copies,
 and reports byte-level progress while the copy is running.
 
+This command is not a local filesystem copy into a DAS member disk. The normal
+path sends a daemon request over the packaged local daemon socket. The daemon is
+the only component that should mutate managed SSD/HDD roots.
+
 Example
 -------
 
@@ -38,6 +42,28 @@ mutation.
 DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
 for normal file ingest.
+
+What Happens
+------------
+
+When ``dasobjectstore ingest files`` is run, the CLI performs client-side
+argument parsing and submits an ingest job request containing:
+
+* the target object store or SubObject endpoint;
+* the mounted source directory;
+* an optional copy-count override;
+* whether the request is a dry run.
+
+The daemon is responsible for authorization, policy lookup, SSD staging,
+placement selection, HDD fan-out, verification, metadata mutation, and progress
+events. The operator sees job submission details first, followed by byte-level
+progress as daemon event streaming is available for the active job.
+
+The daemon socket path in packaged Linux deployments is:
+
+.. code-block:: text
+
+   /run/dasobjectstore/dasobjectstored.sock
 
 Group Requirements
 ------------------
@@ -89,15 +115,15 @@ Progress Output
 ---------------
 
 The progress output is intentionally similar to an ``rsync --info=progress2``
-operator view. It reports cumulative work bytes, percent complete, transfer
-rate, file counts, remaining files, current stage, stage-local bytes, and SSD
-stress.
+operator view. Daemon progress events report cumulative work bytes, percent
+complete when the total is known, transfer rate, file counts, remaining files,
+current stage, and SSD pressure.
 
 Example line:
 
 .. code-block:: text
 
-       104857600  42.13%    82.4 MiB/s files=3/12 remaining=8 stage=ssd-ingest stage_bytes=104857600 ssd=pressure=AcceptingWrites used=31%
+      104857600  42%    82.4 MiB/s files=3/12 remaining=8 stage=ssd-ingest ssd=AcceptingWrites
 
 Stages:
 
@@ -110,12 +136,11 @@ Stages:
 SSD Stress
 ----------
 
-Each file starts with an SSD stress line, and progress lines include the latest
-sample when available:
+Progress lines include the latest daemon SSD-pressure sample when available:
 
 .. code-block:: text
 
-   SSD stress before file: pressure=AcceptingWrites used=31%
+   ssd=AcceptingWrites
 
 Pressure states come from the SSD capacity policy:
 
@@ -148,10 +173,14 @@ Symlinks and non-regular files are not imported by this path.
 Current Limits
 --------------
 
-This command performs synchronous ingest and settlement. It gives clear operator
-progress for large local imports, but it is not yet a resumable job scheduler.
-If an import is interrupted, inspect the output and rerun after checking the
-store state.
+The normal CLI path now builds a daemon ingest request. Full Unix-socket event
+streaming and daemon-side execution are still being completed, so early package
+builds may report that daemon transport or runtime execution is not yet
+available. The hidden ``--local-direct`` mode exists only for developer tests
+and should not be used as the production ingest path.
+
+Once the daemon runtime is active, interrupted imports should be inspected
+through daemon job status and store state before retrying.
 
 The planned operations TUI will make ingest a supported console workflow for
 planning, confirmation, launch, monitoring, reconnect, and completion review. It

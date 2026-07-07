@@ -44,7 +44,7 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   service identity, not ordinary ingest users.
 - [x] Add integration tests proving normal non-root ingest succeeds through the
   daemon without granting direct write permission to managed DAS roots.
-- [ ] Update user documentation so ingest is described as a client/server job
+- [x] Update user documentation so ingest is described as a client/server job
   submission with byte-level progress, not a local filesystem write.
 - [ ] Update Synoptikon/Mneion integration docs so all storage-mutating actions
   call the daemon API and inherit the common audit/authentication model.
