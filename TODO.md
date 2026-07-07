@@ -218,15 +218,15 @@ so the integration is foundational rather than bolted onto a CLI-local model.
   Completed on the remote DAS host at `192.168.1.192` on 2026-07-07 with a
   bounded validation matrix; `check-report-inputs.sh` passed against
   `benchmarks/output/object-services/`.
-- [ ] Produce first benchmark report and recommend MVP object service.
-  Use the completed remote Garage and RustFS workload outputs under
-  `benchmarks/output/object-services/`.
+- [x] Produce first benchmark report and recommend MVP object service.
+  Report: `benchmarks/object-services/reports/2026-07-07-provider-selection.md`.
+  Garage is selected as the Milestone 9 MVP object service.
 
 ## Milestone 9: S3 Service Orchestration
 
 - [x] Create `dasobjectstore-object-service` crate with provider trait.
-- [ ] Implement provider for selected MVP object service.
-  Blocked until Milestone 8 selects the MVP provider.
+- [ ] Implement Garage provider for selected MVP object service.
+  Milestone 8 selected Garage as the MVP provider on 2026-07-07.
 - [x] Generate Docker/Compose configuration from store and pool policy.
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.
