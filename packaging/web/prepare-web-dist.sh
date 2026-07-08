@@ -30,7 +30,7 @@ ERROR
   rm -rf "$dist"
   (
     cd "$web_root"
-    env -u NO_COLOR trunk build --release
+    env -u NO_COLOR trunk build --release >&2
   )
 }
 

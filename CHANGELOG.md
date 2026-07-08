@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.6 - 2026-07-08
+
+- Redirect Trunk build logs to stderr during Web UI asset preparation so Debian
+  and RPM package scripts capture only the generated web dist path on stdout.
+
 ## 0.10.5 - 2026-07-08
 
 - Fix package asset validation for required strings that begin with hyphens,
