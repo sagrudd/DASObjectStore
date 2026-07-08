@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.3 - 2026-07-08
+
+- Make the `performance-test --tui` dashboard use the full terminal viewport
+  instead of a fixed-size frame.
+- Add live performance-test TUI updates during long SSD write/readback and
+  SSD-pipeline staging operations so the active phase, file, bytes, and current
+  operation rate are visible while work is running.
+
 ## 0.4.2 - 2026-07-08
 
 - Make `performance-test --report` PDF-only, requiring a `.pdf` path and using

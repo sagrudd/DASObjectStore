@@ -103,7 +103,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph},
+    widgets::{Block, Borders, Gauge, Paragraph, Wrap},
     Terminal,
 };
 use sha2::{Digest, Sha256};
@@ -321,12 +321,17 @@ fn run_performance_test(
             render_performance_tui_snapshot(
                 writer,
                 &PerformanceTuiSnapshot {
-                    phase: "starting",
+                    phase: "preparing",
+                    activity: "Preparing performance scenarios".to_string(),
                     scenario_done,
                     scenario_total,
+                    file_done: 0,
+                    current_file: None,
                     file_count: workload.file_count(),
+                    processed_bytes: 0,
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
+                    current_rate: None,
                     aggregate_rate: None,
                     report_path: &report_path,
                     json_path: &json_path,
@@ -339,18 +344,30 @@ fn run_performance_test(
                 "scenario ssd-only: writing source payloads directly to SSD"
             )?;
         }
-        let ssd_only = benchmark_ssd_only(&ssd_bench_root, &workload, writer, !args.tui())?;
+        let tui_context = args.tui().then_some(PerformanceTuiContext {
+            scenario_done,
+            scenario_total,
+            report_path: &report_path,
+            json_path: &json_path,
+        });
+        let ssd_only =
+            benchmark_ssd_only(&ssd_bench_root, &workload, writer, !args.tui(), tui_context)?;
         scenario_done += 1;
         if args.tui() {
             render_performance_tui_snapshot(
                 writer,
                 &PerformanceTuiSnapshot {
                     phase: "ssd-only complete",
+                    activity: "SSD-only scenario complete".to_string(),
                     scenario_done,
                     scenario_total,
+                    file_done: workload.file_count(),
+                    current_file: None,
                     file_count: workload.file_count(),
+                    processed_bytes: ssd_only.total_bytes,
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
+                    current_rate: None,
                     aggregate_rate: Some(
                         ssd_only.total_bytes as f64 / ssd_only.elapsed_seconds.max(0.001),
                     ),
@@ -376,6 +393,12 @@ fn run_performance_test(
                 concurrency,
                 writer,
                 !args.tui(),
+                args.tui().then_some(PerformanceTuiContext {
+                    scenario_done,
+                    scenario_total,
+                    report_path: &report_path,
+                    json_path: &json_path,
+                }),
             )?;
             scenario_done += 1;
             if args.tui() {
@@ -383,11 +406,18 @@ fn run_performance_test(
                     writer,
                     &PerformanceTuiSnapshot {
                         phase: "ssd-pipeline complete",
+                        activity: format!(
+                            "SSD pipeline complete with {concurrency} HDD drain worker(s)"
+                        ),
                         scenario_done,
                         scenario_total,
+                        file_done: workload.file_count(),
+                        current_file: None,
                         file_count: workload.file_count(),
+                        processed_bytes: scenario.total_bytes,
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
+                        current_rate: None,
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
                         ),
@@ -407,6 +437,28 @@ fn run_performance_test(
                     "scenario direct-hdd: direct source-to-HDD ingest with {} worker(s)",
                     concurrency
                 )?;
+            } else {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "direct-hdd active",
+                        activity: format!(
+                            "Writing source payloads directly to HDD with {concurrency} worker(s)"
+                        ),
+                        scenario_done,
+                        scenario_total,
+                        file_done: 0,
+                        current_file: None,
+                        file_count: workload.file_count(),
+                        processed_bytes: 0,
+                        total_bytes: workload.total_bytes(),
+                        hdd_concurrency: concurrency,
+                        current_rate: None,
+                        aggregate_rate: None,
+                        report_path: &report_path,
+                        json_path: &json_path,
+                    },
+                )?;
             }
             let scenario = benchmark_direct_hdd(
                 &hdd_bench_roots,
@@ -421,11 +473,18 @@ fn run_performance_test(
                     writer,
                     &PerformanceTuiSnapshot {
                         phase: "direct-hdd complete",
+                        activity: format!(
+                            "Direct-to-HDD scenario complete with {concurrency} worker(s)"
+                        ),
                         scenario_done,
                         scenario_total,
+                        file_done: workload.file_count(),
+                        current_file: None,
                         file_count: workload.file_count(),
+                        processed_bytes: scenario.total_bytes,
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
+                        current_rate: None,
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
                         ),
@@ -935,12 +994,25 @@ fn check_performance_cancelled() -> Result<(), CliError> {
 
 struct PerformanceTuiSnapshot<'a> {
     phase: &'a str,
+    activity: String,
     scenario_done: usize,
     scenario_total: usize,
+    file_done: u32,
+    current_file: Option<u32>,
     file_count: u32,
+    processed_bytes: u64,
     total_bytes: u64,
     hdd_concurrency: usize,
+    current_rate: Option<f64>,
     aggregate_rate: Option<f64>,
+    report_path: &'a Path,
+    json_path: &'a Path,
+}
+
+#[derive(Clone, Copy)]
+struct PerformanceTuiContext<'a> {
+    scenario_done: usize,
+    scenario_total: usize,
     report_path: &'a Path,
     json_path: &'a Path,
 }
@@ -950,26 +1022,30 @@ fn render_performance_tui_snapshot(
     snapshot: &PerformanceTuiSnapshot<'_>,
 ) -> Result<(), CliError> {
     let backend = CrosstermBackend::new(writer);
-    let mut terminal = Terminal::with_options(
-        backend,
-        ratatui::TerminalOptions {
-            viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 110, 18)),
-        },
-    )?;
+    let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
+    let current_fraction = if snapshot.file_count == 0 {
+        0.0
+    } else {
+        f64::from(snapshot.file_done.min(snapshot.file_count)) / f64::from(snapshot.file_count)
+    };
     let percent = if snapshot.scenario_total == 0 {
         0
     } else {
-        ((snapshot.scenario_done * 100) / snapshot.scenario_total).min(100) as u16
+        ((((snapshot.scenario_done as f64 + current_fraction) / snapshot.scenario_total as f64)
+            * 100.0)
+            .round()
+            .clamp(0.0, 100.0)) as u16
     };
     terminal.draw(|frame| {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(4),
+                Constraint::Length(5),
                 Constraint::Length(3),
-                Constraint::Length(6),
-                Constraint::Min(5),
+                Constraint::Length(8),
+                Constraint::Length(5),
+                Constraint::Min(4),
             ])
             .split(frame.area());
         frame.render_widget(
@@ -981,6 +1057,7 @@ fn render_performance_tui_snapshot(
                         .add_modifier(Modifier::BOLD),
                 )]),
                 Line::from(format!("Phase: {}", snapshot.phase)),
+                Line::from(format!("Now: {}", snapshot.activity)),
             ])
             .block(Block::default().borders(Borders::ALL).title("Context")),
             chunks[0],
@@ -1000,6 +1077,14 @@ fn render_performance_tui_snapshot(
             .aggregate_rate
             .map(|rate| format!("{}/s", format_bytes(rate)))
             .unwrap_or_else(|| "pending".to_string());
+        let current_rate = snapshot
+            .current_rate
+            .map(|rate| format!("{}/s", format_bytes(rate)))
+            .unwrap_or_else(|| "pending".to_string());
+        let current_file = snapshot
+            .current_file
+            .map(|file| file.to_string())
+            .unwrap_or_else(|| "-".to_string());
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(format!(
@@ -1007,15 +1092,29 @@ fn render_performance_tui_snapshot(
                     snapshot.scenario_done, snapshot.scenario_total
                 )),
                 Line::from(format!(
-                    "Files: {} total {}",
-                    snapshot.file_count,
+                    "Current scenario files: {}/{} (active {})",
+                    snapshot.file_done, snapshot.file_count, current_file
+                )),
+                Line::from(format!(
+                    "Current scenario bytes: {}/{}",
+                    format_bytes(snapshot.processed_bytes as f64),
                     format_bytes(snapshot.total_bytes as f64)
                 )),
                 Line::from(format!("HDD concurrency: {}", snapshot.hdd_concurrency)),
-                Line::from(format!("Aggregate rate: {rate}")),
+                Line::from(format!("Current operation rate: {current_rate}")),
+                Line::from(format!("Scenario aggregate rate: {rate}")),
             ])
             .block(Block::default().borders(Borders::ALL).title("Workload")),
             chunks[2],
+        );
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from("Ctrl-C requests cancellation and temporary objectstore cleanup."),
+                Line::from("SSD pipeline scenarios stage to SSD while HDD drain workers consume the FIFO queue."),
+            ])
+            .wrap(Wrap { trim: true })
+            .block(Block::default().borders(Borders::ALL).title("Operator Notes")),
+            chunks[3],
         );
         frame.render_widget(
             Paragraph::new(vec![
@@ -1023,7 +1122,7 @@ fn render_performance_tui_snapshot(
                 Line::from(format!("JSON: {}", snapshot.json_path.display())),
             ])
             .block(Block::default().borders(Borders::ALL).title("Artifacts")),
-            chunks[3],
+            chunks[4],
         );
     })?;
     Ok(())
@@ -1034,6 +1133,7 @@ fn benchmark_ssd_only(
     workload: &PerformanceWorkload,
     writer: &mut impl Write,
     log_progress: bool,
+    tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let mut file_results = Vec::new();
@@ -1041,8 +1141,102 @@ fn benchmark_ssd_only(
     for payload in &workload.payloads {
         check_performance_cancelled()?;
         let destination = ssd_bench_root.join("ssd-only").join(&payload.relative_path);
-        let ssd_write = measure_land_payload(payload, &destination)?;
-        let ssd_read = measure_read(&destination)?;
+        if let Some(context) = tui_context {
+            render_performance_tui_snapshot(
+                writer,
+                &PerformanceTuiSnapshot {
+                    phase: "ssd-only active",
+                    activity: format!(
+                        "Writing file {}/{} to SSD: {}",
+                        payload.file_index + 1,
+                        workload.file_count(),
+                        payload.relative_path.display()
+                    ),
+                    scenario_done: context.scenario_done,
+                    scenario_total: context.scenario_total,
+                    file_done: payload.file_index,
+                    current_file: Some(payload.file_index + 1),
+                    file_count: workload.file_count(),
+                    processed_bytes: total_bytes,
+                    total_bytes: workload.total_bytes(),
+                    hdd_concurrency: 0,
+                    current_rate: None,
+                    aggregate_rate: None,
+                    report_path: context.report_path,
+                    json_path: context.json_path,
+                },
+            )?;
+        }
+        let ssd_write = if let Some(context) = tui_context {
+            let mut progress = |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "ssd-only active",
+                        activity: format!(
+                            "Writing file {}/{} to SSD: {} ({}/{})",
+                            payload.file_index + 1,
+                            workload.file_count(),
+                            payload.relative_path.display(),
+                            format_bytes(bytes as f64),
+                            format_bytes(payload.size_bytes as f64)
+                        ),
+                        scenario_done: context.scenario_done,
+                        scenario_total: context.scenario_total,
+                        file_done: payload.file_index,
+                        current_file: Some(payload.file_index + 1),
+                        file_count: workload.file_count(),
+                        processed_bytes: total_bytes.saturating_add(bytes),
+                        total_bytes: workload.total_bytes(),
+                        hdd_concurrency: 0,
+                        current_rate: Some(bytes as f64 / seconds.max(0.001)),
+                        aggregate_rate: None,
+                        report_path: context.report_path,
+                        json_path: context.json_path,
+                    },
+                )
+            };
+            measure_land_payload_with_progress(
+                payload,
+                &destination,
+                payload.file_index,
+                Some(&mut progress),
+            )?
+        } else {
+            measure_land_payload(payload, &destination)?
+        };
+        let ssd_read = if let Some(context) = tui_context {
+            let mut progress = |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "ssd-only readback",
+                        activity: format!(
+                            "Reading file {}/{} back from SSD: {} ({})",
+                            payload.file_index + 1,
+                            workload.file_count(),
+                            payload.relative_path.display(),
+                            format_bytes(bytes as f64)
+                        ),
+                        scenario_done: context.scenario_done,
+                        scenario_total: context.scenario_total,
+                        file_done: payload.file_index,
+                        current_file: Some(payload.file_index + 1),
+                        file_count: workload.file_count(),
+                        processed_bytes: total_bytes.saturating_add(ssd_write.bytes),
+                        total_bytes: workload.total_bytes(),
+                        hdd_concurrency: 0,
+                        current_rate: Some(bytes as f64 / seconds.max(0.001)),
+                        aggregate_rate: None,
+                        report_path: context.report_path,
+                        json_path: context.json_path,
+                    },
+                )
+            };
+            measure_read_with_progress(&destination, Some(&mut progress))?
+        } else {
+            measure_read(&destination)?
+        };
         let _ = fs::remove_file(&destination);
         total_bytes = total_bytes.saturating_add(ssd_write.bytes);
         file_results.push(PerformanceFileResult {
@@ -1087,6 +1281,7 @@ fn benchmark_ssd_pipeline(
     concurrency: usize,
     writer: &mut impl Write,
     log_progress: bool,
+    tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let scheduler = Arc::new(Mutex::new(DiskPlacementScheduler::new(hdd_bench_roots)));
@@ -1167,7 +1362,71 @@ fn benchmark_ssd_pipeline(
             .join("ssd-pipeline")
             .join(format!("c{concurrency}"))
             .join(&payload.relative_path);
-        let ssd_write = match measure_land_payload(payload, &ssd_path) {
+        if let Some(context) = tui_context {
+            render_performance_tui_snapshot(
+                writer,
+                &PerformanceTuiSnapshot {
+                    phase: "ssd-pipeline active",
+                    activity: format!(
+                        "Staging file {}/{} to SSD before FIFO HDD drain: {}",
+                        payload.file_index + 1,
+                        workload.file_count(),
+                        payload.relative_path.display()
+                    ),
+                    scenario_done: context.scenario_done,
+                    scenario_total: context.scenario_total,
+                    file_done: payload.file_index,
+                    current_file: Some(payload.file_index + 1),
+                    file_count: workload.file_count(),
+                    processed_bytes: total_bytes,
+                    total_bytes: workload.total_bytes(),
+                    hdd_concurrency: concurrency,
+                    current_rate: None,
+                    aggregate_rate: None,
+                    report_path: context.report_path,
+                    json_path: context.json_path,
+                },
+            )?;
+        }
+        let ssd_write = match if let Some(context) = tui_context {
+            let mut progress = |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "ssd-pipeline active",
+                        activity: format!(
+                            "Staging file {}/{} to SSD with {} HDD drain worker(s): {} ({}/{})",
+                            payload.file_index + 1,
+                            workload.file_count(),
+                            concurrency,
+                            payload.relative_path.display(),
+                            format_bytes(bytes as f64),
+                            format_bytes(payload.size_bytes as f64)
+                        ),
+                        scenario_done: context.scenario_done,
+                        scenario_total: context.scenario_total,
+                        file_done: payload.file_index,
+                        current_file: Some(payload.file_index + 1),
+                        file_count: workload.file_count(),
+                        processed_bytes: total_bytes.saturating_add(bytes),
+                        total_bytes: workload.total_bytes(),
+                        hdd_concurrency: concurrency,
+                        current_rate: Some(bytes as f64 / seconds.max(0.001)),
+                        aggregate_rate: None,
+                        report_path: context.report_path,
+                        json_path: context.json_path,
+                    },
+                )
+            };
+            measure_land_payload_with_progress(
+                payload,
+                &ssd_path,
+                payload.file_index,
+                Some(&mut progress),
+            )
+        } else {
+            measure_land_payload(payload, &ssd_path)
+        } {
             Ok(measurement) => measurement,
             Err(err) => {
                 let _ = fs::remove_file(&ssd_path);
@@ -1198,6 +1457,34 @@ fn benchmark_ssd_pipeline(
                 "performance-test HDD workers stopped early".to_string(),
             ));
             break;
+        }
+        if let Some(context) = tui_context {
+            render_performance_tui_snapshot(
+                writer,
+                &PerformanceTuiSnapshot {
+                    phase: "ssd-pipeline queued",
+                    activity: format!(
+                        "Queued file {}/{} for FIFO HDD drain with {} worker(s)",
+                        payload.file_index + 1,
+                        workload.file_count(),
+                        concurrency
+                    ),
+                    scenario_done: context.scenario_done,
+                    scenario_total: context.scenario_total,
+                    file_done: payload.file_index + 1,
+                    current_file: None,
+                    file_count: workload.file_count(),
+                    processed_bytes: total_bytes,
+                    total_bytes: workload.total_bytes(),
+                    hdd_concurrency: concurrency,
+                    current_rate: Some(throughput(ssd_write)),
+                    aggregate_rate: Some(
+                        total_bytes as f64 / started.elapsed().as_secs_f64().max(0.001),
+                    ),
+                    report_path: context.report_path,
+                    json_path: context.json_path,
+                },
+            )?;
         }
         if log_progress {
             writeln!(
@@ -1508,10 +1795,11 @@ impl DiskPlacementScheduler {
     }
 }
 
-fn measure_generate_random_file(
+fn measure_generate_random_file_with_progress(
     path: &Path,
     size_bytes: u64,
     seed: u32,
+    mut progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
 ) -> Result<PerformanceMeasurement, CliError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1519,6 +1807,9 @@ fn measure_generate_random_file(
     let started = Instant::now();
     let mut file = File::create(path)?;
     let mut remaining = size_bytes;
+    let mut written = 0_u64;
+    let progress_step = performance_progress_step(size_bytes);
+    let mut next_progress = progress_step.min(size_bytes);
     let mut buffer = vec![0_u8; 1024 * 1024];
     let mut state = 0x9e37_79b9_7f4a_7c15_u64 ^ u64::from(seed);
     while remaining > 0 {
@@ -1527,9 +1818,19 @@ fn measure_generate_random_file(
         let write_len = remaining.min(buffer.len() as u64) as usize;
         file.write_all(&buffer[..write_len])?;
         remaining -= write_len as u64;
+        written = written.saturating_add(write_len as u64);
+        if let Some(callback) = progress.as_deref_mut() {
+            if written >= next_progress || written == size_bytes {
+                callback(written, started.elapsed().as_secs_f64().max(0.001))?;
+                next_progress = written.saturating_add(progress_step).min(size_bytes);
+            }
+        }
     }
     check_performance_cancelled()?;
     file.sync_all()?;
+    if let Some(callback) = progress.as_deref_mut() {
+        callback(size_bytes, started.elapsed().as_secs_f64().max(0.001))?;
+    }
     Ok(PerformanceMeasurement {
         bytes: size_bytes,
         seconds: started.elapsed().as_secs_f64().max(0.001),
@@ -1548,10 +1849,19 @@ fn measure_land_payload_with_seed(
     destination: &Path,
     seed: u32,
 ) -> Result<PerformanceMeasurement, CliError> {
+    measure_land_payload_with_progress(payload, destination, seed, None)
+}
+
+fn measure_land_payload_with_progress(
+    payload: &PerformancePayload,
+    destination: &Path,
+    seed: u32,
+    progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+) -> Result<PerformanceMeasurement, CliError> {
     if let Some(source) = &payload.source_path {
-        measure_copy(source, destination)
+        measure_copy_with_progress(source, destination, progress)
     } else {
-        measure_generate_random_file(destination, payload.size_bytes, seed)
+        measure_generate_random_file_with_progress(destination, payload.size_bytes, seed, progress)
     }
 }
 
@@ -1566,6 +1876,14 @@ fn fill_pseudorandom(buffer: &mut [u8], state: &mut u64) {
 }
 
 fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurement, CliError> {
+    measure_copy_with_progress(source, destination, None)
+}
+
+fn measure_copy_with_progress(
+    source: &Path,
+    destination: &Path,
+    mut progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+) -> Result<PerformanceMeasurement, CliError> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1573,6 +1891,12 @@ fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurem
     let mut reader = File::open(source)?;
     let mut writer = File::create(destination)?;
     let mut bytes = 0_u64;
+    let total_bytes = source
+        .metadata()
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let progress_step = performance_progress_step(total_bytes);
+    let mut next_progress = progress_step.min(total_bytes);
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
         check_performance_cancelled()?;
@@ -1582,9 +1906,18 @@ fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurem
         }
         writer.write_all(&buffer[..read])?;
         bytes = bytes.saturating_add(read as u64);
+        if let Some(callback) = progress.as_deref_mut() {
+            if bytes >= next_progress || bytes == total_bytes {
+                callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
+                next_progress = bytes.saturating_add(progress_step).min(total_bytes);
+            }
+        }
     }
     check_performance_cancelled()?;
     writer.sync_all()?;
+    if let Some(callback) = progress.as_deref_mut() {
+        callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
+    }
     Ok(PerformanceMeasurement {
         bytes,
         seconds: started.elapsed().as_secs_f64().max(0.001),
@@ -1592,9 +1925,22 @@ fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurem
 }
 
 fn measure_read(source: &Path) -> Result<PerformanceMeasurement, CliError> {
+    measure_read_with_progress(source, None)
+}
+
+fn measure_read_with_progress(
+    source: &Path,
+    mut progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+) -> Result<PerformanceMeasurement, CliError> {
     let started = Instant::now();
     let mut reader = File::open(source)?;
     let mut bytes = 0_u64;
+    let total_bytes = source
+        .metadata()
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let progress_step = performance_progress_step(total_bytes);
+    let mut next_progress = progress_step.min(total_bytes);
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
     loop {
         check_performance_cancelled()?;
@@ -1603,11 +1949,31 @@ fn measure_read(source: &Path) -> Result<PerformanceMeasurement, CliError> {
             break;
         }
         bytes = bytes.saturating_add(read as u64);
+        if let Some(callback) = progress.as_deref_mut() {
+            if bytes >= next_progress || bytes == total_bytes {
+                callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
+                next_progress = bytes.saturating_add(progress_step).min(total_bytes);
+            }
+        }
+    }
+    if let Some(callback) = progress.as_deref_mut() {
+        callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
     }
     Ok(PerformanceMeasurement {
         bytes,
         seconds: started.elapsed().as_secs_f64().max(0.001),
     })
+}
+
+fn performance_progress_step(total_bytes: u64) -> u64 {
+    const MIN_STEP: u64 = 64 * 1024 * 1024;
+    const MAX_STEP: u64 = 512 * 1024 * 1024;
+    if total_bytes == 0 {
+        return 1;
+    }
+    (total_bytes / 100)
+        .clamp(MIN_STEP, MAX_STEP)
+        .min(total_bytes)
 }
 
 fn timestamped_run_id() -> String {
@@ -5880,7 +6246,7 @@ mod tests {
         let mut output = Vec::new();
 
         let report =
-            benchmark_ssd_only(&root, &workload, &mut output, false).expect("benchmark runs");
+            benchmark_ssd_only(&root, &workload, &mut output, false, None).expect("benchmark runs");
 
         assert_eq!(report.total_bytes, 8);
         assert!(output.is_empty(), "TUI path must not receive line logs");
