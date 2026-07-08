@@ -390,6 +390,13 @@ aggregate HDD write rate, and per-disk HDD write rates. HDD rates are reported
 from completed disk writes as soon as they are available and are always shown
 in scenario completion snapshots.
 
+Daemon file ingest uses a bounded split SSD pipeline by default. Source reads
+write staged payload bytes to SSD first; a bounded side worker then syncs the
+staged payload and calculates SHA-256 before the file is allowed to enter HDD
+settlement. This avoids blocking the next source file on the previous file's
+SSD sync or checksum calculation while preserving the rule that HDD settlement
+only consumes synced and checksummed SSD payloads.
+
 When ``qrencode`` is available on the host, the QR SVG is a scan-ready code
 for the reproduction payload. If ``qrencode`` is unavailable, DASObjectStore
 still writes a fallback SVG artifact and records that fallback in the report's

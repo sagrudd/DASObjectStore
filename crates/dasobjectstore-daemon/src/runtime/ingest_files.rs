@@ -16,9 +16,9 @@ use dasobjectstore_core::placement::{
 };
 use dasobjectstore_core::store::StorePolicy;
 use dasobjectstore_metadata::{
-    measure_ssd_capacity, settle_staged_object_to_hdd_with_controlled_progress,
-    stage_object_on_ssd_with_controlled_progress, DiskCopyRoot, ObjectPutError, ObjectPutProgress,
-    ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
+    measure_ssd_capacity, settle_staged_object_to_hdd_with_controlled_progress, DiskCopyRoot,
+    IngestJobPaths, IngestStagingLayout, ObjectPutError, ObjectPutProgress, ObjectPutProgressStage,
+    ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
@@ -38,6 +38,7 @@ const HDD_ROOT_ENV: &str = "DASOBJECTSTORE_HDD_ROOT";
 const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
+const SSD_FLUSH_QUEUE_CAPACITY: usize = 2;
 const MAX_HDD_SETTLEMENT_WORKERS: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -217,8 +218,11 @@ impl LocalFileIngestExecutor {
         let capacity_policy = SsdCapacityPolicy::default();
         let queue_capacity = HDD_SETTLEMENT_QUEUE_CAPACITY.max(hdd_worker_count.saturating_mul(2));
         let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
+        let (flush_tx, flush_rx) = mpsc::sync_channel::<SsdFlushWork>(SSD_FLUSH_QUEUE_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
-        let hdd_workers = spawn_hdd_settlement_workers(settle_rx, event_tx, hdd_worker_count);
+        let hdd_workers =
+            spawn_hdd_settlement_workers(settle_rx, event_tx.clone(), hdd_worker_count);
+        let ssd_flush_worker = spawn_ssd_flush_worker(flush_rx, settle_tx.clone(), event_tx);
 
         for entry in &files {
             wait_for_ssd_admission(
@@ -244,9 +248,21 @@ impl LocalFileIngestExecutor {
             )
             .with_object_type(request.object_type);
 
-            state.ssd_active = 1;
-            let staged =
-                stage_object_on_ssd_with_controlled_progress(&put_request, |object_progress| {
+            state.ssd_active = state.ssd_active.saturating_add(1);
+            let layout = IngestStagingLayout::for_ssd_root(&self.ssd_root);
+            layout.create_base_directories()?;
+            let put_job_id = IngestJobId::new(format!("put-{}", entry.object_id.as_str()))
+                .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))?;
+            let job_paths = layout.job_paths(&put_job_id);
+            let mut source = fs::File::open(&entry.source_path)?;
+            let bytes_staged = match job_paths.write_payload_unsynced_controlled_progress(
+                &mut source,
+                |bytes_written| {
+                    let object_progress = ObjectPutProgress {
+                        object_id: entry.object_id.clone(),
+                        stage: ObjectPutProgressStage::SsdIngest,
+                        bytes_written,
+                    };
                     drain_hdd_settlement_events(
                         &event_rx,
                         &mut state,
@@ -255,7 +271,7 @@ impl LocalFileIngestExecutor {
                         &mut progress,
                         false,
                     )
-                    .map_err(runtime_error_to_object_put_error)?;
+                    .map_err(|err| io::Error::other(err.to_string()))?;
                     state.apply_object_progress(entry, &object_progress);
                     progress(object_progress_event(
                         job_id,
@@ -264,16 +280,25 @@ impl LocalFileIngestExecutor {
                         &state,
                         &object_progress,
                     ))
-                    .map_err(runtime_error_to_object_put_error)
-                })?;
-            state.ssd_active = 0;
-            state.staged_files = state.staged_files.saturating_add(1);
-            state.hdd_queued = state.hdd_queued.saturating_add(1);
-            enqueue_hdd_settlement_work(
-                &settle_tx,
-                HddSettlementWork {
+                    .map_err(|err| io::Error::other(err.to_string()))
+                },
+            ) {
+                Ok(bytes_staged) => bytes_staged,
+                Err(err) => {
+                    let _ = fs::remove_dir_all(&job_paths.job_root);
+                    return Err(err.into());
+                }
+            };
+            state.ssd_active = state.ssd_active.saturating_sub(1);
+            enqueue_ssd_flush_work(
+                &flush_tx,
+                SsdFlushWork {
                     entry: entry.clone(),
-                    staged,
+                    pending: PendingSsdStage {
+                        request: put_request,
+                        job_paths,
+                        bytes_staged,
+                    },
                 },
                 &event_rx,
                 &mut state,
@@ -290,6 +315,20 @@ impl LocalFileIngestExecutor {
                 false,
             )?;
         }
+        drop(flush_tx);
+        while !ssd_flush_worker.is_finished() {
+            drain_hdd_settlement_events(
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+                true,
+            )?;
+        }
+        ssd_flush_worker.join().map_err(|_| {
+            DaemonIngestFilesRuntimeError::CommandFailed("SSD flush worker panicked".to_string())
+        })?;
         drop(settle_tx);
 
         while state.completed_files < files.len() as u64 {
@@ -335,6 +374,19 @@ impl LocalFileIngestExecutor {
 }
 
 #[derive(Debug)]
+struct PendingSsdStage {
+    request: ObjectPutRequest,
+    job_paths: IngestJobPaths,
+    bytes_staged: u64,
+}
+
+#[derive(Debug)]
+struct SsdFlushWork {
+    entry: FileIngestEntry,
+    pending: PendingSsdStage,
+}
+
+#[derive(Debug)]
 struct HddSettlementWork {
     entry: FileIngestEntry,
     staged: StagedObjectPut,
@@ -342,6 +394,19 @@ struct HddSettlementWork {
 
 #[derive(Debug)]
 enum HddSettlementEvent {
+    SsdFlushStarted {
+        entry: FileIngestEntry,
+    },
+    SsdFlushProgress {
+        entry: FileIngestEntry,
+        progress: ObjectPutProgress,
+    },
+    SsdHashStarted {
+        entry: FileIngestEntry,
+    },
+    SsdFlushed {
+        entry: FileIngestEntry,
+    },
     Started {
         entry: FileIngestEntry,
     },
@@ -447,6 +512,99 @@ impl PipelineProgressState {
     }
 }
 
+fn spawn_ssd_flush_worker(
+    flush_rx: mpsc::Receiver<SsdFlushWork>,
+    settle_tx: mpsc::SyncSender<HddSettlementWork>,
+    event_tx: mpsc::Sender<HddSettlementEvent>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        while let Ok(work) = flush_rx.recv() {
+            let _ = event_tx.send(HddSettlementEvent::SsdFlushStarted {
+                entry: work.entry.clone(),
+            });
+            let entry = work.entry.clone();
+            let result = sync_and_hash_pending_ssd_stage(
+                work.pending,
+                |progress| {
+                    event_tx
+                        .send(HddSettlementEvent::SsdFlushProgress {
+                            entry: entry.clone(),
+                            progress,
+                        })
+                        .map_err(|_| ObjectPutError::Cancelled)
+                },
+                || {
+                    event_tx
+                        .send(HddSettlementEvent::SsdHashStarted {
+                            entry: work.entry.clone(),
+                        })
+                        .map_err(|_| ObjectPutError::Cancelled)
+                },
+            );
+            match result {
+                Ok(staged) => {
+                    if settle_tx
+                        .send(HddSettlementWork {
+                            entry: work.entry.clone(),
+                            staged,
+                        })
+                        .is_err()
+                    {
+                        let _ = event_tx.send(HddSettlementEvent::Failed {
+                            error: ObjectPutError::Cancelled,
+                        });
+                        break;
+                    }
+                    let _ = event_tx.send(HddSettlementEvent::SsdFlushed { entry: work.entry });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(HddSettlementEvent::Failed { error });
+                    break;
+                }
+            }
+        }
+    })
+}
+
+fn sync_and_hash_pending_ssd_stage(
+    pending: PendingSsdStage,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+    hash_started: impl FnOnce() -> Result<(), ObjectPutError>,
+) -> Result<StagedObjectPut, ObjectPutError> {
+    let request = pending.request;
+    pending
+        .job_paths
+        .sync_payload_with_progress(|bytes_written| {
+            progress(ObjectPutProgress {
+                object_id: request.object_id.clone(),
+                stage: ObjectPutProgressStage::SsdFlush,
+                bytes_written,
+            })
+            .map_err(|err| match err {
+                ObjectPutError::Io(err) => err,
+                ObjectPutError::Cancelled => {
+                    io::Error::new(io::ErrorKind::Interrupted, "object put cancelled")
+                }
+                other => io::Error::other(other.to_string()),
+            })
+        })
+        .map_err(ObjectPutError::from)?;
+    hash_started()?;
+    let write_report = pending.job_paths.hash_payload()?;
+    Ok(StagedObjectPut {
+        object_id: request.object_id.clone(),
+        object_type: request.object_type,
+        source_path: request.source_path.clone(),
+        job_root: pending.job_paths.job_root.clone(),
+        staged_payload_path: pending.job_paths.payload_path.clone(),
+        bytes_staged: pending.bytes_staged,
+        content_hash_algorithm: write_report.content_hash_algorithm,
+        content_hash: write_report.content_hash,
+        disk_roots: request.disk_roots,
+        copy_count: request.copy_count,
+    })
+}
+
 fn spawn_hdd_settlement_workers(
     settle_rx: mpsc::Receiver<HddSettlementWork>,
     event_tx: mpsc::Sender<HddSettlementEvent>,
@@ -495,9 +653,9 @@ fn spawn_hdd_settlement_workers(
         .collect()
 }
 
-fn enqueue_hdd_settlement_work(
-    settle_tx: &mpsc::SyncSender<HddSettlementWork>,
-    mut work: HddSettlementWork,
+fn enqueue_ssd_flush_work(
+    flush_tx: &mpsc::SyncSender<SsdFlushWork>,
+    mut work: SsdFlushWork,
     event_rx: &mpsc::Receiver<HddSettlementEvent>,
     state: &mut PipelineProgressState,
     job_id: &IngestJobId,
@@ -505,7 +663,7 @@ fn enqueue_hdd_settlement_work(
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
-        match settle_tx.try_send(work) {
+        match flush_tx.try_send(work) {
             Ok(()) => return Ok(()),
             Err(mpsc::TrySendError::Full(returned_work)) => {
                 work = returned_work;
@@ -513,7 +671,7 @@ fn enqueue_hdd_settlement_work(
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 return Err(DaemonIngestFilesRuntimeError::CommandFailed(
-                    "HDD settlement worker stopped before accepting staged object".to_string(),
+                    "SSD flush worker stopped before accepting staged object".to_string(),
                 ));
             }
         }
@@ -611,6 +769,95 @@ fn drain_hdd_settlement_events(
         };
 
         match event {
+            HddSettlementEvent::SsdFlushStarted { entry } => {
+                state.ssd_active = state.ssd_active.saturating_add(1);
+                progress(DaemonIngestProgressEvent {
+                    job_id: job_id.clone(),
+                    endpoint: endpoint.clone(),
+                    stage: DaemonIngestStage::SsdIngest,
+                    pipeline_stage: Some(DaemonIngestPipelineStage::SsdFlush),
+                    work_bytes_done: state.completed_work_bytes,
+                    work_bytes_total: Some(state.work_bytes_total),
+                    source_bytes_done: Some(state.completed_source_bytes),
+                    source_bytes_total: Some(state.source_bytes_total),
+                    stage_bytes_done: Some(entry.size_bytes),
+                    stage_bytes_total: Some(entry.size_bytes),
+                    files_done: state.completed_files,
+                    files_total: Some(state.total_files),
+                    current_object_id: Some(entry.object_id),
+                    ssd_pressure: Some(state.ssd_pressure),
+                    telemetry: Some(state.telemetry()),
+                    resource_policy: None,
+                    message: Some(format!(
+                        "syncing staged SSD payload: {}",
+                        entry.relative_path.to_string_lossy()
+                    )),
+                })?;
+            }
+            HddSettlementEvent::SsdFlushProgress {
+                entry,
+                progress: object_progress,
+            } => {
+                state.apply_object_progress(&entry, &object_progress);
+                progress(object_progress_event(
+                    job_id,
+                    endpoint,
+                    &entry,
+                    state,
+                    &object_progress,
+                ))?;
+            }
+            HddSettlementEvent::SsdHashStarted { entry } => {
+                progress(DaemonIngestProgressEvent {
+                    job_id: job_id.clone(),
+                    endpoint: endpoint.clone(),
+                    stage: DaemonIngestStage::SsdIngest,
+                    pipeline_stage: Some(DaemonIngestPipelineStage::ChecksumManifestCapture),
+                    work_bytes_done: state.completed_work_bytes,
+                    work_bytes_total: Some(state.work_bytes_total),
+                    source_bytes_done: Some(state.completed_source_bytes),
+                    source_bytes_total: Some(state.source_bytes_total),
+                    stage_bytes_done: Some(entry.size_bytes),
+                    stage_bytes_total: Some(entry.size_bytes),
+                    files_done: state.completed_files,
+                    files_total: Some(state.total_files),
+                    current_object_id: Some(entry.object_id),
+                    ssd_pressure: Some(state.ssd_pressure),
+                    telemetry: Some(state.telemetry()),
+                    resource_policy: None,
+                    message: Some(format!(
+                        "calculating staged SSD checksum: {}",
+                        entry.relative_path.to_string_lossy()
+                    )),
+                })?;
+            }
+            HddSettlementEvent::SsdFlushed { entry } => {
+                state.ssd_active = state.ssd_active.saturating_sub(1);
+                state.staged_files = state.staged_files.saturating_add(1);
+                state.hdd_queued = state.hdd_queued.saturating_add(1);
+                progress(DaemonIngestProgressEvent {
+                    job_id: job_id.clone(),
+                    endpoint: endpoint.clone(),
+                    stage: DaemonIngestStage::SsdIngest,
+                    pipeline_stage: Some(DaemonIngestPipelineStage::SsdFlush),
+                    work_bytes_done: state.completed_work_bytes,
+                    work_bytes_total: Some(state.work_bytes_total),
+                    source_bytes_done: Some(state.completed_source_bytes),
+                    source_bytes_total: Some(state.source_bytes_total),
+                    stage_bytes_done: Some(entry.size_bytes),
+                    stage_bytes_total: Some(entry.size_bytes),
+                    files_done: state.completed_files,
+                    files_total: Some(state.total_files),
+                    current_object_id: Some(entry.object_id),
+                    ssd_pressure: Some(state.ssd_pressure),
+                    telemetry: Some(state.telemetry()),
+                    resource_policy: None,
+                    message: Some(format!(
+                        "SSD payload synced and queued for HDD settlement: {}",
+                        entry.relative_path.to_string_lossy()
+                    )),
+                })?;
+            }
             HddSettlementEvent::Started { entry } => {
                 state.hdd_queued = state.hdd_queued.saturating_sub(1);
                 state.hdd_active = state.hdd_active.saturating_add(1);
@@ -692,14 +939,6 @@ fn drain_hdd_settlement_events(
     }
 }
 
-fn runtime_error_to_object_put_error(error: DaemonIngestFilesRuntimeError) -> ObjectPutError {
-    if matches!(error, DaemonIngestFilesRuntimeError::ClientDisconnected(_)) {
-        ObjectPutError::Cancelled
-    } else {
-        ObjectPutError::Io(io::Error::other(error.to_string()))
-    }
-}
-
 fn object_progress_event(
     job_id: &IngestJobId,
     endpoint: &StoreId,
@@ -730,7 +969,9 @@ fn object_progress_event(
 
 fn object_progress_stage_key(progress: &ObjectPutProgress) -> String {
     match &progress.stage {
-        ObjectPutProgressStage::SsdIngest => "ssd-ingest".to_string(),
+        ObjectPutProgressStage::SsdIngest | ObjectPutProgressStage::SsdFlush => {
+            "ssd-ingest".to_string()
+        }
         ObjectPutProgressStage::HddCopy {
             disk_id,
             copy_number,
@@ -740,7 +981,9 @@ fn object_progress_stage_key(progress: &ObjectPutProgress) -> String {
 
 fn daemon_stage_for_object_progress(progress: &ObjectPutProgress) -> DaemonIngestStage {
     match &progress.stage {
-        ObjectPutProgressStage::SsdIngest => DaemonIngestStage::SsdIngest,
+        ObjectPutProgressStage::SsdIngest | ObjectPutProgressStage::SsdFlush => {
+            DaemonIngestStage::SsdIngest
+        }
         ObjectPutProgressStage::HddCopy {
             disk_id,
             copy_number,
@@ -754,6 +997,7 @@ fn daemon_stage_for_object_progress(progress: &ObjectPutProgress) -> DaemonInges
 fn pipeline_stage_for_object_progress(progress: &ObjectPutProgress) -> DaemonIngestPipelineStage {
     match progress.stage {
         ObjectPutProgressStage::SsdIngest => DaemonIngestPipelineStage::SsdStage,
+        ObjectPutProgressStage::SsdFlush => DaemonIngestPipelineStage::SsdFlush,
         ObjectPutProgressStage::HddCopy { .. } => DaemonIngestPipelineStage::HddWrite,
     }
 }
@@ -765,6 +1009,12 @@ fn stage_message_for_object_progress(
     match &progress.stage {
         ObjectPutProgressStage::SsdIngest => {
             format!("settling to SSD: {}", entry.relative_path.to_string_lossy())
+        }
+        ObjectPutProgressStage::SsdFlush => {
+            format!(
+                "syncing staged SSD payload: {}",
+                entry.relative_path.to_string_lossy()
+            )
         }
         ObjectPutProgressStage::HddCopy {
             disk_id,
@@ -1149,14 +1399,16 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_ingest_files, FileIngestEntry, LocalFileIngestExecutor, PipelineProgressState,
-        SSD_ROOT_ENV,
+        collect_ingest_files, sync_and_hash_pending_ssd_stage, FileIngestEntry,
+        LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState, SSD_ROOT_ENV,
     };
     use crate::api::{DaemonIngestConflictPolicy, DaemonSsdPressure, SubmitIngestFilesRequest};
-    use dasobjectstore_core::ids::{ObjectId, StoreId};
+    use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
-    use dasobjectstore_metadata::{ObjectPutProgress, ObjectPutProgressStage};
+    use dasobjectstore_metadata::{
+        IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
+    };
     use dasobjectstore_object_service::StoreServiceDefinition;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1217,6 +1469,69 @@ mod tests {
         assert_eq!(planned.source_bytes_total, Some(4));
         assert_eq!(planned.work_bytes_done, 0);
         assert_eq!(planned.work_bytes_total, Some(8));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn file_ingest_splits_source_write_ssd_sync_hash_and_hdd_settlement() {
+        let root = temp_root("daemon-ingest-split-pipeline");
+        let ssd_root = root.join("ssd");
+        let source_root = root.join("source");
+        fs::create_dir_all(&source_root).expect("source dir");
+        let source_path = source_root.join("a.fastq.gz");
+        fs::write(&source_path, b"AAAABBBB").expect("source file");
+        let object_id = ObjectId::new("zymo_fecal_2025.05/a.fastq.gz").expect("object id");
+        let layout = IngestStagingLayout::for_ssd_root(&ssd_root);
+        let job_id = IngestJobId::new(format!("put-{object_id}")).expect("job id");
+        let job_paths = layout.job_paths(&job_id);
+        let mut source = fs::File::open(&source_path).expect("source open");
+        let mut write_progress = Vec::new();
+        let bytes_staged = job_paths
+            .write_payload_unsynced_controlled_progress(&mut source, |bytes| {
+                write_progress.push(bytes);
+                Ok(())
+            })
+            .expect("source writes without inline hash");
+        let disk_root = dasobjectstore_metadata::DiskCopyRoot::new(
+            dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id"),
+            root.join("hdd").join("disk-a"),
+        );
+        let request = ObjectPutRequest::new(
+            object_id.clone(),
+            source_path,
+            &ssd_root,
+            vec![disk_root],
+            1,
+        )
+        .with_object_type(ObjectType::Fastq);
+        let pending = PendingSsdStage {
+            request,
+            job_paths,
+            bytes_staged,
+        };
+        let mut flush_stages = Vec::new();
+        let mut hash_started = false;
+
+        let staged = sync_and_hash_pending_ssd_stage(
+            pending,
+            |progress| {
+                flush_stages.push(progress.stage);
+                Ok(())
+            },
+            || {
+                hash_started = true;
+                Ok(())
+            },
+        )
+        .expect("side worker syncs and hashes");
+
+        assert_eq!(write_progress, vec![8]);
+        assert_eq!(staged.bytes_staged, 8);
+        assert_eq!(staged.content_hash_algorithm, "sha256");
+        assert_eq!(staged.content_hash.len(), 64);
+        assert!(flush_stages.contains(&ObjectPutProgressStage::SsdFlush));
+        assert!(hash_started);
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

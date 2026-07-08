@@ -1,11 +1,11 @@
-use crate::hash::{copy_and_hash_with_controlled_progress, SHA256_ALGORITHM};
+use crate::hash::{copy_and_hash_with_controlled_progress, hash_file_sha256, SHA256_ALGORITHM};
 use crate::initialize::METADATA_DIR_NAME;
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, IngestJobId};
 use dasobjectstore_core::object_type::ObjectType;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const INGEST_DIR_NAME: &str = "ingest";
@@ -91,13 +91,24 @@ impl IngestJobPaths {
     pub fn write_payload_with_hash_controlled_progress(
         &self,
         reader: &mut impl Read,
+        mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+    ) -> Result<IngestWriteReport, std::io::Error> {
+        self.write_payload_with_hash_controlled_progress_events(reader, |event| match event {
+            IngestWriteProgress::Written(bytes) | IngestWriteProgress::Flushing(bytes) => {
+                progress(bytes)
+            }
+        })
+    }
+
+    pub fn write_payload_with_hash_unsynced_controlled_progress(
+        &self,
+        reader: &mut impl Read,
         progress: impl FnMut(u64) -> Result<(), std::io::Error>,
     ) -> Result<IngestWriteReport, std::io::Error> {
         self.create_directories()?;
 
         let mut file = create_private_file(&self.payload_path)?;
         let report = copy_and_hash_with_controlled_progress(reader, &mut file, progress)?;
-        file.sync_all()?;
 
         Ok(IngestWriteReport {
             bytes_written: report.bytes_written,
@@ -105,6 +116,71 @@ impl IngestJobPaths {
             content_hash: report.content_hash,
         })
     }
+
+    pub fn write_payload_unsynced_controlled_progress(
+        &self,
+        reader: &mut impl Read,
+        mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+    ) -> Result<u64, std::io::Error> {
+        self.create_directories()?;
+
+        let mut file = create_private_file(&self.payload_path)?;
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        let mut bytes_written = 0_u64;
+        loop {
+            let read = reader.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            file.write_all(&buffer[..read])?;
+            bytes_written = bytes_written.saturating_add(read as u64);
+            progress(bytes_written)?;
+        }
+
+        Ok(bytes_written)
+    }
+
+    pub fn hash_payload(&self) -> Result<IngestWriteReport, std::io::Error> {
+        let metadata = std::fs::metadata(&self.payload_path)?;
+        let content_hash = hash_file_sha256(&self.payload_path)?;
+        Ok(IngestWriteReport {
+            bytes_written: metadata.len(),
+            content_hash_algorithm: INGEST_CONTENT_HASH_ALGORITHM.to_string(),
+            content_hash,
+        })
+    }
+
+    pub fn write_payload_with_hash_controlled_progress_events(
+        &self,
+        reader: &mut impl Read,
+        mut progress: impl FnMut(IngestWriteProgress) -> Result<(), std::io::Error>,
+    ) -> Result<IngestWriteReport, std::io::Error> {
+        let report = self
+            .write_payload_with_hash_unsynced_controlled_progress(reader, |bytes_written| {
+                progress(IngestWriteProgress::Written(bytes_written))
+            })?;
+        self.sync_payload_with_progress(|bytes| progress(IngestWriteProgress::Flushing(bytes)))?;
+
+        Ok(report)
+    }
+
+    pub fn sync_payload_with_progress(
+        &self,
+        mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+    ) -> Result<(), std::io::Error> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&self.payload_path)?;
+        let bytes = file.metadata()?.len();
+        progress(bytes)?;
+        file.sync_data()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IngestWriteProgress {
+    Written(u64),
+    Flushing(u64),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

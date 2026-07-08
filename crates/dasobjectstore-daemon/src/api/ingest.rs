@@ -288,6 +288,7 @@ pub enum DaemonIngestPipelineStage {
     Scan,
     SourceRead,
     SsdStage,
+    SsdFlush,
     ChecksumManifestCapture,
     HddPlacement,
     HddWrite,
@@ -578,6 +579,10 @@ mod tests {
             serde_json::to_value(DaemonIngestPipelineStage::ChecksumManifestCapture)
                 .expect("stage serializes"),
             "checksum_manifest_capture"
+        );
+        assert_eq!(
+            serde_json::to_value(DaemonIngestPipelineStage::SsdFlush).expect("stage serializes"),
+            "ssd_flush"
         );
     }
 

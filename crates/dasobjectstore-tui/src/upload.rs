@@ -364,6 +364,7 @@ fn pipeline_stage_label(stage: DaemonIngestPipelineStage) -> &'static str {
         DaemonIngestPipelineStage::Scan => "scan",
         DaemonIngestPipelineStage::SourceRead => "source-read",
         DaemonIngestPipelineStage::SsdStage => "ssd-stage",
+        DaemonIngestPipelineStage::SsdFlush => "ssd-flush",
         DaemonIngestPipelineStage::ChecksumManifestCapture => "checksum-manifest-capture",
         DaemonIngestPipelineStage::HddPlacement => "hdd-placement",
         DaemonIngestPipelineStage::HddWrite => "hdd-write",

@@ -7289,7 +7289,9 @@ fn object_id_for_ingested_file(
 
 fn progress_stage_key(progress: &ObjectPutProgress) -> String {
     match &progress.stage {
-        ObjectPutProgressStage::SsdIngest => "ssd-ingest".to_string(),
+        ObjectPutProgressStage::SsdIngest | ObjectPutProgressStage::SsdFlush => {
+            "ssd-ingest".to_string()
+        }
         ObjectPutProgressStage::HddCopy {
             disk_id,
             copy_number,
@@ -7300,6 +7302,7 @@ fn progress_stage_key(progress: &ObjectPutProgress) -> String {
 fn progress_stage_label(progress: &ObjectPutProgress) -> String {
     match &progress.stage {
         ObjectPutProgressStage::SsdIngest => "ssd-ingest".to_string(),
+        ObjectPutProgressStage::SsdFlush => "ssd-flush".to_string(),
         ObjectPutProgressStage::HddCopy {
             disk_id,
             copy_number,

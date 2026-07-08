@@ -88,6 +88,7 @@ pub struct ObjectPutProgress {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectPutProgressStage {
     SsdIngest,
+    SsdFlush,
     HddCopy { disk_id: String, copy_number: u8 },
 }
 
@@ -117,6 +118,14 @@ pub fn stage_object_on_ssd_with_controlled_progress(
     request: &ObjectPutRequest,
     mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
 ) -> Result<StagedObjectPut, ObjectPutError> {
+    let staged = stage_object_on_ssd_unsynced_with_controlled_progress(request, &mut progress)?;
+    sync_staged_object_on_ssd_with_controlled_progress(staged, progress)
+}
+
+pub fn stage_object_on_ssd_unsynced_with_controlled_progress(
+    request: &ObjectPutRequest,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<StagedObjectPut, ObjectPutError> {
     validate_request(request)?;
 
     let layout = IngestStagingLayout::for_ssd_root(&request.ssd_root);
@@ -129,6 +138,28 @@ pub fn stage_object_on_ssd_with_controlled_progress(
         let _ = fs::remove_dir_all(&job_paths.job_root);
     }
     staged
+}
+
+pub fn sync_staged_object_on_ssd_with_controlled_progress(
+    staged: StagedObjectPut,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<StagedObjectPut, ObjectPutError> {
+    let layout = crate::ingest::IngestJobPaths {
+        job_root: staged.job_root.clone(),
+        payload_path: staged.staged_payload_path.clone(),
+        scratch_dir: staged.job_root.join(crate::ingest::INGEST_SCRATCH_DIR_NAME),
+    };
+    layout
+        .sync_payload_with_progress(|bytes_written| {
+            progress(ObjectPutProgress {
+                object_id: staged.object_id.clone(),
+                stage: ObjectPutProgressStage::SsdFlush,
+                bytes_written,
+            })
+            .map_err(object_put_error_to_io)
+        })
+        .map_err(object_put_error_from_io)?;
+    Ok(staged)
 }
 
 pub fn settle_staged_object_to_hdd_with_controlled_progress(
@@ -147,7 +178,7 @@ fn stage_object_on_ssd_inner(
 ) -> Result<StagedObjectPut, ObjectPutError> {
     let mut source = File::open(&request.source_path)?;
     let write_report = job_paths
-        .write_payload_with_hash_controlled_progress(&mut source, |bytes_written| {
+        .write_payload_with_hash_unsynced_controlled_progress(&mut source, |bytes_written| {
             progress(ObjectPutProgress {
                 object_id: request.object_id.clone(),
                 stage: ObjectPutProgressStage::SsdIngest,

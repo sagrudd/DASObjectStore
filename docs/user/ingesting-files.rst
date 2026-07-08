@@ -79,6 +79,15 @@ placement selection, HDD fan-out, verification, metadata mutation, and progress
 events. The operator sees job submission details first, followed by byte-level
 progress as daemon event streaming is available for the active job.
 
+File ingest uses a bounded split SSD pipeline by default. The source reader
+writes staged payload bytes to SSD and then moves on to the next file when
+queue pressure allows. A bounded side worker syncs the staged SSD payload and
+calculates the SHA-256 checksum; only after that succeeds is the file eligible
+for HDD settlement. In the TUI, ``ssd-stage`` means source bytes are landing on
+SSD, ``ssd-flush`` means the staged payload is being synced, and
+``checksum-manifest-capture`` means the staged payload is being hashed before
+HDD placement.
+
 Object Types
 ------------
 

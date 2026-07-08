@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.9.2 - 2026-07-08
+
+- Split daemon file ingest into a bounded SSD pipeline by default: source
+  writes land staged payload bytes on SSD, a bounded side worker syncs and
+  calculates the staged checksum, and only synced/checksummed files are queued
+  for HDD settlement. This keeps ingress of the next file from blocking on the
+  previous file's SSD sync or SHA-256 calculation.
+- Add explicit ``ssd-flush`` and checksum-capture progress telemetry so upload
+  TUI sessions show why a staged file is not yet eligible for HDD migration.
+
 ## 0.9.1 - 2026-07-08
 
 - Remove wasteful per-file SSD readback from ``ssd-stage-then-drain`` and
