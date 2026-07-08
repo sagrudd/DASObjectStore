@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.16.0 - 2026-07-08
+
+- Wire the redesigned Web ObjectStores page to load the authenticated
+  ``/products/dasobjectstore/api/v1/dashboard/object-stores`` payload.
+- Render ObjectStores loading, empty, permission-denied, and transport-error
+  states without using fixture store cards for authenticated pages.
+- Add live ObjectStore cards for store class, copy policy, placement,
+  capacity, object count, writer group, endpoint mode, last ingest time,
+  warning count, and health.
+
 ## 0.15.0 - 2026-07-08
 
 - Add ``dasobjectstore performance-test --file_select <random|smaller|larger>``

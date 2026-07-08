@@ -184,6 +184,16 @@ managed store policy. It should list each store with class, writer group,
 copy/redundancy policy, ingest mode, bucket or endpoint identity, capacity
 behavior, and current health.
 
+The redesigned ObjectStores page loads its inventory from
+``/products/dasobjectstore/api/v1/dashboard/object-stores`` using the browser
+session issued at login. It shows explicit loading, empty-inventory,
+permission-denied, and transport-error states instead of using fixture store
+cards. When store data is present, the page renders cards for store class,
+redundancy/copy policy, placement policy, used/free capacity, object count,
+writer group, endpoint export mode, last ingest time, warning count, and health.
+The create card reflects the daemon/API create affordance, including whether
+creation is currently available or blocked by administrator requirements.
+
 Creating or changing an object store is an admin-only workflow. The Web UI
 should present class defaults before creation and submit the request to
 ``dasobjectstored`` rather than editing store registry files directly. When a

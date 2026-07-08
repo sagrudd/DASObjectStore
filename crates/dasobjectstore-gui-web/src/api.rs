@@ -49,6 +49,16 @@ pub struct EnclosuresPageResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectStoresPageResponse {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub stores: Vec<ObjectStoreCardResponse>,
+    pub selected_store_id: Option<String>,
+    pub create_object_store: CreateObjectStoreAffordanceResponse,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct HealthSummaryResponse {
     pub state: String,
     pub label: String,
@@ -153,9 +163,51 @@ pub struct SmartWarningResponse {
 pub struct ObjectStoreCardResponse {
     pub store_id: String,
     pub display_name: String,
+    pub store_class: Option<String>,
     pub health: String,
+    pub required_copies: Option<u8>,
     pub object_count: usize,
+    pub capacity: Option<CapacitySummaryResponse>,
+    pub placement_policy: Option<String>,
+    pub endpoint_export_mode: Option<String>,
+    pub writer_group: Option<String>,
+    pub created_at_utc: Option<String>,
+    pub last_ingested_at_utc: Option<String>,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct CreateObjectStoreAffordanceResponse {
+    pub enabled: bool,
+    pub action_kind: String,
+    pub label: String,
+    pub required_fields: Vec<CreateObjectStoreFieldResponse>,
+    pub optional_fields: Vec<CreateObjectStoreFieldResponse>,
+    pub defaults: CreateObjectStoreDefaultsResponse,
+    pub store_class_options: Vec<StoreClassOptionResponse>,
+    pub copy_count_options: Vec<u8>,
+    pub confirmation_required: bool,
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct CreateObjectStoreFieldResponse {
+    pub name: String,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct CreateObjectStoreDefaultsResponse {
+    pub store_class: String,
+    pub required_copies: u8,
+    pub endpoint_export_mode: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct StoreClassOptionResponse {
+    pub value: String,
+    pub label: String,
+    pub description: String,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -278,6 +330,11 @@ pub async fn get_enclosures_dashboard(path: &str) -> Result<EnclosuresPageRespon
     get_json(path).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn get_object_stores_dashboard(path: &str) -> Result<ObjectStoresPageResponse, ApiError> {
+    get_json(path).await
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn auth_path(auth_base_path: &str, route: &str) -> String {
     format!("{}/{}", auth_base_path.trim_end_matches('/'), route)
@@ -339,7 +396,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_path, EnclosuresPageResponse, HomeDashboardResponse};
+    use super::{
+        auth_path, EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse,
+    };
 
     #[test]
     fn builds_auth_routes_under_product_mount() {
@@ -486,6 +545,63 @@ mod tests {
         assert_eq!(
             decoded.details.expect("detail").slots[0].drive_id,
             "qnap-1057"
+        );
+    }
+
+    #[test]
+    fn decodes_object_stores_dashboard_response_subset() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "stores": [{
+                "store_id": "zymo_fecal_2025.05",
+                "display_name": "zymo_fecal_2025.05",
+                "store_class": "generated_data",
+                "health": "healthy",
+                "required_copies": 2,
+                "object_count": 42,
+                "capacity": {
+                    "total_tib": "100.0",
+                    "used_tib": "12.5",
+                    "free_tib": "87.5",
+                    "used_percent_basis_points": 1250
+                },
+                "placement_policy": "fractional_free_space",
+                "endpoint_export_mode": "s3_bucket",
+                "writer_group": "bioinformatics",
+                "created_at_utc": "2026-07-08T08:00:00Z",
+                "last_ingested_at_utc": "2026-07-08T08:30:00Z",
+                "warnings": []
+            }],
+            "selected_store_id": "zymo_fecal_2025.05",
+            "create_object_store": {
+                "enabled": false,
+                "action_kind": "store_create",
+                "label": "Create ObjectStore",
+                "required_fields": [{"name": "store_id", "label": "Store ID"}],
+                "optional_fields": [],
+                "defaults": {
+                    "store_class": "generated_data",
+                    "required_copies": 2,
+                    "endpoint_export_mode": "s3_bucket"
+                },
+                "store_class_options": [],
+                "copy_count_options": [1, 2, 3],
+                "confirmation_required": true,
+                "blocked_reason": "admin required"
+            },
+            "warnings": []
+        });
+
+        let decoded = serde_json::from_value::<ObjectStoresPageResponse>(payload)
+            .expect("object stores dashboard decodes");
+
+        assert_eq!(decoded.stores.len(), 1);
+        assert_eq!(decoded.stores[0].store_id, "zymo_fecal_2025.05");
+        assert_eq!(decoded.stores[0].required_copies, Some(2));
+        assert_eq!(
+            decoded.create_object_store.defaults.endpoint_export_mode,
+            "s3_bucket"
         );
     }
 }

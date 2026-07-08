@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 use crate::api::{DasEnclosureCardResponse, DasEnclosureDetailResponse};
-use crate::api::{EnclosuresPageResponse, HomeDashboardResponse};
+use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
 
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
@@ -370,6 +370,81 @@ pub struct ObjectStoreSummary {
 
 pub fn fallback_object_stores() -> Vec<ObjectStoreSummary> {
     Vec::new()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObjectStoreCardSummary {
+    pub id: String,
+    pub label: String,
+    pub name: String,
+    pub health: String,
+    pub policy: String,
+    pub capacity: String,
+    pub objects: String,
+    pub writer_group: String,
+    pub endpoint: String,
+    pub warning_count: usize,
+    pub last_ingested: String,
+}
+
+pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<ObjectStoreCardSummary> {
+    view.stores
+        .iter()
+        .map(|store| {
+            let store_class = store
+                .store_class
+                .as_deref()
+                .unwrap_or("unclassified")
+                .to_string();
+            let copies = store
+                .required_copies
+                .map(|copies| format!("{copies} required copy/copies"))
+                .unwrap_or_else(|| "copy policy pending".to_string());
+            let capacity = store
+                .capacity
+                .as_ref()
+                .map(|capacity| {
+                    format!(
+                        "{} TiB used; {} TiB free",
+                        capacity.used_tib, capacity.free_tib
+                    )
+                })
+                .unwrap_or_else(|| "capacity pending".to_string());
+
+            ObjectStoreCardSummary {
+                id: store.store_id.clone(),
+                label: store_class,
+                name: store.display_name.clone(),
+                health: store.health.clone(),
+                policy: format!(
+                    "{}; {}",
+                    copies,
+                    store
+                        .placement_policy
+                        .as_deref()
+                        .unwrap_or("placement pending")
+                ),
+                capacity,
+                objects: format!("{} object(s)", store.object_count),
+                writer_group: store
+                    .writer_group
+                    .as_deref()
+                    .unwrap_or("writer group pending")
+                    .to_string(),
+                endpoint: store
+                    .endpoint_export_mode
+                    .as_deref()
+                    .unwrap_or("endpoint pending")
+                    .to_string(),
+                warning_count: store.warnings.len(),
+                last_ingested: store
+                    .last_ingested_at_utc
+                    .as_deref()
+                    .unwrap_or("no ingest recorded")
+                    .to_string(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -755,6 +830,33 @@ pub struct ObjectStoresPageProps {
 #[function_component(ObjectStoresPage)]
 pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
     let api_path = WorkspacePage::ObjectStores.api_path(&props.api_base_path);
+    let object_stores_state = use_state(|| ApiLoadState::<ObjectStoresPageResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let object_stores_state = object_stores_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match crate::api::get_object_stores_dashboard(&path).await {
+                    Ok(view) if view.stores.is_empty() => {
+                        let message = view
+                            .warnings
+                            .first()
+                            .map(|warning| warning.message.clone())
+                            .unwrap_or_else(|| "No object stores reported.".to_string());
+                        object_stores_state.set(ApiLoadState::Empty(message));
+                    }
+                    Ok(view) => object_stores_state.set(ApiLoadState::loaded(view)),
+                    Err(error) if error.is_permission_denied() => {
+                        object_stores_state.set(ApiLoadState::PermissionDenied(error.message))
+                    }
+                    Err(error) => object_stores_state.set(ApiLoadState::Error(error.message)),
+                }
+            });
+            || ()
+        });
+    }
 
     html! {
         <section class="dos-page" data-page="objectstores" data-api-route={api_path}>
@@ -763,32 +865,118 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 title="ObjectStores"
                 summary="Operational view of store policies, capacity, and service state."
             />
+            { render_object_stores_state(&*object_stores_state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_stores_state(state: &ApiLoadState<ObjectStoresPageResponse>) -> Html {
+    match state {
+        ApiLoadState::Loading => html! {
             <div class="dos-store-grid">
-                <section class="dos-card dos-create-card" data-action="store_create">
-                    <span class="dos-create-mark">{ "+" }</span>
-                    <h2>{ "Create ObjectStore" }</h2>
-                    <p>{ "Admin workflow: assign a writer group from /opt/dasobjectstore/groups.json, choose enclosure, object type, and redundancy, then submit the daemon creation plan." }</p>
-                    <span class="dos-status-pill">{ "Admin only" }</span>
-                </section>
-                if fallback_object_stores().is_empty() {
-                    <section class="dos-card dos-empty-card">
-                        <span class="dos-card-label">{ "Inventory" }</span>
-                        <h2>{ "No object stores reported yet." }</h2>
-                        <p>{ "Available stores will be shown with name, group policy, public/writeable status, used capacity, object count, and warnings." }</p>
-                    </section>
-                }
-                { for fallback_object_stores().into_iter().map(|store| html! {
-                    <section class="dos-card dos-store-card" data-store-id={store.id}>
-                        <div class="dos-card-row">
-                            <span class="dos-card-label">{ store.policy }</span>
-                            <span class="dos-status-pill">{ store.state }</span>
-                        </div>
-                        <strong>{ store.name }</strong>
-                        <p>{ store.capacity }</p>
-                        <p>{ store.objects }</p>
-                    </section>
-                }) }
+                { render_object_store_create_card(None) }
+                { render_object_stores_state_message(
+                    "Loading",
+                    "Loading object-store inventory",
+                    "The Web console is requesting daemon-backed store registry, policy, capacity, endpoint, and warning state.",
+                ) }
             </div>
+        },
+        ApiLoadState::Loaded(view) | ApiLoadState::Stale { value: view, .. } => {
+            render_object_store_inventory(view)
+        }
+        ApiLoadState::Empty(message) => html! {
+            <div class="dos-store-grid">
+                { render_object_store_create_card(None) }
+                { render_object_stores_state_message("Inventory", "No object stores reported yet", message) }
+            </div>
+        },
+        ApiLoadState::PermissionDenied(message) => render_object_stores_state_message(
+            "Permission denied",
+            "ObjectStore inventory requires an authenticated session",
+            message,
+        ),
+        ApiLoadState::Error(message) => render_object_stores_state_message(
+            "Error",
+            "Unable to load ObjectStore inventory",
+            message,
+        ),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_store_inventory(view: &ObjectStoresPageResponse) -> Html {
+    html! {
+        <div class="dos-store-grid">
+            { render_object_store_create_card(Some(view)) }
+            { for object_store_card_summaries(view).into_iter().map(render_object_store_card) }
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_store_create_card(view: Option<&ObjectStoresPageResponse>) -> Html {
+    let (status, detail) = match view {
+        Some(view) if view.create_object_store.enabled => (
+            "Available".to_string(),
+            format!(
+                "Admin workflow: create a {} store with {} copy/copies and {} export after daemon plan review.",
+                view.create_object_store.defaults.store_class,
+                view.create_object_store.defaults.required_copies,
+                view.create_object_store.defaults.endpoint_export_mode
+            ),
+        ),
+        Some(view) => (
+            "Admin only".to_string(),
+            view.create_object_store
+                .blocked_reason
+                .clone()
+                .unwrap_or_else(|| {
+                    "Admin workflow: assign a writer group, choose enclosure, object type, and redundancy, then submit the daemon creation plan.".to_string()
+                }),
+        ),
+        None => (
+            "Admin only".to_string(),
+            "Admin workflow: assign a writer group, choose enclosure, object type, and redundancy, then submit the daemon creation plan.".to_string(),
+        ),
+    };
+
+    html! {
+        <section class="dos-card dos-create-card" data-action="store_create">
+            <span class="dos-create-mark">{ "+" }</span>
+            <h2>{ "Create ObjectStore" }</h2>
+            <p>{ detail }</p>
+            <span class="dos-status-pill">{ status }</span>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_store_card(store: ObjectStoreCardSummary) -> Html {
+    html! {
+        <section class="dos-card dos-store-card" data-store-id={store.id.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ store.label }</span>
+                <span class="dos-status-pill">{ store.health }</span>
+            </div>
+            <strong>{ store.name }</strong>
+            <p>{ store.policy }</p>
+            <p>{ store.capacity }</p>
+            <p>{ format!("{} · writer group: {}", store.objects, store.writer_group) }</p>
+            <p>{ format!("endpoint: {} · last ingest: {}", store.endpoint, store.last_ingested) }</p>
+            <p>{ format!("{} warning(s)", store.warning_count) }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_stores_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label }</span>
+            <h2>{ title }</h2>
+            <p>{ message }</p>
         </section>
     }
 }
@@ -845,11 +1033,12 @@ mod tests {
     use super::{
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosures_workspace_api_path,
         fallback_enclosures, fallback_object_stores, home_dashboard_attention,
-        home_dashboard_metrics, home_workspace_api_path, objectstores_workspace_api_path,
-        WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        home_dashboard_metrics, home_workspace_api_path, object_store_card_summaries,
+        objectstores_workspace_api_path, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE,
+        ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
+        PRIMARY_NAVIGATION,
     };
-    use crate::api::{EnclosuresPageResponse, HomeDashboardResponse};
+    use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
 
     #[test]
     fn primary_navigation_uses_redesign_labels() {
@@ -925,6 +1114,68 @@ mod tests {
         assert!(stores.is_empty());
         assert!(stores.iter().all(|store| !store.id.is_empty()));
         assert!(stores.iter().all(|store| !store.policy.is_empty()));
+    }
+
+    #[test]
+    fn object_stores_live_payload_maps_to_card_summaries() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "stores": [{
+                "store_id": "zymo_fecal_2025.05",
+                "display_name": "zymo_fecal_2025.05",
+                "store_class": "generated_data",
+                "health": "healthy",
+                "required_copies": 2,
+                "object_count": 42,
+                "capacity": {
+                    "total_tib": "100.0",
+                    "used_tib": "12.5",
+                    "free_tib": "87.5",
+                    "used_percent_basis_points": 1250
+                },
+                "placement_policy": "fractional_free_space",
+                "endpoint_export_mode": "s3_bucket",
+                "writer_group": "bioinformatics",
+                "created_at_utc": "2026-07-08T08:00:00Z",
+                "last_ingested_at_utc": "2026-07-08T08:30:00Z",
+                "warnings": [{
+                    "code": "store_watch",
+                    "message": "Store warning."
+                }]
+            }],
+            "selected_store_id": "zymo_fecal_2025.05",
+            "create_object_store": {
+                "enabled": false,
+                "action_kind": "store_create",
+                "label": "Create ObjectStore",
+                "required_fields": [],
+                "optional_fields": [],
+                "defaults": {
+                    "store_class": "generated_data",
+                    "required_copies": 2,
+                    "endpoint_export_mode": "s3_bucket"
+                },
+                "store_class_options": [],
+                "copy_count_options": [1, 2, 3],
+                "confirmation_required": true,
+                "blocked_reason": "admin required"
+            },
+            "warnings": []
+        });
+        let view = serde_json::from_value::<ObjectStoresPageResponse>(payload)
+            .expect("object stores payload decodes");
+
+        let summaries = object_store_card_summaries(&view);
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "zymo_fecal_2025.05");
+        assert_eq!(summaries[0].label, "generated_data");
+        assert!(summaries[0].policy.contains("2 required copy/copies"));
+        assert!(summaries[0].capacity.contains("12.5 TiB used"));
+        assert_eq!(summaries[0].writer_group, "bioinformatics");
+        assert_eq!(summaries[0].endpoint, "s3_bucket");
+        assert_eq!(summaries[0].warning_count, 1);
     }
 
     #[test]
