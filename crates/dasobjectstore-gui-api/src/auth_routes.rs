@@ -1,3 +1,4 @@
+use crate::groups_registry::{default_groups_registry_path, read_storage_groups_for_user};
 use crate::{
     discover_current_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
     LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
@@ -19,6 +20,7 @@ use dasobjectstore_daemon::{
     DaemonLocalAdminCommand, DaemonRuntimeConfig, UnixSocketDaemonTransport,
 };
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -84,6 +86,7 @@ struct StandaloneUsersGroupsRouteState {
     auth_store: LocalAuthStore,
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
     local_group_admin_client: Option<Arc<dyn StandaloneLocalGroupAdminClient>>,
+    groups_registry_path: PathBuf,
 }
 
 impl StandaloneUsersGroupsRouteState {
@@ -94,6 +97,7 @@ impl StandaloneUsersGroupsRouteState {
             local_group_admin_client: Some(Arc::new(
                 DaemonStandaloneLocalGroupAdminClient::default_packaged(),
             )),
+            groups_registry_path: default_groups_registry_path(),
         }
     }
 }
@@ -359,10 +363,20 @@ async fn users_groups_workspace(
             }],
         ),
     };
+    let current_user_groups = current_user
+        .as_ref()
+        .map(|user| user.groups.clone())
+        .unwrap_or_default();
+    let groups_snapshot =
+        read_storage_groups_for_user(&state.groups_registry_path, &current_user_groups);
+    let mut warnings = warnings;
+    warnings.extend(groups_snapshot.warnings);
 
     Ok(Json(UsersGroupsWorkspaceView::standalone(
         current_user,
         users,
+        groups_snapshot.path.display().to_string(),
+        groups_snapshot.groups,
         warnings,
     )))
 }
@@ -979,6 +993,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standalone_users_groups_workspace_returns_managed_writer_groups() {
+        let root = temp_root("standalone-users-groups-writer-policy");
+        fs::create_dir_all(&root).expect("temp root");
+        let groups_path = root.join("groups.json");
+        fs::write(
+            &groups_path,
+            r#"{"groups":[{"group_name":"bioinformatics","display_name":"Bioinformatics","source":"local_os"}]}"#,
+        )
+        .expect("groups write");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app =
+            standalone_users_groups_router_with_state(test_users_groups_state_with_groups_path(
+                auth_store,
+                local_user("operator", vec!["bioinformatics"]),
+                None,
+                groups_path.clone(),
+            ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/workspaces/users-groups")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&bytes).expect("response decodes");
+
+        assert_eq!(
+            encoded["groups_file_path"],
+            groups_path.display().to_string()
+        );
+        assert_eq!(encoded["writer_groups"][0]["group_name"], "bioinformatics");
+        assert_eq!(encoded["writer_groups"][0]["current_user_member"], true);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn create_local_group_requires_session() {
         let root = temp_root("create-local-group-auth");
         let auth_store = registered_auth_store(&root);
@@ -1281,12 +1344,31 @@ mod tests {
         current_user: LocalUserMetadata,
         local_group_admin_client: Option<Arc<RecordingAdminClient>>,
     ) -> StandaloneUsersGroupsRouteState {
+        test_users_groups_state_with_groups_path(
+            auth_store,
+            current_user,
+            local_group_admin_client,
+            root_groups_path("missing"),
+        )
+    }
+
+    fn test_users_groups_state_with_groups_path(
+        auth_store: LocalAuthStore,
+        current_user: LocalUserMetadata,
+        local_group_admin_client: Option<Arc<RecordingAdminClient>>,
+        groups_registry_path: PathBuf,
+    ) -> StandaloneUsersGroupsRouteState {
         StandaloneUsersGroupsRouteState {
             auth_store,
             local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
             local_group_admin_client: local_group_admin_client
                 .map(|client| client as Arc<dyn StandaloneLocalGroupAdminClient>),
+            groups_registry_path,
         }
+    }
+
+    fn root_groups_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("dasobjectstore-{label}-groups-missing.json"))
     }
 
     fn test_auth_router(

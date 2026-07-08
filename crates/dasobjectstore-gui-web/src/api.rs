@@ -97,10 +97,22 @@ impl Default for AddEnclosureAffordanceResponse {
 pub struct ObjectStoresPageResponse {
     pub schema_version: String,
     pub generated_at_utc: String,
+    #[serde(default)]
+    pub groups_file_path: Option<String>,
+    #[serde(default)]
+    pub groups: Vec<StorageGroupResponse>,
     pub stores: Vec<ObjectStoreCardResponse>,
     pub selected_store_id: Option<String>,
     pub create_object_store: CreateObjectStoreAffordanceResponse,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct StorageGroupResponse {
+    pub group_name: String,
+    pub display_name: String,
+    pub source: String,
+    pub current_user_member: bool,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -261,7 +273,19 @@ pub struct ObjectStoreCardResponse {
     pub writeable: Option<bool>,
     pub created_at_utc: Option<String>,
     pub last_ingested_at_utc: Option<String>,
+    #[serde(default)]
+    pub writer_policy: Option<WriterPolicyReadinessResponse>,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct WriterPolicyReadinessResponse {
+    pub writer_group: Option<String>,
+    pub group_defined: bool,
+    pub current_user_member: bool,
+    pub writeable_by_current_user: bool,
+    pub state: String,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -664,6 +688,13 @@ mod tests {
         let payload = serde_json::json!({
             "schema_version": "dasobjectstore.web_redesign.v1",
             "generated_at_utc": "2026-07-08T08:00:00Z",
+            "groups_file_path": "/opt/dasobjectstore/groups.json",
+            "groups": [{
+                "group_name": "bioinformatics",
+                "display_name": "Bioinformatics",
+                "source": "local_os",
+                "current_user_member": true
+            }],
             "stores": [{
                 "store_id": "zymo_fecal_2025.05",
                 "display_name": "zymo_fecal_2025.05",
@@ -685,6 +716,14 @@ mod tests {
                 "writeable": true,
                 "created_at_utc": "2026-07-08T08:00:00Z",
                 "last_ingested_at_utc": "2026-07-08T08:30:00Z",
+                "writer_policy": {
+                    "writer_group": "bioinformatics",
+                    "group_defined": true,
+                    "current_user_member": true,
+                    "writeable_by_current_user": true,
+                    "state": "ready",
+                    "message": "Current user belongs to the ObjectStore writer group."
+                },
                 "warnings": []
             }],
             "selected_store_id": "zymo_fecal_2025.05",
@@ -711,11 +750,22 @@ mod tests {
             .expect("object stores dashboard decodes");
 
         assert_eq!(decoded.stores.len(), 1);
+        assert_eq!(decoded.groups.len(), 1);
+        assert_eq!(decoded.groups[0].group_name, "bioinformatics");
+        assert!(decoded.groups[0].current_user_member);
         assert_eq!(decoded.stores[0].store_id, "zymo_fecal_2025.05");
         assert_eq!(decoded.stores[0].required_copies, Some(2));
         assert_eq!(decoded.stores[0].object_type.as_deref(), Some("pod5"));
         assert_eq!(decoded.stores[0].public, Some(false));
         assert_eq!(decoded.stores[0].writeable, Some(true));
+        assert_eq!(
+            decoded.stores[0]
+                .writer_policy
+                .as_ref()
+                .expect("writer policy")
+                .state,
+            "ready"
+        );
         assert_eq!(
             decoded.create_object_store.defaults.endpoint_export_mode,
             "s3_bucket"

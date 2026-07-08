@@ -560,6 +560,7 @@ pub struct ObjectStoreCardSummary {
     pub endpoint: String,
     pub warning_count: usize,
     pub last_ingested: String,
+    pub writer_policy: String,
 }
 
 pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<ObjectStoreCardSummary> {
@@ -620,6 +621,11 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                     .as_deref()
                     .unwrap_or("writer group pending")
                     .to_string(),
+                writer_policy: store
+                    .writer_policy
+                    .as_ref()
+                    .map(|policy| policy.message.clone())
+                    .unwrap_or_else(|| "Writer policy readiness pending".to_string()),
                 endpoint: store
                     .endpoint_export_mode
                     .as_deref()
@@ -1238,6 +1244,7 @@ fn render_object_store_card(store: ObjectStoreCardSummary) -> Html {
             <p>{ store.policy }</p>
             <p>{ store.capacity }</p>
             <p>{ format!("{} · writer group: {}", store.objects, store.writer_group) }</p>
+            <p>{ store.writer_policy }</p>
             <p>{ format!("endpoint: {} · last ingest: {}", store.endpoint, store.last_ingested) }</p>
             <p>{ format!("{} warning(s)", store.warning_count) }</p>
         </section>

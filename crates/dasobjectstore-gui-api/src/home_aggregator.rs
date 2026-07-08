@@ -113,7 +113,7 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
             Vec::new()
         });
     let object_stores =
-        registry_object_store_cards(&config.store_registry_path, None, &mut source_warnings);
+        registry_object_store_cards(&config.store_registry_path, None, &[], &mut source_warnings);
     let memory_stress = memory_stress(&config.meminfo_path, &mut source_warnings);
     let throughput_7d = read_throughput_7d(&config.throughput_path).unwrap_or_else(|| {
         source_warnings.push(DashboardWarning::new(

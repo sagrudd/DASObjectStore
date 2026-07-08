@@ -7,6 +7,7 @@ pub mod auth_routes;
 pub mod dashboard;
 mod enclosures_aggregator;
 pub mod endpoints;
+mod groups_registry;
 mod home_aggregator;
 mod object_stores_aggregator;
 pub mod routes;
@@ -43,7 +44,7 @@ pub use dashboard::{
     DashboardSeverity, DashboardWarning, DashboardWarningItemView, DestageQueueObjectView,
     DestageQueueView, DiskHealthView, HealthSignalsView, HealthStateView, IngestJobStateView,
     IngestProgressView, IngestQueueJobView, IngestQueueView, ObjectStateView, PoolAccessMode,
-    PoolStateView, PoolStatusView, QueuePressureView,
+    PoolStateView, PoolStatusView, QueuePressureView, StorageGroupView, WriterPolicyReadinessView,
 };
 pub use endpoints::{
     EndpointBindingReadinessView, EndpointBindingView, EndpointInventoryItemView,

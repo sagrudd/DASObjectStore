@@ -243,6 +243,14 @@ capacity, object type, and last-ingest time are read from live SQLite at
 ``/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite`` by default, or from
 ``DASOBJECTSTORE_WEB_LIVE_SQLITE_PATH`` when that override is set.
 
+Writer groups are read server-side from ``/opt/dasobjectstore/groups.json`` by
+default, or from ``DASOBJECTSTORE_GROUPS_PATH`` when the appliance overrides the
+location. The browser never reads this file directly. The Web API returns the
+group registry path, managed writer groups, current-user membership when known,
+and each ObjectStore card's writer-policy readiness. If a store references a
+writer group that is not present in the registry, the card remains visible but
+reports the missing group as an explicit readiness state.
+
 If live SQLite is unavailable, the card remains visible from the registry but
 reports an explicit usage warning rather than hiding the ObjectStore or
 presenting fixture data. The ``Create ObjectStore`` card remains disabled for
@@ -265,6 +273,17 @@ creation form includes a writer group, the daemon remains responsible for
 validating the group, applying ACL or policy changes, and recording the store in
 managed metadata. Non-admin users may inspect stores and submit writes only when
 store writer policy allows it.
+
+Users/Groups Workspace
+----------------------
+
+The standalone Users/Groups workspace is authenticated and loaded through
+``/products/dasobjectstore/api/v1/workspaces/users-groups``. It reports the
+current OS authority, product-local users, local group memberships,
+administrator capability, and daemon-submitted group-management operations. The
+same server-side groups registry used by the ObjectStores dashboard is included
+as ``writer_groups`` so operators can see which managed writer groups exist and
+whether the current local user is a member.
 
 Bioinformatics Workspace
 ------------------------

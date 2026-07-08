@@ -329,6 +329,8 @@ pub struct EnclosureDriveSlotView {
 pub struct ObjectStoresPageView {
     pub schema_version: String,
     pub generated_at_utc: String,
+    pub groups_file_path: String,
+    pub groups: Vec<StorageGroupView>,
     pub stores: Vec<ObjectStoreCardView>,
     pub selected_store_id: Option<String>,
     pub create_object_store: CreateObjectStoreAffordanceView,
@@ -340,6 +342,8 @@ impl ObjectStoresPageView {
         Self {
             schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
             generated_at_utc: "2026-07-08T08:00:00Z".to_string(),
+            groups_file_path: "/opt/dasobjectstore/groups.json".to_string(),
+            groups: Vec::new(),
             selected_store_id: None,
             stores: Vec::new(),
             create_object_store: CreateObjectStoreAffordanceView::admin_required(),
@@ -368,7 +372,39 @@ pub struct ObjectStoreCardView {
     pub writeable: bool,
     pub created_at_utc: String,
     pub last_ingested_at_utc: Option<String>,
+    pub writer_policy: WriterPolicyReadinessView,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StorageGroupView {
+    pub group_name: String,
+    pub display_name: String,
+    pub source: String,
+    pub current_user_member: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WriterPolicyReadinessView {
+    pub writer_group: Option<String>,
+    pub group_defined: bool,
+    pub current_user_member: bool,
+    pub writeable_by_current_user: bool,
+    pub state: String,
+    pub message: String,
+}
+
+impl WriterPolicyReadinessView {
+    pub fn without_writer_group() -> Self {
+        Self {
+            writer_group: None,
+            group_defined: false,
+            current_user_member: false,
+            writeable_by_current_user: false,
+            state: "no_writer_group".to_string(),
+            message: "No writer group is assigned to this ObjectStore.".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -483,7 +519,7 @@ mod tests {
     use super::{
         CapacitySummaryView, CreateObjectStoreAffordanceView, DashboardHealthStateView,
         EnclosuresPageView, HomeDashboardView, ObjectStoreCardView, ObjectStoresPageView,
-        REDESIGN_DASHBOARD_SCHEMA_VERSION,
+        WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
     };
 
     #[test]
@@ -554,6 +590,14 @@ mod tests {
             writeable: true,
             created_at_utc: "2026-07-08T08:00:00Z".to_string(),
             last_ingested_at_utc: Some("2026-07-08T08:30:00Z".to_string()),
+            writer_policy: WriterPolicyReadinessView {
+                writer_group: Some("bioinformatics".to_string()),
+                group_defined: true,
+                current_user_member: true,
+                writeable_by_current_user: true,
+                state: "ready".to_string(),
+                message: "Current user belongs to the writer group.".to_string(),
+            },
             warnings: Vec::new(),
         }];
         let encoded = serde_json::to_value(view).expect("object stores serializes");
@@ -564,6 +608,7 @@ mod tests {
         assert_eq!(encoded["stores"][0]["object_type"], "pod5");
         assert_eq!(encoded["stores"][0]["public"], false);
         assert_eq!(encoded["stores"][0]["writeable"], true);
+        assert_eq!(encoded["stores"][0]["writer_policy"]["state"], "ready");
         assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["defaults"]["store_class"],

@@ -1,7 +1,9 @@
 use crate::dashboard::{
     CapacitySummaryView, CreateObjectStoreAffordanceView, DashboardHealthStateView,
-    DashboardWarning, ObjectStoreCardView, ObjectStoresPageView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    DashboardWarning, ObjectStoreCardView, ObjectStoresPageView, StorageGroupView,
+    WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
+use crate::groups_registry::{default_groups_registry_path, read_storage_groups_for_user};
 use crate::home_aggregator::{env_path, now_utc_string, DEFAULT_SSD_ROOT};
 use dasobjectstore_core::store::{ExportPolicy, MutabilityPolicy, PlacementStrategy};
 use dasobjectstore_metadata::{
@@ -16,6 +18,8 @@ use std::path::{Path, PathBuf};
 struct ObjectStoresAggregatorConfig {
     store_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
+    groups_registry_path: PathBuf,
+    current_user_groups: Vec<String>,
 }
 
 impl ObjectStoresAggregatorConfig {
@@ -28,6 +32,8 @@ impl ObjectStoresAggregatorConfig {
             live_sqlite_path: std::env::var_os("DASOBJECTSTORE_WEB_LIVE_SQLITE_PATH")
                 .map(PathBuf::from)
                 .unwrap_or(default_live_sqlite_path),
+            groups_registry_path: default_groups_registry_path(),
+            current_user_groups: Vec::new(),
         }
     }
 }
@@ -38,9 +44,13 @@ pub(crate) fn live_object_stores_dashboard() -> ObjectStoresPageView {
 
 fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> ObjectStoresPageView {
     let mut warnings = Vec::new();
+    let groups_snapshot =
+        read_storage_groups_for_user(&config.groups_registry_path, &config.current_user_groups);
+    warnings.extend(groups_snapshot.warnings.clone());
     let stores = registry_object_store_cards(
         &config.store_registry_path,
         Some(&config.live_sqlite_path),
+        &groups_snapshot.groups,
         &mut warnings,
     );
     let selected_store_id = stores.first().map(|store| store.store_id.clone());
@@ -48,6 +58,8 @@ fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> Object
     ObjectStoresPageView {
         schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
         generated_at_utc: now_utc_string(),
+        groups_file_path: groups_snapshot.path.display().to_string(),
+        groups: groups_snapshot.groups,
         stores,
         selected_store_id,
         create_object_store: CreateObjectStoreAffordanceView::admin_required(),
@@ -58,6 +70,7 @@ fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> Object
 pub(crate) fn registry_object_store_cards(
     registry_path: &Path,
     live_sqlite_path: Option<&Path>,
+    groups: &[StorageGroupView],
     warnings: &mut Vec<DashboardWarning>,
 ) -> Vec<ObjectStoreCardView> {
     let definitions = match read_store_registry(registry_path) {
@@ -78,6 +91,7 @@ pub(crate) fn registry_object_store_cards(
         .into_iter()
         .map(|definition| {
             let policy = definition.policy;
+            let writer_group = definition.writer_group;
             let usage = live_sqlite_path
                 .map(|path| store_usage_summary(path, definition.store_id.clone()))
                 .unwrap_or_else(StoreUsageSummary::pending);
@@ -99,16 +113,58 @@ pub(crate) fn registry_object_store_cards(
                 capacity: used_capacity_summary(usage.used_bytes),
                 placement_policy: placement_strategy_label(policy.placement_strategy).to_string(),
                 endpoint_export_mode: export_policy_label(policy.export_policy).to_string(),
-                writer_group: definition.writer_group,
+                writer_group: writer_group.clone(),
                 public: false,
                 writeable: policy.mutability_policy == MutabilityPolicy::Mutable
                     || policy.export_policy != ExportPolicy::Disabled,
                 created_at_utc: "registry-managed".to_string(),
                 last_ingested_at_utc: usage.last_updated_at_utc,
+                writer_policy: writer_policy_readiness(writer_group.as_deref(), groups),
                 warnings: card_warnings,
             }
         })
         .collect()
+}
+
+fn writer_policy_readiness(
+    writer_group: Option<&str>,
+    groups: &[StorageGroupView],
+) -> WriterPolicyReadinessView {
+    let Some(writer_group) = writer_group else {
+        return WriterPolicyReadinessView::without_writer_group();
+    };
+
+    let group = groups
+        .iter()
+        .find(|group| group.group_name.as_str() == writer_group);
+    match group {
+        Some(group) if group.current_user_member => WriterPolicyReadinessView {
+            writer_group: Some(writer_group.to_string()),
+            group_defined: true,
+            current_user_member: true,
+            writeable_by_current_user: true,
+            state: "ready".to_string(),
+            message: "Current user belongs to the ObjectStore writer group.".to_string(),
+        },
+        Some(_) => WriterPolicyReadinessView {
+            writer_group: Some(writer_group.to_string()),
+            group_defined: true,
+            current_user_member: false,
+            writeable_by_current_user: false,
+            state: "member_missing".to_string(),
+            message: "Writer group is defined, but current user membership is not confirmed."
+                .to_string(),
+        },
+        None => WriterPolicyReadinessView {
+            writer_group: Some(writer_group.to_string()),
+            group_defined: false,
+            current_user_member: false,
+            writeable_by_current_user: false,
+            state: "group_unknown".to_string(),
+            message: "Writer group is not present in the DASObjectStore groups registry."
+                .to_string(),
+        },
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -233,6 +289,7 @@ mod tests {
         let root = temp_root("object-stores-live");
         let registry_path = root.join("stores.json");
         let live_sqlite_path = root.join("live.sqlite");
+        let groups_registry_path = root.join("groups.json");
         let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
         policy.copies = 3;
         let definition = StoreServiceDefinition {
@@ -247,12 +304,22 @@ mod tests {
         )
         .expect("registry write");
         create_live_sqlite_with_store_objects(&live_sqlite_path, "zymo_fecal_2025.05");
+        fs::write(
+            &groups_registry_path,
+            r#"{"groups":[{"group_name":"bioinformatics","display_name":"Bioinformatics","source":"local_os"}]}"#,
+        )
+        .expect("groups write");
 
         let view = build_object_stores_dashboard(ObjectStoresAggregatorConfig {
             store_registry_path: registry_path,
             live_sqlite_path,
+            groups_registry_path,
+            current_user_groups: vec!["bioinformatics".to_string()],
         });
 
+        assert_eq!(view.groups.len(), 1);
+        assert_eq!(view.groups[0].group_name, "bioinformatics");
+        assert!(view.groups[0].current_user_member);
         assert_eq!(view.stores.len(), 1);
         assert_eq!(
             view.selected_store_id.as_deref(),
@@ -274,6 +341,9 @@ mod tests {
         );
         assert_eq!(view.stores[0].endpoint_export_mode, "s3_bucket");
         assert!(view.stores[0].writeable);
+        assert_eq!(view.stores[0].writer_policy.state, "ready");
+        assert!(view.stores[0].writer_policy.group_defined);
+        assert!(view.stores[0].writer_policy.writeable_by_current_user);
         assert!(view.stores[0].warnings.is_empty());
         assert!(view.warnings.is_empty());
     }
@@ -287,6 +357,8 @@ mod tests {
         let view = build_object_stores_dashboard(ObjectStoresAggregatorConfig {
             store_registry_path: registry_path,
             live_sqlite_path: root.join("missing-live.sqlite"),
+            groups_registry_path: root.join("missing-groups.json"),
+            current_user_groups: Vec::new(),
         });
 
         assert!(view.stores.is_empty());

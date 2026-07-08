@@ -1,7 +1,7 @@
 use crate::dashboard::{
     CreateObjectStoreAffordanceView, DasEnclosureCardView, DashboardAttentionView,
     DashboardWarning, DestageQueueView, DiskHealthView, HomeDashboardView, IngestQueueView,
-    ObjectStateView, ObjectStoreCardView, PoolStatusView,
+    ObjectStateView, ObjectStoreCardView, PoolStatusView, StorageGroupView,
 };
 use crate::endpoints::EndpointInventoryView;
 use crate::{LocalUserMetadata, UserSummary, SUDO_ADMIN_GROUPS};
@@ -332,7 +332,7 @@ pub struct ProductObjectStoresWorkspaceView {
     pub schema_version: String,
     pub administrator_actions_enabled: bool,
     pub groups_file_path: String,
-    pub groups: Vec<ProductStorageGroupView>,
+    pub groups: Vec<StorageGroupView>,
     pub create: ObjectStoreCreateWorkflowView,
     pub object_stores: Vec<ProductObjectStoreCardView>,
     pub warnings: Vec<DashboardWarning>,
@@ -354,14 +354,6 @@ impl ProductObjectStoresWorkspaceView {
             )],
         }
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ProductStorageGroupView {
-    pub group_name: String,
-    pub display_name: String,
-    pub source: String,
-    pub current_user_member: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -655,6 +647,8 @@ pub struct UsersGroupsWorkspaceView {
     pub current_user: Option<LocalUserAuthorityView>,
     pub users: Vec<StandaloneUserAccountView>,
     pub groups: Vec<LocalGroupMembershipView>,
+    pub groups_file_path: String,
+    pub writer_groups: Vec<StorageGroupView>,
     pub operations: Vec<LocalGroupOperationView>,
     pub capabilities: UsersGroupsCapabilitiesView,
     pub selected_username: Option<String>,
@@ -666,6 +660,8 @@ impl UsersGroupsWorkspaceView {
     pub fn standalone(
         current_user: Option<LocalUserMetadata>,
         users: Vec<UserSummary>,
+        groups_file_path: String,
+        writer_groups: Vec<StorageGroupView>,
         mut warnings: Vec<DashboardWarning>,
     ) -> Self {
         let administrator_actions_enabled = current_user
@@ -692,6 +688,8 @@ impl UsersGroupsWorkspaceView {
                 .map(StandaloneUserAccountView::from)
                 .collect(),
             groups,
+            groups_file_path,
+            writer_groups,
             operations: local_group_operations(administrator_actions_enabled),
             capabilities: UsersGroupsCapabilitiesView {
                 product_local_user_registration: true,
@@ -711,6 +709,8 @@ impl UsersGroupsWorkspaceView {
             current_user: None,
             users: Vec::new(),
             groups: Vec::new(),
+            groups_file_path: "/opt/dasobjectstore/groups.json".to_string(),
+            writer_groups: Vec::new(),
             operations: Vec::new(),
             capabilities: UsersGroupsCapabilitiesView {
                 product_local_user_registration: false,
@@ -857,7 +857,7 @@ mod tests {
         UsersGroupsCapabilitiesView, UsersGroupsHostModeView, UsersGroupsWorkspaceView,
         OPERATIONS_WORKSPACES_SCHEMA_VERSION,
     };
-    use crate::dashboard::{DashboardAttentionView, ObjectStateView};
+    use crate::dashboard::{DashboardAttentionView, ObjectStateView, StorageGroupView};
     use crate::endpoints::{EndpointInventoryItemView, EndpointInventoryView};
     use crate::{LocalUserMetadata, UserSummary};
 
@@ -1079,6 +1079,13 @@ mod tests {
                 registered_at_unix_seconds: Some(20),
                 active_session_count: 1,
             }],
+            "/opt/dasobjectstore/groups.json".to_string(),
+            vec![StorageGroupView {
+                group_name: "mnemosyne".to_string(),
+                display_name: "Mnemosyne".to_string(),
+                source: "local_os".to_string(),
+                current_user_member: true,
+            }],
             Vec::new(),
         );
 
@@ -1116,6 +1123,8 @@ mod tests {
                 }
             ]
         );
+        assert_eq!(view.writer_groups[0].group_name, "mnemosyne");
+        assert!(view.writer_groups[0].current_user_member);
         assert_eq!(
             view.capabilities,
             UsersGroupsCapabilitiesView {
@@ -1154,6 +1163,8 @@ mod tests {
                 "viewer",
                 vec!["users".to_string()],
             )),
+            Vec::new(),
+            "/opt/dasobjectstore/groups.json".to_string(),
             Vec::new(),
             Vec::new(),
         );

@@ -546,7 +546,7 @@ older checklist claims.
   cards with name, writer group, object type, public/writeable flags, redundancy,
   object count, used capacity, S3/export state, warning state, and last ingest
   time.
-- [ ] Load `/opt/dasobjectstore/groups.json` through a daemon/API boundary and
+- [x] Load `/opt/dasobjectstore/groups.json` through a daemon/API boundary and
   expose group membership and writer-policy readiness to ObjectStores and
   Users/Groups pages without direct browser filesystem access.
 - [ ] Reconcile the legacy `workspaces/stores`, `workspaces/users-groups`, and

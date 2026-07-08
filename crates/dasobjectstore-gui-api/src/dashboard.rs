@@ -23,8 +23,9 @@ pub use redesign::{
     DasEnclosureDetailView, DashboardHealthStateView, DriveCountSummaryView,
     EnclosureConnectionView, EnclosureDriveSlotView, EnclosuresPageView, HealthSummaryView,
     HomeDashboardView, MemoryStressStateView, MemoryStressView, ObjectStoreCardView,
-    ObjectStoresPageView, SmartWarningView, SmartWarningsSummaryView, StoreClassOptionView,
-    ThroughputDayView, ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    ObjectStoresPageView, SmartWarningView, SmartWarningsSummaryView, StorageGroupView,
+    StoreClassOptionView, ThroughputDayView, ThroughputSummaryView, WriterPolicyReadinessView,
+    REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

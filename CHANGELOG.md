@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.26.0 - 2026-07-08
+
+- Add a server-side DASObjectStore groups registry reader for
+  `/opt/dasobjectstore/groups.json`, with explicit missing, unreadable, and
+  invalid-registry warning states.
+- Expose managed writer groups and current-user membership through the
+  authenticated Users/Groups workspace payload.
+- Add ObjectStore writer-policy readiness to Web dashboard cards so stores show
+  whether their writer group is known and whether current-user membership is
+  confirmed.
+
 ## 0.25.0 - 2026-07-08
 
 - Replace the Web ObjectStores dashboard bootstrap fixture route with a live
