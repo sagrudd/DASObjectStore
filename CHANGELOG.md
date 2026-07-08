@@ -6,6 +6,20 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.8.0 - 2026-07-08
+
+- Add ``dasobjectstore performance-test --redundancy <1|2|3>`` so benchmark
+  runs can model one, two, or three physical HDD copies per logical source
+  file while keeping the HDD write-worker pool bounded by the requested
+  concurrency.
+- Teach performance-test HDD scenarios to land redundant copies on distinct
+  disks when enough managed HDD members are present, record physical HDD write
+  volume and operation counts, and expose bounded FIFO queue capacity in the
+  recommendation JSON.
+- Add tidy ``plot_data`` rows to performance-test JSON artifacts for
+  Grammateus/floundeR bar charts covering strategy landing rate, elapsed time,
+  HDD write volume, HDD write operations, and per-disk HDD write rate.
+
 ## 0.7.1 - 2026-07-08
 
 - Split performance-test SSD/HDD benchmarking into explicit

@@ -25,6 +25,8 @@ For either generated files or an existing source folder, the command records:
 * direct source-to-HDD throughput for the same concurrency range;
 * per-disk assigned bytes and write rates from the scheduler's actual placement
   decisions;
+* redundancy effects when each logical file is landed to one, two, or three
+  distinct HDD members;
 * a recommendation for future ingest strategy and HDD settlement concurrency.
 
 The benchmark discovers the managed HDD members under the configured HDD root
@@ -46,10 +48,12 @@ The SSD scenarios create generated payloads directly under:
    <ssd-root>/.dasobjectstore/performance-test/<run-id>/
 
 HDD scenarios create temporary benchmark files under the selected disk's
-managed ``.dasobjectstore/performance-test/<run-id>/`` directory. Each logical
-file is assigned to one selected HDD for a scenario; the benchmark does not
-write the same file to every disk merely to inflate throughput. On normal
-completion these temporary benchmark files and run directories are removed.
+managed ``.dasobjectstore/performance-test/<run-id>/`` directory. By default,
+each logical file is assigned to one selected HDD for a scenario; with
+``--redundancy 2`` or ``--redundancy 3``, each logical file is landed to that
+many distinct HDD members. The benchmark does not write the same file to every
+disk merely to inflate throughput. On normal completion these temporary
+benchmark files and run directories are removed.
 
 If the process is killed or the host loses power, temporary benchmark files may
 remain. Inspect only the matching ``performance-test/<run-id>`` directories
@@ -59,6 +63,11 @@ Large runs should be planned against available free space and expected elapsed
 time. For example, ``--file_size 2GiB --file_count 100`` writes 200 GiB of
 logical payload per scenario and substantially more total IO while testing SSD
 only, SSD-first HDD drainage, and direct-to-HDD landing.
+
+Redundancy increases the physical HDD write volume. ``--redundancy 2`` writes
+two HDD copies for each logical file in HDD-writing scenarios; ``--redundancy
+3`` writes three copies. Values above ``3`` are rejected, and the command also
+rejects redundancy greater than the number of managed HDD members.
 
 Pressing ``Ctrl-C`` asks the active benchmark operation to stop and allows the
 temporary objectstore cleanup guard to remove the run directories after the
@@ -126,6 +135,30 @@ name unless an explicit JSON artifact path is supplied:
 .. code-block:: text
 
    /tmp/dasobjectstore-performance-smoke.qr.svg
+
+Redundancy Testing
+------------------
+
+Use ``--redundancy`` to model replicated landing of each logical file. The
+default is ``1``. Accepted values are ``1``, ``2``, and ``3``:
+
+.. code-block:: console
+
+   sudo dasobjectstore performance-test \
+     --source /data/zymo_fecal_2025.05 \
+     --cap 750GiB \
+     --max-hdd-concurrency 5 \
+     --redundancy 2 \
+     --tui \
+     --report /var/lib/dasobjectstore/reports/performance-zymo-r2.pdf \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-r2.json
+
+The concurrency limit remains the total number of active HDD write workers, not
+the number of workers per copy. For example, ``--max-hdd-concurrency 3
+--redundancy 2`` allows at most three simultaneous HDD writes while each
+logical file is eventually landed on two distinct disks. The internal FIFO
+write queue is bounded so a fast SSD producer cannot create an unbounded HDD
+backlog inside the benchmark process.
 
 Commissioning Test
 ------------------
@@ -262,16 +295,20 @@ The PDF report includes:
 * the exact reproduction command;
 * a JSON reproduction payload;
 * median SSD write and read throughput;
-* the recommended ingress strategy and HDD worker count;
+* the recommended ingress strategy, redundancy setting, and HDD worker count;
 * SSD-only, SSD-first pipeline, and direct-HDD scenario summaries;
 * per-file SSD timing tables;
-* per-disk landed-file tables;
+* per-disk landed-file tables, including the redundant copy index;
 * the concurrency result table;
+* the names of the tidy quantitative plot datasets embedded in the JSON
+  artifact;
 * the generated recommendation.
 
 The command also writes:
 
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
+* ``<report-stem>-*.svg`` quantitative bar-chart artifacts embedded into the
+  PDF report when the renderer supports local images;
 * a temporary Markdown source under ``--tmp-dir`` only while rendering the PDF.
 
 The temporary Markdown source is removed after PDF generation. It is not a
@@ -321,6 +358,9 @@ The artifact records:
   selected members, and per-disk assigned bytes/rates for HDD-writing routes;
 * direct-to-HDD pipeline metrics for every tested concurrency value from ``1``
   to ``N``, with the same aggregate and per-disk fields;
+* a ``plot_data`` block with tidy bar-chart rows for strategy landing rate,
+  elapsed time, physical HDD write volume, HDD write operations, and per-disk
+  HDD write rates;
 * the recommended ingress strategy, HDD concurrency, estimated aggregate rate,
   whether SSD readback appears limiting, and short rationale strings;
 * a ``daemon_policy`` block that records whether the artifact is authoritative,

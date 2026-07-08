@@ -32,6 +32,7 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
     assert_positive_u64(&artifact, &["run", "parameters", "discovered_file_count"]);
     assert_positive_u64(&artifact, &["run", "parameters", "discovered_total_bytes"]);
     assert_positive_u64(&artifact, &["run", "parameters", "max_hdd_concurrency"]);
+    assert_positive_u64(&artifact, &["run", "parameters", "redundancy"]);
     assert_string(&artifact, &["run", "artifacts", "pdf_path"]);
     assert_string(&artifact, &["run", "artifacts", "qr_path"]);
     assert_string(&artifact, &["run", "artifacts", "json_path"]);
@@ -53,6 +54,7 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
     assert_pipeline_metrics_cover_concurrency_range(&artifact, "ssd_stage_then_drain_pipeline");
     assert_pipeline_metrics_cover_concurrency_range(&artifact, "ssd_hdd_pipeline");
     assert_pipeline_metrics_cover_concurrency_range(&artifact, "direct_hdd_pipeline");
+    assert_plot_data(&artifact);
 
     let strategy = artifact["recommendation"]["strategy"]
         .as_str()
@@ -65,6 +67,7 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
         "unexpected recommendation.strategy {strategy}"
     );
     assert_positive_u64(&artifact, &["recommendation", "hdd_concurrency"]);
+    assert_positive_u64(&artifact, &["recommendation", "redundancy"]);
     assert_positive_u64(
         &artifact,
         &["recommendation", "estimated_aggregate_bytes_per_second"],
@@ -124,21 +127,23 @@ fn assert_pipeline_metrics_cover_concurrency_range(artifact: &Value, scenario: &
             );
             assert_positive_u64(row, &["aggregate_assigned_bytes"]);
             assert_positive_u64(row, &["aggregate_write_bytes_per_second"]);
+            assert_positive_u64(row, &["redundancy"]);
+            assert_positive_u64(row, &["queue_capacity"]);
+            assert_positive_u64(row, &["logical_source_bytes"]);
+            assert_positive_u64(row, &["physical_hdd_write_bytes"]);
+            assert_positive_u64(row, &["hdd_write_operations"]);
             assert_number(row, &["slowest_member_seconds"]);
             assert_non_empty_array(row, &["members"]);
 
             let per_disk = row["per_disk"]
                 .as_array()
                 .unwrap_or_else(|| panic!("{scenario}.per_disk is an array"));
-            assert_eq!(
-                per_disk.len(),
-                concurrency as usize,
-                "{scenario}.per_disk length matches concurrency"
-            );
+            assert!(!per_disk.is_empty(), "{scenario}.per_disk is populated");
             for disk in per_disk {
                 assert_string(disk, &["disk_id"]);
                 assert_positive_u64(disk, &["assigned_bytes"]);
                 assert_positive_u64(disk, &["write_bytes_per_second"]);
+                assert_positive_u64(disk, &["write_operations"]);
             }
 
             concurrency
@@ -147,6 +152,22 @@ fn assert_pipeline_metrics_cover_concurrency_range(artifact: &Value, scenario: &
 
     let expected = (1..=max_hdd_concurrency).collect::<BTreeSet<_>>();
     assert_eq!(observed, expected, "{scenario} covers concurrency 1..N");
+}
+
+fn assert_plot_data(artifact: &Value) {
+    assert_eq!(
+        artifact["plot_data"]["schema"],
+        "dasobjectstore.performance_test.plot_data.v1"
+    );
+    for key in [
+        "landing_rate_by_strategy",
+        "elapsed_seconds_by_strategy",
+        "hdd_write_volume_by_strategy",
+        "hdd_write_operations_by_strategy",
+        "per_disk_hdd_write_rate",
+    ] {
+        assert_non_empty_array(&artifact["plot_data"], &[key]);
+    }
 }
 
 fn assert_string(value: &Value, path: &[&str]) {

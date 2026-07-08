@@ -82,6 +82,9 @@ pub(crate) struct PerformanceTestArgs {
     /// Maximum concurrent HDD writes to model.
     #[arg(long, default_value_t = 3)]
     max_hdd_concurrency: usize,
+    /// Number of HDD copies to land for each logical file; accepted values are 1, 2, or 3.
+    #[arg(long, default_value_t = 1)]
+    redundancy: usize,
     /// SSD root to stress; defaults to DASOBJECTSTORE_SSD_ROOT or the packaged root.
     #[arg(long)]
     ssd_root: Option<PathBuf>,
@@ -127,6 +130,10 @@ impl PerformanceTestArgs {
 
     pub(crate) fn max_hdd_concurrency(&self) -> usize {
         self.max_hdd_concurrency
+    }
+
+    pub(crate) fn redundancy(&self) -> usize {
+        self.redundancy
     }
 
     pub(crate) fn ssd_root(&self) -> Option<&Path> {
