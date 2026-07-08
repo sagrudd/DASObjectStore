@@ -41,11 +41,17 @@ This command deliberately creates sustained disk IO. Do not run large
 performance tests while production ingest, repair, drain, or other storage-heavy
 work is active unless that contention is the test scenario.
 
-The SSD scenarios create generated payloads directly under:
+When ``--file_size`` and ``--file_count`` are used, DASObjectStore first
+creates every generated random source file under:
 
 .. code-block:: text
 
-   <ssd-root>/.dasobjectstore/performance-test/<run-id>/
+   <tmp-dir>/dasobjectstore-performance-source-<run-id>/
+
+Those files are then used as a fixed source workload for the SSD and HDD
+benchmark scenarios. This keeps random-data generation out of the measured
+upload/landing phases and avoids per-file generation lag during scenario runs.
+The generated source folder is removed on normal completion or cancellation.
 
 HDD scenarios create temporary benchmark files under the selected disk's
 managed ``.dasobjectstore/performance-test/<run-id>/`` directory. By default,
@@ -268,7 +274,8 @@ Keeping Temporary Files
 
 ``--keep-temp`` leaves benchmark files in place for post-run inspection. This is
 useful for debugging path ownership or filesystem behavior, but it consumes SSD
-and HDD capacity until the matching run directories are removed.
+and HDD capacity until the matching run directories are removed. Generated
+source files under ``--tmp-dir`` are still removed when the command exits.
 
 .. code-block:: console
 

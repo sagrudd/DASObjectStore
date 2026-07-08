@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.11.1 - 2026-07-08
+
+- Change generated ``dasobjectstore performance-test`` workloads to create all
+  random source files up front under ``--tmp-dir`` before measured SSD/HDD
+  benchmark phases begin.
+- Remove generated source files on normal completion or cancellation, including
+  when ``--keep-temp`` is used for benchmark objectstore inspection.
+
 ## 0.11.0 - 2026-07-08
 
 - Add the redesigned Web operator navigation with Home, Enclosures,

@@ -298,7 +298,7 @@ fn run_performance_test(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     require_admin_for_performance_test()?;
-    let workload = plan_performance_workload(args)?;
+    let mut workload = plan_performance_workload(args)?;
     if args.max_hdd_concurrency() == 0 {
         return Err(CliError::CommandFailed(
             "performance-test requires --max-hdd-concurrency greater than 0".to_string(),
@@ -370,6 +370,8 @@ fn run_performance_test(
         .json_artifact()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| report_path.with_extension("json"));
+    let max_concurrency = args.max_hdd_concurrency().min(disks.len()).max(1);
+    let scenario_total = 1 + max_concurrency * 3;
     let reproduction_args = performance_test_reproduction_args(
         args,
         &ssd_root,
@@ -378,6 +380,19 @@ fn run_performance_test(
         &report_path,
     );
     let reproduce_command = shell_join(&reproduction_args);
+    #[cfg(unix)]
+    let _interrupt_guard = UploadInterruptGuard::install();
+
+    let _generated_source = materialize_generated_performance_workload(
+        &mut workload,
+        args.tmp_dir(),
+        &run_id,
+        writer,
+        args.tui(),
+        &report_path,
+        &json_path,
+        scenario_total,
+    )?;
     let generated_at_utc = now_utc_string();
     let repository_revision = git_revision();
     let reproduction_payload = serde_json::json!({
@@ -431,13 +446,9 @@ fn run_performance_test(
         )?;
     }
 
-    let max_concurrency = args.max_hdd_concurrency().min(disks.len()).max(1);
     let total_started = Instant::now();
-    #[cfg(unix)]
-    let _interrupt_guard = UploadInterruptGuard::install();
 
     let result = (|| -> Result<PerformanceBenchmarkResults, CliError> {
-        let scenario_total = 1 + max_concurrency * 3;
         let mut scenario_done = 0_usize;
         if args.tui() {
             render_performance_tui_snapshot(
@@ -1407,6 +1418,150 @@ impl Drop for PerformanceTemporaryObjectStore {
     }
 }
 
+#[derive(Debug)]
+struct PerformanceGeneratedSource {
+    root: PathBuf,
+}
+
+impl PerformanceGeneratedSource {
+    fn new(root: PathBuf) -> Result<Self, CliError> {
+        if root.exists() {
+            fs::remove_dir_all(&root)?;
+        }
+        fs::create_dir_all(&root)?;
+        Ok(Self { root })
+    }
+}
+
+impl Drop for PerformanceGeneratedSource {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn materialize_generated_performance_workload(
+    workload: &mut PerformanceWorkload,
+    tmp_dir: &Path,
+    run_id: &str,
+    writer: &mut dyn Write,
+    tui: bool,
+    report_path: &Path,
+    json_path: &Path,
+    scenario_total: usize,
+) -> Result<Option<PerformanceGeneratedSource>, CliError> {
+    if workload.kind != PerformanceWorkloadKind::Generated {
+        return Ok(None);
+    }
+
+    let source = PerformanceGeneratedSource::new(
+        tmp_dir.join(format!("dasobjectstore-performance-source-{run_id}")),
+    )?;
+    let total_bytes = workload.total_bytes();
+    if !tui {
+        writeln!(
+            writer,
+            "performance-test: generating {} random source file(s), {} total, under {}",
+            workload.file_count(),
+            format_bytes(total_bytes as f64),
+            source.root.display()
+        )?;
+    }
+
+    let mut completed_bytes = 0_u64;
+    let payload_count = workload.file_count();
+    for payload in &mut workload.payloads {
+        check_performance_cancelled()?;
+        let file_index = payload.file_index;
+        let destination = source.root.join(&payload.relative_path);
+        let mut progress = |written: u64, seconds: f64| -> Result<(), CliError> {
+            if tui {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "generating source",
+                        scenario: "source-prep",
+                        activity: format!(
+                            "Generating source file {}/{}",
+                            file_index + 1,
+                            payload_count
+                        ),
+                        objective: "create all generated random source files before benchmark upload begins".to_string(),
+                        bounds: format!(
+                            "generated workload; {} file(s), {} total; source files are removed after completion or cancellation",
+                            payload_count,
+                            format_bytes(total_bytes as f64)
+                        ),
+                        scenario_done: 0,
+                        scenario_total,
+                        file_done: file_index,
+                        current_file: Some(file_index + 1),
+                        file_count: payload_count,
+                        processed_bytes: completed_bytes.saturating_add(written),
+                        total_bytes,
+                        hdd_concurrency: 0,
+                        current_rate: Some(written as f64 / seconds.max(0.001)),
+                        ssd_write_rate: None,
+                        ssd_read_rate: None,
+                        hdd_write_rate: None,
+                        hdd_disk_rates: Vec::new(),
+                        active_hdd_landing: Vec::new(),
+                        aggregate_rate: None,
+                        report_path,
+                        json_path,
+                    },
+                )?;
+            }
+            Ok(())
+        };
+        measure_generate_random_file_with_progress(
+            &destination,
+            payload.size_bytes,
+            file_index,
+            Some(&mut progress),
+            PerformanceCopySyncPolicy::SyncAll,
+        )?;
+        payload.source_path = Some(destination);
+        completed_bytes = completed_bytes.saturating_add(payload.size_bytes);
+    }
+
+    if tui {
+        render_performance_tui_snapshot(
+            writer,
+            &PerformanceTuiSnapshot {
+                phase: "source generation complete",
+                scenario: "source-prep",
+                activity: "Generated source workload is ready for benchmark upload".to_string(),
+                objective: "create all generated random source files before benchmark upload begins"
+                    .to_string(),
+                bounds: format!(
+                    "generated workload; {} file(s), {} total; source files are removed after completion or cancellation",
+                    payload_count,
+                    format_bytes(total_bytes as f64)
+                ),
+                scenario_done: 0,
+                scenario_total,
+                file_done: payload_count,
+                current_file: None,
+                file_count: payload_count,
+                processed_bytes: completed_bytes,
+                total_bytes,
+                hdd_concurrency: 0,
+                current_rate: None,
+                ssd_write_rate: None,
+                ssd_read_rate: None,
+                hdd_write_rate: None,
+                hdd_disk_rates: Vec::new(),
+                active_hdd_landing: Vec::new(),
+                aggregate_rate: None,
+                report_path,
+                json_path,
+            },
+        )?;
+    }
+
+    Ok(Some(source))
+}
+
 #[cfg(unix)]
 fn check_performance_cancelled() -> Result<(), CliError> {
     if UPLOAD_CANCELLED.load(Ordering::SeqCst) {
@@ -1458,7 +1613,7 @@ struct PerformanceTuiContext<'a> {
 }
 
 fn render_performance_tui_snapshot(
-    writer: &mut impl Write,
+    writer: &mut (impl Write + ?Sized),
     snapshot: &PerformanceTuiSnapshot<'_>,
 ) -> Result<(), CliError> {
     let visible_active_landing_rows = snapshot.active_hdd_landing.len().min(8);
@@ -8907,7 +9062,8 @@ mod tests {
     use super::{
         active_hdd_landing_lines, benchmark_ssd_only, benchmark_ssd_pipeline_with_options,
         benchmark_ssd_stage_then_drain, collect_ingest_files, connection_status_from_probe,
-        current_user_group_names, measure_copy_with_progress, measure_copy_with_split_progress,
+        current_user_group_names, materialize_generated_performance_workload,
+        measure_copy_with_progress, measure_copy_with_split_progress,
         measure_ssd_stage_payload_with_progress, parse_binary_size,
         performance_report_metadata_json, performance_sync_all_calls, plan_ssd_residency_batches,
         render_performance_json, render_performance_report, render_performance_tui_snapshot,
@@ -9069,6 +9225,69 @@ mod tests {
             ]
         );
 
+        fs::remove_dir_all(root).expect("cleanup source fixture");
+    }
+
+    #[test]
+    fn generated_performance_workload_materializes_all_sources_up_front_and_cleans_up() {
+        let root = temp_root("performance-generated-source-workload");
+        let mut workload = PerformanceWorkload {
+            kind: PerformanceWorkloadKind::Generated,
+            source_path: None,
+            source_cap_bytes: None,
+            discovered_file_count: 2,
+            discovered_total_bytes: 96,
+            payloads: vec![
+                PerformancePayload {
+                    file_index: 0,
+                    relative_path: PathBuf::from("generated-00000.bin"),
+                    source_path: None,
+                    size_bytes: 32,
+                },
+                PerformancePayload {
+                    file_index: 1,
+                    relative_path: PathBuf::from("generated-00001.bin"),
+                    source_path: None,
+                    size_bytes: 64,
+                },
+            ],
+        };
+        let mut output = Vec::new();
+        let report_path = root.join("report.pdf");
+        let json_path = root.join("report.json");
+
+        let guard = materialize_generated_performance_workload(
+            &mut workload,
+            &root,
+            "unit-run",
+            &mut output,
+            false,
+            &report_path,
+            &json_path,
+            4,
+        )
+        .expect("generated workload materializes")
+        .expect("generated workload returns cleanup guard");
+        let source_root = root.join("dasobjectstore-performance-source-unit-run");
+
+        assert_eq!(guard.root, source_root);
+        assert!(String::from_utf8(output)
+            .expect("utf8 output")
+            .contains("generating 2 random source file(s)"));
+        for payload in &workload.payloads {
+            let source_path = payload.source_path.as_ref().expect("source path assigned");
+            assert!(source_path.starts_with(&source_root));
+            assert_eq!(
+                fs::metadata(source_path).expect("source metadata").len(),
+                payload.size_bytes
+            );
+        }
+
+        drop(guard);
+        assert!(
+            !source_root.exists(),
+            "generated source folder is removed when guard drops"
+        );
         fs::remove_dir_all(root).expect("cleanup source fixture");
     }
 
