@@ -978,6 +978,15 @@ struct PerformanceDiskResult {
 }
 
 #[derive(Clone, Debug)]
+struct PerformanceIoSample {
+    elapsed_second: u64,
+    device_label: String,
+    device_name: String,
+    read_bytes_per_second: u64,
+    write_bytes_per_second: u64,
+}
+
+#[derive(Clone, Debug)]
 struct PerformanceConcurrencyResult {
     concurrency: usize,
     scenario: PerformanceScenarioKind,
@@ -1246,6 +1255,201 @@ fn performance_scenario_bounds(
     }
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DiskIoCounters {
+    read_sectors: u64,
+    write_sectors: u64,
+}
+
+struct PerformanceIoSampler {
+    stop_sender: Option<mpsc::Sender<()>>,
+    handle: Option<thread::JoinHandle<Vec<PerformanceIoSample>>>,
+}
+
+impl PerformanceIoSampler {
+    fn start(devices: Vec<(String, PathBuf)>) -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            let devices = devices
+                .into_iter()
+                .filter_map(|(label, path)| {
+                    diskstats_device_for_path(&path).map(|device_name| (label, device_name))
+                })
+                .collect::<Vec<_>>();
+            if devices.is_empty() {
+                return Self::disabled();
+            }
+            let (stop_sender, stop_receiver) = mpsc::channel::<()>();
+            let handle =
+                thread::spawn(move || sample_disk_io_until_stopped(devices, stop_receiver));
+            Self {
+                stop_sender: Some(stop_sender),
+                handle: Some(handle),
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = devices;
+            Self::disabled()
+        }
+    }
+
+    fn disabled() -> Self {
+        Self {
+            stop_sender: None,
+            handle: None,
+        }
+    }
+
+    fn stop(mut self) -> Vec<PerformanceIoSample> {
+        self.stop_and_join()
+    }
+
+    fn stop_and_join(&mut self) -> Vec<PerformanceIoSample> {
+        if let Some(sender) = self.stop_sender.take() {
+            let _ = sender.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            return handle.join().unwrap_or_default();
+        }
+        Vec::new()
+    }
+}
+
+impl Drop for PerformanceIoSampler {
+    fn drop(&mut self) {
+        let _ = self.stop_and_join();
+    }
+}
+
+fn performance_io_devices(
+    ssd_root: Option<&Path>,
+    hdd_roots: &[(DiskId, PathBuf)],
+) -> Vec<(String, PathBuf)> {
+    let mut devices = Vec::new();
+    if let Some(ssd_root) = ssd_root {
+        devices.push(("ssd".to_string(), ssd_root.to_path_buf()));
+    }
+    devices.extend(
+        hdd_roots
+            .iter()
+            .map(|(disk_id, root)| (disk_id.as_str().to_string(), root.clone())),
+    );
+    devices
+}
+
+#[cfg(target_os = "linux")]
+fn sample_disk_io_until_stopped(
+    devices: Vec<(String, String)>,
+    stop_receiver: mpsc::Receiver<()>,
+) -> Vec<PerformanceIoSample> {
+    let mut samples = Vec::new();
+    let mut previous = read_proc_diskstats().unwrap_or_default();
+    let started = Instant::now();
+    let mut previous_sample_at = started;
+    loop {
+        match stop_receiver.recv_timeout(Duration::from_secs(1)) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let sampled_at = Instant::now();
+        let interval_seconds = sampled_at
+            .duration_since(previous_sample_at)
+            .as_secs_f64()
+            .max(0.001);
+        let current = read_proc_diskstats().unwrap_or_default();
+        let elapsed_second = started.elapsed().as_secs().max(1);
+        for (label, device_name) in &devices {
+            let Some(previous_counters) = previous.get(device_name) else {
+                continue;
+            };
+            let Some(current_counters) = current.get(device_name) else {
+                continue;
+            };
+            samples.push(PerformanceIoSample {
+                elapsed_second,
+                device_label: label.clone(),
+                device_name: device_name.clone(),
+                read_bytes_per_second: ((current_counters
+                    .read_sectors
+                    .saturating_sub(previous_counters.read_sectors)
+                    .saturating_mul(DISKSTAT_SECTOR_BYTES)
+                    as f64)
+                    / interval_seconds)
+                    .round() as u64,
+                write_bytes_per_second: ((current_counters
+                    .write_sectors
+                    .saturating_sub(previous_counters.write_sectors)
+                    .saturating_mul(DISKSTAT_SECTOR_BYTES)
+                    as f64)
+                    / interval_seconds)
+                    .round() as u64,
+            });
+        }
+        previous = current;
+        previous_sample_at = sampled_at;
+    }
+    samples
+}
+
+#[cfg(target_os = "linux")]
+const DISKSTAT_SECTOR_BYTES: u64 = 512;
+
+#[cfg(target_os = "linux")]
+fn read_proc_diskstats() -> io::Result<BTreeMap<String, DiskIoCounters>> {
+    fs::read_to_string("/proc/diskstats").map(|contents| parse_proc_diskstats(&contents))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_diskstats(contents: &str) -> BTreeMap<String, DiskIoCounters> {
+    let mut counters = BTreeMap::new();
+    for line in contents.lines() {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() < 10 {
+            continue;
+        }
+        let Ok(read_sectors) = fields[5].parse::<u64>() else {
+            continue;
+        };
+        let Ok(write_sectors) = fields[9].parse::<u64>() else {
+            continue;
+        };
+        counters.insert(
+            fields[2].to_string(),
+            DiskIoCounters {
+                read_sectors,
+                write_sectors,
+            },
+        );
+    }
+    counters
+}
+
+#[cfg(target_os = "linux")]
+fn diskstats_device_for_path(path: &Path) -> Option<String> {
+    let output = ProcessCommand::new("df")
+        .arg("-P")
+        .arg(path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mount_device = stdout.lines().nth(1)?.split_whitespace().next()?.trim();
+    let device_name = Path::new(mount_device)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(mount_device)
+        .trim_start_matches("/dev/");
+    if device_name.is_empty() {
+        None
+    } else {
+        Some(device_name.to_string())
+    }
+}
+
 #[derive(Clone, Debug)]
 struct PerformanceScenarioResult {
     kind: PerformanceScenarioKind,
@@ -1260,6 +1464,7 @@ struct PerformanceScenarioResult {
     hdd_drain_started_before_all_ssd_staged: bool,
     file_results: Vec<PerformanceFileResult>,
     disk_results: Vec<PerformanceDiskResult>,
+    io_samples: Vec<PerformanceIoSample>,
     concurrency_result: PerformanceConcurrencyResult,
 }
 
@@ -2182,6 +2387,7 @@ fn benchmark_ssd_only(
     tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let io_sampler = PerformanceIoSampler::start(performance_io_devices(Some(ssd_bench_root), &[]));
     let ssd_settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
     let scenario_root = ssd_bench_root.join("ssd-only");
     let residency_budget = performance_ssd_residency_budget(&scenario_root)?;
@@ -2435,6 +2641,7 @@ fn benchmark_ssd_only(
         }
     }
     ssd_settler.finish()?;
+    let io_samples = io_sampler.stop();
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let total_bytes = written_bytes;
     Ok(PerformanceScenarioResult {
@@ -2450,6 +2657,7 @@ fn benchmark_ssd_only(
         hdd_drain_started_before_all_ssd_staged: false,
         file_results,
         disk_results: Vec::new(),
+        io_samples,
         concurrency_result: PerformanceConcurrencyResult {
             concurrency: 0,
             scenario: PerformanceScenarioKind::SsdOnly,
@@ -2472,6 +2680,10 @@ fn benchmark_ssd_stage_then_drain(
     tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let io_sampler = PerformanceIoSampler::start(performance_io_devices(
+        Some(ssd_bench_root),
+        hdd_bench_roots,
+    ));
     let ssd_settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
     let scenario_root = ssd_bench_root
         .join("ssd-stage-then-drain")
@@ -2942,6 +3154,7 @@ fn benchmark_ssd_stage_then_drain(
     }
 
     ssd_settler.finish()?;
+    let io_samples = io_sampler.stop();
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     disk_results.sort_by(|left, right| {
         left.file_index
@@ -2982,6 +3195,7 @@ fn benchmark_ssd_stage_then_drain(
         hdd_drain_started_before_all_ssd_staged: false,
         file_results,
         disk_results,
+        io_samples,
         concurrency_result: PerformanceConcurrencyResult {
             concurrency,
             scenario: PerformanceScenarioKind::SsdStageThenDrain,
@@ -3033,6 +3247,10 @@ fn benchmark_ssd_pipeline_with_options(
     options: SsdPipelineBenchmarkOptions,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let io_sampler = PerformanceIoSampler::start(performance_io_devices(
+        Some(ssd_bench_root),
+        hdd_bench_roots,
+    ));
     let ssd_settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
     let scenario_root = ssd_bench_root
         .join("ssd-pipeline")
@@ -3624,6 +3842,7 @@ fn benchmark_ssd_pipeline_with_options(
         let _ = fs::remove_file(&ssd_path);
     }
     ssd_settler.finish()?;
+    let io_samples = io_sampler.stop();
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let mut disk_results = Arc::try_unwrap(worker_results)
         .map_err(|_| {
@@ -3673,6 +3892,7 @@ fn benchmark_ssd_pipeline_with_options(
             .load(Ordering::SeqCst),
         file_results,
         disk_results,
+        io_samples,
         concurrency_result: PerformanceConcurrencyResult {
             concurrency,
             scenario: PerformanceScenarioKind::SsdPipeline,
@@ -3693,6 +3913,7 @@ fn benchmark_direct_hdd(
     log_progress: bool,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let io_sampler = PerformanceIoSampler::start(performance_io_devices(None, hdd_bench_roots));
     let queue_capacity = hdd_queue_capacity(concurrency, redundancy);
     let scheduler = new_shared_disk_placement_scheduler(hdd_bench_roots)?;
     let (sender, receiver) = mpsc::sync_channel::<DirectHddJob>(queue_capacity);
@@ -3810,6 +4031,7 @@ fn benchmark_direct_hdd(
     if let Some(err) = producer_error.or(worker_error) {
         return Err(err);
     }
+    let io_samples = io_sampler.stop();
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let mut disk_results = Arc::try_unwrap(worker_results)
         .map_err(|_| {
@@ -3857,6 +4079,7 @@ fn benchmark_direct_hdd(
         hdd_drain_started_before_all_ssd_staged: false,
         file_results: Vec::new(),
         disk_results,
+        io_samples,
         concurrency_result: PerformanceConcurrencyResult {
             concurrency,
             scenario: PerformanceScenarioKind::DirectHdd,
@@ -5050,6 +5273,7 @@ fn render_performance_json(report: &PerformanceReport) -> String {
             "hdd_write_volume_by_strategy": hdd_volume_plot_rows(report),
             "hdd_write_operations_by_strategy": hdd_operations_plot_rows(report),
             "per_disk_hdd_write_rate": per_disk_rate_plot_rows(report),
+            "io_time_series": io_time_series_plot_rows(report),
         },
         "daemon_policy": {
             "authoritative": report.authoritative,
@@ -5086,6 +5310,7 @@ fn ssd_only_json(
             "file_size_bytes": file_size,
             "total_bytes": total_source_bytes,
             "files": [],
+            "io_samples": [],
         });
     };
     serde_json::json!({
@@ -5102,6 +5327,7 @@ fn ssd_only_json(
         "median_ssd_read_bytes_per_second": rate_u64(median_rate(
             scenario.file_results.iter().map(|row| throughput(row.ssd_read))
         )),
+        "io_samples": scenario_io_samples_json(scenario),
         "files": scenario.file_results.iter().map(|row| {
             serde_json::json!({
                 "file_index": row.file_index,
@@ -5131,7 +5357,26 @@ fn scenario_concurrency_json(scenario: &PerformanceScenarioResult) -> serde_json
         "slowest_member_seconds": scenario.concurrency_result.slowest_seconds,
         "members": scenario.concurrency_result.members.iter().map(DiskId::as_str).collect::<Vec<_>>(),
         "per_disk": per_disk_json(&scenario.disk_results),
+        "io_samples": scenario_io_samples_json(scenario),
     })
+}
+
+fn scenario_io_samples_json(scenario: &PerformanceScenarioResult) -> Vec<serde_json::Value> {
+    scenario
+        .io_samples
+        .iter()
+        .map(|sample| {
+            serde_json::json!({
+                "elapsed_second": sample.elapsed_second,
+                "device_label": sample.device_label,
+                "device_name": sample.device_name,
+                "read_bytes_per_second": sample.read_bytes_per_second,
+                "write_bytes_per_second": sample.write_bytes_per_second,
+                "read_mib_per_second": sample.read_bytes_per_second as f64 / 1024.0 / 1024.0,
+                "write_mib_per_second": sample.write_bytes_per_second as f64 / 1024.0 / 1024.0,
+            })
+        })
+        .collect()
 }
 
 fn per_disk_json(rows: &[PerformanceDiskResult]) -> Vec<serde_json::Value> {
@@ -5240,6 +5485,27 @@ fn per_disk_rate_plot_rows(report: &PerformanceReport) -> Vec<serde_json::Value>
                 "write_mib_per_second": bytes as f64 / seconds.max(0.001) / 1024.0 / 1024.0,
                 "assigned_gib": bytes as f64 / 1024.0 / 1024.0 / 1024.0,
                 "write_operations": operations,
+            }));
+        }
+    }
+    rows
+}
+
+fn io_time_series_plot_rows(report: &PerformanceReport) -> Vec<serde_json::Value> {
+    let mut rows = Vec::new();
+    for scenario in report.all_scenarios() {
+        for sample in &scenario.io_samples {
+            rows.push(serde_json::json!({
+                "run_id": report.run_id,
+                "scenario": scenario.kind.as_str(),
+                "scenario_label": scenario.kind.label(),
+                "hdd_concurrency": scenario.concurrency,
+                "redundancy": scenario.redundancy,
+                "elapsed_second": sample.elapsed_second,
+                "device_label": sample.device_label,
+                "device_name": sample.device_name,
+                "read_mib_per_second": sample.read_bytes_per_second as f64 / 1024.0 / 1024.0,
+                "write_mib_per_second": sample.write_bytes_per_second as f64 / 1024.0 / 1024.0,
             }));
         }
     }
@@ -5490,7 +5756,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
     }
 
     output.push_str("\n## Quantitative Plot Data\n\n");
-    output.push_str("The JSON artifact includes tidy bar-chart rows under `plot_data` for scientifically labelled Grammateus/floundeR plots. The report bundle also includes deterministic SVG bar charts rendered from the same benchmark rows.\n\n");
+    output.push_str("The JSON artifact includes tidy bar-chart and IO time-series rows under `plot_data` for scientifically labelled Grammateus/floundeR plots. The report bundle also includes deterministic SVG bar charts and per-run IO line charts rendered from the same benchmark rows.\n\n");
     for artifact in performance_chart_artifacts(&report) {
         output.push_str(&format!(
             "![{}]({})\n\n",
@@ -5498,7 +5764,14 @@ fn render_performance_report(report: PerformanceReport) -> String {
             artifact.path.display()
         ));
     }
-    output.push_str("| Plot dataset | Intended bar-chart question |\n");
+    for artifact in performance_io_chart_artifacts(&report) {
+        output.push_str(&format!(
+            "![{}]({})\n\n",
+            artifact.title,
+            artifact.path.display()
+        ));
+    }
+    output.push_str("| Plot dataset | Intended quantitative question |\n");
     output.push_str("| --- | --- |\n");
     output.push_str(
         "| `landing_rate_by_strategy` | Which strategy landed the complete dataset fastest? |\n",
@@ -5507,6 +5780,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
     output.push_str("| `hdd_write_volume_by_strategy` | How much physical HDD data did each strategy write after redundancy? |\n");
     output.push_str("| `hdd_write_operations_by_strategy` | How many write operations did each strategy perform? |\n");
     output.push_str("| `per_disk_hdd_write_rate` | Which disks were faster or slower under the tested configuration? |\n");
+    output.push_str("| `io_time_series` | How did SSD and HDD read/write IO rates change each second during each run? |\n");
 
     output.push_str("\n## Recommendation\n\n");
     output.push_str(&format!(
@@ -5521,7 +5795,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
 
 #[derive(Clone, Debug)]
 struct PerformanceChartArtifact {
-    title: &'static str,
+    title: String,
     path: PathBuf,
 }
 
@@ -5541,10 +5815,32 @@ fn performance_chart_artifacts(report: &PerformanceReport) -> Vec<PerformanceCha
     ]
     .into_iter()
     .map(|(title, suffix)| PerformanceChartArtifact {
-        title,
+        title: title.to_string(),
         path: parent.join(format!("{base}-{suffix}.svg")),
     })
     .collect()
+}
+
+fn performance_io_chart_artifacts(report: &PerformanceReport) -> Vec<PerformanceChartArtifact> {
+    let base = report
+        .pdf_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("performance-report");
+    let parent = report.pdf_path.parent().unwrap_or_else(|| Path::new("."));
+    report
+        .all_scenarios()
+        .into_iter()
+        .filter(|scenario| !scenario.io_samples.is_empty())
+        .map(|scenario| {
+            let scenario_label = performance_chart_scenario_label(scenario);
+            let suffix = scenario_label.replace(' ', "-");
+            PerformanceChartArtifact {
+                title: format!("Per-second IO rates: {scenario_label}"),
+                path: parent.join(format!("{base}-io-{suffix}.svg")),
+            }
+        })
+        .collect()
 }
 
 fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliError> {
@@ -5567,7 +5863,7 @@ fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliErr
     fs::write(
         &artifacts[0].path,
         render_svg_bar_chart(
-            artifacts[0].title,
+            &artifacts[0].title,
             "Tested strategy",
             "Aggregate landing rate (MiB/s)",
             &scenario_rows,
@@ -5586,7 +5882,7 @@ fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliErr
     fs::write(
         &artifacts[1].path,
         render_svg_bar_chart(
-            artifacts[1].title,
+            &artifacts[1].title,
             "Tested strategy",
             "Elapsed time (s)",
             &elapsed_rows,
@@ -5605,7 +5901,7 @@ fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliErr
     fs::write(
         &artifacts[2].path,
         render_svg_bar_chart(
-            artifacts[2].title,
+            &artifacts[2].title,
             "Tested strategy",
             "Physical HDD write volume (GiB)",
             &volume_rows,
@@ -5624,7 +5920,7 @@ fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliErr
     fs::write(
         &artifacts[3].path,
         render_svg_bar_chart(
-            artifacts[3].title,
+            &artifacts[3].title,
             "Tested strategy",
             "HDD write operations",
             &operation_rows,
@@ -5634,12 +5930,26 @@ fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliErr
     fs::write(
         &artifacts[4].path,
         render_svg_bar_chart(
-            artifacts[4].title,
+            &artifacts[4].title,
             "Scenario and disk",
             "HDD write rate (MiB/s)",
             &disk_rows,
         ),
     )?;
+    for (scenario, artifact) in report
+        .all_scenarios()
+        .into_iter()
+        .filter(|scenario| !scenario.io_samples.is_empty())
+        .zip(performance_io_chart_artifacts(report).into_iter())
+    {
+        if let Some(parent) = artifact.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(
+            &artifact.path,
+            render_svg_io_line_chart(&artifact.title, &scenario.io_samples),
+        )?;
+    }
     Ok(())
 }
 
@@ -5748,6 +6058,134 @@ fn render_svg_bar_chart(
         x_axis_label = escape_xml_text(x_label),
         y_label_y = top + plot_height / 2.0,
         y_axis_label = escape_xml_text(y_label),
+    )
+}
+
+fn render_svg_io_line_chart(title: &str, samples: &[PerformanceIoSample]) -> String {
+    let width = 1120.0_f64;
+    let height = 520.0_f64;
+    let left = 86.0_f64;
+    let right = 250.0_f64;
+    let top = 62.0_f64;
+    let bottom = 72.0_f64;
+    let plot_width = width - left - right;
+    let plot_height = height - top - bottom;
+    let axis_y = top + plot_height;
+    let axis_right = left + plot_width;
+    if samples.is_empty() {
+        return format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"{}\" viewBox=\"0 0 {width:.0} {height:.0}\">\n\
+             <rect width=\"{width:.0}\" height=\"{height:.0}\" fill=\"#ffffff\"/>\n\
+             <text x=\"24\" y=\"36\" font-family=\"Arial, sans-serif\" font-size=\"18\" font-weight=\"700\" fill=\"#111\">{}</text>\n\
+             <text x=\"24\" y=\"74\" font-family=\"Arial, sans-serif\" font-size=\"13\" fill=\"#555\">No per-second IO samples were captured for this run.</text>\n\
+             </svg>\n",
+            escape_xml_text(title),
+            escape_xml_text(title),
+        );
+    }
+    let max_second = samples
+        .iter()
+        .map(|sample| sample.elapsed_second)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let max_mib = samples
+        .iter()
+        .flat_map(|sample| {
+            [
+                sample.read_bytes_per_second as f64 / 1024.0 / 1024.0,
+                sample.write_bytes_per_second as f64 / 1024.0 / 1024.0,
+            ]
+        })
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let palette = [
+        "#2f5d50", "#2f6f8f", "#8f5d2f", "#5f548a", "#6f7f35", "#9a4f68", "#49728f", "#7b6230",
+    ];
+    let by_device = samples.iter().fold(
+        BTreeMap::<String, Vec<&PerformanceIoSample>>::new(),
+        |mut by_device, sample| {
+            by_device
+                .entry(sample.device_label.clone())
+                .or_default()
+                .push(sample);
+            by_device
+        },
+    );
+    let mut marks = String::new();
+    let mut legend = String::new();
+    for (idx, (label, device_samples)) in by_device.iter().enumerate() {
+        let color = palette[idx % palette.len()];
+        let mut read_points = String::new();
+        let mut write_points = String::new();
+        let mut point_marks = String::new();
+        for sample in device_samples {
+            let x = left + (sample.elapsed_second as f64 / max_second as f64) * plot_width;
+            let read_mib = sample.read_bytes_per_second as f64 / 1024.0 / 1024.0;
+            let write_mib = sample.write_bytes_per_second as f64 / 1024.0 / 1024.0;
+            let read_y = axis_y - (read_mib / max_mib) * plot_height;
+            let write_y = axis_y - (write_mib / max_mib) * plot_height;
+            read_points.push_str(&format!("{x:.1},{read_y:.1} "));
+            write_points.push_str(&format!("{x:.1},{write_y:.1} "));
+            point_marks.push_str(&format!(
+                "<circle cx=\"{x:.1}\" cy=\"{write_y:.1}\" r=\"2.7\" fill=\"{color}\"/>\n\
+                 <circle cx=\"{x:.1}\" cy=\"{read_y:.1}\" r=\"2.7\" fill=\"#ffffff\" stroke=\"{color}\" stroke-width=\"1.4\"/>\n"
+            ));
+        }
+        marks.push_str(&format!(
+            "<polyline points=\"{}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"2.0\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>\n\
+             <polyline points=\"{}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"2.0\" stroke-dasharray=\"6 5\" stroke-linejoin=\"round\" stroke-linecap=\"round\"/>\n",
+            escape_xml_text(write_points.trim()),
+            escape_xml_text(read_points.trim()),
+        ));
+        marks.push_str(&point_marks);
+        let legend_y = top + 30.0 + idx as f64 * 42.0;
+        legend.push_str(&format!(
+            "<line x1=\"{legend_x:.1}\" y1=\"{write_y:.1}\" x2=\"{legend_line_x:.1}\" y2=\"{write_y:.1}\" stroke=\"{color}\" stroke-width=\"2\"/>\n\
+             <line x1=\"{legend_x:.1}\" y1=\"{read_y:.1}\" x2=\"{legend_line_x:.1}\" y2=\"{read_y:.1}\" stroke=\"{color}\" stroke-width=\"2\" stroke-dasharray=\"6 5\"/>\n\
+             <text x=\"{legend_text_x:.1}\" y=\"{label_y:.1}\" font-family=\"Arial, sans-serif\" font-size=\"11\" fill=\"#222\">{label}</text>\n\
+             <text x=\"{legend_text_x:.1}\" y=\"{read_label_y:.1}\" font-family=\"Arial, sans-serif\" font-size=\"10\" fill=\"#666\">solid write, dashed read</text>\n",
+            legend_x = axis_right + 26.0,
+            legend_line_x = axis_right + 56.0,
+            legend_text_x = axis_right + 66.0,
+            write_y = legend_y,
+            read_y = legend_y + 12.0,
+            label_y = legend_y + 4.0,
+            read_label_y = legend_y + 18.0,
+            label = escape_xml_text(label),
+        ));
+    }
+    let tick_mid = max_mib / 2.0;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"{}\" viewBox=\"0 0 {width:.0} {height:.0}\">\n\
+         <rect width=\"{width:.0}\" height=\"{height:.0}\" fill=\"#ffffff\"/>\n\
+         <text x=\"24\" y=\"34\" font-family=\"Arial, sans-serif\" font-size=\"18\" font-weight=\"700\" fill=\"#111\">{}</text>\n\
+         <line x1=\"{left:.1}\" y1=\"{axis_y:.1}\" x2=\"{axis_right:.1}\" y2=\"{axis_y:.1}\" stroke=\"#111\" stroke-width=\"1.2\"/>\n\
+         <line x1=\"{left:.1}\" y1=\"{top:.1}\" x2=\"{left:.1}\" y2=\"{axis_y:.1}\" stroke=\"#111\" stroke-width=\"1.2\"/>\n\
+         <line x1=\"{left:.1}\" y1=\"{mid_y:.1}\" x2=\"{axis_right:.1}\" y2=\"{mid_y:.1}\" stroke=\"#d9ddd2\" stroke-width=\"1\"/>\n\
+         <line x1=\"{left:.1}\" y1=\"{top:.1}\" x2=\"{axis_right:.1}\" y2=\"{top:.1}\" stroke=\"#edf0ea\" stroke-width=\"1\"/>\n\
+         <text x=\"{tick_x:.1}\" y=\"{axis_y:.1}\" text-anchor=\"end\" font-family=\"Arial, sans-serif\" font-size=\"10\" fill=\"#555\">0</text>\n\
+         <text x=\"{tick_x:.1}\" y=\"{mid_text_y:.1}\" text-anchor=\"end\" font-family=\"Arial, sans-serif\" font-size=\"10\" fill=\"#555\">{tick_mid:.1}</text>\n\
+         <text x=\"{tick_x:.1}\" y=\"{top_text_y:.1}\" text-anchor=\"end\" font-family=\"Arial, sans-serif\" font-size=\"10\" fill=\"#555\">{max_mib:.1}</text>\n\
+         <text x=\"{left:.1}\" y=\"{x_tick_y:.1}\" text-anchor=\"middle\" font-family=\"Arial, sans-serif\" font-size=\"10\" fill=\"#555\">0s</text>\n\
+         <text x=\"{axis_right:.1}\" y=\"{x_tick_y:.1}\" text-anchor=\"middle\" font-family=\"Arial, sans-serif\" font-size=\"10\" fill=\"#555\">{max_second}s</text>\n\
+         {marks}\
+         {legend}\
+         <text x=\"{x_label_x:.1}\" y=\"{x_label_y:.1}\" text-anchor=\"middle\" font-family=\"Arial, sans-serif\" font-size=\"13\" fill=\"#111\">Elapsed time (s)</text>\n\
+         <text transform=\"translate(22 {y_label_y:.1}) rotate(-90)\" text-anchor=\"middle\" font-family=\"Arial, sans-serif\" font-size=\"13\" fill=\"#111\">IO rate (MiB/s)</text>\n\
+         </svg>\n",
+        escape_xml_text(title),
+        escape_xml_text(title),
+        mid_y = top + plot_height / 2.0,
+        tick_x = left - 8.0,
+        mid_text_y = top + plot_height / 2.0 + 4.0,
+        top_text_y = top + 4.0,
+        x_tick_y = axis_y + 18.0,
+        marks = marks,
+        legend = legend,
+        x_label_x = left + plot_width / 2.0,
+        x_label_y = height - 20.0,
+        y_label_y = top + plot_height / 2.0,
     )
 }
 
@@ -9500,12 +9938,12 @@ mod tests {
         write_pretty_report, zero_measurement, ActiveHddWrite, ActiveHddWriteMap, CliError,
         ConnectionAssessment, DiskHealthSummary, DiskPlacementScheduler, HealthReport,
         ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
-        PerformanceDiskResult, PerformanceFileResult, PerformanceLiveRateCounters,
-        PerformanceMeasurement, PerformancePayload, PerformanceRecommendation, PerformanceReport,
-        PerformanceScenarioKind, PerformanceScenarioResult, PerformanceSsdResidencyBudget,
-        PerformanceSsdSettler, PerformanceTuiSnapshot, PerformanceWorkload,
-        PerformanceWorkloadKind, SsdPipelineBenchmarkOptions, SsdPipelineJob,
-        PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
+        PerformanceDiskResult, PerformanceFileResult, PerformanceIoSample,
+        PerformanceLiveRateCounters, PerformanceMeasurement, PerformancePayload,
+        PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
+        PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceSsdSettler,
+        PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
+        SsdPipelineBenchmarkOptions, SsdPipelineJob, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
     use crate::cli::{Cli, PerformanceFileSelection};
     use clap::Parser;
@@ -10618,6 +11056,8 @@ mod tests {
         assert!(
             report.contains("| ssd-overlap-drain | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s | yes |")
         );
+        assert!(report.contains("io_time_series"));
+        assert!(report.contains("Per-second IO rates: ssd-overlap-drain c2 r2"));
         assert!(report.contains("Use `ssd-overlap-drain` with 2 HDD worker(s)"));
         assert!(render_simple_pdf(&report).starts_with(b"%PDF-1.4"));
     }
@@ -10639,6 +11079,52 @@ mod tests {
         assert!(svg.contains("Aggregate landing rate (MiB/s)"));
         assert!(svg.contains("ssd-overlap-drain c2 r2"));
         assert!(svg.contains("<rect"));
+    }
+
+    #[test]
+    fn performance_io_line_chart_renders_per_device_read_and_write_series() {
+        let svg = super::render_svg_io_line_chart(
+            "Per-second IO rates: ssd-overlap-drain c2 r1",
+            &[
+                PerformanceIoSample {
+                    elapsed_second: 1,
+                    device_label: "ssd".to_string(),
+                    device_name: "nvme0n1".to_string(),
+                    read_bytes_per_second: 2 * 1024 * 1024,
+                    write_bytes_per_second: 4 * 1024 * 1024,
+                },
+                PerformanceIoSample {
+                    elapsed_second: 2,
+                    device_label: "qnap-1057".to_string(),
+                    device_name: "sda".to_string(),
+                    read_bytes_per_second: 0,
+                    write_bytes_per_second: 128 * 1024 * 1024,
+                },
+            ],
+        );
+
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("<polyline"));
+        assert!(svg.contains("Per-second IO rates"));
+        assert!(svg.contains("qnap-1057"));
+        assert!(svg.contains("solid write, dashed read"));
+        assert!(svg.contains("IO rate (MiB/s)"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn diskstats_parser_extracts_read_and_write_sector_counters() {
+        let counters = parse_proc_diskstats(
+            "   8       0 sda 157698 0 8822930 92744 100003 0 4194304 112233 0 0 0 0 0 0 0 0 0\n",
+        );
+
+        assert_eq!(
+            counters.get("sda"),
+            Some(&DiskIoCounters {
+                read_sectors: 8_822_930,
+                write_sectors: 4_194_304,
+            })
+        );
     }
 
     #[test]
@@ -10765,6 +11251,18 @@ mod tests {
                 .count(),
             3
         );
+        assert!(artifact["plot_data"]["io_time_series"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["device_label"] == "ssd"
+                && row["scenario"] == "ssd-overlap-drain"
+                && row["write_mib_per_second"].as_f64().unwrap() > 0.0));
+        assert_eq!(
+            artifact["scenarios"]["ssd_hdd_pipeline"]["concurrency"][0]["io_samples"][0]
+                ["device_name"],
+            "nvme0n1"
+        );
     }
 
     #[test]
@@ -10827,6 +11325,22 @@ mod tests {
                 seconds: 0.25,
             },
         };
+        let io_samples = vec![
+            PerformanceIoSample {
+                elapsed_second: 1,
+                device_label: "ssd".to_string(),
+                device_name: "nvme0n1".to_string(),
+                read_bytes_per_second: 2_097_152,
+                write_bytes_per_second: 4_194_304,
+            },
+            PerformanceIoSample {
+                elapsed_second: 1,
+                device_label: "disk-a".to_string(),
+                device_name: "sda".to_string(),
+                read_bytes_per_second: 0,
+                write_bytes_per_second: 1_048_576,
+            },
+        ];
         let ssd_only = PerformanceScenarioResult {
             kind: PerformanceScenarioKind::SsdOnly,
             concurrency: 0,
@@ -10840,6 +11354,7 @@ mod tests {
             hdd_drain_started_before_all_ssd_staged: false,
             file_results: vec![ssd_file.clone()],
             disk_results: Vec::new(),
+            io_samples: io_samples.clone(),
             concurrency_result: PerformanceConcurrencyResult {
                 concurrency: 0,
                 scenario: PerformanceScenarioKind::SsdOnly,
@@ -10893,6 +11408,7 @@ mod tests {
                     },
                 },
             ],
+            io_samples: io_samples.clone(),
             concurrency_result: PerformanceConcurrencyResult {
                 concurrency: 1,
                 scenario: PerformanceScenarioKind::SsdStageThenDrain,
@@ -10929,6 +11445,7 @@ mod tests {
                     seconds: 1.0,
                 },
             }],
+            io_samples: io_samples.clone(),
             concurrency_result: PerformanceConcurrencyResult {
                 concurrency: 1,
                 scenario: PerformanceScenarioKind::SsdPipeline,
@@ -10982,6 +11499,7 @@ mod tests {
                     },
                 },
             ],
+            io_samples: io_samples.clone(),
             concurrency_result: PerformanceConcurrencyResult {
                 concurrency: 2,
                 scenario: PerformanceScenarioKind::SsdPipeline,
@@ -11015,6 +11533,7 @@ mod tests {
                     seconds: 2.0,
                 },
             }],
+            io_samples: io_samples.clone(),
             concurrency_result: PerformanceConcurrencyResult {
                 concurrency: 1,
                 scenario: PerformanceScenarioKind::DirectHdd,
@@ -11062,6 +11581,7 @@ mod tests {
                     },
                 },
             ],
+            io_samples,
             concurrency_result: PerformanceConcurrencyResult {
                 concurrency: 2,
                 scenario: PerformanceScenarioKind::DirectHdd,

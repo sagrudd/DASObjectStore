@@ -5,7 +5,7 @@
     "run_id": "dasobjectstore-performance-20260708T120000Z",
     "generated_at_utc": "2026-07-08T12:00:00Z",
     "repository_revision": "abc1234",
-    "cli_version": "0.8.0",
+    "cli_version": "0.18.0",
     "command": [
       "dasobjectstore",
       "performance-test",
@@ -29,7 +29,18 @@
       "discovered_total_bytes": 10737418240,
       "max_hdd_concurrency": 2,
       "redundancy": 2,
-      "keep_temp": false
+      "keep_temp": false,
+      "file_selection": "random",
+      "selected_scenarios": [
+        "ssd-only",
+        "ssd-stage-then-drain",
+        "ssd-overlap-drain",
+        "direct-hdd"
+      ],
+      "selected_hdd_concurrency": [
+        1,
+        2
+      ]
     },
     "artifacts": {
       "pdf_path": "/var/lib/dasobjectstore/reports/performance.pdf",
@@ -73,6 +84,18 @@
           "ssd_write_bytes_per_second": 1258291200,
           "ssd_read_bytes_per_second": 1468006400
         }
+      ],
+      "selected": true,
+      "io_samples": [
+        {
+          "elapsed_second": 1,
+          "device_label": "ssd",
+          "device_name": "nvme0n1",
+          "read_bytes_per_second": 734003200,
+          "write_bytes_per_second": 1258291200,
+          "read_mib_per_second": 700.0,
+          "write_mib_per_second": 1200.0
+        }
       ]
     },
     "ssd_stage_then_drain_pipeline": {
@@ -90,7 +113,10 @@
           "aggregate_write_bytes_per_second": 209715200,
           "hdd_drain_started_before_all_ssd_staged": false,
           "slowest_member_seconds": 5.12,
-          "members": ["disk-a", "disk-b"],
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
           "per_disk": [
             {
               "disk_id": "disk-a",
@@ -103,6 +129,35 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 157286400,
               "write_operations": 10
+            }
+          ],
+          "io_samples": [
+            {
+              "elapsed_second": 1,
+              "device_label": "ssd",
+              "device_name": "nvme0n1",
+              "read_bytes_per_second": 734003200,
+              "write_bytes_per_second": 1258291200,
+              "read_mib_per_second": 700.0,
+              "write_mib_per_second": 1200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-a",
+              "device_name": "sda",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 209715200,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-b",
+              "device_name": "sdb",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 157286400,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 150.0
             }
           ]
         },
@@ -118,7 +173,10 @@
           "aggregate_write_bytes_per_second": 367001600,
           "hdd_drain_started_before_all_ssd_staged": false,
           "slowest_member_seconds": 5.85,
-          "members": ["disk-a", "disk-b"],
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
           "per_disk": [
             {
               "disk_id": "disk-a",
@@ -132,9 +190,39 @@
               "write_bytes_per_second": 157286400,
               "write_operations": 10
             }
+          ],
+          "io_samples": [
+            {
+              "elapsed_second": 1,
+              "device_label": "ssd",
+              "device_name": "nvme0n1",
+              "read_bytes_per_second": 734003200,
+              "write_bytes_per_second": 1258291200,
+              "read_mib_per_second": 700.0,
+              "write_mib_per_second": 1200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-a",
+              "device_name": "sda",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 209715200,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-b",
+              "device_name": "sdb",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 157286400,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 150.0
+            }
           ]
         }
-      ]
+      ],
+      "selected": true
     },
     "ssd_hdd_pipeline": {
       "description": "Source payloads are staged to SSD and FIFO HDD drain begins as soon as staged files are available, overlapping SSD reads and writes.",
@@ -151,7 +239,10 @@
           "aggregate_write_bytes_per_second": 262144000,
           "hdd_drain_started_before_all_ssd_staged": true,
           "slowest_member_seconds": 5.12,
-          "members": ["disk-a", "disk-b"],
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
           "per_disk": [
             {
               "disk_id": "disk-a",
@@ -164,6 +255,35 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 157286400,
               "write_operations": 10
+            }
+          ],
+          "io_samples": [
+            {
+              "elapsed_second": 1,
+              "device_label": "ssd",
+              "device_name": "nvme0n1",
+              "read_bytes_per_second": 734003200,
+              "write_bytes_per_second": 1258291200,
+              "read_mib_per_second": 700.0,
+              "write_mib_per_second": 1200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-a",
+              "device_name": "sda",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 209715200,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-b",
+              "device_name": "sdb",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 157286400,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 150.0
             }
           ]
         },
@@ -179,7 +299,10 @@
           "aggregate_write_bytes_per_second": 419430400,
           "hdd_drain_started_before_all_ssd_staged": true,
           "slowest_member_seconds": 5.85,
-          "members": ["disk-a", "disk-b"],
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
           "per_disk": [
             {
               "disk_id": "disk-a",
@@ -193,9 +316,39 @@
               "write_bytes_per_second": 157286400,
               "write_operations": 10
             }
+          ],
+          "io_samples": [
+            {
+              "elapsed_second": 1,
+              "device_label": "ssd",
+              "device_name": "nvme0n1",
+              "read_bytes_per_second": 734003200,
+              "write_bytes_per_second": 1258291200,
+              "read_mib_per_second": 700.0,
+              "write_mib_per_second": 1200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-a",
+              "device_name": "sda",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 209715200,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-b",
+              "device_name": "sdb",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 157286400,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 150.0
+            }
           ]
         }
-      ]
+      ],
+      "selected": true
     },
     "direct_hdd_pipeline": {
       "description": "Source payloads are written directly to selected HDD members without SSD staging.",
@@ -212,7 +365,10 @@
           "aggregate_write_bytes_per_second": 188743680,
           "hdd_drain_started_before_all_ssd_staged": false,
           "slowest_member_seconds": 7.88,
-          "members": ["disk-a", "disk-b"],
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
           "per_disk": [
             {
               "disk_id": "disk-a",
@@ -225,6 +381,35 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 104857600,
               "write_operations": 10
+            }
+          ],
+          "io_samples": [
+            {
+              "elapsed_second": 1,
+              "device_label": "ssd",
+              "device_name": "nvme0n1",
+              "read_bytes_per_second": 734003200,
+              "write_bytes_per_second": 1258291200,
+              "read_mib_per_second": 700.0,
+              "write_mib_per_second": 1200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-a",
+              "device_name": "sda",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 209715200,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-b",
+              "device_name": "sdb",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 157286400,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 150.0
             }
           ]
         },
@@ -240,7 +425,10 @@
           "aggregate_write_bytes_per_second": 241172480,
           "hdd_drain_started_before_all_ssd_staged": false,
           "slowest_member_seconds": 8.9,
-          "members": ["disk-a", "disk-b"],
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
           "per_disk": [
             {
               "disk_id": "disk-a",
@@ -254,9 +442,39 @@
               "write_bytes_per_second": 104857600,
               "write_operations": 10
             }
+          ],
+          "io_samples": [
+            {
+              "elapsed_second": 1,
+              "device_label": "ssd",
+              "device_name": "nvme0n1",
+              "read_bytes_per_second": 734003200,
+              "write_bytes_per_second": 1258291200,
+              "read_mib_per_second": 700.0,
+              "write_mib_per_second": 1200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-a",
+              "device_name": "sda",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 209715200,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 200.0
+            },
+            {
+              "elapsed_second": 1,
+              "device_label": "disk-b",
+              "device_name": "sdb",
+              "read_bytes_per_second": 0,
+              "write_bytes_per_second": 157286400,
+              "read_mib_per_second": 0.0,
+              "write_mib_per_second": 150.0
+            }
           ]
         }
-      ]
+      ],
+      "selected": true
     }
   },
   "recommendation": {
@@ -345,6 +563,224 @@
         "write_mib_per_second": 150.0,
         "assigned_gib": 10.0,
         "write_operations": 10
+      }
+    ],
+    "io_time_series": [
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-stage-then-drain",
+        "scenario_label": "SSD stage then HDD drain",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "ssd",
+        "device_name": "nvme0n1",
+        "read_mib_per_second": 700.0,
+        "write_mib_per_second": 1200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-stage-then-drain",
+        "scenario_label": "SSD stage then HDD drain",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-a",
+        "device_name": "sda",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-stage-then-drain",
+        "scenario_label": "SSD stage then HDD drain",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-b",
+        "device_name": "sdb",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 150.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-stage-then-drain",
+        "scenario_label": "SSD stage then HDD drain",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "ssd",
+        "device_name": "nvme0n1",
+        "read_mib_per_second": 700.0,
+        "write_mib_per_second": 1200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-stage-then-drain",
+        "scenario_label": "SSD stage then HDD drain",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-a",
+        "device_name": "sda",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-stage-then-drain",
+        "scenario_label": "SSD stage then HDD drain",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-b",
+        "device_name": "sdb",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 150.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-overlap-drain",
+        "scenario_label": "SSD ingest with overlapping HDD drain",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "ssd",
+        "device_name": "nvme0n1",
+        "read_mib_per_second": 700.0,
+        "write_mib_per_second": 1200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-overlap-drain",
+        "scenario_label": "SSD ingest with overlapping HDD drain",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-a",
+        "device_name": "sda",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-overlap-drain",
+        "scenario_label": "SSD ingest with overlapping HDD drain",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-b",
+        "device_name": "sdb",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 150.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-overlap-drain",
+        "scenario_label": "SSD ingest with overlapping HDD drain",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "ssd",
+        "device_name": "nvme0n1",
+        "read_mib_per_second": 700.0,
+        "write_mib_per_second": 1200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-overlap-drain",
+        "scenario_label": "SSD ingest with overlapping HDD drain",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-a",
+        "device_name": "sda",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "ssd-overlap-drain",
+        "scenario_label": "SSD ingest with overlapping HDD drain",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-b",
+        "device_name": "sdb",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 150.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "direct-hdd",
+        "scenario_label": "Direct source-to-HDD ingest",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "ssd",
+        "device_name": "nvme0n1",
+        "read_mib_per_second": 700.0,
+        "write_mib_per_second": 1200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "direct-hdd",
+        "scenario_label": "Direct source-to-HDD ingest",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-a",
+        "device_name": "sda",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "direct-hdd",
+        "scenario_label": "Direct source-to-HDD ingest",
+        "hdd_concurrency": 1,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-b",
+        "device_name": "sdb",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 150.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "direct-hdd",
+        "scenario_label": "Direct source-to-HDD ingest",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "ssd",
+        "device_name": "nvme0n1",
+        "read_mib_per_second": 700.0,
+        "write_mib_per_second": 1200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "direct-hdd",
+        "scenario_label": "Direct source-to-HDD ingest",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-a",
+        "device_name": "sda",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 200.0
+      },
+      {
+        "run_id": "dasobjectstore-performance-20260708T120000Z",
+        "scenario": "direct-hdd",
+        "scenario_label": "Direct source-to-HDD ingest",
+        "hdd_concurrency": 2,
+        "redundancy": 2,
+        "elapsed_second": 1,
+        "device_label": "disk-b",
+        "device_name": "sdb",
+        "read_mib_per_second": 0.0,
+        "write_mib_per_second": 150.0
       }
     ]
   },

@@ -25,6 +25,8 @@ For either generated files or an existing source folder, the command records:
 * direct source-to-HDD throughput for the same concurrency range;
 * per-disk assigned bytes and write rates from the scheduler's actual placement
   decisions;
+* per-second block-device IO rates for the SSD and each managed HDD member used
+  by a benchmark scenario, where the host exposes Linux ``/proc/diskstats``;
 * redundancy effects when each logical file is landed to one, two, or three
   distinct HDD members;
 * a recommendation for future ingest strategy and HDD settlement concurrency.
@@ -371,12 +373,16 @@ The PDF report includes:
 * the concurrency result table;
 * the names of the tidy quantitative plot datasets embedded in the JSON
   artifact;
+* per-run IO line charts showing read and write MiB/s over elapsed time for the
+  SSD and each sampled enclosure HDD member;
 * the generated recommendation.
 
 The command also writes:
 
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
 * ``<report-stem>-*.svg`` quantitative bar-chart artifacts embedded into the
+  PDF report when the renderer supports local images;
+* ``<report-stem>-io-*.svg`` per-run IO line-chart artifacts embedded into the
   PDF report when the renderer supports local images;
 * a temporary Markdown source under ``--tmp-dir`` only while rendering the PDF.
 
@@ -399,8 +405,9 @@ The JSON artifact is intended for automation and audit ingestion. It should
 include the run ID, generation timestamp, CLI version, repository revision,
 input parameters, discovered disks, PDF/QR artifact paths, per-file SSD
 measurements, per-disk assigned bytes and HDD write rates, concurrency scenario
-rows, and the generated recommendation. Keep it with the PDF and QR SVG files
-for a complete evidence bundle.
+rows, per-second IO samples, and the generated recommendation. Keep it with the
+PDF, QR SVG, bar-chart SVG, and IO line-chart SVG files for a complete evidence
+bundle.
 
 Recommendation JSON Contract
 ----------------------------
@@ -430,7 +437,8 @@ The artifact records:
   to ``N``, with the same aggregate and per-disk fields;
 * a ``plot_data`` block with tidy bar-chart rows for strategy landing rate,
   elapsed time, physical HDD write volume, HDD write operations, and per-disk
-  HDD write rates;
+  HDD write rates, plus ``io_time_series`` rows for read/write MiB/s by
+  scenario, elapsed second, and sampled device;
 * the recommended ingress strategy, HDD concurrency, estimated aggregate rate,
   whether SSD drain-read throughput appears limiting, and short rationale
   strings;
@@ -444,6 +452,22 @@ bytes-per-second. Display-friendly strings in the PDF report are not a
 substitute for these numeric fields. A representative contract fixture is
 maintained at
 ``docs/user/examples/performance-recommendation.v1.json``.
+
+IO Sampling
+-----------
+
+On Linux hosts, ``performance-test`` samples ``/proc/diskstats`` once per
+second for the block devices backing the benchmark SSD root and managed HDD
+member roots used by each scenario. The sampler records read and write byte
+deltas as scenario-local elapsed-second rows. These samples are best-effort:
+if a path cannot be resolved to a diskstats device, or if the platform does not
+provide ``/proc/diskstats``, the benchmark still runs and the affected
+``io_samples`` and ``plot_data.io_time_series`` rows are absent.
+
+In the generated SVG line charts, solid lines represent writes and dashed lines
+represent reads. The intent is to show whether SSD reads fall during HDD drain,
+whether HDD writes are balanced across enclosure members, and whether specific
+benchmark strategies create avoidable IO stalls.
 
 During ``--tui`` runs the dashboard shows the active scenario objective and
 SSD residency bounds. SSD-backed scenarios are bounded by measured available

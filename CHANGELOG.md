@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.18.0 - 2026-07-08
+
+- Add per-second Linux block-device IO sampling to ``dasobjectstore
+  performance-test`` for the SSD and managed HDD roots used by each scenario.
+- Record scenario ``io_samples`` and tidy ``plot_data.io_time_series`` rows in
+  the performance JSON artifact for downstream policy analysis and plotting.
+- Render per-run IO SVG line charts in the performance report bundle with
+  solid write lines and dashed read lines.
+
 ## 0.17.0 - 2026-07-08
 
 - Extend the Web ObjectStores dashboard card contract with object type,
