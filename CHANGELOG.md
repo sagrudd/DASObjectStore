@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.20.0 - 2026-07-08
+
+- Add ``dasobjectstore performance-test --file_order`` with ``fifo``,
+  ``size_asc``, ``size_desc``, ``time_asc``, and ``time_desc`` upload order
+  policies; ``size_desc`` is now the default benchmark order.
+- Allow repeated or comma-delimited file-order sweeps so one benchmark run can
+  compare FIFO and largest-first landing against the same scenario matrix.
+- Record file orders in performance-test reproduction payloads, JSON scenario
+  rows, tidy plot data, authoritative recommendations, and PDF reports.
+
 ## 0.19.2 - 2026-07-08
 
 - Keep ``performance-test --tui`` responsive during large HDD landing by

@@ -132,10 +132,48 @@ runs:
    Select larger files first until the cap budget is exhausted. This is useful
    when benchmarking POD5, BAM/CRAM, or other large-object cohorts.
 
-After the subset is selected, benchmark execution uses sorted relative-path FIFO
-order for the chosen files so SSD staging and HDD drainage remain comparable
-across scenario classes. If no file can fit inside the cap, the command exits
-without running a benchmark.
+After the subset is selected, ``--file_order`` decides the order in which the
+chosen files are uploaded during each scenario. The default is ``size_desc`` so
+large POD5/BAM/CRAM files are staged and settled early during commissioning
+runs. Accepted values are:
+
+``fifo``
+   Preserve sorted relative-path FIFO source order.
+
+``size_asc``
+   Upload smaller files first.
+
+``size_desc``
+   Default. Upload larger files first.
+
+``time_asc``
+   Upload older files first by source modification time.
+
+``time_desc``
+   Upload newer files first by source modification time.
+
+``--file_order`` may be repeated, or supplied as a comma-separated list, to run
+the same scenario matrix as a sweep across multiple upload orders. This is
+useful when comparing FIFO with largest-first landing for datasets containing a
+small number of very large files:
+
+.. code-block:: console
+
+   sudo dasobjectstore performance-test \
+     --source /data/zymo_fecal_2025.05 \
+     --cap 250GiB \
+     --scenario ssd-overlap-drain \
+     --hdd-concurrency 1,3,5 \
+     --file_order fifo,size_desc \
+     --tui \
+     --report /var/lib/dasobjectstore/reports/performance-zymo-order-sweep.pdf \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-order-sweep.json
+
+The PDF report, reproduction payload, and JSON artifact record the requested
+``file_orders``. Each scenario result, plot row, and authoritative
+recommendation also records the concrete ``file_order`` that produced the
+measurement. If no file can fit inside the cap, the command exits without
+running a benchmark.
 
 Basic Smoke Test
 ----------------

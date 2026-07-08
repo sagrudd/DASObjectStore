@@ -102,6 +102,15 @@ pub(crate) struct PerformanceTestArgs {
         default_value_t = PerformanceFileSelection::Random
     )]
     file_select: PerformanceFileSelection,
+    /// File upload order for generated or selected source workloads.
+    #[arg(
+        long = "file_order",
+        alias = "file-order",
+        value_enum,
+        value_delimiter = ',',
+        num_args = 1..
+    )]
+    file_order: Vec<PerformanceFileOrder>,
     /// Maximum concurrent HDD writes to model.
     #[arg(long, default_value_t = 3)]
     max_hdd_concurrency: usize,
@@ -162,6 +171,36 @@ pub(crate) enum PerformanceFileSelection {
     Larger,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, ValueEnum)]
+pub(crate) enum PerformanceFileOrder {
+    /// Preserve FIFO source order by relative path.
+    Fifo,
+    /// Upload smaller files first.
+    #[value(alias = "size_asc")]
+    SizeAsc,
+    /// Upload larger files first.
+    #[value(alias = "size_desc")]
+    SizeDesc,
+    /// Upload older files first by source modification time.
+    #[value(alias = "time_asc")]
+    TimeAsc,
+    /// Upload newer files first by source modification time.
+    #[value(alias = "time_desc")]
+    TimeDesc,
+}
+
+impl PerformanceFileOrder {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fifo => "fifo",
+            Self::SizeAsc => "size_asc",
+            Self::SizeDesc => "size_desc",
+            Self::TimeAsc => "time_asc",
+            Self::TimeDesc => "time_desc",
+        }
+    }
+}
+
 impl PerformanceFileSelection {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
@@ -191,6 +230,14 @@ impl PerformanceTestArgs {
 
     pub(crate) fn file_select(&self) -> PerformanceFileSelection {
         self.file_select
+    }
+
+    pub(crate) fn file_orders(&self) -> Vec<PerformanceFileOrder> {
+        if self.file_order.is_empty() {
+            vec![PerformanceFileOrder::SizeDesc]
+        } else {
+            self.file_order.clone()
+        }
     }
 
     pub(crate) fn max_hdd_concurrency(&self) -> usize {
@@ -1955,9 +2002,9 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 mod tests {
     use super::{
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
-        MnemosyneCommand, ObjectCommand, PerformanceFileSelection, PerformanceScenarioSelection,
-        PoolCommand, ProbeArgs, ServiceCommand, StatusArgs, StoreArgs, StoreCommand,
-        StoreS3UploadAuth, SubobjectCommand,
+        MnemosyneCommand, ObjectCommand, PerformanceFileOrder, PerformanceFileSelection,
+        PerformanceScenarioSelection, PoolCommand, ProbeArgs, ServiceCommand, StatusArgs,
+        StoreArgs, StoreCommand, StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
@@ -2038,6 +2085,7 @@ mod tests {
         assert_eq!(args.file_count(), Some(2));
         assert_eq!(args.source(), None);
         assert_eq!(args.cap(), None);
+        assert_eq!(args.file_orders(), vec![PerformanceFileOrder::SizeDesc]);
         assert_eq!(args.max_hdd_concurrency(), 5);
         assert_eq!(
             args.scenarios(),
@@ -2071,6 +2119,8 @@ mod tests {
             "750GiB",
             "--file_select",
             "larger",
+            "--file_order",
+            "fifo,size_desc",
             "--max-hdd-concurrency",
             "5",
         ])
@@ -2082,6 +2132,10 @@ mod tests {
         assert_eq!(args.source(), Some(Path::new("/data/source-folder")));
         assert_eq!(args.cap(), Some("750GiB"));
         assert_eq!(args.file_select(), PerformanceFileSelection::Larger);
+        assert_eq!(
+            args.file_orders(),
+            vec![PerformanceFileOrder::Fifo, PerformanceFileOrder::SizeDesc]
+        );
         assert_eq!(args.file_size(), None);
         assert_eq!(args.file_count(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);
