@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.13.1 - 2026-07-08
+
+- Enforce one active HDD settlement writer per managed HDD in daemon ingest and
+  performance-test HDD landing scenarios.
+- Select HDD landing workers by projected fractional free space so ingest and
+  benchmark placement distribute usage across members without a fixed disk
+  preference.
+- Keep HDD write concurrency bounded by managed HDD count and add regression
+  coverage for active disk reservations.
+
 ## 0.13.0 - 2026-07-08
 
 - Wire the redesigned Web Home dashboard to load the daemon-backed

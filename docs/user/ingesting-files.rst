@@ -61,6 +61,14 @@ DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
 for normal file ingest.
 
+During HDD settlement the daemon permits at most one active writer per managed
+HDD member. The effective HDD settlement concurrency is therefore capped by the
+number of discovered HDD roots, even when an authoritative performance policy
+requests more workers. When more than one HDD writer is active, new settlement
+work reserves idle disks only and selects among them by projected fractional
+free space, then absolute free space. This keeps usage distributed across the
+array without creating a fixed preference for a particular disk.
+
 What Happens
 ------------
 

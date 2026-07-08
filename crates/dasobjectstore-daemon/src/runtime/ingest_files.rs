@@ -9,12 +9,7 @@ use crate::runtime::{
     AuthoritativeIngestPolicy, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
-use dasobjectstore_core::lifecycle::HealthState;
 use dasobjectstore_core::object_type::ObjectType;
-use dasobjectstore_core::placement::{
-    plan_copy_count_for_store, PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad,
-};
-use dasobjectstore_core::store::StorePolicy;
 use dasobjectstore_metadata::{
     measure_ssd_capacity, settle_staged_object_to_hdd_with_controlled_progress, DiskCopyRoot,
     IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectPutError, ObjectPutProgress,
@@ -24,13 +19,12 @@ use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
     read_subobject_registry, ObjectServiceError, StoreServiceDefinition,
 };
-use std::collections::{hash_map::DefaultHasher, BTreeMap};
+use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 
 const SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
@@ -220,8 +214,13 @@ impl LocalFileIngestExecutor {
         let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
         let (flush_tx, flush_rx) = mpsc::sync_channel::<SsdFlushWork>(SSD_FLUSH_QUEUE_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
-        let hdd_workers =
-            spawn_hdd_settlement_workers(settle_rx, event_tx.clone(), hdd_worker_count);
+        let hdd_scheduler = new_shared_hdd_settlement_scheduler(&managed_disk_roots)?;
+        let hdd_workers = spawn_hdd_settlement_workers(
+            settle_rx,
+            event_tx.clone(),
+            hdd_worker_count,
+            hdd_scheduler,
+        );
         let ssd_flush_worker = spawn_ssd_flush_worker(flush_rx, settle_tx.clone(), event_tx);
 
         for entry in &files {
@@ -238,12 +237,7 @@ impl LocalFileIngestExecutor {
                 entry.object_id.clone(),
                 &entry.source_path,
                 &self.ssd_root,
-                plan_disk_roots_for_entry(
-                    &managed_disk_roots,
-                    entry,
-                    &endpoint.store.policy,
-                    copies,
-                )?,
+                managed_disk_roots.clone(),
                 copies,
             )
             .with_object_type(request.object_type);
@@ -390,6 +384,168 @@ struct SsdFlushWork {
 struct HddSettlementWork {
     entry: FileIngestEntry,
     staged: StagedObjectPut,
+}
+
+#[derive(Clone, Debug)]
+struct HddSettlementDiskState {
+    disk_id: DiskId,
+    root_path: PathBuf,
+    active: bool,
+    total_bytes: u64,
+    available_bytes: u64,
+    assigned_bytes: u64,
+}
+
+#[derive(Debug)]
+struct HddSettlementScheduler {
+    disks: Vec<HddSettlementDiskState>,
+}
+
+type SharedHddSettlementScheduler = Arc<(Mutex<HddSettlementScheduler>, Condvar)>;
+
+impl HddSettlementScheduler {
+    fn new(roots: &[DiskCopyRoot]) -> Result<Self, DaemonIngestFilesRuntimeError> {
+        Ok(Self {
+            disks: roots
+                .iter()
+                .map(|root| {
+                    let capacity = measure_ssd_capacity(&root.root_path)?;
+                    Ok(HddSettlementDiskState {
+                        disk_id: root.disk_id.clone(),
+                        root_path: root.root_path.clone(),
+                        active: false,
+                        total_bytes: capacity.total_bytes,
+                        available_bytes: capacity.available_bytes,
+                        assigned_bytes: 0,
+                    })
+                })
+                .collect::<Result<Vec<_>, DaemonIngestFilesRuntimeError>>()?,
+        })
+    }
+
+    fn reserve_roots(
+        &mut self,
+        copy_count: usize,
+        object_size_bytes: u64,
+    ) -> Result<Option<Vec<DiskCopyRoot>>, DaemonIngestFilesRuntimeError> {
+        let eligible_count = self
+            .disks
+            .iter()
+            .filter(|disk| disk.projected_available_bytes() >= object_size_bytes)
+            .count();
+        if eligible_count < copy_count {
+            return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "HDD settlement needs {copy_count} disk(s) with at least {object_size_bytes} byte(s) free; found {eligible_count}"
+            )));
+        }
+
+        let mut candidates = self
+            .disks
+            .iter()
+            .enumerate()
+            .filter(|(_, disk)| {
+                !disk.active && disk.projected_available_bytes() >= object_size_bytes
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() < copy_count {
+            return Ok(None);
+        }
+        candidates.sort_by(|(_, left), (_, right)| compare_hdd_settlement_disks(right, left));
+        let selected = candidates
+            .into_iter()
+            .take(copy_count)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let mut roots = Vec::with_capacity(copy_count);
+        for index in selected {
+            let disk = &mut self.disks[index];
+            disk.active = true;
+            roots.push(DiskCopyRoot::new(
+                disk.disk_id.clone(),
+                disk.root_path.clone(),
+            ));
+        }
+        Ok(Some(roots))
+    }
+
+    fn release_roots(&mut self, roots: &[DiskCopyRoot], bytes_per_root: u64) {
+        for root in roots {
+            if let Some(disk) = self
+                .disks
+                .iter_mut()
+                .find(|disk| disk.disk_id == root.disk_id)
+            {
+                disk.active = false;
+                disk.assigned_bytes = disk.assigned_bytes.saturating_add(bytes_per_root);
+            }
+        }
+    }
+}
+
+impl HddSettlementDiskState {
+    fn projected_available_bytes(&self) -> u64 {
+        self.available_bytes.saturating_sub(self.assigned_bytes)
+    }
+}
+
+fn new_shared_hdd_settlement_scheduler(
+    roots: &[DiskCopyRoot],
+) -> Result<SharedHddSettlementScheduler, DaemonIngestFilesRuntimeError> {
+    Ok(Arc::new((
+        Mutex::new(HddSettlementScheduler::new(roots)?),
+        Condvar::new(),
+    )))
+}
+
+fn reserve_hdd_settlement_roots(
+    scheduler: &SharedHddSettlementScheduler,
+    copy_count: usize,
+    object_size_bytes: u64,
+) -> Result<Vec<DiskCopyRoot>, DaemonIngestFilesRuntimeError> {
+    let (lock, condvar) = &**scheduler;
+    let mut scheduler = lock.lock().map_err(|_| {
+        DaemonIngestFilesRuntimeError::CommandFailed(
+            "HDD settlement scheduler lock poisoned".to_string(),
+        )
+    })?;
+    loop {
+        if let Some(roots) = scheduler.reserve_roots(copy_count, object_size_bytes)? {
+            return Ok(roots);
+        }
+        scheduler = condvar.wait(scheduler).map_err(|_| {
+            DaemonIngestFilesRuntimeError::CommandFailed(
+                "HDD settlement scheduler lock poisoned".to_string(),
+            )
+        })?;
+    }
+}
+
+fn release_hdd_settlement_roots(
+    scheduler: &SharedHddSettlementScheduler,
+    roots: &[DiskCopyRoot],
+    bytes_per_root: u64,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    let (lock, condvar) = &**scheduler;
+    let mut scheduler = lock.lock().map_err(|_| {
+        DaemonIngestFilesRuntimeError::CommandFailed(
+            "HDD settlement scheduler lock poisoned".to_string(),
+        )
+    })?;
+    scheduler.release_roots(roots, bytes_per_root);
+    condvar.notify_all();
+    Ok(())
+}
+
+fn compare_hdd_settlement_disks(
+    left: &HddSettlementDiskState,
+    right: &HddSettlementDiskState,
+) -> std::cmp::Ordering {
+    let left_free = left.projected_available_bytes();
+    let right_free = right.projected_available_bytes();
+    (u128::from(left_free) * u128::from(right.total_bytes.max(1)))
+        .cmp(&(u128::from(right_free) * u128::from(left.total_bytes.max(1))))
+        .then_with(|| left_free.cmp(&right_free))
+        .then_with(|| right.disk_id.cmp(&left.disk_id))
 }
 
 #[derive(Debug)]
@@ -593,12 +749,14 @@ fn spawn_hdd_settlement_workers(
     settle_rx: mpsc::Receiver<HddSettlementWork>,
     event_tx: mpsc::Sender<HddSettlementEvent>,
     worker_count: usize,
+    scheduler: SharedHddSettlementScheduler,
 ) -> Vec<thread::JoinHandle<()>> {
     let settle_rx = Arc::new(Mutex::new(settle_rx));
     (0..worker_count.max(1))
         .map(|_| {
             let settle_rx = Arc::clone(&settle_rx);
             let event_tx = event_tx.clone();
+            let scheduler = Arc::clone(&scheduler);
             thread::spawn(move || loop {
                 let work = {
                     let receiver = match settle_rx.lock() {
@@ -610,12 +768,27 @@ fn spawn_hdd_settlement_workers(
                 let Ok(work) = work else {
                     break;
                 };
+                let roots = match reserve_hdd_settlement_roots(
+                    &scheduler,
+                    work.staged.copy_count as usize,
+                    work.entry.size_bytes,
+                ) {
+                    Ok(roots) => roots,
+                    Err(error) => {
+                        let _ = event_tx.send(HddSettlementEvent::Failed {
+                            error: ObjectPutError::Io(io::Error::other(error.to_string())),
+                        });
+                        break;
+                    }
+                };
                 let _ = event_tx.send(HddSettlementEvent::Started {
                     entry: work.entry.clone(),
                 });
                 let entry = work.entry.clone();
+                let mut staged = work.staged;
+                staged.disk_roots = roots.clone();
                 let result =
-                    settle_staged_object_to_hdd_with_controlled_progress(work.staged, |progress| {
+                    settle_staged_object_to_hdd_with_controlled_progress(staged, |progress| {
                         event_tx
                             .send(HddSettlementEvent::Progress {
                                 entry: entry.clone(),
@@ -623,6 +796,14 @@ fn spawn_hdd_settlement_workers(
                             })
                             .map_err(|_| ObjectPutError::Cancelled)
                     });
+                if let Err(error) =
+                    release_hdd_settlement_roots(&scheduler, &roots, work.entry.size_bytes)
+                {
+                    let _ = event_tx.send(HddSettlementEvent::Failed {
+                        error: ObjectPutError::Io(io::Error::other(error.to_string())),
+                    });
+                    break;
+                }
                 match result {
                     Ok(_report) => {
                         let _ = event_tx.send(HddSettlementEvent::Settled { entry: work.entry });
@@ -1204,79 +1385,6 @@ fn object_id_for_ingested_file(
         .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))
 }
 
-fn plan_disk_roots_for_entry(
-    roots: &[DiskCopyRoot],
-    entry: &FileIngestEntry,
-    policy: &StorePolicy,
-    copies: u8,
-) -> Result<Vec<DiskCopyRoot>, DaemonIngestFilesRuntimeError> {
-    let root_by_disk = roots
-        .iter()
-        .map(|root| (root.disk_id.clone(), root.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let candidates = placement_candidates_for_entry(roots, entry)?;
-    let request = if copies > 1 {
-        PlacementRequest::protected(entry.size_bytes)
-    } else {
-        PlacementRequest::cache(entry.size_bytes)
-    };
-    let plan = plan_copy_count_for_store(&candidates, &request, policy, copies).map_err(|err| {
-        DaemonIngestFilesRuntimeError::CommandFailed(format!("copy placement failed: {err:?}"))
-    })?;
-    if !plan.is_complete() {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "copy placement for {} planned {} of {} required copy/copies",
-            entry.object_id,
-            plan.planned_copies.len(),
-            copies
-        )));
-    }
-
-    plan.planned_copies
-        .into_iter()
-        .map(|copy| {
-            root_by_disk.get(&copy.disk_id).cloned().ok_or_else(|| {
-                DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                    "copy placement selected unknown disk {}",
-                    copy.disk_id
-                ))
-            })
-        })
-        .collect()
-}
-
-fn placement_candidates_for_entry(
-    roots: &[DiskCopyRoot],
-    entry: &FileIngestEntry,
-) -> Result<Vec<PlacementCandidate>, DaemonIngestFilesRuntimeError> {
-    roots
-        .iter()
-        .map(|root| {
-            let capacity = measure_ssd_capacity(&root.root_path)?;
-            Ok(PlacementCandidate::new(
-                root.disk_id.clone(),
-                None,
-                capacity.available_bytes,
-                HealthState::Healthy,
-                PerformanceClass::Unknown,
-                deterministic_write_load(&entry.object_id, &root.disk_id),
-            ))
-        })
-        .collect()
-}
-
-fn deterministic_write_load(object_id: &ObjectId, disk_id: &DiskId) -> WriteLoad {
-    let mut hasher = DefaultHasher::new();
-    object_id.as_str().hash(&mut hasher);
-    disk_id.as_str().hash(&mut hasher);
-    match hasher.finish() % 4 {
-        0 => WriteLoad::Idle,
-        1 => WriteLoad::Light,
-        2 => WriteLoad::Busy,
-        _ => WriteLoad::Saturated,
-    }
-}
-
 fn ingest_job_id(accepted_at_utc: &str) -> Result<IngestJobId, DaemonIngestFilesRuntimeError> {
     let job_id_value = format!(
         "ingest-files-{}",
@@ -1359,8 +1467,9 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_ingest_files, sync_pending_ssd_stage, FileIngestEntry, LocalFileIngestExecutor,
-        PendingSsdStage, PipelineProgressState, SSD_ROOT_ENV,
+        collect_ingest_files, sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState,
+        HddSettlementScheduler, LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState,
+        SSD_ROOT_ENV,
     };
     use crate::api::{DaemonIngestConflictPolicy, DaemonSsdPressure, SubmitIngestFilesRequest};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
@@ -1558,6 +1667,61 @@ mod tests {
         assert_eq!(telemetry.workers.hdd_write.active, 1);
         assert_eq!(telemetry.workers.hdd_write.idle, 2);
         assert_eq!(telemetry.pressure.ssd, DaemonSsdPressure::High);
+    }
+
+    #[test]
+    fn hdd_settlement_scheduler_reserves_only_idle_highest_fraction_disks() {
+        let disk_a = dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id");
+        let disk_b = dasobjectstore_core::ids::DiskId::new("disk-b").expect("disk id");
+        let disk_c = dasobjectstore_core::ids::DiskId::new("disk-c").expect("disk id");
+        let mut scheduler = HddSettlementScheduler {
+            disks: vec![
+                HddSettlementDiskState {
+                    disk_id: disk_a.clone(),
+                    root_path: PathBuf::from("/hdd/a"),
+                    active: false,
+                    total_bytes: 100,
+                    available_bytes: 90,
+                    assigned_bytes: 0,
+                },
+                HddSettlementDiskState {
+                    disk_id: disk_b,
+                    root_path: PathBuf::from("/hdd/b"),
+                    active: true,
+                    total_bytes: 100,
+                    available_bytes: 95,
+                    assigned_bytes: 0,
+                },
+                HddSettlementDiskState {
+                    disk_id: disk_c.clone(),
+                    root_path: PathBuf::from("/hdd/c"),
+                    active: false,
+                    total_bytes: 200,
+                    available_bytes: 100,
+                    assigned_bytes: 0,
+                },
+            ],
+        };
+
+        let roots = scheduler
+            .reserve_roots(2, 8)
+            .expect("reservation evaluates")
+            .expect("two idle disks reserve");
+        let blocked = scheduler
+            .reserve_roots(1, 8)
+            .expect("second reservation evaluates");
+
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.disk_id.clone())
+                .collect::<Vec<_>>(),
+            vec![disk_a, disk_c]
+        );
+        assert!(
+            blocked.is_none(),
+            "active reservations must block instead of assigning a second writer to an HDD"
+        );
     }
 
     #[test]

@@ -33,6 +33,10 @@ The benchmark discovers the managed HDD members under the configured HDD root
 and tests concurrency from ``1`` up to ``--max-hdd-concurrency`` or the number
 of available disks, whichever is lower. Use ``--max-hdd-concurrency 5`` to test
 the requested one-to-five worker range on a sufficiently populated DAS.
+Each HDD worker owns one physical HDD at a time; the benchmark never schedules
+two simultaneous writes to the same HDD. Placement chooses idle disks by
+projected fractional free space so test results model balanced object-store
+landing rather than accidental hot-spotting on a single member.
 
 Safety and Resource Warnings
 ----------------------------
