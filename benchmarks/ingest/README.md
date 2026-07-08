@@ -160,3 +160,9 @@ per-scenario scaffold outputs are TSV files under:
 ```text
 benchmarks/output/ingest/<scenario>/<run-id>/
 ```
+
+Reports produced by `dasobjectstore performance-test` should follow
+`reports/performance-test-report-contract.md`: the Markdown report is the
+canonical artifact, begins with a Mnemosyne Biosciences branded table, includes
+the exact reproduction QR JSON payload, and treats PDF as a sibling derived
+artifact rather than a benchmark execution requirement.
