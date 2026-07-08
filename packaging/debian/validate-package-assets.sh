@@ -26,7 +26,7 @@ require_file() {
 require_text() {
   local path="$1"
   local expected="$2"
-  if ! grep -Fq "$expected" "$path"; then
+  if ! grep -Fq -- "$expected" "$path"; then
     printf 'package asset %s must contain: %s\n' "$path" "$expected" >&2
     exit 1
   fi

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.5 - 2026-07-08
+
+- Fix package asset validation for required strings that begin with hyphens,
+  ensuring the strict Web UI packaging checks run correctly on Debian/RPM
+  builders.
+
 ## 0.10.4 - 2026-07-08
 
 - Make packaged Web UI asset preparation fail loudly when Trunk or the
