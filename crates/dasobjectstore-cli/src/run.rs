@@ -196,12 +196,7 @@ fn run_performance_test(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     require_admin_for_performance_test()?;
-    let file_size = parse_binary_size(args.file_size())?;
-    if args.file_count() == 0 {
-        return Err(CliError::CommandFailed(
-            "performance-test requires --file_count greater than 0".to_string(),
-        ));
-    }
+    let workload = plan_performance_workload(args)?;
     if args.max_hdd_concurrency() == 0 {
         return Err(CliError::CommandFailed(
             "performance-test requires --max-hdd-concurrency greater than 0".to_string(),
@@ -241,6 +236,14 @@ fn run_performance_test(
         fs::create_dir_all(&root)?;
         hdd_bench_roots.push((disk.disk_id.clone(), root));
     }
+    let _temporary_objectstore = PerformanceTemporaryObjectStore::new(
+        ssd_bench_root.clone(),
+        hdd_bench_roots
+            .iter()
+            .map(|(_, root)| root.clone())
+            .collect(),
+        args.keep_temp(),
+    );
     let report_path = args
         .report()
         .map(Path::to_path_buf)
@@ -271,8 +274,12 @@ fn run_performance_test(
         "cli_version": dasobjectstore_core::VERSION,
         "command": reproduction_args,
         "parameters": {
+            "workload_kind": workload.kind.as_str(),
+            "source_path": workload.source_path.as_ref().map(|path| path.to_string_lossy().to_string()),
             "file_size": args.file_size(),
             "file_count": args.file_count(),
+            "planned_file_count": workload.file_count(),
+            "planned_total_bytes": workload.total_bytes(),
             "max_hdd_concurrency": args.max_hdd_concurrency(),
             "ssd_root": ssd_root.to_string_lossy(),
             "hdd_root": hdd_root.to_string_lossy(),
@@ -291,9 +298,10 @@ fn run_performance_test(
 
     writeln!(
         writer,
-        "performance-test: files={} size={} disks={} max_hdd_concurrency={} report={}",
-        args.file_count(),
-        format_bytes(file_size as f64),
+        "performance-test: workload={} files={} total={} disks={} max_hdd_concurrency={} report={}",
+        workload.kind.as_str(),
+        workload.file_count(),
+        format_bytes(workload.total_bytes() as f64),
         disks.len(),
         args.max_hdd_concurrency(),
         report_path.display()
@@ -307,6 +315,8 @@ fn run_performance_test(
 
     let max_concurrency = args.max_hdd_concurrency().min(disks.len()).max(1);
     let total_started = Instant::now();
+    #[cfg(unix)]
+    let _interrupt_guard = UploadInterruptGuard::install();
 
     let result = (|| -> Result<PerformanceBenchmarkResults, CliError> {
         let scenario_total = 1 + max_concurrency * 2;
@@ -318,8 +328,8 @@ fn run_performance_test(
                     phase: "starting",
                     scenario_done,
                     scenario_total,
-                    file_count: args.file_count(),
-                    file_size,
+                    file_count: workload.file_count(),
+                    total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
                     aggregate_rate: None,
                     report_path: &report_path,
@@ -331,7 +341,7 @@ fn run_performance_test(
             writer,
             "scenario ssd-only: writing generated files directly to SSD"
         )?;
-        let ssd_only = benchmark_ssd_only(&ssd_bench_root, file_size, args.file_count(), writer)?;
+        let ssd_only = benchmark_ssd_only(&ssd_bench_root, &workload, writer)?;
         scenario_done += 1;
         if args.tui() {
             render_performance_tui_snapshot(
@@ -340,8 +350,8 @@ fn run_performance_test(
                     phase: "ssd-only complete",
                     scenario_done,
                     scenario_total,
-                    file_count: args.file_count(),
-                    file_size,
+                    file_count: workload.file_count(),
+                    total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
                     aggregate_rate: Some(
                         ssd_only.total_bytes as f64 / ssd_only.elapsed_seconds.max(0.001),
@@ -362,8 +372,7 @@ fn run_performance_test(
             let scenario = benchmark_ssd_pipeline(
                 &ssd_bench_root,
                 &hdd_bench_roots,
-                file_size,
-                args.file_count(),
+                &workload,
                 concurrency,
                 writer,
             )?;
@@ -375,8 +384,8 @@ fn run_performance_test(
                         phase: "ssd-pipeline complete",
                         scenario_done,
                         scenario_total,
-                        file_count: args.file_count(),
-                        file_size,
+                        file_count: workload.file_count(),
+                        total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
@@ -396,13 +405,7 @@ fn run_performance_test(
                 "scenario direct-hdd: direct source-to-HDD ingest with {} worker(s)",
                 concurrency
             )?;
-            let scenario = benchmark_direct_hdd(
-                &hdd_bench_roots,
-                file_size,
-                args.file_count(),
-                concurrency,
-                writer,
-            )?;
+            let scenario = benchmark_direct_hdd(&hdd_bench_roots, &workload, concurrency, writer)?;
             scenario_done += 1;
             if args.tui() {
                 render_performance_tui_snapshot(
@@ -411,8 +414,8 @@ fn run_performance_test(
                         phase: "direct-hdd complete",
                         scenario_done,
                         scenario_total,
-                        file_count: args.file_count(),
-                        file_size,
+                        file_count: workload.file_count(),
+                        total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
@@ -432,12 +435,6 @@ fn run_performance_test(
         })
     })();
 
-    if !args.keep_temp() {
-        let _ = fs::remove_dir_all(&ssd_bench_root);
-        for (_, root) in &hdd_bench_roots {
-            let _ = fs::remove_dir_all(root);
-        }
-    }
     let results = result?;
     let recommendation = recommend_performance_strategy(&results);
 
@@ -446,8 +443,11 @@ fn run_performance_test(
         run_id,
         generated_at_utc,
         repository_revision,
-        file_size,
-        file_count: args.file_count(),
+        file_size: workload.nominal_file_size(),
+        file_count: workload.file_count(),
+        workload_kind: workload.kind,
+        source_path: workload.source_path.clone(),
+        total_source_bytes: workload.total_bytes(),
         ssd_root,
         hdd_root,
         disk_count: disks.len(),
@@ -488,6 +488,63 @@ fn run_performance_test(
 struct PerformanceMeasurement {
     bytes: u64,
     seconds: f64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PerformanceWorkloadKind {
+    Generated,
+    SourceFolder,
+}
+
+impl PerformanceWorkloadKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Generated => "generated",
+            Self::SourceFolder => "source-folder",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PerformancePayload {
+    file_index: u32,
+    relative_path: PathBuf,
+    source_path: Option<PathBuf>,
+    size_bytes: u64,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceWorkload {
+    kind: PerformanceWorkloadKind,
+    source_path: Option<PathBuf>,
+    payloads: Vec<PerformancePayload>,
+}
+
+impl PerformanceWorkload {
+    fn file_count(&self) -> u32 {
+        self.payloads.len() as u32
+    }
+
+    fn total_bytes(&self) -> u64 {
+        self.payloads
+            .iter()
+            .map(|payload| payload.size_bytes)
+            .sum::<u64>()
+    }
+
+    fn nominal_file_size(&self) -> u64 {
+        match self.payloads.as_slice() {
+            [] => 0,
+            [payload] => payload.size_bytes,
+            payloads => {
+                let total = payloads
+                    .iter()
+                    .map(|payload| payload.size_bytes)
+                    .sum::<u64>();
+                total / payloads.len() as u64
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -574,6 +631,9 @@ struct PerformanceReport {
     repository_revision: String,
     file_size: u64,
     file_count: u32,
+    workload_kind: PerformanceWorkloadKind,
+    source_path: Option<PathBuf>,
+    total_source_bytes: u64,
     ssd_root: PathBuf,
     hdd_root: PathBuf,
     disk_count: usize,
@@ -602,13 +662,21 @@ fn performance_test_reproduction_args(
     tmp_dir: &Path,
     report_path: &Path,
 ) -> Vec<String> {
-    let mut command = vec![
-        "dasobjectstore".to_string(),
-        "performance-test".to_string(),
-        "--file_size".to_string(),
-        args.file_size().to_string(),
-        "--file_count".to_string(),
-        args.file_count().to_string(),
+    let mut command = vec!["dasobjectstore".to_string(), "performance-test".to_string()];
+    if let Some(source) = args.source() {
+        command.push("--source".to_string());
+        command.push(source.display().to_string());
+    } else {
+        if let Some(file_size) = args.file_size() {
+            command.push("--file_size".to_string());
+            command.push(file_size.to_string());
+        }
+        if let Some(file_count) = args.file_count() {
+            command.push("--file_count".to_string());
+            command.push(file_count.to_string());
+        }
+    }
+    command.extend([
         "--max-hdd-concurrency".to_string(),
         args.max_hdd_concurrency().to_string(),
         "--ssd-root".to_string(),
@@ -619,7 +687,7 @@ fn performance_test_reproduction_args(
         tmp_dir.display().to_string(),
         "--report".to_string(),
         report_path.display().to_string(),
-    ];
+    ]);
     if let Some(json_artifact) = args.json_artifact() {
         command.push("--json-artifact".to_string());
         command.push(json_artifact.display().to_string());
@@ -688,6 +756,102 @@ fn parse_binary_size(value: &str) -> Result<u64, CliError> {
     Ok(bytes.round() as u64)
 }
 
+fn plan_performance_workload(args: &PerformanceTestArgs) -> Result<PerformanceWorkload, CliError> {
+    match (args.source(), args.file_size(), args.file_count()) {
+        (Some(source), None, None) => source_performance_workload(source),
+        (None, Some(file_size), Some(file_count)) => {
+            if file_count == 0 {
+                return Err(CliError::CommandFailed(
+                    "performance-test requires --file_count greater than 0".to_string(),
+                ));
+            }
+            let size_bytes = parse_binary_size(file_size)?;
+            let payloads = (0..file_count)
+                .map(|file_index| PerformancePayload {
+                    file_index,
+                    relative_path: PathBuf::from(format!("generated-{file_index:05}.bin")),
+                    source_path: None,
+                    size_bytes,
+                })
+                .collect();
+            Ok(PerformanceWorkload {
+                kind: PerformanceWorkloadKind::Generated,
+                source_path: None,
+                payloads,
+            })
+        }
+        (Some(_), Some(_), _) | (Some(_), _, Some(_)) => Err(CliError::CommandFailed(
+            "performance-test accepts either --source or --file_size/--file_count, not both"
+                .to_string(),
+        )),
+        (None, _, _) => Err(CliError::CommandFailed(
+            "performance-test requires either --source <DIR> or both --file_size and --file_count"
+                .to_string(),
+        )),
+    }
+}
+
+fn source_performance_workload(source: &Path) -> Result<PerformanceWorkload, CliError> {
+    if !source.is_dir() {
+        return Err(CliError::CommandFailed(format!(
+            "performance-test source {} is not a directory",
+            source.display()
+        )));
+    }
+    let mut files = Vec::new();
+    collect_performance_source_files(source, source, &mut files)?;
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    if files.is_empty() {
+        return Err(CliError::CommandFailed(format!(
+            "performance-test source {} contains no files",
+            source.display()
+        )));
+    }
+    if files.len() > u32::MAX as usize {
+        return Err(CliError::CommandFailed(format!(
+            "performance-test source {} contains more than {} files",
+            source.display(),
+            u32::MAX
+        )));
+    }
+    for (index, payload) in files.iter_mut().enumerate() {
+        payload.file_index = index as u32;
+    }
+    Ok(PerformanceWorkload {
+        kind: PerformanceWorkloadKind::SourceFolder,
+        source_path: Some(source.to_path_buf()),
+        payloads: files,
+    })
+}
+
+fn collect_performance_source_files(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<PerformancePayload>,
+) -> Result<(), CliError> {
+    let mut entries = fs::read_dir(current)?.collect::<Result<Vec<_>, io::Error>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            collect_performance_source_files(root, &path, files)?;
+        } else if metadata.is_file() {
+            let relative_path = path
+                .strip_prefix(root)
+                .map_err(|err| CliError::CommandFailed(err.to_string()))?
+                .to_path_buf();
+            files.push(PerformancePayload {
+                file_index: 0,
+                relative_path,
+                source_path: Some(path),
+                size_bytes: metadata.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn require_admin_for_performance_test() -> Result<(), CliError> {
     if current_user_is_root()? {
         return Ok(());
@@ -698,12 +862,58 @@ fn require_admin_for_performance_test() -> Result<(), CliError> {
     ))
 }
 
+#[derive(Debug)]
+struct PerformanceTemporaryObjectStore {
+    ssd_root: PathBuf,
+    hdd_roots: Vec<PathBuf>,
+    keep: bool,
+}
+
+impl PerformanceTemporaryObjectStore {
+    fn new(ssd_root: PathBuf, hdd_roots: Vec<PathBuf>, keep: bool) -> Self {
+        Self {
+            ssd_root,
+            hdd_roots,
+            keep,
+        }
+    }
+}
+
+impl Drop for PerformanceTemporaryObjectStore {
+    fn drop(&mut self) {
+        if self.keep {
+            return;
+        }
+        let _ = fs::remove_dir_all(&self.ssd_root);
+        for root in &self.hdd_roots {
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn check_performance_cancelled() -> Result<(), CliError> {
+    if UPLOAD_CANCELLED.load(Ordering::SeqCst) {
+        Err(CliError::CommandFailed(
+            "performance-test cancelled by Ctrl-C; temporary objectstore cleanup requested"
+                .to_string(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(unix))]
+fn check_performance_cancelled() -> Result<(), CliError> {
+    Ok(())
+}
+
 struct PerformanceTuiSnapshot<'a> {
     phase: &'a str,
     scenario_done: usize,
     scenario_total: usize,
     file_count: u32,
-    file_size: u64,
+    total_bytes: u64,
     hdd_concurrency: usize,
     aggregate_rate: Option<f64>,
     report_path: &'a Path,
@@ -771,9 +981,9 @@ fn render_performance_tui_snapshot(
                     snapshot.scenario_done, snapshot.scenario_total
                 )),
                 Line::from(format!(
-                    "Files: {} x {}",
+                    "Files: {} total {}",
                     snapshot.file_count,
-                    format_bytes(snapshot.file_size as f64)
+                    format_bytes(snapshot.total_bytes as f64)
                 )),
                 Line::from(format!("HDD concurrency: {}", snapshot.hdd_concurrency)),
                 Line::from(format!("Aggregate rate: {rate}")),
@@ -795,29 +1005,29 @@ fn render_performance_tui_snapshot(
 
 fn benchmark_ssd_only(
     ssd_bench_root: &Path,
-    file_size: u64,
-    file_count: u32,
+    workload: &PerformanceWorkload,
     writer: &mut impl Write,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let mut file_results = Vec::new();
     let mut total_bytes = 0_u64;
-    for file_index in 0..file_count {
-        let destination = ssd_bench_root.join(format!("ssd-only-{file_index:05}.bin"));
-        let ssd_write = measure_generate_random_file(&destination, file_size, file_index)?;
+    for payload in &workload.payloads {
+        check_performance_cancelled()?;
+        let destination = ssd_bench_root.join("ssd-only").join(&payload.relative_path);
+        let ssd_write = measure_land_payload(payload, &destination)?;
         let ssd_read = measure_read(&destination)?;
         let _ = fs::remove_file(&destination);
         total_bytes = total_bytes.saturating_add(ssd_write.bytes);
         file_results.push(PerformanceFileResult {
-            file_index,
+            file_index: payload.file_index,
             ssd_write,
             ssd_read,
         });
         writeln!(
             writer,
             "ssd-only file {}/{}: SSD write {}/s SSD read {}/s",
-            file_index + 1,
-            file_count,
+            payload.file_index + 1,
+            workload.file_count(),
             format_bytes(throughput(ssd_write)),
             format_bytes(throughput(ssd_read))
         )?;
@@ -844,8 +1054,7 @@ fn benchmark_ssd_only(
 fn benchmark_ssd_pipeline(
     ssd_bench_root: &Path,
     hdd_bench_roots: &[(DiskId, PathBuf)],
-    file_size: u64,
-    file_count: u32,
+    workload: &PerformanceWorkload,
     concurrency: usize,
     writer: &mut impl Write,
 ) -> Result<PerformanceScenarioResult, CliError> {
@@ -862,6 +1071,7 @@ fn benchmark_ssd_pipeline(
         let worker_results = Arc::clone(&worker_results);
         handles.push(thread::spawn(move || -> Result<(), CliError> {
             loop {
+                check_performance_cancelled()?;
                 let job = {
                     let receiver = receiver.lock().map_err(|_| {
                         CliError::CommandFailed(
@@ -881,10 +1091,11 @@ fn benchmark_ssd_pipeline(
                         )
                     })?
                     .reserve_disk();
-                let destination = placement.root_path.join(format!(
-                    "ssd-pipeline-c{concurrency}-file{:05}.bin",
-                    job.file_index
-                ));
+                let destination = placement
+                    .root_path
+                    .join("ssd-pipeline")
+                    .join(format!("c{concurrency}"))
+                    .join(&job.relative_path);
                 let measurement = measure_copy(&job.ssd_path, &destination);
                 let _ = fs::remove_file(&destination);
                 let _ = fs::remove_file(&job.ssd_path);
@@ -916,20 +1127,24 @@ fn benchmark_ssd_pipeline(
 
     let mut file_results = Vec::new();
     let mut total_bytes = 0_u64;
-    for file_index in 0..file_count {
-        let ssd_path =
-            ssd_bench_root.join(format!("ssd-pipeline-c{concurrency}-{file_index:05}.bin"));
-        let ssd_write = measure_generate_random_file(&ssd_path, file_size, file_index)?;
+    for payload in &workload.payloads {
+        check_performance_cancelled()?;
+        let ssd_path = ssd_bench_root
+            .join("ssd-pipeline")
+            .join(format!("c{concurrency}"))
+            .join(&payload.relative_path);
+        let ssd_write = measure_land_payload(payload, &ssd_path)?;
         let ssd_read = measure_read(&ssd_path)?;
         total_bytes = total_bytes.saturating_add(ssd_write.bytes);
         file_results.push(PerformanceFileResult {
-            file_index,
+            file_index: payload.file_index,
             ssd_write,
             ssd_read,
         });
         sender
             .send(SsdPipelineJob {
-                file_index,
+                file_index: payload.file_index,
+                relative_path: payload.relative_path.clone(),
                 ssd_path,
             })
             .map_err(|_| {
@@ -939,8 +1154,8 @@ fn benchmark_ssd_pipeline(
             writer,
             "ssd-pipeline c{} file {}/{}: SSD write {}/s queued for HDD drain",
             concurrency,
-            file_index + 1,
-            file_count,
+            payload.file_index + 1,
+            workload.file_count(),
             format_bytes(throughput(ssd_write))
         )?;
     }
@@ -1000,14 +1215,13 @@ fn benchmark_ssd_pipeline(
 
 fn benchmark_direct_hdd(
     hdd_bench_roots: &[(DiskId, PathBuf)],
-    file_size: u64,
-    file_count: u32,
+    workload: &PerformanceWorkload,
     concurrency: usize,
     writer: &mut impl Write,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let scheduler = Arc::new(Mutex::new(DiskPlacementScheduler::new(hdd_bench_roots)));
-    let (sender, receiver) = mpsc::channel::<u32>();
+    let (sender, receiver) = mpsc::channel::<PerformancePayload>();
     let receiver = Arc::new(Mutex::new(receiver));
     let worker_results = Arc::new(Mutex::new(Vec::<PerformanceDiskResult>::new()));
     let mut handles = Vec::new();
@@ -1017,7 +1231,8 @@ fn benchmark_direct_hdd(
         let worker_results = Arc::clone(&worker_results);
         handles.push(thread::spawn(move || -> Result<(), CliError> {
             loop {
-                let file_index = {
+                check_performance_cancelled()?;
+                let payload = {
                     let receiver = receiver.lock().map_err(|_| {
                         CliError::CommandFailed(
                             "performance-test direct HDD queue lock poisoned".to_string(),
@@ -1025,7 +1240,7 @@ fn benchmark_direct_hdd(
                     })?;
                     receiver.recv()
                 };
-                let Ok(file_index) = file_index else {
+                let Ok(payload) = payload else {
                     break;
                 };
                 let placement = scheduler
@@ -1038,11 +1253,13 @@ fn benchmark_direct_hdd(
                     .reserve_disk();
                 let destination = placement
                     .root_path
-                    .join(format!("direct-hdd-c{concurrency}-file{file_index:05}.bin"));
-                let measurement = measure_generate_random_file(
+                    .join("direct-hdd")
+                    .join(format!("c{concurrency}"))
+                    .join(&payload.relative_path);
+                let measurement = measure_land_payload_with_seed(
+                    &payload,
                     &destination,
-                    file_size,
-                    file_index ^ worker_index as u32,
+                    payload.file_index ^ worker_index as u32,
                 );
                 let _ = fs::remove_file(&destination);
                 let measurement = measurement?;
@@ -1060,7 +1277,7 @@ fn benchmark_direct_hdd(
                         CliError::CommandFailed("performance-test result lock poisoned".to_string())
                     })?
                     .push(PerformanceDiskResult {
-                        file_index,
+                        file_index: payload.file_index,
                         concurrency,
                         scenario: PerformanceScenarioKind::DirectHdd,
                         disk_id: placement.disk_id,
@@ -1070,8 +1287,9 @@ fn benchmark_direct_hdd(
             Ok(())
         }));
     }
-    for file_index in 0..file_count {
-        sender.send(file_index).map_err(|_| {
+    for payload in &workload.payloads {
+        check_performance_cancelled()?;
+        sender.send(payload.clone()).map_err(|_| {
             CliError::CommandFailed("performance-test direct HDD workers stopped early".to_string())
         })?;
     }
@@ -1133,6 +1351,7 @@ fn benchmark_direct_hdd(
 #[derive(Debug)]
 struct SsdPipelineJob {
     file_index: u32,
+    relative_path: PathBuf,
     ssd_path: PathBuf,
 }
 
@@ -1207,6 +1426,9 @@ fn measure_generate_random_file(
     size_bytes: u64,
     seed: u32,
 ) -> Result<PerformanceMeasurement, CliError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let started = Instant::now();
     let mut file = File::create(path)?;
     let mut remaining = size_bytes;
@@ -1223,6 +1445,25 @@ fn measure_generate_random_file(
         bytes: size_bytes,
         seconds: started.elapsed().as_secs_f64().max(0.001),
     })
+}
+
+fn measure_land_payload(
+    payload: &PerformancePayload,
+    destination: &Path,
+) -> Result<PerformanceMeasurement, CliError> {
+    measure_land_payload_with_seed(payload, destination, payload.file_index)
+}
+
+fn measure_land_payload_with_seed(
+    payload: &PerformancePayload,
+    destination: &Path,
+    seed: u32,
+) -> Result<PerformanceMeasurement, CliError> {
+    if let Some(source) = &payload.source_path {
+        measure_copy(source, destination)
+    } else {
+        measure_generate_random_file(destination, payload.size_bytes, seed)
+    }
 }
 
 fn fill_pseudorandom(buffer: &mut [u8], state: &mut u64) {
@@ -1545,8 +1786,14 @@ fn render_performance_json(report: &PerformanceReport) -> String {
             "cli_version": dasobjectstore_core::VERSION,
             "command": report.reproduction_args,
             "parameters": {
+                "workload_kind": report.workload_kind.as_str(),
+                "source_path": report
+                    .source_path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
                 "file_size_bytes": report.file_size,
                 "file_count": report.file_count,
+                "total_source_bytes": report.total_source_bytes,
                 "max_hdd_concurrency": report.max_concurrency,
                 "keep_temp": report.keep_temp,
             },
@@ -1554,6 +1801,7 @@ fn render_performance_json(report: &PerformanceReport) -> String {
                 "markdown_path": report.report_path.to_string_lossy(),
                 "pdf_path": report.pdf_path.to_string_lossy(),
                 "qr_path": report.qr_path.to_string_lossy(),
+                "json_path": report.json_path.to_string_lossy(),
                 "recommendation_json_path": report.json_path.to_string_lossy(),
             },
         },
@@ -1572,13 +1820,13 @@ fn render_performance_json(report: &PerformanceReport) -> String {
             }).collect::<Vec<_>>(),
         },
         "scenarios": {
-            "ssd_only": ssd_only_json(&report.results.ssd_only, report.file_size),
+            "ssd_only": ssd_only_json(&report.results.ssd_only, report.file_size, report.total_source_bytes),
             "ssd_hdd_pipeline": {
-                "description": "Generated source is staged to SSD, read back from SSD, and settled to HDD members.",
+                "description": "Source payloads are staged to SSD, read back from SSD, and settled to HDD members.",
                 "concurrency": report.results.ssd_pipeline.iter().map(scenario_concurrency_json).collect::<Vec<_>>(),
             },
             "direct_hdd_pipeline": {
-                "description": "Generated source is written directly to selected HDD members without SSD staging.",
+                "description": "Source payloads are written directly to selected HDD members without SSD staging.",
                 "concurrency": report.results.direct_hdd.iter().map(scenario_concurrency_json).collect::<Vec<_>>(),
             },
         },
@@ -1593,11 +1841,15 @@ fn render_performance_json(report: &PerformanceReport) -> String {
     serde_json::to_string_pretty(&artifact).expect("serialize performance recommendation JSON")
 }
 
-fn ssd_only_json(scenario: &PerformanceScenarioResult, file_size: u64) -> serde_json::Value {
+fn ssd_only_json(
+    scenario: &PerformanceScenarioResult,
+    file_size: u64,
+    total_source_bytes: u64,
+) -> serde_json::Value {
     serde_json::json!({
         "file_count": scenario.file_results.len() as u64,
         "file_size_bytes": file_size,
-        "total_bytes": scenario.total_bytes,
+        "total_bytes": total_source_bytes,
         "median_generate_bytes_per_second": rate_u64(median_rate(
             scenario.file_results.iter().map(|row| throughput(row.ssd_write))
         )),
@@ -1737,10 +1989,17 @@ fn render_performance_report(report: PerformanceReport) -> String {
         "QR code image: ![Reproduce]({})\n\n",
         report.qr_path.display()
     ));
+    let source = report
+        .source_path
+        .as_ref()
+        .map(|path| format!("; source `{}`", path.display()))
+        .unwrap_or_default();
     output.push_str(&format!(
-        "Scenario: {} files of {} each. SSD root `{}`; HDD root `{}`; disks {}; max HDD concurrency {}.\n\n",
+        "Scenario: {} workload, {} files, {} total{}. SSD root `{}`; HDD root `{}`; disks {}; max HDD concurrency {}.\n\n",
+        report.workload_kind.as_str(),
         report.file_count,
-        format_bytes(report.file_size as f64),
+        format_bytes(report.total_source_bytes as f64),
+        source,
         report.ssd_root.display(),
         report.hdd_root.display(),
         report.disk_count,
@@ -5329,13 +5588,14 @@ mod tests {
     use super::{
         collect_ingest_files, connection_status_from_probe, current_user_group_names,
         parse_binary_size, performance_report_metadata_json, render_performance_json,
-        render_performance_report, render_simple_pdf, run, validate_managed_hdds_on_supported_das,
-        write_health_json, write_health_summary, write_health_verbose,
-        write_host_connection_status, write_pretty_report, CliError, ConnectionAssessment,
-        DiskHealthSummary, HealthReport, ManagedHddDevice, PerformanceBenchmarkResults,
-        PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
-        PerformanceMeasurement, PerformanceRecommendation, PerformanceReport,
-        PerformanceScenarioKind, PerformanceScenarioResult,
+        render_performance_report, render_simple_pdf, run, source_performance_workload,
+        validate_managed_hdds_on_supported_das, write_health_json, write_health_summary,
+        write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
+        ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
+        PerformanceBenchmarkResults, PerformanceConcurrencyResult, PerformanceDiskResult,
+        PerformanceFileResult, PerformanceMeasurement, PerformanceRecommendation,
+        PerformanceReport, PerformanceScenarioKind, PerformanceScenarioResult,
+        PerformanceWorkloadKind,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -5446,6 +5706,40 @@ mod tests {
     }
 
     #[test]
+    fn performance_source_workload_collects_files_recursively_in_fifo_order() {
+        let root = temp_root("performance-source-workload");
+        let source = root.join("source");
+        fs::create_dir_all(source.join("nested")).expect("create source fixture");
+        fs::write(source.join("root.fastq.gz"), b"ACGT").expect("write root fixture");
+        fs::write(source.join("nested").join("sample.pod5"), b"POD5DATA")
+            .expect("write nested fixture");
+
+        let workload = source_performance_workload(&source).expect("source workload is planned");
+
+        assert_eq!(workload.kind, PerformanceWorkloadKind::SourceFolder);
+        assert_eq!(workload.source_path, Some(source.clone()));
+        assert_eq!(workload.file_count(), 2);
+        assert_eq!(workload.total_bytes(), 12);
+        assert_eq!(
+            workload
+                .payloads
+                .iter()
+                .map(|payload| (
+                    payload.file_index,
+                    payload.relative_path.clone(),
+                    payload.size_bytes
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, PathBuf::from("nested/sample.pod5"), 8),
+                (1, PathBuf::from("root.fastq.gz"), 4),
+            ]
+        );
+
+        fs::remove_dir_all(root).expect("cleanup source fixture");
+    }
+
+    #[test]
     fn performance_test_report_renders_summary_tables_and_recommendation() {
         let report = render_performance_report(example_performance_report());
 
@@ -5457,7 +5751,7 @@ mod tests {
         assert!(report.contains("Reproduction payload SHA-256"));
         assert!(report.contains("Reproduction QR payload"));
         assert!(report.contains("## Reproduction Payload"));
-        assert!(report.contains("Scenario: 1 files of 1.0 MiB each."));
+        assert!(report.contains("Scenario: generated workload, 1 files, 1.0 MiB total."));
         assert!(report.contains("- Run id: `perf-test-run`"));
         assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
         assert!(report.contains("- Recommended strategy: ssd-pipeline at 2 HDD worker(s)"));
@@ -5698,6 +5992,9 @@ mod tests {
             repository_revision: "test-revision".to_string(),
             file_size: 1_048_576,
             file_count: 1,
+            workload_kind: PerformanceWorkloadKind::Generated,
+            source_path: None,
+            total_source_bytes: 1_048_576,
             ssd_root: PathBuf::from("/ssd"),
             hdd_root: PathBuf::from("/hdd"),
             disk_count: 2,

@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.8 - 2026-07-08
+
+- Allow `dasobjectstore performance-test` to benchmark extant source folders via
+  `--source`, preserving recursive relative paths and FIFO source order while
+  testing SSD-only, SSD-first HDD drain, and direct-to-HDD landing strategies.
+- Record workload provenance, optional source path, and total source bytes in
+  the performance recommendation JSON so future ingress planning can distinguish
+  generated benchmarks from real dataset benchmarks.
+- Ensure the temporary benchmark objectstore cleanup guard is active for
+  completion, command errors, and Ctrl-C cancellation after the active file
+  operation returns.
+
 ## 0.3.7 - 2026-07-08
 
 - Add operator-facing `performance-test` CLI surface for embedded TUI rendering

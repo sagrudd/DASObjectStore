@@ -18,8 +18,10 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
     assert_string(&artifact, &["run", "repository_revision"]);
     assert_string(&artifact, &["run", "cli_version"]);
     assert_non_empty_array(&artifact, &["run", "command"]);
+    assert_string(&artifact, &["run", "parameters", "workload_kind"]);
     assert_positive_u64(&artifact, &["run", "parameters", "file_size_bytes"]);
     assert_positive_u64(&artifact, &["run", "parameters", "file_count"]);
+    assert_positive_u64(&artifact, &["run", "parameters", "total_source_bytes"]);
     assert_positive_u64(&artifact, &["run", "parameters", "max_hdd_concurrency"]);
     assert_string(&artifact, &["run", "artifacts", "markdown_path"]);
     assert_string(&artifact, &["run", "artifacts", "pdf_path"]);

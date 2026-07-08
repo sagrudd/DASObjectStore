@@ -69,10 +69,13 @@ pub(crate) enum Command {
 pub(crate) struct PerformanceTestArgs {
     /// Size of each generated test file, for example 100MiB, 1GiB, or 1.1TiB.
     #[arg(long = "file_size", alias = "file-size")]
-    file_size: String,
+    file_size: Option<String>,
     /// Number of generated files to test.
     #[arg(long = "file_count", alias = "file-count")]
-    file_count: u32,
+    file_count: Option<u32>,
+    /// Existing folder of files to benchmark instead of generated random data.
+    #[arg(long)]
+    source: Option<PathBuf>,
     /// Maximum concurrent HDD writes to model.
     #[arg(long, default_value_t = 3)]
     max_hdd_concurrency: usize,
@@ -100,12 +103,16 @@ pub(crate) struct PerformanceTestArgs {
 }
 
 impl PerformanceTestArgs {
-    pub(crate) fn file_size(&self) -> &str {
-        &self.file_size
+    pub(crate) fn file_size(&self) -> Option<&str> {
+        self.file_size.as_deref()
     }
 
-    pub(crate) fn file_count(&self) -> u32 {
+    pub(crate) fn file_count(&self) -> Option<u32> {
         self.file_count
+    }
+
+    pub(crate) fn source(&self) -> Option<&Path> {
+        self.source.as_deref()
     }
 
     pub(crate) fn max_hdd_concurrency(&self) -> usize {
@@ -1914,8 +1921,9 @@ mod tests {
         let Some(Command::PerformanceTest(args)) = cli.command() else {
             panic!("expected performance-test command");
         };
-        assert_eq!(args.file_size(), "1GiB");
-        assert_eq!(args.file_count(), 2);
+        assert_eq!(args.file_size(), Some("1GiB"));
+        assert_eq!(args.file_count(), Some(2));
+        assert_eq!(args.source(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);
         assert_eq!(args.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
         assert_eq!(args.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
@@ -1927,6 +1935,27 @@ mod tests {
         );
         assert!(args.tui());
         assert!(args.keep_temp());
+    }
+
+    #[test]
+    fn parses_performance_test_source_folder_options() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "performance-test",
+            "--source",
+            "/data/source-folder",
+            "--max-hdd-concurrency",
+            "5",
+        ])
+        .expect("performance-test source parses");
+
+        let Some(Command::PerformanceTest(args)) = cli.command() else {
+            panic!("expected performance-test command");
+        };
+        assert_eq!(args.source(), Some(Path::new("/data/source-folder")));
+        assert_eq!(args.file_size(), None);
+        assert_eq!(args.file_count(), None);
+        assert_eq!(args.max_hdd_concurrency(), 5);
     }
 
     #[test]
