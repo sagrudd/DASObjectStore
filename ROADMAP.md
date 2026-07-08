@@ -1,7 +1,9 @@
 # DASObjectStore Roadmap
 
 Status: Draft  
-Tracked TODO status: complete through Milestone 18 as of 2026-07-07
+Tracked TODO status: complete through Milestone 18 as of 2026-07-07;
+new Web console completion work is tracked in Milestones 19 and 20 as of
+2026-07-08
 Scope: MVP for a DAS-based object store for bioinformatics development  
 Target platforms: Linux full support, macOS development/read-export support
 
@@ -42,6 +44,12 @@ Current completion-hardening work is limited to keeping the tracked status,
 operator documentation, and user-guide indexes coherent now that the checklist
 through Milestone 18 has no unchecked items. New implementation scope should be
 recorded as a future milestone or Post-MVP direction.
+
+The Web interface has a coherent Yew shell and API contracts, but several
+current surfaces are holder implementations rather than completed operator
+workflows. The Home, Enclosures, ObjectStores, Users/Groups, Stores/SubObject,
+and Bioinformatics pages must now be finished against live daemon-backed data
+and action routes before the console can be considered operational.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
@@ -508,6 +516,96 @@ Exit criteria:
   unbounded memory growth or unverified persistence claims;
 - embedded CLI terminal views and Web views agree on job state because both
   consume the same backend events.
+
+## Milestone 19: Web Console Live Data and Grammateus-Aligned Design
+
+Goal: turn the current Yew holder interface into a live, polished operations
+console while locking the Mnemosyne Biosciences report-style footer across
+every Web page.
+
+Priority: this milestone is the immediate Web completion slice. The existing
+top-level navigation, login shell, and dashboard contracts are retained, but
+fallback fixtures and placeholder cards must be replaced by authenticated,
+daemon-backed data. The page footer must mirror the Mnemosyne Biosciences
+Grammateus/Mnematikon presentation style: dark, compact, monospaced,
+version-bearing, Mnemosyne-linked, and present on login and authenticated pages.
+
+Scope:
+
+- replace Home dashboard fallback metrics with live daemon/API values for drive
+  count, mounted DAS enclosures, total/used/free capacity, seven-day throughput,
+  memory stress, SMART warnings, object-store count, and required actions;
+- replace Enclosures page empty holder cards with detected supported DAS
+  enclosure cards, TL-D800C identity where available, topology, bay/drive
+  membership, SSD/HDD role assignment, SMART warnings, and detail panels;
+- replace ObjectStores empty holder cards with live store registry cards,
+  writer-group membership, public/writeable state, object counts, used
+  capacity, object type, redundancy, and service/export state;
+- wire Yew pages to fetch the existing `/dashboard/*` and product workspace
+  payloads rather than rendering static fallback functions;
+- reconcile the legacy operations workspaces with the redesigned Home,
+  Enclosures, ObjectStores, and Bioinformatics navigation so there is one
+  coherent product surface;
+- implement a reusable DASObjectStore footer component matching the
+  Mnemosyne/Grammateus report footer style and apply it to login and all
+  authenticated pages;
+- add visual and component regression tests for desktop and mobile layouts,
+  including footer fidelity, top-bar behavior, card density, empty states, and
+  permission-denied states.
+
+Exit criteria:
+
+- loading the Web UI after login shows live daemon-backed values rather than
+  "pending" fixture text when the daemon can provide data;
+- every top-level page has the Mnemosyne Biosciences footer in the approved
+  style and includes product version/provenance information;
+- the Home, Enclosures, and ObjectStores pages can be used to understand the
+  appliance without reading CLI JSON;
+- screenshots prove the footer, top bar, card grid, and empty/error states are
+  stable on desktop and mobile widths.
+
+## Milestone 20: Web Administrator Workflows and Bioinformatics Readiness
+
+Goal: complete the currently advertised Web workflows for administrators,
+writer groups, ObjectStores/SubObjects, and bioinformatics orchestration.
+
+Priority: this milestone follows Milestone 19. It converts the current action
+holders into confirmed, daemon-submitted workflows with risk gates and audit
+metadata. No Web workflow may directly mutate managed DAS roots.
+
+Scope:
+
+- implement the Enclosures "Add enclosure" workflow: supported DAS detection,
+  SSD/HDD identification, data-loss review, format/prepare confirmation, daemon
+  job submission, progress, cancellation, and result review;
+- implement ObjectStore creation and configuration from the Web UI using
+  `/opt/dasobjectstore/groups.json`, supported object types, enclosure
+  anchoring, redundancy, public/writeable policy, store class, and S3 export
+  options;
+- implement SubObject creation/configuration surfaces for nested prefixes and
+  object-service routing once the backing registry action plan is accepted;
+- expose Users/Groups as a first-class navigation surface when host mode allows
+  local administration, with current OS authority, group creation, local
+  user-to-group assignment, and writer-policy readiness;
+- implement authenticated action planning, confirmation, submission, progress,
+  failure, and audit review for all risky Web administrator workflows;
+- replace the Bioinformatics placeholder with workflow-readiness cards for BAM,
+  CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, ENA/SRA datasets,
+  sequencing run provenance, object lineage, and downstream analysis handoff;
+- add Web Activity views that show submitted admin and ingest jobs using the
+  same daemon job/event model as the CLI embedded TUI.
+
+Exit criteria:
+
+- administrators can prepare a supported DAS enclosure and create an
+  ObjectStore from the Web UI without shell-only procedures;
+- non-administrators see useful inventory and explicit permission-denied
+  states without seeing unsafe controls as available actions;
+- ObjectStore and SubObject workflows create the same registry/domain records
+  as the CLI paths and are covered by API/Yew tests;
+- Bioinformatics pages identify workflow-ready datasets and expose clear
+  handoff state for basecalling and genome/transcriptome analysis workflows;
+- all risky operations are gated, auditable, daemon-owned, and recoverable.
 
 ## Post-MVP Direction
 

@@ -9,9 +9,9 @@ Current status: the tracked MVP/current-round checklist is functionally complete
 through Milestone 18 as of 2026-07-07, with a small number of daemon ingest
 hardening items still tracked under Milestone 12. Milestone 12 remains recorded
 below as the daemon/client boundary that all normal CLI, HTTPS API, Web UI, TUI,
-and Synoptikon-facing storage mutation flows must preserve. New implementation
-work should be added as a new milestone or Post-MVP task instead of reopening
-stale current-priority language.
+and Synoptikon-facing storage mutation flows must preserve. New Web console
+completion scope is tracked under Milestones 19 and 20 rather than reopening
+older checklist claims.
 
 ## Working Rules
 
@@ -511,6 +511,114 @@ stale current-priority language.
   after interruption.
 - [x] Document embedded `--tui` command flags, supported terminal sizes, resource
   policy, and operational expectations.
+
+## Milestone 19: Web Console Live Data and Grammateus-Aligned Design
+
+- [ ] Audit the Yew redesign surface and remove reliance on
+  `fallback_dashboard_metrics`, `fallback_enclosures`, and
+  `fallback_object_stores` for authenticated pages once live payload loading is
+  in place.
+- [ ] Add a shared Yew API loading model for the Home, Enclosures, ObjectStores,
+  and Bioinformatics pages: loading, success, empty, permission-denied,
+  transport-error, and stale-data states.
+- [ ] Wire `HomeDashboard` to fetch `/products/dasobjectstore/api/v1/dashboard/home`
+  or the canonical product workspace route and render live drive count, mounted
+  enclosure count, total/used/free capacity, seven-day throughput, memory stress,
+  SMART warning count, required actions, and object-store count.
+- [ ] Replace Home "Live dashboard telemetry is being bootstrapped" copy with
+  real attention cards sourced from daemon health, ingest, destage, SMART,
+  capacity, and object-service warnings.
+- [ ] Implement the daemon/API aggregator that populates `HomeDashboardView` or
+  the product home workspace from probe, health, store registry, ingest queue,
+  destage queue, SMART, throughput, and memory sources instead of
+  `bootstrap_fixture`.
+- [ ] Wire `EnclosuresPage` to fetch live enclosure payloads and render detected
+  supported DAS enclosures as cards, including QNAP TL-D800C identity, topology,
+  mounted state, SSD/HDD counts, capacity, bay membership, SMART warning count,
+  and health state.
+- [ ] Implement selected-enclosure detail panels with drive cards for SSD and
+  HDD members, mounted paths, bay labels, role assignment, capacity, health,
+  SMART warnings, and daemon-managed action availability.
+- [ ] Replace the static Enclosures "Add enclosure" card with a disabled/enabled
+  state driven by authenticated administrator capability, supported enclosure
+  discovery, and daemon readiness.
+- [ ] Wire `ObjectStoresPage` to fetch live object-store registry data and render
+  cards with name, writer group, object type, public/writeable flags, redundancy,
+  object count, used capacity, S3/export state, warning state, and last ingest
+  time.
+- [ ] Load `/opt/dasobjectstore/groups.json` through a daemon/API boundary and
+  expose group membership and writer-policy readiness to ObjectStores and
+  Users/Groups pages without direct browser filesystem access.
+- [ ] Reconcile the legacy `workspaces/stores`, `workspaces/users-groups`, and
+  operations workspace modules with the redesigned top navigation so there is
+  one coherent Web console rather than parallel holder surfaces.
+- [ ] Implement a reusable `MnemosyneFooter`/`DasObjectStoreFooter` Yew component
+  that mirrors the Mnemosyne Biosciences Grammateus/Mnematikon footer style:
+  dark compact band, monospaced typography, product version, "Developed by"
+  wording, `https://mnemosyne.co.uk` link, and 2026 attribution.
+- [ ] Apply the shared footer to the login page and every authenticated page,
+  replacing the current plain `dos-app-footer` text footer and the separate
+  `dos-auth-brand-footer` wording where needed.
+- [ ] Add CSS tokens for the footer and Mnemosyne report palette so page-level
+  styling does not drift from Grammateus report conventions.
+- [ ] Add Yew/component tests proving the footer renders on disconnected,
+  checking-session, connected, busy, and error states.
+- [ ] Add Playwright or trunk-driven screenshot regression coverage for login,
+  Home, Enclosures, ObjectStores, and Bioinformatics at desktop and mobile
+  widths, including footer fidelity and no-overlap checks.
+- [ ] Update `docs/user/web-interface.rst` with the live Web dashboard behavior,
+  footer standard, placeholder removal plan, and daemon-owned data boundaries.
+
+## Milestone 20: Web Administrator Workflows and Bioinformatics Readiness
+
+- [ ] Implement the Enclosures "Add enclosure" wizard as a real Web workflow:
+  detect supported DAS hardware, select SSD landing media, select eligible HDD
+  media, show data-loss/format plan, require administrator confirmation, submit
+  a daemon preparation job, and render progress/results.
+- [ ] Add API request/response DTOs and daemon client methods for Web-submitted
+  enclosure preparation so the browser never mutates devices or managed roots
+  directly.
+- [ ] Add risk-gate tests for enclosure preparation: non-admin denied,
+  unsupported DAS denied, existing data requires explicit confirmation, daemon
+  job failure shown clearly, and cancellation/retry state preserved.
+- [ ] Implement ObjectStore creation form controls for store name, writer group,
+  enclosure, object type, redundancy, public/writeable state, store class,
+  capacity behavior, retention, and S3/export mode.
+- [ ] Connect ObjectStore creation to the existing action-plan/daemon boundary
+  and convert the current `store_create` holder into a confirmation and
+  submission workflow with audit metadata.
+- [ ] Add ObjectStore edit/configuration flows for redundancy, retention,
+  writer group, public/writeable policy, export mode, and capacity behavior,
+  using the same validation as CLI/domain policy code.
+- [ ] Implement SubObject creation/configuration UI for nested prefixes, parent
+  ObjectStore selection, object type inheritance/override, S3 routing, and
+  registry preview before confirmation.
+- [ ] Add Web tests proving ObjectStore and SubObject creation produce the same
+  registry/domain records as CLI paths and reject invalid policy combinations.
+- [ ] Promote Users/Groups into primary navigation when host mode permits local
+  administration, including current OS authority, product-local users, local
+  groups, administrator readiness, and writer-policy readiness.
+- [ ] Implement Users/Groups forms for local group creation and local
+  user-to-group assignment against the existing daemon-backed routes, including
+  dry-run/preview, confirmation, result, and permission-denied states.
+- [ ] Extend Web Activity to show administrator jobs, enclosure preparation,
+  ObjectStore/SubObject creation, ingest, destage, repair, and endpoint
+  validation using the shared daemon job/event stream.
+- [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
+  cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
+  ENA/SRA object types.
+- [ ] Add Bioinformatics views for sequencing run provenance, object lineage,
+  basecalling readiness, genome/transcriptome workflow handoff, and Mnemosyne
+  project/governance-domain binding state.
+- [ ] Add API contracts that allow Bioinformatics readiness to be derived from
+  ObjectStore/SubObject metadata, object type assignments, and Mneion export
+  bindings without hard-coding workflow-specific paths in Yew.
+- [ ] Add documentation for administrator Web workflows, Bioinformatics
+  readiness semantics, permission boundaries, audit expectations, and recovery
+  from failed Web-submitted jobs.
+- [ ] Add end-to-end Web workflow tests for administrator and non-administrator
+  users covering enclosure preparation, ObjectStore creation, SubObject
+  creation, group assignment, Bioinformatics readiness, and Activity progress.
 
 ## Cross-Cutting Tasks
 
