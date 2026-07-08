@@ -100,11 +100,11 @@ use dasobjectstore_platform::{
 use dasobjectstore_tui::{UploadTui, UploadTuiContext};
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph, Wrap},
-    Terminal,
+    Terminal, TerminalOptions, Viewport,
 };
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -1022,7 +1022,12 @@ fn render_performance_tui_snapshot(
     snapshot: &PerformanceTuiSnapshot<'_>,
 ) -> Result<(), CliError> {
     let backend = CrosstermBackend::new(writer);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::with_options(
+        backend,
+        TerminalOptions {
+            viewport: Viewport::Fixed(performance_tui_area()),
+        },
+    )?;
     terminal.clear()?;
     let current_fraction = if snapshot.file_count == 0 {
         0.0
@@ -1126,6 +1131,21 @@ fn render_performance_tui_snapshot(
         );
     })?;
     Ok(())
+}
+
+fn performance_tui_area() -> Rect {
+    let env_size = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|columns| columns.parse::<u16>().ok())
+        .zip(
+            std::env::var("LINES")
+                .ok()
+                .and_then(|lines| lines.parse::<u16>().ok()),
+        );
+    let (width, height) = env_size
+        .or_else(|| crossterm::terminal::size().ok())
+        .unwrap_or((110, 24));
+    Rect::new(0, 0, width.max(80), height.max(20))
 }
 
 fn benchmark_ssd_only(

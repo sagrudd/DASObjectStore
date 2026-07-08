@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.4 - 2026-07-08
+
+- Make the performance-test TUI viewport robust when terminal size probing is
+  unavailable, while still using the available full terminal dimensions in
+  normal interactive shells.
+
 ## 0.4.3 - 2026-07-08
 
 - Make the `performance-test --tui` dashboard use the full terminal viewport
