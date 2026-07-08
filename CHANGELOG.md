@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.7 - 2026-07-08
+
+- Add operator-facing `performance-test` CLI surface for embedded TUI rendering
+  and optional JSON benchmark artifacts, and document administrative runs up to
+  `--max-hdd-concurrency 5`.
+
 ## 0.3.6 - 2026-07-08
 
 - Prefer `grammateus_markdown_pdf` for `dasobjectstore performance-test` PDF

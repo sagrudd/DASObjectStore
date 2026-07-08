@@ -88,6 +88,12 @@ pub(crate) struct PerformanceTestArgs {
     /// Markdown report path; defaults to a timestamped file in /tmp.
     #[arg(long)]
     report: Option<PathBuf>,
+    /// JSON artifact path; defaults beside the Markdown report.
+    #[arg(long = "json-artifact")]
+    json_artifact: Option<PathBuf>,
+    /// Render an embedded terminal benchmark view while the run executes.
+    #[arg(long)]
+    tui: bool,
     /// Keep temporary benchmark files for inspection instead of deleting them.
     #[arg(long)]
     keep_temp: bool,
@@ -120,6 +126,14 @@ impl PerformanceTestArgs {
 
     pub(crate) fn report(&self) -> Option<&Path> {
         self.report.as_deref()
+    }
+
+    pub(crate) fn json_artifact(&self) -> Option<&Path> {
+        self.json_artifact.as_deref()
+    }
+
+    pub(crate) fn tui(&self) -> bool {
+        self.tui
     }
 
     pub(crate) fn keep_temp(&self) -> bool {
@@ -1881,7 +1895,7 @@ mod tests {
             "--file-count",
             "2",
             "--max-hdd-concurrency",
-            "4",
+            "5",
             "--ssd-root",
             "/srv/dasobjectstore/ssd",
             "--hdd-root",
@@ -1890,6 +1904,9 @@ mod tests {
             "/tmp/dos-perf",
             "--report",
             "/tmp/dos-perf/report.md",
+            "--json-artifact",
+            "/tmp/dos-perf/report.json",
+            "--tui",
             "--keep-temp",
         ])
         .expect("performance-test parses");
@@ -1899,11 +1916,16 @@ mod tests {
         };
         assert_eq!(args.file_size(), "1GiB");
         assert_eq!(args.file_count(), 2);
-        assert_eq!(args.max_hdd_concurrency(), 4);
+        assert_eq!(args.max_hdd_concurrency(), 5);
         assert_eq!(args.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
         assert_eq!(args.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
         assert_eq!(args.tmp_dir(), Path::new("/tmp/dos-perf"));
         assert_eq!(args.report(), Some(Path::new("/tmp/dos-perf/report.md")));
+        assert_eq!(
+            args.json_artifact(),
+            Some(Path::new("/tmp/dos-perf/report.json"))
+        );
+        assert!(args.tui());
         assert!(args.keep_temp());
     }
 

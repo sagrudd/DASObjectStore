@@ -74,9 +74,11 @@ artifact paths:
 .. code-block:: text
 
    Report: /tmp/dasobjectstore-performance-smoke.md
+   JSON: /tmp/dasobjectstore-performance-smoke.json
    PDF: /tmp/dasobjectstore-performance-smoke.pdf
 
-The QR artifact is written beside the Markdown report using the same base name:
+The JSON and QR artifacts are written beside the Markdown report using the same
+base name unless an explicit JSON artifact path is supplied:
 
 .. code-block:: text
 
@@ -93,7 +95,7 @@ support more than one concurrent HDD writer:
    dasobjectstore performance-test \
      --file_size 2GiB \
      --file_count 100 \
-     --max-hdd-concurrency 3 \
+     --max-hdd-concurrency 5 \
      --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md
 
 Use ``--tmp-dir`` when ``/tmp`` is too small or is backed by storage that should
@@ -116,6 +118,26 @@ Use ``--ssd-root`` only when testing a non-default prepared SSD root:
      --file_count 10 \
      --ssd-root /srv/dasobjectstore/ssd \
      --report /var/lib/dasobjectstore/reports/performance-explicit-ssd.md
+
+Terminal View
+-------------
+
+Add ``--tui`` for the embedded terminal benchmark view during a long-running
+administrative run:
+
+.. code-block:: console
+
+   dasobjectstore performance-test \
+     --file_size 2GiB \
+     --file_count 100 \
+     --max-hdd-concurrency 5 \
+     --tui \
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md
+
+The TUI is an operator convenience for the same command. It should show the
+current benchmark phase, elapsed time, generated data volume, SSD write/read
+activity, HDD concurrency activity, and artifact paths without changing the
+benchmark workload or report content.
 
 Keeping Temporary Files
 -----------------------
@@ -159,6 +181,25 @@ The command also writes:
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
 * ``<report>.pdf`` as the final PDF report artifact.
 
+Use ``--json-artifact`` to write the structured benchmark artifact beside the
+human-readable report bundle:
+
+.. code-block:: console
+
+   dasobjectstore performance-test \
+     --file_size 2GiB \
+     --file_count 100 \
+     --max-hdd-concurrency 5 \
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-100x2GiB.json
+
+The JSON artifact is intended for automation and audit ingestion. It should
+include the run ID, generation timestamp, CLI version, repository revision,
+input parameters, discovered disk count, Markdown/PDF/QR artifact paths,
+per-file SSD measurements, per-disk HDD measurements, concurrency model rows,
+and the generated recommendation. Keep it with the Markdown, QR SVG, and PDF
+files for a complete evidence bundle.
+
 When ``qrencode`` is available on the host, the QR SVG is a scan-ready code
 for the reproduction payload. If ``qrencode`` is unavailable, DASObjectStore
 still writes a fallback SVG artifact and records that fallback in the report's
@@ -175,9 +216,9 @@ evidence bundle.
 Reproducibility Notes
 ---------------------
 
-Keep the Markdown, QR SVG, and PDF artifacts together. The Markdown report is
-the primary machine-readable and reviewable artifact because it contains the
-full reproduction payload.
+Keep the Markdown, JSON, QR SVG, and PDF artifacts together. The Markdown report
+is the primary human-reviewable artifact, while the JSON artifact is the
+preferred machine-ingestion artifact.
 
 For reproducible comparisons between runs:
 
