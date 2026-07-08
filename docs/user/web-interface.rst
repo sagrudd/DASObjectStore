@@ -565,6 +565,23 @@ storage from browser code. A later API slice will populate the cards from
 ObjectStore/SubObject metadata, object type assignments, and Mneion export
 bindings.
 
+Bioinformatics readiness is also backed by explicit derivation source records.
+The browser renders these records generically and does not hard-code metadata
+paths or workflow-specific ObjectStore names. Source records identify:
+
+* whether the evidence came from ObjectStore metadata, SubObject metadata, or a
+  Mneion/Mnemosyne binding;
+* the source identifier and optional parent source;
+* the object type assignment and endpoint/export mode;
+* the Mneion binding state and optional governance domain; and
+* workflow roles plus evidence strings that explain why the source contributes
+  to readiness.
+
+This contract is the handoff point for live metadata aggregation. Once daemon
+metadata exposes ObjectStore/SubObject object-type assignments and Mneion
+bindings, the API can populate these source records without changing the Yew
+page.
+
 Login and Footer Branding
 -------------------------
 

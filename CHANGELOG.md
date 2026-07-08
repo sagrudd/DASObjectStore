@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.53.0 - 2026-07-09
+
+- Add Bioinformatics derivation-source API records for ObjectStore metadata,
+  SubObject metadata, object-type assignments, endpoint/export state, and
+  Mneion/Mnemosyne governance bindings.
+- Render derivation-source cards generically in the Yew Bioinformatics page so
+  readiness evidence is API-owned rather than hard-coded in browser workflow
+  paths.
+- Document the Bioinformatics derivation-source contract as the handoff point
+  for live ObjectStore/SubObject and Mneion metadata aggregation.
+
 ## 0.52.0 - 2026-07-09
 
 - Add Bioinformatics context views for sequencing run provenance, object

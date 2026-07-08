@@ -658,7 +658,7 @@ older checklist claims.
 - [x] Add Bioinformatics views for sequencing run provenance, object lineage,
   basecalling readiness, genome/transcriptome workflow handoff, and Mnemosyne
   project/governance-domain binding state.
-- [ ] Add API contracts that allow Bioinformatics readiness to be derived from
+- [x] Add API contracts that allow Bioinformatics readiness to be derived from
   ObjectStore/SubObject metadata, object type assignments, and Mneion export
   bindings without hard-coding workflow-specific paths in Yew.
 - [ ] Add documentation for administrator Web workflows, Bioinformatics

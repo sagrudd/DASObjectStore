@@ -4489,6 +4489,20 @@ pub struct BioinformaticsContextSummary {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BioinformaticsDerivationSourceSummary {
+    pub source_kind: String,
+    pub source_id: String,
+    pub display_name: String,
+    pub object_type: String,
+    pub parent: String,
+    pub endpoint_export: String,
+    pub binding: String,
+    pub workflow_roles: String,
+    pub evidence: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn bioinformatics_readiness_summaries(
     view: &BioinformaticsWorkspaceResponse,
 ) -> Vec<BioinformaticsReadinessSummary> {
@@ -4569,11 +4583,41 @@ fn bioinformatics_context_group(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+pub fn bioinformatics_derivation_source_summaries(
+    view: &BioinformaticsWorkspaceResponse,
+) -> Vec<BioinformaticsDerivationSourceSummary> {
+    view.derivation_sources
+        .iter()
+        .map(|source| BioinformaticsDerivationSourceSummary {
+            source_kind: source.source_kind.clone(),
+            source_id: source.source_id.clone(),
+            display_name: source.display_name.clone(),
+            object_type: source.object_type.clone(),
+            parent: source
+                .parent_id
+                .clone()
+                .unwrap_or_else(|| "top-level source".to_string()),
+            endpoint_export: source
+                .endpoint_export_mode
+                .clone()
+                .unwrap_or_else(|| "not exported".to_string()),
+            binding: match &source.governance_domain {
+                Some(domain) => format!("{} · {}", source.mneion_binding_state, domain),
+                None => source.mneion_binding_state.clone(),
+            },
+            workflow_roles: bioinformatics_metadata_summary(&source.workflow_roles),
+            evidence: bioinformatics_metadata_summary(&source.evidence),
+        })
+        .collect()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn bioinformatics_summary_cards(
     view: &BioinformaticsWorkspaceResponse,
 ) -> Vec<(String, String, String)> {
     let cards = bioinformatics_readiness_summaries(view);
     let context_cards = bioinformatics_context_summaries(view);
+    let derivation_sources = bioinformatics_derivation_source_summaries(view);
     let workflow_ready = cards
         .iter()
         .filter(|card| card.state == "workflow_ready")
@@ -4603,6 +4647,11 @@ pub fn bioinformatics_summary_cards(
             "Context views".to_string(),
             context_cards.len().to_string(),
             "Provenance, lineage, handoff, and governance cards".to_string(),
+        ),
+        (
+            "Derivation sources".to_string(),
+            derivation_sources.len().to_string(),
+            "ObjectStore, SubObject, object-type, and Mneion source records".to_string(),
         ),
     ]
 }
@@ -4708,6 +4757,7 @@ fn render_bioinformatics_state(state: &ApiLoadState<BioinformaticsWorkspaceRespo
 #[cfg(target_arch = "wasm32")]
 fn render_bioinformatics_workspace(view: &BioinformaticsWorkspaceResponse) -> Html {
     let summaries = bioinformatics_readiness_summaries(view);
+    let derivation_sources = bioinformatics_derivation_source_summaries(view);
     let context_summaries = bioinformatics_context_summaries(view);
     html! {
         <>
@@ -4727,6 +4777,16 @@ fn render_bioinformatics_workspace(view: &BioinformaticsWorkspaceResponse) -> Ht
             <div class="dos-store-grid">
                 { for summaries.into_iter().map(render_bioinformatics_readiness_card) }
             </div>
+            if !derivation_sources.is_empty() {
+                <section class="dos-card dos-wide-card">
+                    <span class="dos-card-label">{ "Metadata derivation" }</span>
+                    <h2>{ "API-owned readiness source records" }</h2>
+                    <p>{ "The Bioinformatics page renders source records supplied by the API instead of hard-coding ObjectStore, SubObject, or Mneion metadata paths in browser code." }</p>
+                </section>
+                <div class="dos-store-grid">
+                    { for derivation_sources.into_iter().map(render_bioinformatics_derivation_source_card) }
+                </div>
+            }
             if !context_summaries.is_empty() {
                 <section class="dos-card dos-wide-card">
                     <span class="dos-card-label">{ "Workflow context" }</span>
@@ -4767,6 +4827,25 @@ fn render_bioinformatics_readiness_card(card: BioinformaticsReadinessSummary) ->
             <p>{ card.primary_workflow }</p>
             <p>{ format!("Handoff: {}", card.handoff) }</p>
             <p>{ format!("Metadata: {}", card.metadata) }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_derivation_source_card(
+    source: BioinformaticsDerivationSourceSummary,
+) -> Html {
+    html! {
+        <section class="dos-card dos-store-card" data-source-kind={source.source_kind.clone()} data-object-type={source.object_type.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ source.source_kind }</span>
+                <span class="dos-status-pill">{ source.object_type }</span>
+            </div>
+            <strong>{ source.display_name }</strong>
+            <p>{ format!("Source: {} · parent {}", source.source_id, source.parent) }</p>
+            <p>{ format!("Export: {} · binding {}", source.endpoint_export, source.binding) }</p>
+            <p>{ format!("Roles: {}", source.workflow_roles) }</p>
+            <p>{ format!("Evidence: {}", source.evidence) }</p>
         </section>
     }
 }
@@ -4823,9 +4902,9 @@ mod tests {
     use super::{
         activity_category_summaries, activity_queue_summary, activity_workspace_api_path,
         admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
-        bioinformatics_readiness_summaries, bioinformatics_summary_cards,
-        bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
-        enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
+        bioinformatics_derivation_source_summaries, bioinformatics_readiness_summaries,
+        bioinformatics_summary_cards, bioinformatics_workspace_api_path, enclosure_card_summaries,
+        enclosure_prepare_candidate, enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
         enclosures_workspace_api_path, endpoints_workspace_api_path, home_dashboard_attention,
         home_dashboard_metrics, home_workspace_api_path, object_store_bucket_default,
         object_store_card_summaries, object_store_configure_review_from_values,
@@ -4845,13 +4924,13 @@ mod tests {
     use crate::api::{
         ActivityCategoryResponse, ActivityTaskResponse, ActivityWorkspaceResponse,
         AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
-        BioinformaticsContextCardResponse, BioinformaticsReadinessCardResponse,
-        BioinformaticsWorkspaceResponse, DestageQueueSummaryResponse,
-        EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice, EnclosurePrepareResponse,
-        EnclosuresPageResponse, HomeDashboardResponse, IngestQueueSummaryResponse,
-        LocalGroupMembershipResponse, LocalGroupOperationResponse, LocalUserAuthorityResponse,
-        ObjectStoresPageResponse, StandaloneUserAccountResponse, StorageGroupResponse,
-        UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
+        BioinformaticsContextCardResponse, BioinformaticsDerivationSourceResponse,
+        BioinformaticsReadinessCardResponse, BioinformaticsWorkspaceResponse,
+        DestageQueueSummaryResponse, EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice,
+        EnclosurePrepareResponse, EnclosuresPageResponse, HomeDashboardResponse,
+        IngestQueueSummaryResponse, LocalGroupMembershipResponse, LocalGroupOperationResponse,
+        LocalUserAuthorityResponse, ObjectStoresPageResponse, StandaloneUserAccountResponse,
+        StorageGroupResponse, UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
     };
     use crate::mount::FrontendHost;
     use crate::stores::STORES_WORKSPACE_ROUTE;
@@ -5146,6 +5225,47 @@ mod tests {
                     required_metadata: vec!["reference genome".to_string()],
                 },
             ],
+            derivation_sources: vec![
+                BioinformaticsDerivationSourceResponse {
+                    source_kind: "object_store_metadata".to_string(),
+                    source_id: "contract-object-store-object-type".to_string(),
+                    display_name: "ObjectStore object-type assignment".to_string(),
+                    object_type: "pod5".to_string(),
+                    parent_id: None,
+                    endpoint_export_mode: Some("s3_bucket".to_string()),
+                    mneion_binding_state: "binding_required".to_string(),
+                    governance_domain: None,
+                    workflow_roles: vec![
+                        "sequencing_run_provenance".to_string(),
+                        "basecalling_handoff".to_string(),
+                    ],
+                    evidence: vec!["ObjectStore object_type assignment".to_string()],
+                },
+                BioinformaticsDerivationSourceResponse {
+                    source_kind: "subobject_metadata".to_string(),
+                    source_id: "contract-subobject-lineage".to_string(),
+                    display_name: "SubObject lineage and object-type policy".to_string(),
+                    object_type: "fastq".to_string(),
+                    parent_id: Some("contract-object-store-object-type".to_string()),
+                    endpoint_export_mode: Some("dedicated_prefix".to_string()),
+                    mneion_binding_state: "binding_required".to_string(),
+                    governance_domain: None,
+                    workflow_roles: vec!["object_lineage".to_string()],
+                    evidence: vec!["SubObject parent relationship".to_string()],
+                },
+                BioinformaticsDerivationSourceResponse {
+                    source_kind: "mneion_binding".to_string(),
+                    source_id: "contract-mneion-governance-binding".to_string(),
+                    display_name: "Mneion governance-domain binding".to_string(),
+                    object_type: "mixed".to_string(),
+                    parent_id: None,
+                    endpoint_export_mode: None,
+                    mneion_binding_state: "binding_required".to_string(),
+                    governance_domain: Some("unassigned".to_string()),
+                    workflow_roles: vec!["governance_binding".to_string()],
+                    evidence: vec!["Mneion storage definition".to_string()],
+                },
+            ],
             sequencing_runs: vec![BioinformaticsContextCardResponse {
                 label: "Sequencing run provenance".to_string(),
                 state: "metadata_required".to_string(),
@@ -5178,6 +5298,7 @@ mod tests {
         };
 
         let cards = bioinformatics_readiness_summaries(&view);
+        let derivation_sources = bioinformatics_derivation_source_summaries(&view);
         let context_cards = super::bioinformatics_context_summaries(&view);
         let metrics = bioinformatics_summary_cards(&view);
 
@@ -5191,6 +5312,17 @@ mod tests {
         assert_eq!(metrics[1].1, "1");
         assert_eq!(metrics[2].1, "1");
         assert_eq!(metrics[3].1, "4");
+        assert_eq!(metrics[4].1, "3");
+        assert_eq!(derivation_sources[0].source_kind, "object_store_metadata");
+        assert_eq!(derivation_sources[0].parent, "top-level source");
+        assert_eq!(
+            derivation_sources[1].parent,
+            "contract-object-store-object-type"
+        );
+        assert_eq!(
+            derivation_sources[2].binding,
+            "binding_required · unassigned"
+        );
         assert_eq!(context_cards[0].section, "Sequencing Runs");
         assert_eq!(context_cards[1].state_label, "Planned");
         assert_eq!(context_cards[3].state_label, "Binding needed");
@@ -5203,6 +5335,7 @@ mod tests {
             available: false,
             supported_object_types: vec!["FASTQ/FASTQ.GZ".to_string(), "ENA/SRA".to_string()],
             readiness_cards: Vec::new(),
+            derivation_sources: Vec::new(),
             sequencing_runs: Vec::new(),
             object_lineage: Vec::new(),
             workflow_handoffs: Vec::new(),

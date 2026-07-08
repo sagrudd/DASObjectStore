@@ -358,6 +358,21 @@ mod tests {
             .unwrap()
             .iter()
             .any(|card| card["label"] == json!("ENA / SRA")));
+        assert!(encoded["derivation_sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["source_kind"] == json!("object_store_metadata")));
+        assert!(encoded["derivation_sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["source_kind"] == json!("subobject_metadata")));
+        assert!(encoded["derivation_sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["source_kind"] == json!("mneion_binding")));
         assert_eq!(
             encoded["sequencing_runs"][0]["label"],
             json!("Sequencing run provenance")

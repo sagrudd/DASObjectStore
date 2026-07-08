@@ -415,6 +415,7 @@ pub struct ProductBioinformaticsWorkspaceView {
     pub available: bool,
     pub supported_object_types: Vec<String>,
     pub readiness_cards: Vec<ProductBioinformaticsReadinessCardView>,
+    pub derivation_sources: Vec<ProductBioinformaticsDerivationSourceView>,
     pub sequencing_runs: Vec<ProductBioinformaticsContextCardView>,
     pub object_lineage: Vec<ProductBioinformaticsContextCardView>,
     pub workflow_handoffs: Vec<ProductBioinformaticsContextCardView>,
@@ -439,6 +440,20 @@ pub struct ProductBioinformaticsContextCardView {
     pub state: String,
     pub summary: String,
     pub detail: String,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductBioinformaticsDerivationSourceView {
+    pub source_kind: String,
+    pub source_id: String,
+    pub display_name: String,
+    pub object_type: String,
+    pub parent_id: Option<String>,
+    pub endpoint_export_mode: Option<String>,
+    pub mneion_binding_state: String,
+    pub governance_domain: Option<String>,
+    pub workflow_roles: Vec<String>,
     pub evidence: Vec<String>,
 }
 
@@ -564,6 +579,62 @@ impl ProductBioinformaticsWorkspaceView {
                 "ENA/SRA".to_string(),
             ],
             readiness_cards,
+            derivation_sources: vec![
+                ProductBioinformaticsDerivationSourceView {
+                    source_kind: "object_store_metadata".to_string(),
+                    source_id: "contract-object-store-object-type".to_string(),
+                    display_name: "ObjectStore object-type assignment".to_string(),
+                    object_type: "pod5".to_string(),
+                    parent_id: None,
+                    endpoint_export_mode: Some("s3_bucket".to_string()),
+                    mneion_binding_state: "binding_required".to_string(),
+                    governance_domain: None,
+                    workflow_roles: vec![
+                        "sequencing_run_provenance".to_string(),
+                        "basecalling_handoff".to_string(),
+                    ],
+                    evidence: vec![
+                        "ObjectStore object_type assignment".to_string(),
+                        "ObjectStore endpoint export mode".to_string(),
+                    ],
+                },
+                ProductBioinformaticsDerivationSourceView {
+                    source_kind: "subobject_metadata".to_string(),
+                    source_id: "contract-subobject-lineage".to_string(),
+                    display_name: "SubObject lineage and object-type policy".to_string(),
+                    object_type: "fastq".to_string(),
+                    parent_id: Some("contract-object-store-object-type".to_string()),
+                    endpoint_export_mode: Some("dedicated_prefix".to_string()),
+                    mneion_binding_state: "binding_required".to_string(),
+                    governance_domain: None,
+                    workflow_roles: vec![
+                        "object_lineage".to_string(),
+                        "genome_transcriptome_handoff".to_string(),
+                    ],
+                    evidence: vec![
+                        "SubObject parent relationship".to_string(),
+                        "SubObject object_type override or inheritance".to_string(),
+                    ],
+                },
+                ProductBioinformaticsDerivationSourceView {
+                    source_kind: "mneion_binding".to_string(),
+                    source_id: "contract-mneion-governance-binding".to_string(),
+                    display_name: "Mneion governance-domain binding".to_string(),
+                    object_type: "mixed".to_string(),
+                    parent_id: None,
+                    endpoint_export_mode: None,
+                    mneion_binding_state: "binding_required".to_string(),
+                    governance_domain: Some("unassigned".to_string()),
+                    workflow_roles: vec![
+                        "governance_binding".to_string(),
+                        "audit_context".to_string(),
+                    ],
+                    evidence: vec![
+                        "Endpoint inventory active binding".to_string(),
+                        "Mneion storage definition".to_string(),
+                    ],
+                },
+            ],
             sequencing_runs: vec![ProductBioinformaticsContextCardView {
                 label: "Sequencing run provenance".to_string(),
                 state: "metadata_required".to_string(),

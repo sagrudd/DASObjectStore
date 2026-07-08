@@ -408,6 +408,8 @@ pub struct BioinformaticsWorkspaceResponse {
     #[serde(default)]
     pub readiness_cards: Vec<BioinformaticsReadinessCardResponse>,
     #[serde(default)]
+    pub derivation_sources: Vec<BioinformaticsDerivationSourceResponse>,
+    #[serde(default)]
     pub sequencing_runs: Vec<BioinformaticsContextCardResponse>,
     #[serde(default)]
     pub object_lineage: Vec<BioinformaticsContextCardResponse>,
@@ -438,6 +440,23 @@ pub struct BioinformaticsContextCardResponse {
     pub state: String,
     pub summary: String,
     pub detail: String,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct BioinformaticsDerivationSourceResponse {
+    pub source_kind: String,
+    pub source_id: String,
+    pub display_name: String,
+    pub object_type: String,
+    pub parent_id: Option<String>,
+    pub endpoint_export_mode: Option<String>,
+    pub mneion_binding_state: String,
+    pub governance_domain: Option<String>,
+    #[serde(default)]
+    pub workflow_roles: Vec<String>,
     #[serde(default)]
     pub evidence: Vec<String>,
 }
@@ -1619,6 +1638,32 @@ mod tests {
                     "required_metadata": ["flowcell/run identity", "sequencing kit"]
                 }
             ],
+            "derivation_sources": [
+                {
+                    "source_kind": "object_store_metadata",
+                    "source_id": "contract-object-store-object-type",
+                    "display_name": "ObjectStore object-type assignment",
+                    "object_type": "pod5",
+                    "parent_id": null,
+                    "endpoint_export_mode": "s3_bucket",
+                    "mneion_binding_state": "binding_required",
+                    "governance_domain": null,
+                    "workflow_roles": ["sequencing_run_provenance", "basecalling_handoff"],
+                    "evidence": ["ObjectStore object_type assignment"]
+                },
+                {
+                    "source_kind": "mneion_binding",
+                    "source_id": "contract-mneion-governance-binding",
+                    "display_name": "Mneion governance-domain binding",
+                    "object_type": "mixed",
+                    "parent_id": null,
+                    "endpoint_export_mode": null,
+                    "mneion_binding_state": "binding_required",
+                    "governance_domain": "unassigned",
+                    "workflow_roles": ["governance_binding"],
+                    "evidence": ["Mneion storage definition"]
+                }
+            ],
             "sequencing_runs": [
                 {
                     "label": "Sequencing run provenance",
@@ -1660,6 +1705,14 @@ mod tests {
             .any(|object_type| object_type == "POD5"));
         assert_eq!(decoded.readiness_cards[0].label, "POD5");
         assert_eq!(decoded.readiness_cards[0].handoff, "Basecalling readiness");
+        assert_eq!(
+            decoded.derivation_sources[0].source_kind,
+            "object_store_metadata"
+        );
+        assert_eq!(
+            decoded.derivation_sources[1].governance_domain.as_deref(),
+            Some("unassigned")
+        );
         assert_eq!(
             decoded.sequencing_runs[0].label,
             "Sequencing run provenance"
