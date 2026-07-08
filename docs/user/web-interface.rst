@@ -418,14 +418,12 @@ rows. It also reads the daemon-owned live ingest queue metadata from the SSD
 metadata database and derives the current ingest and HDD settlement summaries
 from those rows. Repair activity is read from the same live metadata database:
 ``Repairing`` and ``Degraded`` pool states are surfaced as repair task rows
-with explicit operator warnings. Endpoint-validation activity uses the shared
-endpoint inventory contract so pending, validated, degraded, rejected, and
-unknown endpoint validation states have the same task-row semantics once a
-live endpoint inventory source is present. The page always shows the supported
-activity categories so operators can distinguish an idle appliance from an
-unimplemented browser holder. Categories currently include administrator jobs,
-enclosure preparation, ObjectStore creation, SubObject creation, ingest,
-destage, repair, and endpoint validation.
+with explicit operator warnings. Endpoint-validation activity is read from the
+same endpoint inventory registry as the ``Endpoints`` workspace. The page always
+shows the supported activity categories so operators can distinguish an idle
+appliance from an unimplemented browser holder. Categories currently include
+administrator jobs, enclosure preparation, ObjectStore creation, SubObject
+creation, ingest, destage, repair, and endpoint validation.
 
 When daemon sources report work, the page shows active task rows with task ID,
 kind, state, label, and update timestamp. Ingest and destage queue summaries
@@ -440,11 +438,40 @@ and task views with an explicit ``activity_ingest_queue_unavailable`` warning
 while leaving the page observational and usable.
 If live repair metadata cannot be read, the API returns
 ``activity_repair_events_unavailable`` rather than hiding the source failure.
+If the endpoint inventory registry is missing or invalid, both ``Activity`` and
+``Endpoints`` expose registry warnings rather than silently presenting fixture
+data.
 
 The Activity page is observational. Operators may navigate from submitted
 administrator workflows to their daemon job status, but the page itself must not
 cancel, mutate, or retry storage operations without using the same
 authenticated daemon job routes and risk gates as the originating workflow.
+
+Endpoints Workspace
+-------------------
+
+The legacy operations ``Endpoints`` workspace loads
+``/products/dasobjectstore/api/v1/workspaces/endpoints``. It reads endpoint
+inventory from ``/opt/dasobjectstore/endpoints.json`` by default, or from the
+path named by ``DASOBJECTSTORE_ENDPOINTS_PATH`` when that environment variable
+is set. The registry may be either an object with an ``endpoints`` list or a
+bare list of endpoint records. Each endpoint record includes:
+
+* ``endpoint_id`` and ``display_name``;
+* ``kind`` such as ``dasobjectstore_das``, ``dasobjectstore_nfs``, or
+  ``s3_compatible``;
+* ``object_service_url``;
+* ``validation`` with ``state``, optional ``checked_at_utc``, and optional
+  ``message``;
+* optional ``active_bindings`` with binding ID, governance domain, ObjectStore
+  ID, and readiness.
+
+Endpoint validation states are ``draft``, ``pending_validation``,
+``validated``, ``degraded``, ``rejected``, and ``unknown``. Degraded, rejected,
+unknown, draft, and pending states generate visible warnings. Administrator
+workflows for creating and updating endpoint records from validated NAS/NFS,
+S3-compatible, and Mnemosyne definitions remain daemon-owned work rather than
+browser-side file mutation.
 
 Users/Groups Workspace
 ----------------------

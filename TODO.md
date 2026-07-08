@@ -642,9 +642,12 @@ older checklist claims.
   metadata without browser-side storage mutation.
 - [x] Add Activity task mapping for endpoint-validation events from the shared
   endpoint inventory contract without browser-side storage mutation.
-- [ ] Add a persistent endpoint inventory/validation registry so Activity and
-  Endpoints workspaces consume live endpoint-validation events rather than an
-  empty inventory source.
+- [x] Add a persistent endpoint inventory/validation registry so Activity and
+  Endpoints workspaces consume registry-backed endpoint-validation events rather
+  than an empty inventory source.
+- [ ] Add administrator Web and daemon workflows to create/update endpoint
+  inventory records from validated NAS/NFS, S3-compatible, and Mnemosyne
+  endpoint definitions.
 - [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.

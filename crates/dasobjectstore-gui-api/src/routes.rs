@@ -99,7 +99,7 @@ async fn objects_workspace() -> Json<ObjectsWorkspaceView> {
 }
 
 async fn endpoints_workspace() -> Json<EndpointsWorkspaceView> {
-    Json(EndpointsWorkspaceView::empty())
+    Json(crate::endpoints_aggregator::live_endpoints_workspace())
 }
 
 async fn activity_workspace() -> Json<ActivityWorkspaceView> {
@@ -438,9 +438,10 @@ mod tests {
             .expect("body bytes");
         let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
 
-        assert_eq!(encoded["inventory"]["endpoint_count"], 0);
-        assert_eq!(encoded["inventory"]["degraded_endpoint_count"], 0);
-        assert_eq!(encoded["inventory"]["binding_count"], 0);
+        assert!(encoded["inventory"]["endpoint_count"].is_number());
+        assert!(encoded["inventory"]["degraded_endpoint_count"].is_number());
+        assert!(encoded["inventory"]["binding_count"].is_number());
+        assert!(encoded["inventory"]["warnings"].as_array().is_some());
     }
 
     #[tokio::test]

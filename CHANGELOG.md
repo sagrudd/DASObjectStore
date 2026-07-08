@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.48.0 - 2026-07-09
+
+- Add a JSON-backed endpoint inventory registry at
+  `/opt/dasobjectstore/endpoints.json`, with `DASOBJECTSTORE_ENDPOINTS_PATH`
+  override support.
+- Connect the Endpoints workspace and Activity endpoint-validation tasks to the
+  shared registry-backed inventory source.
+- Surface missing, unreadable, and invalid endpoint registry states as explicit
+  Web warnings instead of silently returning an empty fixture inventory.
+
 ## 0.47.0 - 2026-07-09
 
 - Add a metadata reader for live pool repair Activity state from SSD

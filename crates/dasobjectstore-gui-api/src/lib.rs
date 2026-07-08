@@ -8,6 +8,8 @@ pub mod auth_routes;
 pub mod dashboard;
 mod enclosures_aggregator;
 pub mod endpoints;
+mod endpoints_aggregator;
+mod endpoints_registry;
 mod groups_registry;
 mod home_aggregator;
 mod object_stores_aggregator;

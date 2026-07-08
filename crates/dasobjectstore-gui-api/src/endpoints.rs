@@ -37,6 +37,11 @@ impl EndpointInventoryView {
             warnings,
         }
     }
+
+    pub fn with_warnings(mut self, warnings: Vec<EndpointWarningView>) -> Self {
+        self.warnings.extend(warnings);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -187,6 +192,14 @@ pub struct EndpointWarningView {
 }
 
 impl EndpointWarningView {
+    pub(crate) fn registry(
+        code: impl Into<String>,
+        severity: EndpointWarningSeverityView,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::endpoint("__endpoint_registry__", code, severity, message)
+    }
+
     fn endpoint(
         endpoint_id: impl Into<String>,
         code: impl Into<String>,

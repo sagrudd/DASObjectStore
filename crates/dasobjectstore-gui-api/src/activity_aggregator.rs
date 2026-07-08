@@ -52,9 +52,14 @@ pub fn live_activity_workspace() -> ActivityWorkspaceView {
         Ok(repair_tasks) => tasks.extend(repair_tasks),
         Err(warning) => warnings.push(warning),
     }
-    tasks.extend(activity_tasks_from_endpoint_inventory(
-        &EndpointInventoryView::from_endpoints(Vec::new()),
-    ));
+    let endpoint_inventory = crate::endpoints_aggregator::live_endpoint_inventory();
+    warnings.extend(
+        endpoint_inventory
+            .warnings
+            .iter()
+            .map(|warning| DashboardWarning::new(warning.code.clone(), warning.message.clone())),
+    );
+    tasks.extend(activity_tasks_from_endpoint_inventory(&endpoint_inventory));
 
     let mut view = ActivityWorkspaceView::from_sections(ingest, destage, tasks)
         .with_categories(default_activity_categories());
