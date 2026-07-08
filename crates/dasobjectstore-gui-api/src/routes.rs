@@ -141,10 +141,12 @@ mod tests {
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
         assert_eq!(encoded["health"]["state"], "watch");
-        assert_eq!(encoded["drives"]["mounted"], 18);
-        assert_eq!(encoded["capacity"]["free_tib"], "83.4");
+        assert_eq!(encoded["health"]["label"], "Inventory pending");
+        assert_eq!(encoded["drives"]["mounted"], 0);
+        assert_eq!(encoded["capacity"]["free_tib"], "0.0");
         assert_eq!(encoded["throughput_7d"]["window_days"], 7);
-        assert_eq!(encoded["memory_stress"]["state"], "nominal");
+        assert_eq!(encoded["memory_stress"]["state"], "elevated");
+        assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["action_kind"],
             "store_create"
@@ -167,16 +169,13 @@ mod tests {
         let encoded = response_json(response).await;
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
-        assert_eq!(encoded["selected_enclosure_id"], "das-enc-a");
+        assert_eq!(encoded["selected_enclosure_id"], serde_json::Value::Null);
         assert_eq!(
             encoded["enclosures"].as_array().expect("enclosures").len(),
-            2
+            0
         );
-        assert_eq!(encoded["enclosures"][0]["drive_count"]["mounted"], 8);
-        assert_eq!(
-            encoded["details"]["slots"][0]["drive_id"],
-            "das-enc-a-slot-01"
-        );
+        assert_eq!(encoded["details"], serde_json::Value::Null);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 1);
     }
 
     #[tokio::test]
@@ -195,8 +194,9 @@ mod tests {
         let encoded = response_json(response).await;
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
-        assert_eq!(encoded["selected_store_id"], "generated-data");
-        assert_eq!(encoded["stores"][0]["store_id"], "generated-data");
+        assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
+        assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
+        assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["defaults"]["required_copies"],
             2

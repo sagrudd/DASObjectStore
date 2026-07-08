@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.11.0 - 2026-07-08
+
+- Add the redesigned Web operator navigation with Home, Enclosures,
+  ObjectStores, and Bioinformatics pages after standalone login.
+- Add Mnemosyne Biosciences login/footer branding and a top bar with the
+  current username and logout control.
+- Add Web dashboard API payloads for Home, Enclosures, and ObjectStores,
+  including health, drive, capacity, throughput, memory, SMART warning,
+  enclosure, object-store, and admin-create metadata.
+- Document the redesigned Web operator flows and admin-only daemon submission
+  boundaries.
+
 ## 0.10.11 - 2026-07-08
 
 - Allow the packaged Web service to execute the root-owned local-auth helper

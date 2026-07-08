@@ -20,54 +20,46 @@ pub struct HomeDashboardView {
 
 impl HomeDashboardView {
     pub fn bootstrap_fixture() -> Self {
-        let enclosures = bootstrap_enclosure_cards();
-        let object_stores = bootstrap_object_store_cards();
-        let smart_warnings = SmartWarningsSummaryView::from_warnings(vec![SmartWarningView {
-            drive_id: "das-enc-a-slot-04".to_string(),
-            enclosure_id: Some("das-enc-a".to_string()),
-            severity: DashboardSeverity::Warning,
-            attribute: "reallocated_sector_count".to_string(),
-            message: "SMART reallocation count is above the watch threshold.".to_string(),
-            observed_at_utc: "2026-07-08T07:00:00Z".to_string(),
-        }]);
-
         Self {
             schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
             generated_at_utc: "2026-07-08T08:00:00Z".to_string(),
             health: HealthSummaryView {
                 state: DashboardHealthStateView::Watch,
-                label: "Watch".to_string(),
-                warning_count: 2,
+                label: "Inventory pending".to_string(),
+                warning_count: 1,
                 critical_count: 0,
                 action_count: 1,
-                last_checked_at_utc: Some("2026-07-08T07:45:00Z".to_string()),
+                last_checked_at_utc: None,
             },
             drives: DriveCountSummaryView {
-                total: 18,
-                mounted: 18,
-                healthy: 16,
-                watch: 2,
+                total: 0,
+                mounted: 0,
+                healthy: 0,
+                watch: 0,
                 suspect: 0,
                 failed: 0,
             },
             capacity: CapacitySummaryView {
-                total_tib: "174.6".to_string(),
-                used_tib: "91.2".to_string(),
-                free_tib: "83.4".to_string(),
-                used_percent_basis_points: 5223,
+                total_tib: "0.0".to_string(),
+                used_tib: "0.0".to_string(),
+                free_tib: "0.0".to_string(),
+                used_percent_basis_points: 0,
             },
-            mounted_enclosures: enclosures,
+            mounted_enclosures: Vec::new(),
             throughput_7d: ThroughputSummaryView::bootstrap_fixture(),
             memory_stress: MemoryStressView {
-                state: MemoryStressStateView::Nominal,
-                pressure_percent: 34,
+                state: MemoryStressStateView::Elevated,
+                pressure_percent: 0,
                 swap_used_percent: 0,
-                page_cache_tib: "0.8".to_string(),
-                warning: None,
+                page_cache_tib: "0.0".to_string(),
+                warning: Some(DashboardWarning::new(
+                    "memory_telemetry_pending",
+                    "Memory pressure telemetry is pending daemon integration.",
+                )),
             },
-            smart_warnings,
-            object_stores,
-            create_object_store: CreateObjectStoreAffordanceView::enabled(),
+            smart_warnings: SmartWarningsSummaryView::from_warnings(Vec::new()),
+            object_stores: Vec::new(),
+            create_object_store: CreateObjectStoreAffordanceView::admin_required(),
         }
     }
 }
@@ -133,20 +125,12 @@ impl ThroughputSummaryView {
     pub fn bootstrap_fixture() -> Self {
         Self {
             window_days: 7,
-            read_tib: "18.4".to_string(),
-            written_tib: "11.7".to_string(),
-            ingest_tib: "9.3".to_string(),
-            avg_read_mib_s: 31,
-            avg_write_mib_s: 20,
-            daily: vec![
-                ThroughputDayView::new("2026-07-02", "2.4", "1.2", "1.0"),
-                ThroughputDayView::new("2026-07-03", "2.0", "1.6", "1.3"),
-                ThroughputDayView::new("2026-07-04", "2.7", "1.4", "1.2"),
-                ThroughputDayView::new("2026-07-05", "3.3", "2.1", "1.8"),
-                ThroughputDayView::new("2026-07-06", "2.9", "1.9", "1.5"),
-                ThroughputDayView::new("2026-07-07", "2.5", "1.7", "1.4"),
-                ThroughputDayView::new("2026-07-08", "2.6", "1.8", "1.1"),
-            ],
+            read_tib: "0.0".to_string(),
+            written_tib: "0.0".to_string(),
+            ingest_tib: "0.0".to_string(),
+            avg_read_mib_s: 0,
+            avg_write_mib_s: 0,
+            daily: Vec::new(),
         }
     }
 }
@@ -157,17 +141,6 @@ pub struct ThroughputDayView {
     pub read_tib: String,
     pub written_tib: String,
     pub ingest_tib: String,
-}
-
-impl ThroughputDayView {
-    fn new(date: &str, read_tib: &str, written_tib: &str, ingest_tib: &str) -> Self {
-        Self {
-            date: date.to_string(),
-            read_tib: read_tib.to_string(),
-            written_tib: written_tib.to_string(),
-            ingest_tib: ingest_tib.to_string(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -225,25 +198,16 @@ pub struct EnclosuresPageView {
 
 impl EnclosuresPageView {
     pub fn bootstrap_fixture() -> Self {
-        let enclosures = bootstrap_enclosure_cards();
-        let selected_enclosure_id = enclosures
-            .first()
-            .map(|enclosure| enclosure.enclosure_id.clone());
-        let details = selected_enclosure_id
-            .as_deref()
-            .map(DasEnclosureDetailView::bootstrap_fixture);
-        let warnings = enclosures
-            .iter()
-            .flat_map(|enclosure| enclosure.warnings.clone())
-            .collect();
-
         Self {
             schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
             generated_at_utc: "2026-07-08T08:00:00Z".to_string(),
-            enclosures,
-            selected_enclosure_id,
-            details,
-            warnings,
+            enclosures: Vec::new(),
+            selected_enclosure_id: None,
+            details: None,
+            warnings: vec![DashboardWarning::new(
+                "enclosure_inventory_pending",
+                "Live DAS enclosure inventory is pending daemon integration.",
+            )],
         }
     }
 }
@@ -278,24 +242,6 @@ pub struct DasEnclosureDetailView {
     pub slots: Vec<EnclosureDriveSlotView>,
 }
 
-impl DasEnclosureDetailView {
-    fn bootstrap_fixture(enclosure_id: &str) -> Self {
-        Self {
-            enclosure_id: enclosure_id.to_string(),
-            vendor: "DASObjectStore Lab".to_string(),
-            model: "USB4 JBOD 8".to_string(),
-            serial: "DAS-BOOTSTRAP-001".to_string(),
-            firmware: Some("1.4.2".to_string()),
-            slots: vec![
-                EnclosureDriveSlotView::new(1, "das-enc-a-slot-01", "10.9", "healthy", true),
-                EnclosureDriveSlotView::new(2, "das-enc-a-slot-02", "10.9", "healthy", true),
-                EnclosureDriveSlotView::new(3, "das-enc-a-slot-03", "10.9", "healthy", true),
-                EnclosureDriveSlotView::new(4, "das-enc-a-slot-04", "10.9", "watch", true),
-            ],
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct EnclosureDriveSlotView {
     pub slot_number: u8,
@@ -303,18 +249,6 @@ pub struct EnclosureDriveSlotView {
     pub size_tib: String,
     pub health: String,
     pub mounted: bool,
-}
-
-impl EnclosureDriveSlotView {
-    fn new(slot_number: u8, drive_id: &str, size_tib: &str, health: &str, mounted: bool) -> Self {
-        Self {
-            slot_number,
-            drive_id: drive_id.to_string(),
-            size_tib: size_tib.to_string(),
-            health: health.to_string(),
-            mounted,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -329,19 +263,16 @@ pub struct ObjectStoresPageView {
 
 impl ObjectStoresPageView {
     pub fn bootstrap_fixture() -> Self {
-        let stores = bootstrap_object_store_cards();
-        let warnings = stores
-            .iter()
-            .flat_map(|store| store.warnings.clone())
-            .collect();
-
         Self {
             schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
             generated_at_utc: "2026-07-08T08:00:00Z".to_string(),
-            selected_store_id: stores.first().map(|store| store.store_id.clone()),
-            stores,
-            create_object_store: CreateObjectStoreAffordanceView::enabled(),
-            warnings,
+            selected_store_id: None,
+            stores: Vec::new(),
+            create_object_store: CreateObjectStoreAffordanceView::admin_required(),
+            warnings: vec![DashboardWarning::new(
+                "object_store_inventory_pending",
+                "Live object-store inventory and group policy are pending daemon integration.",
+            )],
         }
     }
 }
@@ -378,6 +309,15 @@ pub struct CreateObjectStoreAffordanceView {
 }
 
 impl CreateObjectStoreAffordanceView {
+    pub fn admin_required() -> Self {
+        let mut view = Self::enabled();
+        view.enabled = false;
+        view.blocked_reason = Some(
+            "Current user must have sudo-derived DASObjectStore administrator rights.".to_string(),
+        );
+        view
+    }
+
     pub fn enabled() -> Self {
         Self {
             enabled: true,
@@ -461,116 +401,6 @@ impl StoreClassOptionView {
     }
 }
 
-fn bootstrap_enclosure_cards() -> Vec<DasEnclosureCardView> {
-    vec![
-        DasEnclosureCardView {
-            enclosure_id: "das-enc-a".to_string(),
-            display_name: "Primary DAS enclosure".to_string(),
-            mount_path: "/srv/dasobjectstore/enclosures/primary".to_string(),
-            connection: EnclosureConnectionView {
-                bus: "usb4".to_string(),
-                protocol: "uas".to_string(),
-                link_speed: "40 Gbit/s".to_string(),
-            },
-            health: DashboardHealthStateView::Watch,
-            drive_count: DriveCountSummaryView {
-                total: 8,
-                mounted: 8,
-                healthy: 7,
-                watch: 1,
-                suspect: 0,
-                failed: 0,
-            },
-            capacity: CapacitySummaryView {
-                total_tib: "87.3".to_string(),
-                used_tib: "48.1".to_string(),
-                free_tib: "39.2".to_string(),
-                used_percent_basis_points: 5510,
-            },
-            last_seen_at_utc: "2026-07-08T07:59:00Z".to_string(),
-            warnings: vec![DashboardWarning::new(
-                "enclosure_smart_warning",
-                "One mounted drive has a SMART warning.",
-            )],
-        },
-        DasEnclosureCardView {
-            enclosure_id: "das-enc-b".to_string(),
-            display_name: "Expansion DAS enclosure".to_string(),
-            mount_path: "/srv/dasobjectstore/enclosures/expansion".to_string(),
-            connection: EnclosureConnectionView {
-                bus: "usb3".to_string(),
-                protocol: "uas".to_string(),
-                link_speed: "10 Gbit/s".to_string(),
-            },
-            health: DashboardHealthStateView::Healthy,
-            drive_count: DriveCountSummaryView {
-                total: 10,
-                mounted: 10,
-                healthy: 9,
-                watch: 1,
-                suspect: 0,
-                failed: 0,
-            },
-            capacity: CapacitySummaryView {
-                total_tib: "87.3".to_string(),
-                used_tib: "43.1".to_string(),
-                free_tib: "44.2".to_string(),
-                used_percent_basis_points: 4937,
-            },
-            last_seen_at_utc: "2026-07-08T07:59:00Z".to_string(),
-            warnings: Vec::new(),
-        },
-    ]
-}
-
-fn bootstrap_object_store_cards() -> Vec<ObjectStoreCardView> {
-    vec![
-        ObjectStoreCardView {
-            store_id: "generated-data".to_string(),
-            display_name: "Generated data".to_string(),
-            store_class: "generated_data".to_string(),
-            health: DashboardHealthStateView::Healthy,
-            required_copies: 2,
-            object_count: 1_248,
-            capacity: CapacitySummaryView {
-                total_tib: "120.0".to_string(),
-                used_tib: "72.6".to_string(),
-                free_tib: "47.4".to_string(),
-                used_percent_basis_points: 6050,
-            },
-            placement_policy: "ssd_first_then_parallel_hdd".to_string(),
-            endpoint_export_mode: "s3_bucket".to_string(),
-            writer_group: Some("mnemosyne".to_string()),
-            created_at_utc: "2026-06-11T09:30:00Z".to_string(),
-            last_ingested_at_utc: Some("2026-07-08T06:40:00Z".to_string()),
-            warnings: Vec::new(),
-        },
-        ObjectStoreCardView {
-            store_id: "raw-public".to_string(),
-            display_name: "Raw public data".to_string(),
-            store_class: "reproducible_cache".to_string(),
-            health: DashboardHealthStateView::Watch,
-            required_copies: 1,
-            object_count: 382,
-            capacity: CapacitySummaryView {
-                total_tib: "54.6".to_string(),
-                used_tib: "18.6".to_string(),
-                free_tib: "36.0".to_string(),
-                used_percent_basis_points: 3407,
-            },
-            placement_policy: "evictable_cache".to_string(),
-            endpoint_export_mode: "s3_bucket".to_string(),
-            writer_group: Some("research".to_string()),
-            created_at_utc: "2026-06-15T14:10:00Z".to_string(),
-            last_ingested_at_utc: Some("2026-07-07T21:05:00Z".to_string()),
-            warnings: vec![DashboardWarning::new(
-                "store_copy_count_at_minimum",
-                "Store is operating at the configured minimum copy count.",
-            )],
-        },
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -585,18 +415,22 @@ mod tests {
 
         assert_eq!(encoded["schema_version"], REDESIGN_DASHBOARD_SCHEMA_VERSION);
         assert_eq!(encoded["health"]["state"], "watch");
-        assert_eq!(encoded["drives"]["total"], 18);
-        assert_eq!(encoded["capacity"]["total_tib"], "174.6");
+        assert_eq!(encoded["health"]["label"], "Inventory pending");
+        assert_eq!(encoded["drives"]["total"], 0);
+        assert_eq!(encoded["capacity"]["total_tib"], "0.0");
         assert_eq!(encoded["throughput_7d"]["window_days"], 7);
         assert_eq!(
             encoded["throughput_7d"]["daily"]
                 .as_array()
                 .expect("daily throughput")
                 .len(),
-            7
+            0
         );
-        assert_eq!(encoded["memory_stress"]["state"], "nominal");
-        assert_eq!(encoded["smart_warnings"]["affected_drive_count"], 1);
+        assert_eq!(encoded["memory_stress"]["state"], "elevated");
+        assert_eq!(encoded["smart_warnings"]["affected_drive_count"], 0);
+        assert_eq!(encoded["mounted_enclosures"].as_array().unwrap().len(), 0);
+        assert_eq!(encoded["object_stores"].as_array().unwrap().len(), 0);
+        assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["action_kind"],
             "store_create"
@@ -609,16 +443,13 @@ mod tests {
             .expect("enclosures serializes");
 
         assert_eq!(encoded["schema_version"], REDESIGN_DASHBOARD_SCHEMA_VERSION);
-        assert_eq!(encoded["selected_enclosure_id"], "das-enc-a");
+        assert_eq!(encoded["selected_enclosure_id"], serde_json::Value::Null);
         assert_eq!(
             encoded["enclosures"].as_array().expect("enclosures").len(),
-            2
+            0
         );
-        assert_eq!(
-            encoded["enclosures"][0]["mount_path"],
-            "/srv/dasobjectstore/enclosures/primary"
-        );
-        assert_eq!(encoded["details"]["slots"][0]["mounted"], true);
+        assert_eq!(encoded["details"], serde_json::Value::Null);
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 1);
     }
 
     #[test]
@@ -627,16 +458,14 @@ mod tests {
             .expect("object stores serializes");
 
         assert_eq!(encoded["schema_version"], REDESIGN_DASHBOARD_SCHEMA_VERSION);
-        assert_eq!(encoded["selected_store_id"], "generated-data");
-        assert_eq!(encoded["stores"][0]["required_copies"], 2);
-        assert_eq!(
-            encoded["stores"][0]["placement_policy"],
-            "ssd_first_then_parallel_hdd"
-        );
+        assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
+        assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
+        assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["defaults"]["store_class"],
             "generated_data"
         );
+        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 1);
     }
 
     #[test]

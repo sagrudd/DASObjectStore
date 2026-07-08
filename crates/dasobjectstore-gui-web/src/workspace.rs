@@ -150,38 +150,7 @@ pub struct EnclosureSummary {
 }
 
 pub fn fallback_enclosures() -> Vec<EnclosureSummary> {
-    vec![
-        EnclosureSummary {
-            id: "enc-a",
-            name: "Enclosure A",
-            role: "Primary HDD shelf",
-            health: "Nominal",
-            bays_used: 11,
-            bays_total: 12,
-            capacity: "184 TB raw",
-            note: "All managed disks reporting.",
-        },
-        EnclosureSummary {
-            id: "enc-b",
-            name: "Enclosure B",
-            role: "Expansion shelf",
-            health: "Review",
-            bays_used: 9,
-            bays_total: 12,
-            capacity: "144 TB raw",
-            note: "SMART warning pending operator review.",
-        },
-        EnclosureSummary {
-            id: "ssd",
-            name: "SSD Landing",
-            role: "Ingress settlement",
-            health: "Nominal",
-            bays_used: 4,
-            bays_total: 4,
-            capacity: "30 TB raw",
-            note: "Landing pool ready for ingest.",
-        },
-    ]
+    Vec::new()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,24 +164,7 @@ pub struct ObjectStoreSummary {
 }
 
 pub fn fallback_object_stores() -> Vec<ObjectStoreSummary> {
-    vec![
-        ObjectStoreSummary {
-            id: "genomics-hot",
-            name: "genomics-hot",
-            policy: "SSD ingest, HDD destage",
-            capacity: "18.4 TB used",
-            objects: "1,248 objects",
-            state: "Active",
-        },
-        ObjectStoreSummary {
-            id: "archive-runs",
-            name: "archive-runs",
-            policy: "HDD mirrored",
-            capacity: "63.9 TB used",
-            objects: "8,912 objects",
-            state: "Serving",
-        },
-    ]
+    Vec::new()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -518,10 +470,7 @@ mod tests {
     fn fallback_enclosures_support_card_and_detail_views() {
         let enclosures = fallback_enclosures();
 
-        assert!(enclosures.len() >= 3);
-        assert!(enclosures
-            .iter()
-            .any(|enclosure| enclosure.health == "Review"));
+        assert!(enclosures.is_empty());
         assert!(enclosures
             .iter()
             .all(|enclosure| enclosure.bays_used <= enclosure.bays_total));
@@ -531,7 +480,7 @@ mod tests {
     fn fallback_object_stores_leave_room_for_create_card() {
         let stores = fallback_object_stores();
 
-        assert!(!stores.is_empty());
+        assert!(stores.is_empty());
         assert!(stores.iter().all(|store| !store.id.is_empty()));
         assert!(stores.iter().all(|store| !store.policy.is_empty()));
     }
