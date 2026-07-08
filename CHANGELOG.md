@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.18.1 - 2026-07-08
+
+- Fix ``dasobjectstore performance-test`` direct-to-HDD scenarios so TUI runs
+  continuously render queue state, active HDD landing rows, and live HDD write
+  rates instead of appearing idle until the scenario completes.
+
 ## 0.18.0 - 2026-07-08
 
 - Add per-second Linux block-device IO sampling to ``dasobjectstore

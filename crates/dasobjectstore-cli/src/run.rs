@@ -759,6 +759,16 @@ fn run_performance_test(
                 args.redundancy(),
                 writer,
                 !args.tui(),
+                if args.tui() {
+                    Some(PerformanceTuiContext {
+                        scenario_done,
+                        scenario_total,
+                        report_path: &report_path,
+                        json_path: &json_path,
+                    })
+                } else {
+                    None
+                },
             )?;
             scenario_done += 1;
             if args.tui() {
@@ -3911,6 +3921,7 @@ fn benchmark_direct_hdd(
     redundancy: usize,
     writer: &mut impl Write,
     log_progress: bool,
+    tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let io_sampler = PerformanceIoSampler::start(performance_io_devices(None, hdd_bench_roots));
@@ -3919,11 +3930,23 @@ fn benchmark_direct_hdd(
     let (sender, receiver) = mpsc::sync_channel::<DirectHddJob>(queue_capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let worker_results = Arc::new(Mutex::new(Vec::<PerformanceDiskResult>::new()));
+    let hdd_jobs_started = Arc::new(AtomicU32::new(0));
+    let hdd_jobs_completed = Arc::new(AtomicU32::new(0));
+    let hdd_bytes_transferred = Arc::new(AtomicU64::new(0));
+    let live_rates = PerformanceLiveRateCounters::default();
+    let active_hdd_writes = Arc::new(Mutex::new(
+        BTreeMap::<ActiveHddWriteKey, ActiveHddWrite>::new(),
+    ));
     let mut handles = Vec::new();
     for worker_index in 0..concurrency {
         let receiver = Arc::clone(&receiver);
         let scheduler = Arc::clone(&scheduler);
         let worker_results = Arc::clone(&worker_results);
+        let hdd_jobs_started = Arc::clone(&hdd_jobs_started);
+        let hdd_jobs_completed = Arc::clone(&hdd_jobs_completed);
+        let hdd_bytes_transferred = Arc::clone(&hdd_bytes_transferred);
+        let live_rates = live_rates.clone();
+        let active_hdd_writes = Arc::clone(&active_hdd_writes);
         handles.push(thread::spawn(move || -> Result<(), CliError> {
             loop {
                 check_performance_cancelled()?;
@@ -3938,6 +3961,7 @@ fn benchmark_direct_hdd(
                 let Ok(job) = payload else {
                     break;
                 };
+                hdd_jobs_started.fetch_add(1, Ordering::SeqCst);
                 let placement =
                     reserve_performance_disk_for_file(&scheduler, job.payload.file_index)?;
                 let destination = placement
@@ -3945,19 +3969,80 @@ fn benchmark_direct_hdd(
                     .join("direct-hdd")
                     .join(format!("c{concurrency}"))
                     .join(&job.payload.relative_path);
+                let active_key = (job.payload.file_index, job.copy_index);
+                active_hdd_writes
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test active HDD write lock poisoned".to_string(),
+                        )
+                    })?
+                    .insert(
+                        active_key,
+                        ActiveHddWrite {
+                            file_index: job.payload.file_index,
+                            copy_index: job.copy_index,
+                            relative_path: job.payload.relative_path.clone(),
+                            disk_id: placement.disk_id.clone(),
+                            size_bytes: job.payload.size_bytes,
+                            bytes_written: 0,
+                            started: Instant::now(),
+                        },
+                    );
+                let mut last_progress_bytes = 0_u64;
+                let mut last_write_seconds = 0.0_f64;
+                let mut progress = |bytes: u64, write_seconds: f64| -> Result<(), CliError> {
+                    let delta = bytes.saturating_sub(last_progress_bytes);
+                    last_progress_bytes = bytes;
+                    let delta_write_seconds = (write_seconds - last_write_seconds).max(0.0);
+                    last_write_seconds = write_seconds;
+                    hdd_bytes_transferred.fetch_add(delta, Ordering::SeqCst);
+                    live_rates.add_hdd_write_interval(
+                        &placement.disk_id,
+                        delta,
+                        delta_write_seconds,
+                    )?;
+                    if let Some(active) = active_hdd_writes
+                        .lock()
+                        .map_err(|_| {
+                            CliError::CommandFailed(
+                                "performance-test active HDD write lock poisoned".to_string(),
+                            )
+                        })?
+                        .get_mut(&active_key)
+                    {
+                        active.bytes_written = bytes;
+                    }
+                    Ok(())
+                };
                 let measurement = if let Some(source) = &job.payload.source_path {
-                    measure_copy_with_split_progress(source, &destination, None)
-                        .map(|measurement| measurement.destination_write)
+                    let mut split_progress =
+                        |copy_progress: PerformanceSplitCopyProgress| -> Result<(), CliError> {
+                            progress(copy_progress.bytes, copy_progress.destination_write_seconds)
+                        };
+                    measure_copy_with_split_progress(
+                        source,
+                        &destination,
+                        Some(&mut split_progress),
+                    )
+                    .map(|measurement| measurement.destination_write)
                 } else {
+                    let mut generated_progress =
+                        |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                            progress(bytes, seconds)
+                        };
                     measure_land_payload_with_progress_and_sync_policy(
                         &job.payload,
                         &destination,
                         job.payload.file_index ^ worker_index as u32 ^ job.copy_index as u32,
-                        None,
+                        Some(&mut generated_progress),
                         PerformanceCopySyncPolicy::SyncAll,
                     )
                 };
                 let _ = fs::remove_file(&destination);
+                let _ = active_hdd_writes
+                    .lock()
+                    .map(|mut active| active.remove(&active_key));
                 let measurement = match measurement {
                     Ok(measurement) => measurement,
                     Err(err) => {
@@ -3971,6 +4056,7 @@ fn benchmark_direct_hdd(
                     measurement.bytes,
                     measurement.seconds,
                 )?;
+                hdd_jobs_completed.fetch_add(1, Ordering::SeqCst);
                 worker_results
                     .lock()
                     .map_err(|_| {
@@ -3990,23 +4076,89 @@ fn benchmark_direct_hdd(
         }));
     }
     let mut producer_error = None;
+    let total_hdd_jobs = workload.file_count() as usize * redundancy;
+    let mut submitted_hdd_jobs = 0_usize;
     for payload in &workload.payloads {
         if let Err(err) = check_performance_cancelled() {
             producer_error = Some(err);
             break;
         }
         for copy_index in 0..redundancy {
-            if sender
-                .send(DirectHddJob {
-                    payload: payload.clone(),
-                    copy_index,
-                })
-                .is_err()
-            {
-                producer_error = Some(CliError::CommandFailed(
-                    "performance-test direct HDD workers stopped early".to_string(),
-                ));
+            let mut pending_job = Some(DirectHddJob {
+                payload: payload.clone(),
+                copy_index,
+            });
+            loop {
+                check_performance_cancelled()?;
+                let job = pending_job.take().expect("pending direct HDD job");
+                match sender.try_send(job) {
+                    Ok(()) => {
+                        submitted_hdd_jobs += 1;
+                        break;
+                    }
+                    Err(mpsc::TrySendError::Full(job)) => {
+                        pending_job = Some(job);
+                        if let Some(context) = tui_context {
+                            let rate_snapshot = live_rates.snapshot()?;
+                            render_hdd_drain_tui_snapshot(
+                                writer,
+                                HddDrainTuiState {
+                                    context,
+                                    workload,
+                                    kind: PerformanceScenarioKind::DirectHdd,
+                                    concurrency,
+                                    submitted_jobs: submitted_hdd_jobs,
+                                    total_jobs: total_hdd_jobs,
+                                    started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                                    completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst)
+                                        as usize,
+                                    transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                                    ssd_read_rate: None,
+                                    hdd_write_rate: rate_snapshot.hdd_write_rate,
+                                    hdd_disk_rates: active_hdd_disk_rates(&active_hdd_writes)?,
+                                    active_hdd_landing: active_hdd_landing_lines(
+                                        &active_hdd_writes,
+                                        workload.file_count(),
+                                    )?,
+                                },
+                            )?;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        producer_error = Some(CliError::CommandFailed(
+                            "performance-test direct HDD workers stopped early".to_string(),
+                        ));
+                        break;
+                    }
+                }
+            }
+            if producer_error.is_some() {
                 break;
+            }
+            if let Some(context) = tui_context {
+                let rate_snapshot = live_rates.snapshot()?;
+                render_hdd_drain_tui_snapshot(
+                    writer,
+                    HddDrainTuiState {
+                        context,
+                        workload,
+                        kind: PerformanceScenarioKind::DirectHdd,
+                        concurrency,
+                        submitted_jobs: submitted_hdd_jobs,
+                        total_jobs: total_hdd_jobs,
+                        started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                        completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst) as usize,
+                        transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                        ssd_read_rate: None,
+                        hdd_write_rate: rate_snapshot.hdd_write_rate,
+                        hdd_disk_rates: active_hdd_disk_rates(&active_hdd_writes)?,
+                        active_hdd_landing: active_hdd_landing_lines(
+                            &active_hdd_writes,
+                            workload.file_count(),
+                        )?,
+                    },
+                )?;
             }
         }
         if producer_error.is_some() {
@@ -4014,6 +4166,37 @@ fn benchmark_direct_hdd(
         }
     }
     drop(sender);
+    if let Some(context) = tui_context {
+        while (hdd_jobs_completed.load(Ordering::SeqCst) as usize) < total_hdd_jobs {
+            check_performance_cancelled()?;
+            let rate_snapshot = live_rates.snapshot()?;
+            render_hdd_drain_tui_snapshot(
+                writer,
+                HddDrainTuiState {
+                    context,
+                    workload,
+                    kind: PerformanceScenarioKind::DirectHdd,
+                    concurrency,
+                    submitted_jobs: submitted_hdd_jobs,
+                    total_jobs: total_hdd_jobs,
+                    started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                    completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst) as usize,
+                    transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                    ssd_read_rate: None,
+                    hdd_write_rate: rate_snapshot.hdd_write_rate,
+                    hdd_disk_rates: active_hdd_disk_rates(&active_hdd_writes)?,
+                    active_hdd_landing: active_hdd_landing_lines(
+                        &active_hdd_writes,
+                        workload.file_count(),
+                    )?,
+                },
+            )?;
+            if handles.iter().all(|handle| handle.is_finished()) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+    }
     let mut worker_error = None;
     for handle in handles {
         match handle.join() {
@@ -9923,12 +10106,12 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_hdd_landing_lines, benchmark_ssd_only, benchmark_ssd_pipeline_with_options,
-        benchmark_ssd_stage_then_drain, collect_ingest_files, connection_status_from_probe,
-        current_user_group_names, materialize_generated_performance_workload,
-        measure_copy_with_progress, measure_copy_with_split_progress,
-        measure_ssd_stage_payload_with_progress, parse_binary_size,
-        performance_report_metadata_json, performance_sync_all_calls,
+        active_hdd_landing_lines, benchmark_direct_hdd, benchmark_ssd_only,
+        benchmark_ssd_pipeline_with_options, benchmark_ssd_stage_then_drain, collect_ingest_files,
+        connection_status_from_probe, current_user_group_names,
+        materialize_generated_performance_workload, measure_copy_with_progress,
+        measure_copy_with_split_progress, measure_ssd_stage_payload_with_progress,
+        parse_binary_size, performance_report_metadata_json, performance_sync_all_calls,
         plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
         render_performance_report, render_performance_tui_snapshot, render_simple_pdf,
         reset_performance_sync_all_calls, run, source_performance_workload, throughput,
@@ -9942,8 +10125,9 @@ mod tests {
         PerformanceLiveRateCounters, PerformanceMeasurement, PerformancePayload,
         PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
         PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceSsdSettler,
-        PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
-        SsdPipelineBenchmarkOptions, SsdPipelineJob, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
+        PerformanceTuiContext, PerformanceTuiSnapshot, PerformanceWorkload,
+        PerformanceWorkloadKind, SsdPipelineBenchmarkOptions, SsdPipelineJob,
+        PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
     use crate::cli::{Cli, PerformanceFileSelection};
     use clap::Parser;
@@ -10708,6 +10892,53 @@ mod tests {
         assert_eq!(disks.len(), 2);
         assert!(disks.contains(&disk_a));
         assert!(disks.contains(&disk_b));
+        fs::remove_dir_all(root).expect("cleanup benchmark fixture");
+    }
+
+    #[test]
+    fn performance_direct_hdd_tui_renders_live_drain_progress() {
+        let root = temp_root("performance-direct-hdd-tui-progress");
+        let hdd_a = root.join("hdd").join("disk-a");
+        fs::create_dir_all(&hdd_a).expect("create hdd root");
+        let workload = PerformanceWorkload {
+            kind: PerformanceWorkloadKind::Generated,
+            source_path: None,
+            source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
+            discovered_file_count: 1,
+            discovered_total_bytes: 8,
+            payloads: vec![PerformancePayload {
+                file_index: 0,
+                relative_path: PathBuf::from("a.bin"),
+                source_path: None,
+                size_bytes: 8,
+            }],
+        };
+        let mut output = Vec::new();
+        let disk_a = DiskId::new("disk-a").expect("disk id");
+
+        let report = benchmark_direct_hdd(
+            &[(disk_a, hdd_a)],
+            &workload,
+            1,
+            1,
+            &mut output,
+            false,
+            Some(PerformanceTuiContext {
+                scenario_done: 0,
+                scenario_total: 1,
+                report_path: Path::new("/tmp/perf.pdf"),
+                json_path: Path::new("/tmp/perf.json"),
+            }),
+        )
+        .expect("direct hdd benchmark runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert_eq!(report.hdd_write_operations, 1);
+        assert_eq!(report.physical_hdd_write_bytes, 8);
+        assert!(output.contains("direct-hdd"));
+        assert!(output.contains("HDD drain copy jobs"));
+        assert!(output.contains("HDD Landing"));
         fs::remove_dir_all(root).expect("cleanup benchmark fixture");
     }
 
