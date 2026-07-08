@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
-version="${version:-0.3.8}"
+version="${version:-0.4.0}"
 
 if ! command -v dpkg-deb >/dev/null 2>&1; then
   cat >&2 <<ERROR
@@ -25,6 +25,7 @@ bash "$packaging_debian/validate-package-assets.sh"
 
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
 install -d \
@@ -40,6 +41,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$build_root/usr/bin/dasobjectstored"
+install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
+  "$build_root/usr/bin/dasobjectstore-remote"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
@@ -59,6 +62,7 @@ Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
 Depends: ca-certificates, acl
+Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics
  DASObjectStore provides CLI and service binaries for staging objects on SSD

@@ -58,8 +58,10 @@ require_text "$postinst" 'repair_managed_tree "$root"'
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 
 require_text "$build_deb" "cargo build --release -p dasobjectstore-daemon"
+require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'
+require_text "$build_deb" 'target/release/dasobjectstore-remote'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
@@ -67,7 +69,9 @@ require_text "$build_deb" 'DEBIAN/postinst'
 
 require_text "$build_rpm" "rpmbuild"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
+require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_rpm" 'target/release/dasobjectstored'
+require_text "$build_rpm" 'target/release/dasobjectstore-remote'
 require_text "$build_rpm" 'usr/lib/systemd/system/dasobjectstored.service'
 require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'

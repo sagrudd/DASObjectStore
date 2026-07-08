@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.0 - 2026-07-08
+
+- Add the standalone `dasobjectstore-remote` CLI for remote computers to list
+  accessible S3-backed object stores and upload files or folders through the
+  DASObjectStore object-service endpoint.
+- Support remote client configuration, AWS profile based credentials, and
+  Mneion, Synoptikon, or local-password credential-helper flows with password
+  capture that does not echo to the terminal.
+- Package `dasobjectstore-remote` in DEB/RPM artifacts and document remote
+  client setup, object-store listing, uploads, and the credential-helper
+  contract.
+
 ## 0.3.8 - 2026-07-08
 
 - Allow `dasobjectstore performance-test` to benchmark extant source folders via

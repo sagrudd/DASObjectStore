@@ -6,6 +6,11 @@ policy exports S3. Remote computers can then upload with the AWS CLI using
 ``s3api put-object``, ``s3 cp``, or ``s3 sync`` against the DASObjectStore
 endpoint URL.
 
+For routine remote-computer use, prefer the standalone
+``dasobjectstore-remote`` client described in :doc:`remote-client`. It wraps the
+same S3 path with remote configuration, secure password prompting for
+credential helpers, object-store listing, and file/folder upload commands.
+
 Prepare the remote upload plan on the appliance or an administrative host that
 can read the DASObjectStore store registry:
 

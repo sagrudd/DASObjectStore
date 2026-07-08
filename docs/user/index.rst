@@ -19,3 +19,4 @@ stabilized in the current MVP.
    ingesting-files
    performance-test
    remote-s3-uploads
+   remote-client

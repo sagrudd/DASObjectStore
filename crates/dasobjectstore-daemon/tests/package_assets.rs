@@ -66,11 +66,14 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
 #[test]
 fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-remote");
     assert_contains(
         BUILD_DEB,
         "dpkg-deb is required to build the DASObjectStore Debian package.",
     );
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
+    assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-remote");
     assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
     assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
@@ -82,7 +85,10 @@ fn deb_build_installs_daemon_boundary_assets() {
 fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "rpmbuild");
     assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
+    assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-remote");
     assert_contains(BUILD_RPM, "usr/lib/systemd/system/dasobjectstored.service");
     assert_contains(BUILD_RPM, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_RPM, "usr/lib/tmpfiles.d/dasobjectstore.conf");

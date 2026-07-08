@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
-version="${version:-0.3.8}"
+version="${version:-0.4.0}"
 release="${release:-1}"
 
 if ! command -v rpmbuild >/dev/null 2>&1; then
@@ -23,6 +23,7 @@ bash "$packaging_debian/validate-package-assets.sh"
 
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 
 rpm_root="$repo_root/target/rpm/rpmbuild"
 staging_root="$repo_root/target/rpm/staging"
@@ -45,6 +46,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$payload_root/usr/bin/dasobjectstore-server"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$payload_root/usr/bin/dasobjectstored"
+install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
+  "$payload_root/usr/bin/dasobjectstore-remote"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
@@ -75,6 +78,7 @@ Requires(post): coreutils
 Requires(post): findutils
 Requires(post): shadow-utils
 Requires(post): systemd
+Recommends:      awscli
 
 %description
 DASObjectStore provides CLI and service binaries for staging objects on SSD
@@ -149,6 +153,7 @@ fi
 /usr/bin/dasobjectstore
 /usr/bin/dasobjectstore-server
 /usr/bin/dasobjectstored
+/usr/bin/dasobjectstore-remote
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
