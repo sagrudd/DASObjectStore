@@ -97,6 +97,8 @@ require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g'
+require_text "$build_deb" 'X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg'
+require_text "$build_deb" 'sudo apt-get install clang libclang-dev libpam0g-dev'
 
 require_text "$build_rpm" "rpmbuild"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
@@ -110,7 +112,11 @@ require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf'
+require_text "$build_rpm" 'BuildRequires:  clang'
+require_text "$build_rpm" 'BuildRequires:  libclang-devel'
+require_text "$build_rpm" 'BuildRequires:  pam-devel'
 require_text "$build_rpm" 'Requires:       pam'
+require_text "$build_rpm" 'sudo dnf install clang libclang-devel pam-devel'
 
 require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."

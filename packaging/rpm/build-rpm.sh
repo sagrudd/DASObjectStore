@@ -17,6 +17,14 @@ ERROR
   exit 1
 fi
 
+if ! command -v clang >/dev/null 2>&1 || ! ldconfig -p 2>/dev/null | grep -Eq 'libclang(-[0-9]+)?\.so'; then
+  cat >&2 <<ERROR
+Native DASObjectStore package builds require clang, libclang, and PAM headers.
+On AlmaLinux/RHEL: sudo dnf install clang libclang-devel pam-devel
+ERROR
+  exit 1
+fi
+
 packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
 packaging_product="$packaging_linux/opt/dasobjectstore"
@@ -83,6 +91,13 @@ License:        MPL-2.0
 URL:            https://github.com/sagrudd/DASObjectStore
 Source0:        %{name}-%{version}.tar.gz
 
+BuildRequires:  cargo
+BuildRequires:  clang
+BuildRequires:  libclang-devel
+BuildRequires:  pam-devel
+BuildRequires:  rust
+# WebAssembly packaging also requires Trunk and the wasm32-unknown-unknown Rust
+# target; those are usually installed through rustup/cargo rather than RPM.
 Requires:       acl
 Requires:       ca-certificates
 Requires:       pam

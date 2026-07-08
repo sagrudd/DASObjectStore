@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.8 - 2026-07-08
+
+- Document native PAM/libclang packaging prerequisites in the generated Debian
+  control metadata and RPM spec.
+- Add Debian/RPM build preflight checks that report the required PAM/libclang
+  build packages before native Rust compilation starts.
+
 ## 0.10.7 - 2026-07-08
 
 - Authenticate standalone Web UI logins against OS-local users through PAM

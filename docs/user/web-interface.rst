@@ -33,8 +33,15 @@ the developer placeholder page. Prepare a packaging host with:
 
 .. code-block:: console
 
+   sudo apt-get install dpkg clang libclang-dev libpam0g-dev
    rustup target add wasm32-unknown-unknown
    cargo install trunk
+
+On AlmaLinux or RHEL package builders, install the native build tools with:
+
+.. code-block:: console
+
+   sudo dnf install rpm-build clang libclang-devel pam-devel
 
 If the Web page says to install the Trunk WebAssembly toolchain, the installed
 package contains the developer fallback page and should be rebuilt from a

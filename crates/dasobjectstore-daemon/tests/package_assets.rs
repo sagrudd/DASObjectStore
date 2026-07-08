@@ -107,9 +107,18 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_DEB, "etc/pam.d");
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_DEB, "Depends: ca-certificates, acl, libpam0g");
+    assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
+    assert_contains(
+        BUILD_DEB,
+        "sudo apt-get install clang libclang-dev libpam0g-dev",
+    );
     assert_contains(BUILD_RPM, "etc/pam.d");
     assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
+    assert_contains(BUILD_RPM, "BuildRequires:  clang");
+    assert_contains(BUILD_RPM, "BuildRequires:  libclang-devel");
+    assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
     assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_contains(BUILD_RPM, "sudo dnf install clang libclang-devel pam-devel");
 }
 
 #[test]
@@ -136,6 +145,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
     assert_contains(BUILD_DEB, "Depends: ca-certificates, acl, libpam0g");
+    assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
 }
 
 #[test]
@@ -168,6 +178,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "Requires:       ca-certificates");
     assert_contains(BUILD_RPM, "Requires:       acl");
     assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
 }
 
 #[test]

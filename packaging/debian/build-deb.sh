@@ -15,6 +15,14 @@ ERROR
   exit 1
 fi
 
+if ! command -v clang >/dev/null 2>&1 || ! ldconfig -p 2>/dev/null | grep -Eq 'libclang(-[0-9]+)?\.so'; then
+  cat >&2 <<ERROR
+Native DASObjectStore package builds require clang, libclang, and PAM headers.
+On Ubuntu/Debian: sudo apt-get install clang libclang-dev libpam0g-dev
+ERROR
+  exit 1
+fi
+
 arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 build_root="$repo_root/target/deb/${package_name}_${version}_${arch}"
 package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"
@@ -74,6 +82,7 @@ Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
 Depends: ca-certificates, acl, libpam0g
+X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics
