@@ -652,7 +652,7 @@ older checklist claims.
   registry-backed endpoint records through the authenticated daemon-backed Web
   route, including validation-state review, active binding controls,
   dry-run/live confirmation, result display, and permission-denied states.
-- [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
+- [x] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.
 - [ ] Add Bioinformatics views for sequencing run provenance, object lineage,

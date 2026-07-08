@@ -405,7 +405,22 @@ pub struct BioinformaticsWorkspaceResponse {
     pub schema_version: String,
     pub available: bool,
     pub supported_object_types: Vec<String>,
+    #[serde(default)]
+    pub readiness_cards: Vec<BioinformaticsReadinessCardResponse>,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct BioinformaticsReadinessCardResponse {
+    pub object_type: String,
+    pub label: String,
+    pub category: String,
+    pub state: String,
+    pub primary_workflow: String,
+    pub handoff: String,
+    #[serde(default)]
+    pub required_metadata: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -1572,19 +1587,32 @@ mod tests {
     fn decodes_bioinformatics_workspace_response_subset() {
         let payload = serde_json::json!({
             "schema_version": "dasobjectstore.product_workspaces.v1",
-            "available": false,
+            "available": true,
             "supported_object_types": ["BAM", "POD5", "FASTQ", "ENA/SRA"],
-            "message": "Bioinformatics orchestration will surface workflow-ready data sets once pipeline adapters are connected."
+            "readiness_cards": [
+                {
+                    "object_type": "pod5",
+                    "label": "POD5",
+                    "category": "Nanopore signal",
+                    "state": "workflow_ready",
+                    "primary_workflow": "Basecalling and signal-level provenance.",
+                    "handoff": "Basecalling readiness",
+                    "required_metadata": ["flowcell/run identity", "sequencing kit"]
+                }
+            ],
+            "message": "Bioinformatics readiness cards classify supported object types."
         });
 
         let decoded = serde_json::from_value::<BioinformaticsWorkspaceResponse>(payload)
             .expect("bioinformatics workspace decodes");
 
-        assert!(!decoded.available);
+        assert!(decoded.available);
         assert!(decoded
             .supported_object_types
             .iter()
             .any(|object_type| object_type == "POD5"));
+        assert_eq!(decoded.readiness_cards[0].label, "POD5");
+        assert_eq!(decoded.readiness_cards[0].handoff, "Basecalling readiness");
     }
 
     #[test]

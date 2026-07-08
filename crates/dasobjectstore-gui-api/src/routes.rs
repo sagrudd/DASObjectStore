@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn product_bioinformatics_route_is_explicit_placeholder() {
+    async fn product_bioinformatics_route_returns_readiness_cards() {
         let response = gui_api_router()
             .oneshot(
                 Request::builder()
@@ -343,11 +343,21 @@ mod tests {
             .expect("body bytes");
         let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
 
-        assert_eq!(encoded["available"], false);
+        assert_eq!(encoded["available"], true);
         assert!(encoded["supported_object_types"]
             .as_array()
             .unwrap()
             .contains(&json!("POD5")));
+        assert!(encoded["readiness_cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|card| card["label"] == json!("FASTQ / FASTQ.GZ")));
+        assert!(encoded["readiness_cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|card| card["label"] == json!("ENA / SRA")));
     }
 
     #[tokio::test]

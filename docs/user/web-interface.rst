@@ -138,10 +138,10 @@ The primary navigation is:
    groups, administrator readiness, and warnings.
 
 ``Bioinformatics``
-   Placeholder workspace for the first bioinformatics-oriented workflow. Until
-   the workflow is implemented, this page should clearly present itself as a
-   future integration surface rather than a place where storage mutations are
-   already available.
+   Workflow-readiness view for common sequencing and analysis object families.
+   It presents daemon-provided cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ,
+   FASTA, VCF/BCF, GFF/GTF, and ENA/SRA data, including handoff intent and
+   metadata expected before orchestration.
 
 Regardless of labels, storage mutation must still be submitted to
 ``dasobjectstored`` and must use the same job model as CLI and API operations.
@@ -168,7 +168,8 @@ experience. The active Web console surfaces are:
   destage queue state;
 * ``Users/Groups`` for standalone local-user authority, writer-policy
   readiness, and administrator capability when host mode permits it; and
-* ``Bioinformatics`` for clearly reserved workflow-readiness state.
+* ``Bioinformatics`` for object-type workflow-readiness cards and handoff
+  metadata expectations.
 
 Legacy ``workspaces/stores`` remains a compatibility API endpoint only. The
 ``workspaces/users-groups`` route is now consumed by the first-class
@@ -521,18 +522,33 @@ canonical Web console surfaces.
 Bioinformatics Workspace
 ------------------------
 
-The Bioinformatics navigation item is reserved for product workflows that bind
-DASObjectStore to reproducible reference data, generated pipeline outputs, and
-Mnemosyne/Mneion storage definitions. Until those workflows are implemented, it
-should behave as a placeholder and must not imply that unimplemented data
-management actions have run.
+The Bioinformatics navigation item is the read-only workflow-readiness surface
+for object families that DASObjectStore can classify for downstream
+orchestration. It binds DASObjectStore concepts to reproducible reference data,
+generated pipeline outputs, and Mnemosyne/Mneion storage definitions without
+performing browser-side storage mutation.
 
 The redesigned Bioinformatics page now requests
 ``/products/dasobjectstore/api/v1/workspaces/bioinformatics`` through the same
 authenticated browser session as the other operator pages. The daemon-backed
 payload controls whether the page is presented as workflow-ready or reserved
-and lists the object types currently understood by the product workspace, such
-as BAM, POD5, FASTQ, and ENA/SRA-oriented data.
+and lists the object types currently understood by the product workspace. The
+payload also carries readiness cards for:
+
+* ``BAM`` and ``CRAM`` alignment data, including reference and index metadata;
+* ``POD5`` nanopore signal data for basecalling and run QC handoff;
+* ``FASTQ/FASTQ.GZ`` read folders for QC, alignment, assembly, profiling, and
+  transcriptome quantification;
+* ``FASTA`` reference or assembly data;
+* ``VCF/BCF`` variant data;
+* ``GFF/GTF`` annotation data; and
+* ``ENA/SRA`` public repository datasets with accession and manifest metadata.
+
+The cards report category, readiness state, primary workflow intent, handoff
+target, and required metadata. Later lineage and provenance work will derive
+these states from ObjectStore/SubObject metadata and Mneion bindings; the Web
+page already consumes the card contract so that transition can happen behind
+the API boundary.
 
 Login and Footer Branding
 -------------------------

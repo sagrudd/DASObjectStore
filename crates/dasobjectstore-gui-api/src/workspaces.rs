@@ -414,25 +414,144 @@ pub struct ProductBioinformaticsWorkspaceView {
     pub schema_version: String,
     pub available: bool,
     pub supported_object_types: Vec<String>,
+    pub readiness_cards: Vec<ProductBioinformaticsReadinessCardView>,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductBioinformaticsReadinessCardView {
+    pub object_type: String,
+    pub label: String,
+    pub category: String,
+    pub state: String,
+    pub primary_workflow: String,
+    pub handoff: String,
+    pub required_metadata: Vec<String>,
 }
 
 impl ProductBioinformaticsWorkspaceView {
     pub fn bootstrap() -> Self {
+        let readiness_cards = vec![
+            ProductBioinformaticsReadinessCardView {
+                object_type: "bam".to_string(),
+                label: "BAM".to_string(),
+                category: "Alignment".to_string(),
+                state: "workflow_ready".to_string(),
+                primary_workflow: "Genome alignment inspection, variant calling, coverage, and QC handoff.".to_string(),
+                handoff: "Genome/transcriptome analysis".to_string(),
+                required_metadata: vec![
+                    "reference genome".to_string(),
+                    "sample or run identity".to_string(),
+                    "index readiness".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "cram".to_string(),
+                label: "CRAM".to_string(),
+                category: "Compressed alignment".to_string(),
+                state: "metadata_required".to_string(),
+                primary_workflow: "Reference-backed alignment analysis with storage-efficient archive handling.".to_string(),
+                handoff: "Genome analysis with reference binding".to_string(),
+                required_metadata: vec![
+                    "reference genome".to_string(),
+                    "reference checksum".to_string(),
+                    "index readiness".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "pod5".to_string(),
+                label: "POD5".to_string(),
+                category: "Nanopore signal".to_string(),
+                state: "workflow_ready".to_string(),
+                primary_workflow: "Basecalling, run QC, methylation-aware analysis, and signal-level provenance.".to_string(),
+                handoff: "Basecalling readiness".to_string(),
+                required_metadata: vec![
+                    "flowcell/run identity".to_string(),
+                    "sequencing kit".to_string(),
+                    "sample sheet".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "fastq".to_string(),
+                label: "FASTQ / FASTQ.GZ".to_string(),
+                category: "Reads".to_string(),
+                state: "workflow_ready".to_string(),
+                primary_workflow: "Read QC, alignment, assembly, taxonomic profiling, and transcriptome quantification.".to_string(),
+                handoff: "Genome/transcriptome workflows".to_string(),
+                required_metadata: vec![
+                    "sample identity".to_string(),
+                    "library strategy".to_string(),
+                    "paired-end or single-end state".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "fasta".to_string(),
+                label: "FASTA".to_string(),
+                category: "Reference or assembly".to_string(),
+                state: "workflow_ready".to_string(),
+                primary_workflow: "Reference registration, assembly handoff, indexing, and annotation workflows.".to_string(),
+                handoff: "Reference and assembly workflows".to_string(),
+                required_metadata: vec![
+                    "organism or build label".to_string(),
+                    "source/version".to_string(),
+                    "index readiness".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "vcf_bcf".to_string(),
+                label: "VCF / BCF".to_string(),
+                category: "Variants".to_string(),
+                state: "workflow_ready".to_string(),
+                primary_workflow: "Variant filtering, cohort comparison, annotation, and export.".to_string(),
+                handoff: "Variant analysis".to_string(),
+                required_metadata: vec![
+                    "reference genome".to_string(),
+                    "sample or cohort identity".to_string(),
+                    "index readiness".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "gff_gtf".to_string(),
+                label: "GFF / GTF".to_string(),
+                category: "Annotation".to_string(),
+                state: "workflow_ready".to_string(),
+                primary_workflow: "Genome annotation, transcript feature import, and quantification support.".to_string(),
+                handoff: "Annotation and transcriptome workflows".to_string(),
+                required_metadata: vec![
+                    "reference build".to_string(),
+                    "annotation source".to_string(),
+                    "feature vocabulary".to_string(),
+                ],
+            },
+            ProductBioinformaticsReadinessCardView {
+                object_type: "ena_sra".to_string(),
+                label: "ENA / SRA".to_string(),
+                category: "Public repository dataset".to_string(),
+                state: "catalogue_ready".to_string(),
+                primary_workflow: "Public sequence dataset staging, accession tracking, reproducibility, and downstream ingest.".to_string(),
+                handoff: "Repository accession workflows".to_string(),
+                required_metadata: vec![
+                    "accession".to_string(),
+                    "study/project identity".to_string(),
+                    "download manifest".to_string(),
+                ],
+            },
+        ];
         Self {
             schema_version: PRODUCT_WORKSPACES_SCHEMA_VERSION.to_string(),
-            available: false,
+            available: true,
             supported_object_types: vec![
                 "BAM".to_string(),
-                "POD5".to_string(),
-                "FASTQ".to_string(),
-                "ENA/SRA".to_string(),
                 "CRAM".to_string(),
-                "VCF/BCF".to_string(),
+                "POD5".to_string(),
+                "FASTQ/FASTQ.GZ".to_string(),
                 "FASTA".to_string(),
+                "VCF/BCF".to_string(),
                 "GFF/GTF".to_string(),
+                "ENA/SRA".to_string(),
             ],
-            message: "Bioinformatics orchestration will surface workflow-ready data sets once pipeline adapters are connected.".to_string(),
+            readiness_cards,
+            message: "Bioinformatics readiness cards classify supported object types and the workflow handoff metadata needed for orchestration.".to_string(),
         }
     }
 }

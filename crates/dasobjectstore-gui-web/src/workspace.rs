@@ -1,3 +1,5 @@
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::api::BioinformaticsWorkspaceResponse;
 use crate::api::{
     ActivityWorkspaceResponse, EnclosureDriveSlotResponse, EnclosuresPageResponse,
     HomeDashboardResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
@@ -6,10 +8,10 @@ use crate::api::{
 use crate::api::{
     AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
     AdminJobStatusResponse, AdminJobSummary, AssignLocalUserToGroupRequest,
-    BioinformaticsWorkspaceResponse, CreateLocalGroupRequest, CreateObjectStoreRequest,
-    CreateObjectStoreResponse, DasEnclosureCardResponse, DasEnclosureDetailResponse,
-    EnclosurePrepareHddDevice, EnclosurePrepareRequest, EnclosurePrepareResponse,
-    GuiActionPlanRequest, GuiActionPlanResponse, LocalGroupAdminResponse, ObjectStoreCardResponse,
+    CreateLocalGroupRequest, CreateObjectStoreRequest, CreateObjectStoreResponse,
+    DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosurePrepareHddDevice,
+    EnclosurePrepareRequest, EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse,
+    LocalGroupAdminResponse, ObjectStoreCardResponse,
 };
 #[cfg(test)]
 use crate::api::{
@@ -4461,6 +4463,109 @@ fn render_activity_state_message(label: &str, title: &str, message: &str) -> Htm
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BioinformaticsReadinessSummary {
+    pub object_type: String,
+    pub label: String,
+    pub category: String,
+    pub state: String,
+    pub state_label: String,
+    pub primary_workflow: String,
+    pub handoff: String,
+    pub metadata: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn bioinformatics_readiness_summaries(
+    view: &BioinformaticsWorkspaceResponse,
+) -> Vec<BioinformaticsReadinessSummary> {
+    if !view.readiness_cards.is_empty() {
+        return view
+            .readiness_cards
+            .iter()
+            .map(|card| BioinformaticsReadinessSummary {
+                object_type: card.object_type.clone(),
+                label: card.label.clone(),
+                category: card.category.clone(),
+                state: card.state.clone(),
+                state_label: bioinformatics_readiness_state_label(&card.state).to_string(),
+                primary_workflow: card.primary_workflow.clone(),
+                handoff: card.handoff.clone(),
+                metadata: bioinformatics_metadata_summary(&card.required_metadata),
+            })
+            .collect();
+    }
+
+    view.supported_object_types
+        .iter()
+        .map(|object_type| BioinformaticsReadinessSummary {
+            object_type: object_type.to_ascii_lowercase().replace(['/', '.'], "_"),
+            label: object_type.clone(),
+            category: "Supported type".to_string(),
+            state: "reserved".to_string(),
+            state_label: "Reserved".to_string(),
+            primary_workflow: "Workflow handoff metadata has not yet been published by the API."
+                .to_string(),
+            handoff: "Pending workflow contract".to_string(),
+            metadata: "metadata contract pending".to_string(),
+        })
+        .collect()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn bioinformatics_summary_cards(
+    view: &BioinformaticsWorkspaceResponse,
+) -> Vec<(String, String, String)> {
+    let cards = bioinformatics_readiness_summaries(view);
+    let workflow_ready = cards
+        .iter()
+        .filter(|card| card.state == "workflow_ready")
+        .count();
+    let metadata_needed = cards
+        .iter()
+        .filter(|card| card.state.contains("metadata"))
+        .count();
+
+    vec![
+        (
+            "Object families".to_string(),
+            cards.len().to_string(),
+            "Supported bioinformatics object classifications".to_string(),
+        ),
+        (
+            "Workflow ready".to_string(),
+            workflow_ready.to_string(),
+            "Cards with sufficient default handoff semantics".to_string(),
+        ),
+        (
+            "Metadata needed".to_string(),
+            metadata_needed.to_string(),
+            "Cards that require explicit reference or provenance binding".to_string(),
+        ),
+    ]
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn bioinformatics_readiness_state_label(state: &str) -> &'static str {
+    match state {
+        "workflow_ready" => "Workflow ready",
+        "metadata_required" => "Metadata needed",
+        "catalogue_ready" => "Catalogue ready",
+        "reserved" => "Reserved",
+        _ => "Review",
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn bioinformatics_metadata_summary(required_metadata: &[String]) -> String {
+    if required_metadata.is_empty() {
+        "metadata contract pending".to_string()
+    } else {
+        required_metadata.join("; ")
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq, Properties)]
 pub struct BioinformaticsPageProps {
@@ -4483,8 +4588,10 @@ pub fn bioinformatics_page(props: &BioinformaticsPageProps) -> Html {
                 bioinformatics_state.set(page_load_state_from_result(
                     crate::api::get_bioinformatics_workspace(&path).await,
                     |view| {
-                        view.supported_object_types.is_empty().then(|| {
-                            "No bioinformatics object types were reported by the daemon workspace API."
+                        (view.supported_object_types.is_empty()
+                            && view.readiness_cards.is_empty())
+                        .then(|| {
+                            "No bioinformatics object types or readiness cards were reported by the daemon workspace API."
                                 .to_string()
                         })
                     },
@@ -4537,16 +4644,55 @@ fn render_bioinformatics_state(state: &ApiLoadState<BioinformaticsWorkspaceRespo
 
 #[cfg(target_arch = "wasm32")]
 fn render_bioinformatics_workspace(view: &BioinformaticsWorkspaceResponse) -> Html {
+    let summaries = bioinformatics_readiness_summaries(view);
     html! {
-        <section class="dos-card dos-placeholder-card" data-state={if view.available { "available" } else { "reserved" }}>
-            <span class="dos-card-label">{ if view.available { "Workflow ready" } else { "Reserved workflow" } }</span>
-            <h2>{ if view.available { "Bioinformatics readiness is available." } else { "Bioinformatics workspace is reserved." } }</h2>
-            <p>{ &view.message }</p>
-            <div class="dos-chip-row">
-                { for view.supported_object_types.iter().map(|object_type| html! {
-                    <span class="dos-status-pill">{ object_type }</span>
-                }) }
+        <>
+            <div class="dos-metric-grid">
+                { for bioinformatics_summary_cards(view).into_iter().map(render_bioinformatics_metric_card) }
             </div>
+            <section class="dos-card dos-wide-card" data-state={if view.available { "available" } else { "reserved" }}>
+                <span class="dos-card-label">{ if view.available { "Workflow readiness" } else { "Reserved workflow" } }</span>
+                <h2>{ if view.available { "Bioinformatics object-type readiness is available." } else { "Bioinformatics workspace is reserved." } }</h2>
+                <p>{ &view.message }</p>
+                <div class="dos-chip-row">
+                    { for view.supported_object_types.iter().map(|object_type| html! {
+                        <span class="dos-status-pill">{ object_type }</span>
+                    }) }
+                </div>
+            </section>
+            <div class="dos-store-grid">
+                { for summaries.into_iter().map(render_bioinformatics_readiness_card) }
+            </div>
+        </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_metric_card(metric: (String, String, String)) -> Html {
+    html! {
+        <section class="dos-card dos-metric-card">
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ metric.0 }</span>
+                <span class="dos-status-pill">{ "Readiness" }</span>
+            </div>
+            <strong>{ metric.1 }</strong>
+            <p>{ metric.2 }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_readiness_card(card: BioinformaticsReadinessSummary) -> Html {
+    html! {
+        <section class="dos-card dos-store-card" data-object-type={card.object_type.clone()} data-state={card.state.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ card.category }</span>
+                <span class="dos-status-pill">{ card.state_label }</span>
+            </div>
+            <strong>{ card.label }</strong>
+            <p>{ card.primary_workflow }</p>
+            <p>{ format!("Handoff: {}", card.handoff) }</p>
+            <p>{ format!("Metadata: {}", card.metadata) }</p>
         </section>
     }
 }
@@ -4587,6 +4733,7 @@ mod tests {
     use super::{
         activity_category_summaries, activity_queue_summary, activity_workspace_api_path,
         admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
+        bioinformatics_readiness_summaries, bioinformatics_summary_cards,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
         enclosures_workspace_api_path, endpoints_workspace_api_path, home_dashboard_attention,
@@ -4608,6 +4755,7 @@ mod tests {
     use crate::api::{
         ActivityCategoryResponse, ActivityTaskResponse, ActivityWorkspaceResponse,
         AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
+        BioinformaticsReadinessCardResponse, BioinformaticsWorkspaceResponse,
         DestageQueueSummaryResponse, EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice,
         EnclosurePrepareResponse, EnclosuresPageResponse, HomeDashboardResponse,
         IngestQueueSummaryResponse, LocalGroupMembershipResponse, LocalGroupOperationResponse,
@@ -4867,6 +5015,79 @@ mod tests {
             bioinformatics_workspace_api_path("/api/"),
             "/api/workspaces/bioinformatics"
         );
+    }
+
+    #[test]
+    fn bioinformatics_readiness_cards_surface_workflow_handoff() {
+        let view = BioinformaticsWorkspaceResponse {
+            schema_version: "dasobjectstore.product_workspaces.v1".to_string(),
+            available: true,
+            supported_object_types: vec![
+                "BAM".to_string(),
+                "CRAM".to_string(),
+                "POD5".to_string(),
+                "FASTQ/FASTQ.GZ".to_string(),
+                "FASTA".to_string(),
+                "VCF/BCF".to_string(),
+                "GFF/GTF".to_string(),
+                "ENA/SRA".to_string(),
+            ],
+            readiness_cards: vec![
+                BioinformaticsReadinessCardResponse {
+                    object_type: "pod5".to_string(),
+                    label: "POD5".to_string(),
+                    category: "Nanopore signal".to_string(),
+                    state: "workflow_ready".to_string(),
+                    primary_workflow: "Basecalling and signal provenance.".to_string(),
+                    handoff: "Basecalling readiness".to_string(),
+                    required_metadata: vec![
+                        "flowcell/run identity".to_string(),
+                        "sequencing kit".to_string(),
+                    ],
+                },
+                BioinformaticsReadinessCardResponse {
+                    object_type: "cram".to_string(),
+                    label: "CRAM".to_string(),
+                    category: "Compressed alignment".to_string(),
+                    state: "metadata_required".to_string(),
+                    primary_workflow: "Reference-backed analysis.".to_string(),
+                    handoff: "Genome analysis with reference binding".to_string(),
+                    required_metadata: vec!["reference genome".to_string()],
+                },
+            ],
+            message: "Readiness cards available.".to_string(),
+        };
+
+        let cards = bioinformatics_readiness_summaries(&view);
+        let metrics = bioinformatics_summary_cards(&view);
+
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].label, "POD5");
+        assert_eq!(cards[0].state_label, "Workflow ready");
+        assert_eq!(cards[0].handoff, "Basecalling readiness");
+        assert_eq!(cards[0].metadata, "flowcell/run identity; sequencing kit");
+        assert_eq!(cards[1].state_label, "Metadata needed");
+        assert_eq!(metrics[0].1, "2");
+        assert_eq!(metrics[1].1, "1");
+        assert_eq!(metrics[2].1, "1");
+    }
+
+    #[test]
+    fn bioinformatics_readiness_falls_back_to_supported_types() {
+        let view = BioinformaticsWorkspaceResponse {
+            schema_version: "dasobjectstore.product_workspaces.v1".to_string(),
+            available: false,
+            supported_object_types: vec!["FASTQ/FASTQ.GZ".to_string(), "ENA/SRA".to_string()],
+            readiness_cards: Vec::new(),
+            message: "Older payload.".to_string(),
+        };
+
+        let cards = bioinformatics_readiness_summaries(&view);
+
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].label, "FASTQ/FASTQ.GZ");
+        assert_eq!(cards[0].state_label, "Reserved");
+        assert_eq!(cards[0].handoff, "Pending workflow contract");
     }
 
     #[test]

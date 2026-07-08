@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.51.0 - 2026-07-09
+
+- Replace the Bioinformatics Web placeholder with object-type readiness cards
+  for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and ENA/SRA
+  data families.
+- Extend the Bioinformatics workspace API contract with readiness-card
+  metadata covering category, state, workflow intent, handoff target, and
+  required metadata while preserving existing supported-object-type fields.
+- Document the Bioinformatics readiness-card surface and its API-owned boundary
+  before provenance and lineage-derived states are added.
+
 ## 0.50.0 - 2026-07-09
 
 - Promote the Endpoints workspace into standalone Web primary navigation and
