@@ -5,7 +5,7 @@
     "run_id": "dasobjectstore-performance-20260708T120000Z",
     "generated_at_utc": "2026-07-08T12:00:00Z",
     "repository_revision": "abc1234",
-    "cli_version": "0.4.2",
+    "cli_version": "0.7.0",
     "command": [
       "dasobjectstore",
       "performance-test",
@@ -22,6 +22,9 @@
       "file_size_bytes": 1073741824,
       "file_count": 10,
       "total_source_bytes": 10737418240,
+      "source_cap_bytes": null,
+      "discovered_file_count": 10,
+      "discovered_total_bytes": 10737418240,
       "max_hdd_concurrency": 2,
       "keep_temp": false
     },

@@ -76,6 +76,9 @@ pub(crate) struct PerformanceTestArgs {
     /// Existing folder of files to benchmark instead of generated random data.
     #[arg(long)]
     source: Option<PathBuf>,
+    /// Cap an existing source-folder benchmark to a prefix such as 750GiB or 1TiB.
+    #[arg(long)]
+    cap: Option<String>,
     /// Maximum concurrent HDD writes to model.
     #[arg(long, default_value_t = 3)]
     max_hdd_concurrency: usize,
@@ -116,6 +119,10 @@ impl PerformanceTestArgs {
 
     pub(crate) fn source(&self) -> Option<&Path> {
         self.source.as_deref()
+    }
+
+    pub(crate) fn cap(&self) -> Option<&str> {
+        self.cap.as_deref()
     }
 
     pub(crate) fn max_hdd_concurrency(&self) -> usize {
@@ -1932,6 +1939,7 @@ mod tests {
         assert_eq!(args.file_size(), Some("1GiB"));
         assert_eq!(args.file_count(), Some(2));
         assert_eq!(args.source(), None);
+        assert_eq!(args.cap(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);
         assert_eq!(args.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
         assert_eq!(args.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
@@ -1953,6 +1961,8 @@ mod tests {
             "performance-test",
             "--source",
             "/data/source-folder",
+            "--cap",
+            "750GiB",
             "--max-hdd-concurrency",
             "5",
         ])
@@ -1962,6 +1972,7 @@ mod tests {
             panic!("expected performance-test command");
         };
         assert_eq!(args.source(), Some(Path::new("/data/source-folder")));
+        assert_eq!(args.cap(), Some("750GiB"));
         assert_eq!(args.file_size(), None);
         assert_eq!(args.file_count(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);

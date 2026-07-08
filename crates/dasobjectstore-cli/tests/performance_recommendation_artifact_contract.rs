@@ -22,6 +22,15 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
     assert_positive_u64(&artifact, &["run", "parameters", "file_size_bytes"]);
     assert_positive_u64(&artifact, &["run", "parameters", "file_count"]);
     assert_positive_u64(&artifact, &["run", "parameters", "total_source_bytes"]);
+    assert!(
+        artifact["run"]["parameters"]["source_cap_bytes"].is_null()
+            || artifact["run"]["parameters"]["source_cap_bytes"]
+                .as_u64()
+                .is_some(),
+        "source_cap_bytes is null or u64"
+    );
+    assert_positive_u64(&artifact, &["run", "parameters", "discovered_file_count"]);
+    assert_positive_u64(&artifact, &["run", "parameters", "discovered_total_bytes"]);
     assert_positive_u64(&artifact, &["run", "parameters", "max_hdd_concurrency"]);
     assert_string(&artifact, &["run", "artifacts", "pdf_path"]);
     assert_string(&artifact, &["run", "artifacts", "qr_path"]);

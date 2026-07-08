@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.7.0 - 2026-07-08
+
+- Add ``dasobjectstore performance-test --cap <SIZE>`` for source-folder
+  workloads so large extant datasets can be benchmarked as a deterministic FIFO
+  prefix without staging the entire tree.
+- Expand the performance-test TUI with scenario objective and SSD residency
+  bounds so operators can distinguish SSD-only, SSD-first FIFO drain, and
+  direct-to-HDD scenarios during long runs.
+- Record source cap and discovered source totals in performance-test
+  reproduction metadata and recommendation JSON artifacts.
+
 ## 0.6.0 - 2026-07-08
 
 - Add ``dasobjectstore performance-test --authoritative`` to persist the
