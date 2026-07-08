@@ -1,3 +1,5 @@
+use crate::api::HomeDashboardResponse;
+
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
 pub const OBJECTSTORES_WORKSPACE_ROUTE: &str = "dashboard/object-stores";
@@ -88,53 +90,204 @@ pub fn bioinformatics_workspace_api_path(api_base_path: &str) -> String {
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ApiLoadState<T> {
+    Loading,
+    Loaded(T),
+    Empty(String),
+    PermissionDenied(String),
+    Error(String),
+    Stale { value: T, message: String },
+}
+
+impl<T> ApiLoadState<T> {
+    pub fn loaded(value: T) -> Self {
+        Self::Loaded(value)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DashboardMetric {
-    pub label: &'static str,
-    pub value: &'static str,
-    pub detail: &'static str,
-    pub state: &'static str,
+    pub label: String,
+    pub value: String,
+    pub detail: String,
+    pub state: String,
+}
+
+impl DashboardMetric {
+    fn new(label: &str, value: impl Into<String>, detail: impl Into<String>, state: &str) -> Self {
+        Self {
+            label: label.to_string(),
+            value: value.into(),
+            detail: detail.into(),
+            state: state.to_string(),
+        }
+    }
 }
 
 pub fn fallback_dashboard_metrics() -> Vec<DashboardMetric> {
     vec![
-        DashboardMetric {
-            label: "Drives",
-            value: "0",
-            detail: "Live daemon inventory pending",
-            state: "Pending",
-        },
-        DashboardMetric {
-            label: "DAS enclosures",
-            value: "0 mounted",
-            detail: "Supported enclosure mapping pending",
-            state: "Pending",
-        },
-        DashboardMetric {
-            label: "Capacity",
-            value: "0 B",
-            detail: "Used and available TiB will appear after inventory",
-            state: "Pending",
-        },
-        DashboardMetric {
-            label: "7-day throughput",
-            value: "Pending",
-            detail: "Ingress and destage rates require daemon metrics",
-            state: "Pending",
-        },
-        DashboardMetric {
-            label: "Memory stress",
-            value: "Unknown",
-            detail: "Host memory telemetry pending",
-            state: "Pending",
-        },
-        DashboardMetric {
-            label: "SMART warnings",
-            value: "0",
-            detail: "No live SMART feed attached to this page yet",
-            state: "Pending",
-        },
+        DashboardMetric::new("Drives", "0", "Live daemon inventory pending", "Pending"),
+        DashboardMetric::new(
+            "DAS enclosures",
+            "0 mounted",
+            "Supported enclosure mapping pending",
+            "Pending",
+        ),
+        DashboardMetric::new(
+            "Capacity",
+            "0 B",
+            "Used and available TiB will appear after inventory",
+            "Pending",
+        ),
+        DashboardMetric::new(
+            "7-day throughput",
+            "Pending",
+            "Ingress and destage rates require daemon metrics",
+            "Pending",
+        ),
+        DashboardMetric::new(
+            "Memory stress",
+            "Unknown",
+            "Host memory telemetry pending",
+            "Pending",
+        ),
+        DashboardMetric::new(
+            "SMART warnings",
+            "0",
+            "No live SMART feed attached to this page yet",
+            "Pending",
+        ),
     ]
+}
+
+pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetric> {
+    vec![
+        DashboardMetric::new(
+            "Drives",
+            view.drives.total.to_string(),
+            format!(
+                "{} mounted; {} healthy; {} watch; {} suspect; {} failed",
+                view.drives.mounted,
+                view.drives.healthy,
+                view.drives.watch,
+                view.drives.suspect,
+                view.drives.failed
+            ),
+            &view.health.label,
+        ),
+        DashboardMetric::new(
+            "DAS enclosures",
+            format!("{} mounted", view.mounted_enclosures.len()),
+            "Supported enclosure inventory from daemon dashboard API",
+            &view.health.label,
+        ),
+        DashboardMetric::new(
+            "Capacity",
+            format!("{} TiB free", view.capacity.free_tib),
+            format!(
+                "{} TiB used of {} TiB total",
+                view.capacity.used_tib, view.capacity.total_tib
+            ),
+            &format!(
+                "{:.1}% used",
+                f64::from(view.capacity.used_percent_basis_points) / 100.0
+            ),
+        ),
+        DashboardMetric::new(
+            "7-day throughput",
+            format!("{} TiB ingest", view.throughput_7d.ingest_tib),
+            format!(
+                "{} MiB/s write avg; {} MiB/s read avg",
+                view.throughput_7d.avg_write_mib_s, view.throughput_7d.avg_read_mib_s
+            ),
+            &format!("{} days", view.throughput_7d.window_days),
+        ),
+        DashboardMetric::new(
+            "Memory stress",
+            format!("{}%", view.memory_stress.pressure_percent),
+            format!(
+                "{}% swap; {} TiB page cache",
+                view.memory_stress.swap_used_percent, view.memory_stress.page_cache_tib
+            ),
+            &view.memory_stress.state,
+        ),
+        DashboardMetric::new(
+            "SMART warnings",
+            view.smart_warnings.warning_count.to_string(),
+            format!(
+                "{} affected drive(s)",
+                view.smart_warnings.affected_drive_count
+            ),
+            if view.smart_warnings.warning_count == 0 {
+                "clear"
+            } else {
+                "review"
+            },
+        ),
+        DashboardMetric::new(
+            "ObjectStores",
+            view.object_stores.len().to_string(),
+            "Registered object stores visible to this appliance",
+            &view.health.label,
+        ),
+    ]
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DashboardAttentionItem {
+    pub title: String,
+    pub detail: String,
+    pub state: String,
+}
+
+impl DashboardAttentionItem {
+    fn new(title: impl Into<String>, detail: impl Into<String>, state: &str) -> Self {
+        Self {
+            title: title.into(),
+            detail: detail.into(),
+            state: state.to_string(),
+        }
+    }
+}
+
+pub fn home_dashboard_attention(view: &HomeDashboardResponse) -> Vec<DashboardAttentionItem> {
+    let mut items = Vec::new();
+    if view.health.action_count > 0
+        || view.health.warning_count > 0
+        || view.health.critical_count > 0
+    {
+        items.push(DashboardAttentionItem::new(
+            "Appliance attention",
+            format!(
+                "{} required action(s), {} warning(s), {} critical condition(s)",
+                view.health.action_count, view.health.warning_count, view.health.critical_count
+            ),
+            &view.health.state,
+        ));
+    }
+    if let Some(warning) = &view.memory_stress.warning {
+        items.push(DashboardAttentionItem::new(
+            "Memory stress",
+            warning.message.clone(),
+            &view.memory_stress.state,
+        ));
+    }
+    for warning in view.smart_warnings.warnings.iter().take(3) {
+        items.push(DashboardAttentionItem::new(
+            format!("SMART {}", warning.drive_id),
+            format!("{}: {}", warning.attribute, warning.message),
+            &warning.severity,
+        ));
+    }
+    if items.is_empty() {
+        items.push(DashboardAttentionItem::new(
+            "No dashboard warnings reported",
+            "The daemon dashboard API did not report active Home attention items.",
+            "clear",
+        ));
+    }
+    items
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -180,6 +333,25 @@ pub struct HomeDashboardProps {
 #[function_component(HomeDashboard)]
 pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
     let api_path = WorkspacePage::Home.api_path(&props.api_base_path);
+    let dashboard_state = use_state(|| ApiLoadState::<HomeDashboardResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let dashboard_state = dashboard_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match crate::api::get_home_dashboard(&path).await {
+                    Ok(view) => dashboard_state.set(ApiLoadState::loaded(view)),
+                    Err(error) if error.is_permission_denied() => {
+                        dashboard_state.set(ApiLoadState::PermissionDenied(error.message))
+                    }
+                    Err(error) => dashboard_state.set(ApiLoadState::Error(error.message)),
+                }
+            });
+            || ()
+        });
+    }
 
     html! {
         <section class="dos-page" data-page="home" data-api-route={api_path}>
@@ -188,25 +360,82 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
                 title="Home"
                 summary="Current operating posture for local storage, ingress, and object service."
             />
-            <div class="dos-metric-grid">
-                { for fallback_dashboard_metrics().into_iter().map(|metric| html! {
-                    <section class="dos-card dos-metric-card" data-state={metric.state}>
-                        <div class="dos-card-row">
-                            <span class="dos-card-label">{ metric.label }</span>
-                            <span class="dos-status-pill">{ metric.state }</span>
-                        </div>
-                        <strong>{ metric.value }</strong>
-                        <p>{ metric.detail }</p>
-                    </section>
-                }) }
-            </div>
-            <section class="dos-card dos-wide-card">
-                <div>
-                    <span class="dos-card-label">{ "Attention" }</span>
-                    <h2>{ "Live dashboard telemetry is being bootstrapped." }</h2>
-                    <p>{ "The page is wired to the Home API contract and will populate drive, enclosure, capacity, throughput, memory, and SMART data as daemon inventory is connected." }</p>
+            { render_home_dashboard_state(&*dashboard_state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> Html {
+    match state {
+        ApiLoadState::Loading => html! {
+            <>
+                <div class="dos-metric-grid">
+                    { for fallback_dashboard_metrics().into_iter().map(render_metric_card) }
                 </div>
-            </section>
+                <section class="dos-card dos-wide-card dos-loading-card">
+                    <span class="dos-card-label">{ "Loading" }</span>
+                    <h2>{ "Loading live dashboard telemetry." }</h2>
+                    <p>{ "The Web console is requesting daemon-backed drive, capacity, throughput, memory, and SMART state." }</p>
+                </section>
+            </>
+        },
+        ApiLoadState::Loaded(view) | ApiLoadState::Stale { value: view, .. } => html! {
+            <>
+                <div class="dos-metric-grid">
+                    { for home_dashboard_metrics(view).into_iter().map(render_metric_card) }
+                </div>
+                <div class="dos-attention-grid">
+                    { for home_dashboard_attention(view).into_iter().map(render_attention_card) }
+                </div>
+            </>
+        },
+        ApiLoadState::Empty(message) => {
+            render_home_state_message("Empty", "No dashboard data", message)
+        }
+        ApiLoadState::PermissionDenied(message) => render_home_state_message(
+            "Permission denied",
+            "Home dashboard requires an authenticated session",
+            message,
+        ),
+        ApiLoadState::Error(message) => {
+            render_home_state_message("Error", "Unable to load Home dashboard", message)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_metric_card(metric: DashboardMetric) -> Html {
+    html! {
+        <section class="dos-card dos-metric-card" data-state={metric.state.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ metric.label }</span>
+                <span class="dos-status-pill">{ metric.state }</span>
+            </div>
+            <strong>{ metric.value }</strong>
+            <p>{ metric.detail }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_attention_card(item: DashboardAttentionItem) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card" data-state={item.state.clone()}>
+            <span class="dos-card-label">{ "Attention" }</span>
+            <h2>{ item.title }</h2>
+            <p>{ item.detail }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_home_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label }</span>
+            <h2>{ title }</h2>
+            <p>{ message }</p>
         </section>
     }
 }
@@ -404,10 +633,12 @@ fn page_header(props: &PageHeaderProps) -> Html {
 mod tests {
     use super::{
         bioinformatics_workspace_api_path, enclosures_workspace_api_path, fallback_enclosures,
-        fallback_object_stores, home_workspace_api_path, objectstores_workspace_api_path,
-        WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        fallback_object_stores, home_dashboard_attention, home_dashboard_metrics,
+        home_workspace_api_path, objectstores_workspace_api_path, WorkspacePage,
+        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
+    use crate::api::HomeDashboardResponse;
 
     #[test]
     fn primary_navigation_uses_redesign_labels() {
@@ -483,5 +714,91 @@ mod tests {
         assert!(stores.is_empty());
         assert!(stores.iter().all(|store| !store.id.is_empty()));
         assert!(stores.iter().all(|store| !store.policy.is_empty()));
+    }
+
+    #[test]
+    fn home_dashboard_live_payload_maps_to_metrics_and_attention() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "health": {
+                "state": "watch",
+                "label": "Watch",
+                "warning_count": 1,
+                "critical_count": 0,
+                "action_count": 1,
+                "last_checked_at_utc": null
+            },
+            "drives": {
+                "total": 7,
+                "mounted": 7,
+                "healthy": 6,
+                "watch": 1,
+                "suspect": 0,
+                "failed": 0
+            },
+            "capacity": {
+                "total_tib": "100.0",
+                "used_tib": "12.5",
+                "free_tib": "87.5",
+                "used_percent_basis_points": 1250
+            },
+            "mounted_enclosures": [],
+            "throughput_7d": {
+                "window_days": 7,
+                "read_tib": "1.0",
+                "written_tib": "2.0",
+                "ingest_tib": "2.5",
+                "avg_read_mib_s": 120,
+                "avg_write_mib_s": 240
+            },
+            "memory_stress": {
+                "state": "elevated",
+                "pressure_percent": 71,
+                "swap_used_percent": 9,
+                "page_cache_tib": "0.4",
+                "warning": {
+                    "code": "memory_pressure_high",
+                    "message": "Memory pressure is elevated."
+                }
+            },
+            "smart_warnings": {
+                "warning_count": 1,
+                "affected_drive_count": 1,
+                "warnings": [{
+                    "drive_id": "qnap-1057",
+                    "severity": "warning",
+                    "attribute": "reallocated_sector_count",
+                    "message": "SMART attribute is above warning threshold."
+                }]
+            },
+            "object_stores": [{
+                "store_id": "zymo_fecal_2025.05",
+                "display_name": "zymo_fecal_2025.05",
+                "health": "healthy",
+                "object_count": 42,
+                "warnings": []
+            }]
+        });
+        let view =
+            serde_json::from_value::<HomeDashboardResponse>(payload).expect("dashboard decodes");
+
+        let metrics = home_dashboard_metrics(&view);
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "Drives" && metric.value == "7"));
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "Capacity" && metric.value == "87.5 TiB free"));
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "ObjectStores" && metric.value == "1"));
+
+        let attention = home_dashboard_attention(&view);
+        assert!(attention
+            .iter()
+            .any(|item| item.title == "Appliance attention"));
+        assert!(attention.iter().any(|item| item.title == "Memory stress"));
+        assert!(attention.iter().any(|item| item.title == "SMART qnap-1057"));
     }
 }

@@ -144,6 +144,15 @@ The dashboard is informational by default. Risky actions should lead to the
 specific Enclosures or ObjectStores workflow where the plan, policy allowance,
 and confirmation can be shown next to the affected resource.
 
+The redesigned Home page loads its live summary from
+``/products/dasobjectstore/api/v1/dashboard/home`` using the browser session
+issued at login. The page shows authenticated loading, permission-denied, and
+transport-error states instead of presenting fixture metrics as live appliance
+state. Once loaded, the visible cards cover drive count, mounted enclosure
+count, usable capacity, seven-day throughput, memory pressure, SMART warnings,
+visible ObjectStores, and operator attention items from the daemon health
+payload.
+
 Enclosures Page
 ---------------
 

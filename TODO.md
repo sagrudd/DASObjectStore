@@ -521,7 +521,7 @@ older checklist claims.
 - [ ] Add a shared Yew API loading model for the Home, Enclosures, ObjectStores,
   and Bioinformatics pages: loading, success, empty, permission-denied,
   transport-error, and stale-data states.
-- [ ] Wire `HomeDashboard` to fetch `/products/dasobjectstore/api/v1/dashboard/home`
+- [x] Wire `HomeDashboard` to fetch `/products/dasobjectstore/api/v1/dashboard/home`
   or the canonical product workspace route and render live drive count, mounted
   enclosure count, total/used/free capacity, seven-day throughput, memory stress,
   SMART warning count, required actions, and object-store count.

@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.13.0 - 2026-07-08
+
+- Wire the redesigned Web Home dashboard to load the daemon-backed
+  ``/products/dasobjectstore/api/v1/dashboard/home`` payload after login.
+- Render live Home metrics for drive inventory, mounted enclosures, capacity,
+  seven-day throughput, memory stress, SMART warnings, and visible
+  ObjectStores.
+- Replace the Home bootstrapping placeholder with attention cards sourced from
+  health, memory, and SMART warning data, with authenticated-session error
+  states for dashboard loading failures.
+
 ## 0.12.1 - 2026-07-08
 
 - Fix ``ssd-overlap-drain`` performance benchmarking so a full HDD worker
