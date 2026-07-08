@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.2 - 2026-07-08
+
+- Show per-active-file HDD landing rates in the performance-test TUI so each
+  concurrent transfer reports its own throughput alongside copied bytes.
+- Grow the HDD Landing pane to fit the active transfer set used by typical DAS
+  concurrency tests and summarize only when more active transfers remain.
+- Remove completed staged-drain transfers from the active HDD landing map and
+  keep their byte counters updated while copies progress.
+
 ## 0.10.1 - 2026-07-08
 
 - Capture SHA-256 checksums inline during normal source-to-SSD ingest instead

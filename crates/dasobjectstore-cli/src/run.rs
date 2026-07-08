@@ -1365,7 +1365,19 @@ fn render_performance_tui_snapshot(
     writer: &mut impl Write,
     snapshot: &PerformanceTuiSnapshot<'_>,
 ) -> Result<(), CliError> {
-    let area = performance_tui_area();
+    let visible_active_landing_rows = snapshot.active_hdd_landing.len().min(8);
+    let hidden_active_landing_rows = snapshot
+        .active_hdd_landing
+        .len()
+        .saturating_sub(visible_active_landing_rows);
+    let landing_height = if snapshot.active_hdd_landing.is_empty() {
+        5
+    } else {
+        (3 + visible_active_landing_rows + usize::from(hidden_active_landing_rows > 0)).clamp(6, 12)
+            as u16
+    };
+    let mut area = performance_tui_area();
+    area.height = area.height.max(landing_height.saturating_add(31));
     let backend = TestBackend::new(area.width, area.height);
     let mut terminal =
         Terminal::new(backend).expect("test backend terminal creation is infallible");
@@ -1389,9 +1401,9 @@ fn render_performance_tui_snapshot(
                 Constraint::Length(6),
                 Constraint::Length(3),
                 Constraint::Length(7),
-                Constraint::Length(7),
+                Constraint::Length(landing_height),
                 Constraint::Length(6),
-                Constraint::Length(6),
+                Constraint::Length(5),
                 Constraint::Min(4),
             ])
             .split(frame.area());
@@ -1469,9 +1481,14 @@ fn render_performance_tui_snapshot(
                     snapshot
                         .active_hdd_landing
                         .iter()
-                        .take(5)
+                        .take(visible_active_landing_rows)
                         .map(|line| Line::from(format!("  {line}"))),
                 )
+                .chain((hidden_active_landing_rows > 0).then(|| {
+                    Line::from(format!(
+                        "  ... {hidden_active_landing_rows} more active transfer(s)"
+                    ))
+                }))
                 .collect::<Vec<_>>()
         };
         let current_file = snapshot
@@ -2243,6 +2260,17 @@ fn benchmark_ssd_stage_then_drain(
                             })?
                             .entry(placement.disk_id.clone())
                             .or_insert(0) += delta;
+                        if let Some(active) = active_hdd_writes
+                            .lock()
+                            .map_err(|_| {
+                                CliError::CommandFailed(
+                                    "performance-test active HDD write lock poisoned".to_string(),
+                                )
+                            })?
+                            .get_mut(&active_key)
+                        {
+                            active.bytes_written = bytes;
+                        }
                         Ok(())
                     };
                     let measurement = measure_copy_with_progress(
@@ -2251,6 +2279,9 @@ fn benchmark_ssd_stage_then_drain(
                         Some(&mut progress),
                     );
                     let _ = fs::remove_file(&destination);
+                    let _ = active_hdd_writes
+                        .lock()
+                        .map(|mut active| active.remove(&active_key));
                     let measurement = measurement?;
                     hdd_jobs_completed.fetch_add(1, Ordering::SeqCst);
                     scheduler
@@ -4044,6 +4075,7 @@ fn active_hdd_landing_lines(
     active_writes: &ActiveHddWriteMap,
     file_count: u32,
 ) -> Result<Vec<String>, CliError> {
+    let now = Instant::now();
     let active = active_writes.lock().map_err(|_| {
         CliError::CommandFailed("performance-test active HDD write lock poisoned".to_string())
     })?;
@@ -4051,17 +4083,26 @@ fn active_hdd_landing_lines(
         .values()
         .map(|write| {
             format!(
-                "file {}/{} copy {} -> {}: {}/{} {}",
+                "file {}/{} copy {} -> {}: {}/{} @ {} {}",
                 write.file_index + 1,
                 file_count,
                 write.copy_index + 1,
                 write.disk_id.as_str(),
                 format_bytes(write.bytes_written as f64),
                 format_bytes(write.size_bytes as f64),
+                active_hdd_write_rate(write, now),
                 write.relative_path.display()
             )
         })
         .collect())
+}
+
+fn active_hdd_write_rate(write: &ActiveHddWrite, now: Instant) -> String {
+    if write.bytes_written == 0 {
+        return "pending".to_string();
+    }
+    let elapsed = now.duration_since(write.started).as_secs_f64().max(0.001);
+    format!("{}/s", format_bytes(write.bytes_written as f64 / elapsed))
 }
 
 fn render_performance_json(report: &PerformanceReport) -> String {
@@ -8508,19 +8549,20 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        benchmark_ssd_only, benchmark_ssd_pipeline_with_options, benchmark_ssd_stage_then_drain,
-        collect_ingest_files, connection_status_from_probe, current_user_group_names,
-        parse_binary_size, performance_report_metadata_json, plan_ssd_residency_batches,
-        render_performance_json, render_performance_report, render_performance_tui_snapshot,
-        render_simple_pdf, run, source_performance_workload,
+        active_hdd_landing_lines, benchmark_ssd_only, benchmark_ssd_pipeline_with_options,
+        benchmark_ssd_stage_then_drain, collect_ingest_files, connection_status_from_probe,
+        current_user_group_names, parse_binary_size, performance_report_metadata_json,
+        plan_ssd_residency_batches, render_performance_json, render_performance_report,
+        render_performance_tui_snapshot, render_simple_pdf, run, source_performance_workload,
         validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
         write_health_summary, write_health_verbose, write_host_connection_status,
-        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
-        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
-        PerformanceDiskResult, PerformanceFileResult, PerformanceMeasurement, PerformancePayload,
-        PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
-        PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceTuiSnapshot,
-        PerformanceWorkload, PerformanceWorkloadKind, SsdPipelineBenchmarkOptions,
+        write_pretty_report, ActiveHddWrite, ActiveHddWriteMap, CliError, ConnectionAssessment,
+        DiskHealthSummary, HealthReport, ManagedHddDevice, PerformanceBenchmarkResults,
+        PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
+        PerformanceMeasurement, PerformancePayload, PerformanceRecommendation, PerformanceReport,
+        PerformanceScenarioKind, PerformanceScenarioResult, PerformanceSsdResidencyBudget,
+        PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
+        SsdPipelineBenchmarkOptions,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -8547,12 +8589,13 @@ mod tests {
         EnclosureIdentity, HostPlatform, ObservedDisk, ObservedEnclosure, ProbeReport, Transport,
     };
     use rusqlite::Connection;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs::{self, File};
     #[cfg(target_os = "linux")]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn bare_invocation_writes_top_level_help() {
@@ -9057,7 +9100,8 @@ mod tests {
                 hdd_write_rate: Some(384.0 * 1024.0 * 1024.0),
                 hdd_disk_rates: vec!["disk-a 192.0 MiB/s".to_string()],
                 active_hdd_landing: vec![
-                    "file 1/2 copy 1 -> disk-a: 1.0 GiB/2.0 GiB reads.fastq".to_string(),
+                    "file 1/2 copy 1 -> disk-a: 1.0 GiB/2.0 GiB @ 128.0 MiB/s reads.fastq"
+                        .to_string(),
                 ],
                 aggregate_rate: None,
                 report_path: Path::new("/tmp/perf.pdf"),
@@ -9073,8 +9117,69 @@ mod tests {
         assert!(output.contains("SSD read rate: 512.0 MiB/s"));
         assert!(output.contains("HDD aggregate average: 384.0 MiB/s"));
         assert!(output.contains("HDD Landing"));
+        assert!(output.contains("@ 128.0 MiB/s"));
         assert!(output.contains("reads.fastq"));
         assert!(output.contains("disk-a 192.0 MiB/s"));
+    }
+
+    #[test]
+    fn performance_tui_active_hdd_landing_lines_include_per_transfer_rates() {
+        let active_writes: ActiveHddWriteMap = Arc::new(Mutex::new(BTreeMap::new()));
+        let started = Instant::now() - Duration::from_secs(2);
+        for index in 0..5 {
+            active_writes.lock().expect("active write lock").insert(
+                (index, 0),
+                ActiveHddWrite {
+                    file_index: index,
+                    copy_index: 0,
+                    relative_path: PathBuf::from(format!("raw/file-{index}.pod5")),
+                    disk_id: DiskId::new(format!("qnap-105{index}")).expect("disk id"),
+                    size_bytes: 2 * 1024 * 1024 * 1024,
+                    bytes_written: 512 * 1024 * 1024,
+                    started,
+                },
+            );
+        }
+
+        let lines = active_hdd_landing_lines(&active_writes, 31).expect("landing lines");
+        assert_eq!(lines.len(), 5);
+        assert!(lines[0].contains("@"));
+        assert!(lines[0].contains("MiB/s"));
+        assert!(lines[4].contains("file 5/31"));
+
+        let mut output = Vec::new();
+        render_performance_tui_snapshot(
+            &mut output,
+            &PerformanceTuiSnapshot {
+                phase: "hdd-drain active",
+                scenario: "ssd-pipeline",
+                activity: "HDD drain active".to_string(),
+                objective: "show active transfer visibility".to_string(),
+                bounds: "five active HDD transfers should fit in the landing pane".to_string(),
+                scenario_done: 1,
+                scenario_total: 2,
+                file_done: 0,
+                current_file: None,
+                file_count: 31,
+                processed_bytes: 0,
+                total_bytes: 10 * 1024 * 1024 * 1024,
+                hdd_concurrency: 5,
+                current_rate: None,
+                ssd_write_rate: None,
+                ssd_read_rate: None,
+                hdd_write_rate: None,
+                hdd_disk_rates: Vec::new(),
+                active_hdd_landing: lines,
+                aggregate_rate: None,
+                report_path: Path::new("/tmp/perf.pdf"),
+                json_path: Path::new("/tmp/perf.json"),
+            },
+        )
+        .expect("snapshot renders");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("file 5/31"));
+        assert!(output.contains("MiB/s"));
     }
 
     #[test]
