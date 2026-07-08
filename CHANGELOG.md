@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.8.1 - 2026-07-08
+
+- Keep performance-test TUI SSD write and read rates populated with live
+  phase-average values during active file writes and SSD readback instead of
+  leaving fields as pending until a scenario completes.
+- Show live HDD drain progress while staged and overlapping SSD/HDD benchmark
+  routes are settling data, including drained, draining, queued, and pending
+  copy-job counts plus interim aggregate HDD write rate.
+
 ## 0.8.0 - 2026-07-08
 
 - Add ``dasobjectstore performance-test --redundancy <1|2|3>`` so benchmark

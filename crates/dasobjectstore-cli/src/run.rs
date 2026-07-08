@@ -123,7 +123,7 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{collections::hash_map::DefaultHasher, collections::BTreeMap, collections::BTreeSet};
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 #[cfg(unix)]
@@ -408,8 +408,12 @@ fn run_performance_test(
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
                     current_rate: None,
-                    ssd_write_rate: None,
-                    ssd_read_rate: None,
+                    ssd_write_rate: measurement_rate(
+                        ssd_only.file_results.iter().map(|row| row.ssd_write),
+                    ),
+                    ssd_read_rate: measurement_rate(
+                        ssd_only.file_results.iter().map(|row| row.ssd_read),
+                    ),
                     hdd_write_rate: None,
                     hdd_disk_rates: Vec::new(),
                     aggregate_rate: Some(
@@ -474,8 +478,12 @@ fn run_performance_test(
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
                         current_rate: None,
-                        ssd_write_rate: None,
-                        ssd_read_rate: None,
+                        ssd_write_rate: measurement_rate(
+                            scenario.file_results.iter().map(|row| row.ssd_write),
+                        ),
+                        ssd_read_rate: measurement_rate(
+                            scenario.file_results.iter().map(|row| row.ssd_read),
+                        ),
                         hdd_write_rate,
                         hdd_disk_rates,
                         aggregate_rate: Some(
@@ -542,8 +550,12 @@ fn run_performance_test(
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
                         current_rate: None,
-                        ssd_write_rate: None,
-                        ssd_read_rate: None,
+                        ssd_write_rate: measurement_rate(
+                            scenario.file_results.iter().map(|row| row.ssd_write),
+                        ),
+                        ssd_read_rate: measurement_rate(
+                            scenario.file_results.iter().map(|row| row.ssd_read),
+                        ),
                         hdd_write_rate,
                         hdd_disk_rates,
                         aggregate_rate: Some(
@@ -1509,6 +1521,75 @@ fn render_performance_tui_snapshot(
     Ok(())
 }
 
+struct HddDrainTuiState<'a> {
+    context: PerformanceTuiContext<'a>,
+    workload: &'a PerformanceWorkload,
+    kind: PerformanceScenarioKind,
+    concurrency: usize,
+    submitted_jobs: usize,
+    total_jobs: usize,
+    started_jobs: usize,
+    completed_jobs: usize,
+    transferred_bytes: u64,
+    hdd_disk_rates: Vec<String>,
+    drain_started: Instant,
+}
+
+fn render_hdd_drain_tui_snapshot(
+    writer: &mut impl Write,
+    state: HddDrainTuiState<'_>,
+) -> Result<(), CliError> {
+    let active_jobs = state.started_jobs.saturating_sub(state.completed_jobs);
+    let queued_jobs = state.submitted_jobs.saturating_sub(state.started_jobs);
+    let pending_submission = state.total_jobs.saturating_sub(state.submitted_jobs);
+    let elapsed = state.drain_started.elapsed().as_secs_f64().max(0.001);
+    let hdd_rate = if state.transferred_bytes > 0 {
+        Some(state.transferred_bytes as f64 / elapsed)
+    } else {
+        None
+    };
+    let total_bytes = state.workload.total_bytes().saturating_mul(
+        state
+            .total_jobs
+            .checked_div(state.workload.file_count().max(1) as usize)
+            .unwrap_or(1)
+            .max(1) as u64,
+    );
+    render_performance_tui_snapshot(
+        writer,
+        &PerformanceTuiSnapshot {
+            phase: "hdd-drain active",
+            scenario: state.kind.as_str(),
+            activity: format!(
+                "HDD drain copy jobs: drained {}/{}, draining {}, queued {}, pending submission {}",
+                state.completed_jobs,
+                state.total_jobs,
+                active_jobs,
+                queued_jobs,
+                pending_submission
+            ),
+            objective: performance_scenario_objective(state.kind, state.concurrency),
+            bounds: performance_scenario_bounds(state.workload, state.kind, state.concurrency),
+            scenario_done: state.context.scenario_done,
+            scenario_total: state.context.scenario_total,
+            file_done: state.completed_jobs.min(u32::MAX as usize) as u32,
+            current_file: None,
+            file_count: state.total_jobs.min(u32::MAX as usize) as u32,
+            processed_bytes: state.transferred_bytes,
+            total_bytes,
+            hdd_concurrency: state.concurrency,
+            current_rate: hdd_rate,
+            ssd_write_rate: None,
+            ssd_read_rate: None,
+            hdd_write_rate: hdd_rate,
+            hdd_disk_rates: state.hdd_disk_rates,
+            aggregate_rate: hdd_rate,
+            report_path: state.context.report_path,
+            json_path: state.context.json_path,
+        },
+    )
+}
+
 fn performance_tui_area() -> Rect {
     let env_size = std::env::var("COLUMNS")
         .ok()
@@ -1554,7 +1635,7 @@ fn benchmark_ssd_only(
     tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
-    let mut file_results = Vec::new();
+    let mut file_results = Vec::<PerformanceFileResult>::new();
     let mut total_bytes = 0_u64;
     for payload in &workload.payloads {
         check_performance_cancelled()?;
@@ -1586,8 +1667,8 @@ fn benchmark_ssd_only(
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
                     current_rate: None,
-                    ssd_write_rate: None,
-                    ssd_read_rate: None,
+                    ssd_write_rate: measurement_rate(file_results.iter().map(|row| row.ssd_write)),
+                    ssd_read_rate: measurement_rate(file_results.iter().map(|row| row.ssd_read)),
                     hdd_write_rate: None,
                     hdd_disk_rates: Vec::new(),
                     aggregate_rate: None,
@@ -1629,8 +1710,14 @@ fn benchmark_ssd_only(
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: 0,
                         current_rate: Some(bytes as f64 / seconds.max(0.001)),
-                        ssd_write_rate: None,
-                        ssd_read_rate: None,
+                        ssd_write_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_write),
+                            bytes,
+                            seconds,
+                        ),
+                        ssd_read_rate: measurement_rate(
+                            file_results.iter().map(|row| row.ssd_read),
+                        ),
                         hdd_write_rate: None,
                         hdd_disk_rates: Vec::new(),
                         aggregate_rate: None,
@@ -1680,8 +1767,16 @@ fn benchmark_ssd_only(
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: 0,
                         current_rate: Some(bytes as f64 / seconds.max(0.001)),
-                        ssd_write_rate: None,
-                        ssd_read_rate: None,
+                        ssd_write_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_write),
+                            ssd_write.bytes,
+                            ssd_write.seconds,
+                        ),
+                        ssd_read_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_read),
+                            bytes,
+                            seconds,
+                        ),
                         hdd_write_rate: None,
                         hdd_disk_rates: Vec::new(),
                         aggregate_rate: None,
@@ -1748,7 +1843,7 @@ fn benchmark_ssd_stage_then_drain(
     tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
-    let mut file_results = Vec::new();
+    let mut file_results = Vec::<PerformanceFileResult>::new();
     let mut staged_jobs = Vec::new();
     let mut total_bytes = 0_u64;
 
@@ -1788,8 +1883,8 @@ fn benchmark_ssd_stage_then_drain(
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: 0,
                     current_rate: None,
-                    ssd_write_rate: None,
-                    ssd_read_rate: None,
+                    ssd_write_rate: measurement_rate(file_results.iter().map(|row| row.ssd_write)),
+                    ssd_read_rate: measurement_rate(file_results.iter().map(|row| row.ssd_read)),
                     hdd_write_rate: None,
                     hdd_disk_rates: Vec::new(),
                     aggregate_rate: None,
@@ -1831,8 +1926,14 @@ fn benchmark_ssd_stage_then_drain(
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: 0,
                         current_rate: Some(bytes as f64 / seconds.max(0.001)),
-                        ssd_write_rate: None,
-                        ssd_read_rate: None,
+                        ssd_write_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_write),
+                            bytes,
+                            seconds,
+                        ),
+                        ssd_read_rate: measurement_rate(
+                            file_results.iter().map(|row| row.ssd_read),
+                        ),
                         hdd_write_rate: None,
                         hdd_disk_rates: Vec::new(),
                         aggregate_rate: None,
@@ -1856,7 +1957,60 @@ fn benchmark_ssd_stage_then_drain(
                 return Err(err);
             }
         };
-        let ssd_read = match measure_read(&ssd_path) {
+        let ssd_read = match if let Some(context) = tui_context {
+            let mut progress = |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "ssd-stage-then-drain readback",
+                        scenario: "ssd-stage-then-drain",
+                        activity: format!(
+                            "Reading staged file {}/{} back from SSD before HDD drain: {} ({})",
+                            payload.file_index + 1,
+                            workload.file_count(),
+                            payload.relative_path.display(),
+                            format_bytes(bytes as f64)
+                        ),
+                        objective: performance_scenario_objective(
+                            PerformanceScenarioKind::SsdStageThenDrain,
+                            concurrency,
+                        ),
+                        bounds: performance_scenario_bounds(
+                            workload,
+                            PerformanceScenarioKind::SsdStageThenDrain,
+                            concurrency,
+                        ),
+                        scenario_done: context.scenario_done,
+                        scenario_total: context.scenario_total,
+                        file_done: payload.file_index,
+                        current_file: Some(payload.file_index + 1),
+                        file_count: workload.file_count(),
+                        processed_bytes: total_bytes.saturating_add(bytes),
+                        total_bytes: workload.total_bytes(),
+                        hdd_concurrency: 0,
+                        current_rate: Some(bytes as f64 / seconds.max(0.001)),
+                        ssd_write_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_write),
+                            ssd_write.bytes,
+                            ssd_write.seconds,
+                        ),
+                        ssd_read_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_read),
+                            bytes,
+                            seconds,
+                        ),
+                        hdd_write_rate: None,
+                        hdd_disk_rates: Vec::new(),
+                        aggregate_rate: None,
+                        report_path: context.report_path,
+                        json_path: context.json_path,
+                    },
+                )
+            };
+            measure_read_with_progress(&ssd_path, Some(&mut progress))
+        } else {
+            measure_read(&ssd_path)
+        } {
             Ok(measurement) => measurement,
             Err(err) => {
                 let _ = fs::remove_file(&ssd_path);
@@ -1916,11 +2070,13 @@ fn benchmark_ssd_stage_then_drain(
                 total_bytes: workload.total_bytes(),
                 hdd_concurrency: concurrency,
                 current_rate: None,
-                    ssd_write_rate: None,
-                    ssd_read_rate: None,
-                    hdd_write_rate: None,
-                    hdd_disk_rates: Vec::new(),
-                aggregate_rate: Some(total_bytes as f64 / started.elapsed().as_secs_f64().max(0.001)),
+                ssd_write_rate: measurement_rate(file_results.iter().map(|row| row.ssd_write)),
+                ssd_read_rate: measurement_rate(file_results.iter().map(|row| row.ssd_read)),
+                hdd_write_rate: None,
+                hdd_disk_rates: Vec::new(),
+                aggregate_rate: Some(
+                    total_bytes as f64 / started.elapsed().as_secs_f64().max(0.001),
+                ),
                 report_path: context.report_path,
                 json_path: context.json_path,
             },
@@ -1932,11 +2088,20 @@ fn benchmark_ssd_stage_then_drain(
     let (sender, receiver) = mpsc::sync_channel::<SsdPipelineJob>(queue_capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let worker_results = Arc::new(Mutex::new(Vec::<PerformanceDiskResult>::new()));
+    let hdd_jobs_started = Arc::new(AtomicU32::new(0));
+    let hdd_jobs_completed = Arc::new(AtomicU32::new(0));
+    let hdd_bytes_transferred = Arc::new(AtomicU64::new(0));
+    let hdd_disk_bytes = Arc::new(Mutex::new(BTreeMap::<DiskId, u64>::new()));
+    let drain_started = Instant::now();
     let mut handles = Vec::new();
     for _ in 0..concurrency {
         let receiver = Arc::clone(&receiver);
         let scheduler = Arc::clone(&scheduler);
         let worker_results = Arc::clone(&worker_results);
+        let hdd_jobs_started = Arc::clone(&hdd_jobs_started);
+        let hdd_jobs_completed = Arc::clone(&hdd_jobs_completed);
+        let hdd_bytes_transferred = Arc::clone(&hdd_bytes_transferred);
+        let hdd_disk_bytes = Arc::clone(&hdd_disk_bytes);
         handles.push(thread::spawn(move || -> Result<(), CliError> {
             loop {
                 check_performance_cancelled()?;
@@ -1951,6 +2116,7 @@ fn benchmark_ssd_stage_then_drain(
                 let Ok(job) = job else {
                     break;
                 };
+                hdd_jobs_started.fetch_add(1, Ordering::SeqCst);
                 let placement = scheduler
                     .lock()
                     .map_err(|_| {
@@ -1964,9 +2130,27 @@ fn benchmark_ssd_stage_then_drain(
                     .join("ssd-stage-then-drain")
                     .join(format!("c{concurrency}"))
                     .join(&job.relative_path);
-                let measurement = measure_copy(&job.ssd_path, &destination);
+                let mut last_progress_bytes = 0_u64;
+                let mut progress = |bytes: u64, _seconds: f64| -> Result<(), CliError> {
+                    let delta = bytes.saturating_sub(last_progress_bytes);
+                    last_progress_bytes = bytes;
+                    hdd_bytes_transferred.fetch_add(delta, Ordering::SeqCst);
+                    *hdd_disk_bytes
+                        .lock()
+                        .map_err(|_| {
+                            CliError::CommandFailed(
+                                "performance-test HDD rate lock poisoned".to_string(),
+                            )
+                        })?
+                        .entry(placement.disk_id.clone())
+                        .or_insert(0) += delta;
+                    Ok(())
+                };
+                let measurement =
+                    measure_copy_with_progress(&job.ssd_path, &destination, Some(&mut progress));
                 let _ = fs::remove_file(&destination);
                 let measurement = measurement?;
+                hdd_jobs_completed.fetch_add(1, Ordering::SeqCst);
                 scheduler
                     .lock()
                     .map_err(|_| {
@@ -1992,14 +2176,77 @@ fn benchmark_ssd_stage_then_drain(
             Ok(())
         }));
     }
+    let total_hdd_jobs = staged_jobs.len();
+    let mut submitted_hdd_jobs = 0_usize;
     for job in staged_jobs {
-        if sender.send(job).is_err() {
-            return Err(CliError::CommandFailed(
-                "performance-test staged HDD workers stopped early".to_string(),
-            ));
+        let mut pending_job = Some(job);
+        loop {
+            check_performance_cancelled()?;
+            let job = pending_job.take().expect("pending staged HDD job");
+            match sender.try_send(job) {
+                Ok(()) => {
+                    submitted_hdd_jobs += 1;
+                    break;
+                }
+                Err(mpsc::TrySendError::Full(job)) => {
+                    pending_job = Some(job);
+                    if let Some(context) = tui_context {
+                        render_hdd_drain_tui_snapshot(
+                            writer,
+                            HddDrainTuiState {
+                                context,
+                                workload,
+                                kind: PerformanceScenarioKind::SsdStageThenDrain,
+                                concurrency,
+                                submitted_jobs: submitted_hdd_jobs,
+                                total_jobs: total_hdd_jobs,
+                                started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                                completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst) as usize,
+                                transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                                hdd_disk_rates: live_hdd_disk_rates(
+                                    &hdd_disk_bytes,
+                                    drain_started,
+                                )?,
+                                drain_started,
+                            },
+                        )?;
+                    }
+                    thread::sleep(std::time::Duration::from_millis(250));
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err(CliError::CommandFailed(
+                        "performance-test staged HDD workers stopped early".to_string(),
+                    ));
+                }
+            }
         }
     }
     drop(sender);
+    if let Some(context) = tui_context {
+        while (hdd_jobs_completed.load(Ordering::SeqCst) as usize) < total_hdd_jobs {
+            check_performance_cancelled()?;
+            render_hdd_drain_tui_snapshot(
+                writer,
+                HddDrainTuiState {
+                    context,
+                    workload,
+                    kind: PerformanceScenarioKind::SsdStageThenDrain,
+                    concurrency,
+                    submitted_jobs: submitted_hdd_jobs,
+                    total_jobs: total_hdd_jobs,
+                    started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                    completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst) as usize,
+                    transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                    hdd_disk_rates: live_hdd_disk_rates(&hdd_disk_bytes, drain_started)?,
+                    drain_started,
+                },
+            )?;
+            if handles.iter().all(|handle| handle.is_finished()) {
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
     let mut worker_error = None;
     for handle in handles {
         match handle.join() {
@@ -2136,6 +2383,10 @@ fn benchmark_ssd_pipeline_with_options(
     let worker_results = Arc::new(Mutex::new(Vec::<PerformanceDiskResult>::new()));
     let staging_complete = Arc::new(AtomicBool::new(false));
     let hdd_jobs_started = Arc::new(AtomicU32::new(0));
+    let hdd_jobs_completed = Arc::new(AtomicU32::new(0));
+    let hdd_bytes_transferred = Arc::new(AtomicU64::new(0));
+    let hdd_disk_bytes = Arc::new(Mutex::new(BTreeMap::<DiskId, u64>::new()));
+    let drain_started = Instant::now();
     let hdd_drain_started_before_all_ssd_staged = Arc::new(AtomicBool::new(false));
     let mut handles = Vec::new();
 
@@ -2145,6 +2396,9 @@ fn benchmark_ssd_pipeline_with_options(
         let worker_results = Arc::clone(&worker_results);
         let staging_complete = Arc::clone(&staging_complete);
         let hdd_jobs_started = Arc::clone(&hdd_jobs_started);
+        let hdd_jobs_completed = Arc::clone(&hdd_jobs_completed);
+        let hdd_bytes_transferred = Arc::clone(&hdd_bytes_transferred);
+        let hdd_disk_bytes = Arc::clone(&hdd_disk_bytes);
         let hdd_drain_started_before_all_ssd_staged =
             Arc::clone(&hdd_drain_started_before_all_ssd_staged);
         handles.push(thread::spawn(move || -> Result<(), CliError> {
@@ -2178,9 +2432,27 @@ fn benchmark_ssd_pipeline_with_options(
                     .join("ssd-pipeline")
                     .join(format!("c{concurrency}"))
                     .join(&job.relative_path);
-                let measurement = measure_copy(&job.ssd_path, &destination);
+                let mut last_progress_bytes = 0_u64;
+                let mut progress = |bytes: u64, _seconds: f64| -> Result<(), CliError> {
+                    let delta = bytes.saturating_sub(last_progress_bytes);
+                    last_progress_bytes = bytes;
+                    hdd_bytes_transferred.fetch_add(delta, Ordering::SeqCst);
+                    *hdd_disk_bytes
+                        .lock()
+                        .map_err(|_| {
+                            CliError::CommandFailed(
+                                "performance-test HDD rate lock poisoned".to_string(),
+                            )
+                        })?
+                        .entry(placement.disk_id.clone())
+                        .or_insert(0) += delta;
+                    Ok(())
+                };
+                let measurement =
+                    measure_copy_with_progress(&job.ssd_path, &destination, Some(&mut progress));
                 let _ = fs::remove_file(&destination);
                 let measurement = measurement?;
+                hdd_jobs_completed.fetch_add(1, Ordering::SeqCst);
                 scheduler
                     .lock()
                     .map_err(|_| {
@@ -2207,9 +2479,11 @@ fn benchmark_ssd_pipeline_with_options(
         }));
     }
 
-    let mut file_results = Vec::new();
+    let mut file_results = Vec::<PerformanceFileResult>::new();
     let mut total_bytes = 0_u64;
     let mut producer_error = None;
+    let total_hdd_jobs = workload.file_count() as usize * redundancy;
+    let mut submitted_hdd_jobs = 0_usize;
     for payload in &workload.payloads {
         if let Err(err) = check_performance_cancelled() {
             producer_error = Some(err);
@@ -2220,16 +2494,28 @@ fn benchmark_ssd_pipeline_with_options(
             .join(format!("c{concurrency}"))
             .join(&payload.relative_path);
         if let Some(context) = tui_context {
+            let hdd_bytes = hdd_bytes_transferred.load(Ordering::SeqCst);
+            let hdd_rate = if hdd_bytes > 0 {
+                Some(hdd_bytes as f64 / drain_started.elapsed().as_secs_f64().max(0.001))
+            } else {
+                None
+            };
             render_performance_tui_snapshot(
                 writer,
                 &PerformanceTuiSnapshot {
                     phase: "ssd-pipeline active",
                     scenario: "ssd-pipeline",
                     activity: format!(
-                        "Staging file {}/{} to SSD before FIFO HDD drain: {}",
+                        "Staging file {}/{} to SSD before FIFO HDD drain: {}; HDD drained {}, draining {}, queued {}",
                         payload.file_index + 1,
                         workload.file_count(),
-                        payload.relative_path.display()
+                        payload.relative_path.display(),
+                        hdd_jobs_completed.load(Ordering::SeqCst),
+                        hdd_jobs_started
+                            .load(Ordering::SeqCst)
+                            .saturating_sub(hdd_jobs_completed.load(Ordering::SeqCst)),
+                        (submitted_hdd_jobs as u32)
+                            .saturating_sub(hdd_jobs_started.load(Ordering::SeqCst))
                     ),
                     objective: performance_scenario_objective(
                         PerformanceScenarioKind::SsdPipeline,
@@ -2249,10 +2535,10 @@ fn benchmark_ssd_pipeline_with_options(
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: concurrency,
                     current_rate: None,
-                    ssd_write_rate: None,
-                    ssd_read_rate: None,
-                    hdd_write_rate: None,
-                    hdd_disk_rates: Vec::new(),
+                    ssd_write_rate: measurement_rate(file_results.iter().map(|row| row.ssd_write)),
+                    ssd_read_rate: measurement_rate(file_results.iter().map(|row| row.ssd_read)),
+                    hdd_write_rate: hdd_rate,
+                    hdd_disk_rates: live_hdd_disk_rates(&hdd_disk_bytes, drain_started)?,
                     aggregate_rate: None,
                     report_path: context.report_path,
                     json_path: context.json_path,
@@ -2261,6 +2547,12 @@ fn benchmark_ssd_pipeline_with_options(
         }
         let ssd_write = match if let Some(context) = tui_context {
             let mut progress = |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                let hdd_bytes = hdd_bytes_transferred.load(Ordering::SeqCst);
+                let hdd_rate = if hdd_bytes > 0 {
+                    Some(hdd_bytes as f64 / drain_started.elapsed().as_secs_f64().max(0.001))
+                } else {
+                    None
+                };
                 render_performance_tui_snapshot(
                     writer,
                     &PerformanceTuiSnapshot {
@@ -2293,10 +2585,16 @@ fn benchmark_ssd_pipeline_with_options(
                         total_bytes: workload.total_bytes(),
                         hdd_concurrency: concurrency,
                         current_rate: Some(bytes as f64 / seconds.max(0.001)),
-                        ssd_write_rate: None,
-                        ssd_read_rate: None,
-                        hdd_write_rate: None,
-                        hdd_disk_rates: Vec::new(),
+                        ssd_write_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_write),
+                            bytes,
+                            seconds,
+                        ),
+                        ssd_read_rate: measurement_rate(
+                            file_results.iter().map(|row| row.ssd_read),
+                        ),
+                        hdd_write_rate: hdd_rate,
+                        hdd_disk_rates: live_hdd_disk_rates(&hdd_disk_bytes, drain_started)?,
                         aggregate_rate: None,
                         report_path: context.report_path,
                         json_path: context.json_path,
@@ -2319,7 +2617,72 @@ fn benchmark_ssd_pipeline_with_options(
                 break;
             }
         };
-        let ssd_read = match measure_read(&ssd_path) {
+        let ssd_read = match if let Some(context) = tui_context {
+            let mut progress = |bytes: u64, seconds: f64| -> Result<(), CliError> {
+                let hdd_bytes = hdd_bytes_transferred.load(Ordering::SeqCst);
+                let hdd_rate = if hdd_bytes > 0 {
+                    Some(hdd_bytes as f64 / drain_started.elapsed().as_secs_f64().max(0.001))
+                } else {
+                    None
+                };
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "ssd-pipeline readback",
+                        scenario: "ssd-pipeline",
+                        activity: format!(
+                            "Reading staged file {}/{} back from SSD before FIFO HDD drain: {} ({}); HDD drained {}, draining {}, queued {}",
+                            payload.file_index + 1,
+                            workload.file_count(),
+                            payload.relative_path.display(),
+                            format_bytes(bytes as f64),
+                            hdd_jobs_completed.load(Ordering::SeqCst),
+                            hdd_jobs_started
+                                .load(Ordering::SeqCst)
+                                .saturating_sub(hdd_jobs_completed.load(Ordering::SeqCst)),
+                            (submitted_hdd_jobs as u32)
+                                .saturating_sub(hdd_jobs_started.load(Ordering::SeqCst))
+                        ),
+                        objective: performance_scenario_objective(
+                            PerformanceScenarioKind::SsdPipeline,
+                            concurrency,
+                        ),
+                        bounds: performance_scenario_bounds(
+                            workload,
+                            PerformanceScenarioKind::SsdPipeline,
+                            concurrency,
+                        ),
+                        scenario_done: context.scenario_done,
+                        scenario_total: context.scenario_total,
+                        file_done: payload.file_index,
+                        current_file: Some(payload.file_index + 1),
+                        file_count: workload.file_count(),
+                        processed_bytes: total_bytes.saturating_add(bytes),
+                        total_bytes: workload.total_bytes(),
+                        hdd_concurrency: concurrency,
+                        current_rate: Some(bytes as f64 / seconds.max(0.001)),
+                        ssd_write_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_write),
+                            ssd_write.bytes,
+                            ssd_write.seconds,
+                        ),
+                        ssd_read_rate: measurement_rate_with_current(
+                            file_results.iter().map(|row| row.ssd_read),
+                            bytes,
+                            seconds,
+                        ),
+                        hdd_write_rate: hdd_rate,
+                        hdd_disk_rates: live_hdd_disk_rates(&hdd_disk_bytes, drain_started)?,
+                        aggregate_rate: None,
+                        report_path: context.report_path,
+                        json_path: context.json_path,
+                    },
+                )
+            };
+            measure_read_with_progress(&ssd_path, Some(&mut progress))
+        } else {
+            measure_read(&ssd_path)
+        } {
             Ok(measurement) => measurement,
             Err(err) => {
                 let _ = fs::remove_file(&ssd_path);
@@ -2334,15 +2697,58 @@ fn benchmark_ssd_pipeline_with_options(
             ssd_read,
         });
         for copy_index in 0..redundancy {
-            if let Err(_err) = sender.send(SsdPipelineJob {
+            let mut pending_job = Some(SsdPipelineJob {
                 file_index: payload.file_index,
                 copy_index,
                 relative_path: payload.relative_path.clone(),
                 ssd_path: ssd_path.clone(),
-            }) {
-                producer_error = Some(CliError::CommandFailed(
-                    "performance-test HDD workers stopped early".to_string(),
-                ));
+            });
+            loop {
+                if let Err(err) = check_performance_cancelled() {
+                    producer_error = Some(err);
+                    break;
+                }
+                let job = pending_job.take().expect("pending SSD pipeline HDD job");
+                match sender.try_send(job) {
+                    Ok(()) => {
+                        submitted_hdd_jobs += 1;
+                        break;
+                    }
+                    Err(mpsc::TrySendError::Full(job)) => {
+                        pending_job = Some(job);
+                        if let Some(context) = tui_context {
+                            render_hdd_drain_tui_snapshot(
+                                writer,
+                                HddDrainTuiState {
+                                    context,
+                                    workload,
+                                    kind: PerformanceScenarioKind::SsdPipeline,
+                                    concurrency,
+                                    submitted_jobs: submitted_hdd_jobs,
+                                    total_jobs: total_hdd_jobs,
+                                    started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                                    completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst)
+                                        as usize,
+                                    transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                                    hdd_disk_rates: live_hdd_disk_rates(
+                                        &hdd_disk_bytes,
+                                        drain_started,
+                                    )?,
+                                    drain_started,
+                                },
+                            )?;
+                        }
+                        thread::sleep(std::time::Duration::from_millis(250));
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        producer_error = Some(CliError::CommandFailed(
+                            "performance-test HDD workers stopped early".to_string(),
+                        ));
+                        break;
+                    }
+                }
+            }
+            if producer_error.is_some() {
                 break;
             }
         }
@@ -2366,6 +2772,12 @@ fn benchmark_ssd_pipeline_with_options(
             }
         }
         if let Some(context) = tui_context {
+            let hdd_bytes = hdd_bytes_transferred.load(Ordering::SeqCst);
+            let hdd_rate = if hdd_bytes > 0 {
+                Some(hdd_bytes as f64 / drain_started.elapsed().as_secs_f64().max(0.001))
+            } else {
+                None
+            };
             render_performance_tui_snapshot(
                 writer,
                 &PerformanceTuiSnapshot {
@@ -2395,10 +2807,10 @@ fn benchmark_ssd_pipeline_with_options(
                     total_bytes: workload.total_bytes(),
                     hdd_concurrency: concurrency,
                     current_rate: Some(throughput(ssd_write)),
-                    ssd_write_rate: Some(throughput(ssd_write)),
-                    ssd_read_rate: Some(throughput(ssd_read)),
-                    hdd_write_rate: None,
-                    hdd_disk_rates: Vec::new(),
+                    ssd_write_rate: measurement_rate(file_results.iter().map(|row| row.ssd_write)),
+                    ssd_read_rate: measurement_rate(file_results.iter().map(|row| row.ssd_read)),
+                    hdd_write_rate: hdd_rate,
+                    hdd_disk_rates: live_hdd_disk_rates(&hdd_disk_bytes, drain_started)?,
                     aggregate_rate: Some(
                         total_bytes as f64 / started.elapsed().as_secs_f64().max(0.001),
                     ),
@@ -2420,6 +2832,31 @@ fn benchmark_ssd_pipeline_with_options(
     }
     staging_complete.store(true, Ordering::SeqCst);
     drop(sender);
+    if let Some(context) = tui_context {
+        while (hdd_jobs_completed.load(Ordering::SeqCst) as usize) < total_hdd_jobs {
+            check_performance_cancelled()?;
+            render_hdd_drain_tui_snapshot(
+                writer,
+                HddDrainTuiState {
+                    context,
+                    workload,
+                    kind: PerformanceScenarioKind::SsdPipeline,
+                    concurrency,
+                    submitted_jobs: submitted_hdd_jobs,
+                    total_jobs: total_hdd_jobs,
+                    started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                    completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst) as usize,
+                    transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                    hdd_disk_rates: live_hdd_disk_rates(&hdd_disk_bytes, drain_started)?,
+                    drain_started,
+                },
+            )?;
+            if handles.iter().all(|handle| handle.is_finished()) {
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
     let mut worker_error = None;
     for handle in handles {
         match handle.join() {
@@ -2874,10 +3311,6 @@ fn fill_pseudorandom(buffer: &mut [u8], state: &mut u64) {
     }
 }
 
-fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurement, CliError> {
-    measure_copy_with_progress(source, destination, None)
-}
-
 fn measure_copy_with_progress(
     source: &Path,
     destination: &Path,
@@ -3247,6 +3680,56 @@ fn escape_pdf_text(value: &str) -> String {
 
 fn throughput(measurement: PerformanceMeasurement) -> f64 {
     measurement.bytes as f64 / measurement.seconds.max(0.001)
+}
+
+fn measurement_rate(measurements: impl Iterator<Item = PerformanceMeasurement>) -> Option<f64> {
+    measurement_rate_with_current(measurements, 0, 0.0)
+}
+
+fn measurement_rate_with_current(
+    measurements: impl Iterator<Item = PerformanceMeasurement>,
+    current_bytes: u64,
+    current_seconds: f64,
+) -> Option<f64> {
+    let (mut bytes, mut seconds) = measurements.fold((0_u64, 0.0_f64), |acc, measurement| {
+        (
+            acc.0.saturating_add(measurement.bytes),
+            acc.1 + measurement.seconds.max(0.001),
+        )
+    });
+    bytes = bytes.saturating_add(current_bytes);
+    seconds += current_seconds.max(0.0);
+    if bytes == 0 || seconds <= 0.0 {
+        None
+    } else {
+        Some(bytes as f64 / seconds.max(0.001))
+    }
+}
+
+fn live_hdd_disk_rates(
+    disk_bytes: &Arc<Mutex<BTreeMap<DiskId, u64>>>,
+    started: Instant,
+) -> Result<Vec<String>, CliError> {
+    let elapsed = started.elapsed().as_secs_f64().max(0.001);
+    let rates = disk_bytes
+        .lock()
+        .map_err(|_| {
+            CliError::CommandFailed("performance-test HDD rate lock poisoned".to_string())
+        })?
+        .iter()
+        .filter_map(|(disk_id, bytes)| {
+            if *bytes == 0 {
+                None
+            } else {
+                Some(format!(
+                    "{} {}/s",
+                    disk_id.as_str(),
+                    format_bytes(*bytes as f64 / elapsed)
+                ))
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(rates)
 }
 
 fn render_performance_json(report: &PerformanceReport) -> String {
