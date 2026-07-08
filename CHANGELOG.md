@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.5 - 2026-07-08
+
+- Replace the performance-test TUI terminal-size fallback with direct Unix
+  window-size detection so wrapped terminal sessions do not trigger
+  cursor-position probe failures.
+
 ## 0.4.4 - 2026-07-08
 
 - Make the performance-test TUI viewport robust when terminal size probing is

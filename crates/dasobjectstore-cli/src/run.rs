@@ -112,6 +112,8 @@ use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -1143,9 +1145,31 @@ fn performance_tui_area() -> Rect {
                 .and_then(|lines| lines.parse::<u16>().ok()),
         );
     let (width, height) = env_size
-        .or_else(|| crossterm::terminal::size().ok())
+        .or_else(performance_terminal_size_from_ioctl)
         .unwrap_or((110, 24));
     Rect::new(0, 0, width.max(80), height.max(20))
+}
+
+#[cfg(unix)]
+fn performance_terminal_size_from_ioctl() -> Option<(u16, u16)> {
+    let stdout = std::io::stdout();
+    let mut winsize = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let result = unsafe { libc::ioctl(stdout.as_raw_fd(), libc::TIOCGWINSZ, &mut winsize) };
+    if result == 0 && winsize.ws_col > 0 && winsize.ws_row > 0 {
+        Some((winsize.ws_col, winsize.ws_row))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(unix))]
+fn performance_terminal_size_from_ioctl() -> Option<(u16, u16)> {
+    None
 }
 
 fn benchmark_ssd_only(
