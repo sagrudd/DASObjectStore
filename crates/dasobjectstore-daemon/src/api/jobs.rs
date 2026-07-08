@@ -69,6 +69,7 @@ pub enum DaemonJobKind {
     DiskDrain,
     DiskRetire,
     DiskReplace,
+    EnclosurePreparation,
     Repair,
     ServiceOperation,
     SystemAdministration,

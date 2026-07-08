@@ -3,8 +3,8 @@ use crate::api::{
     CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest,
     DaemonApiResponse, DaemonIngestProgressEvent, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 use crate::runtime::{
     provision_garage_store_registry, submit_ingest_files_to_local_store_with_progress,
@@ -65,6 +65,11 @@ where
                 .provision(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::ServiceProvision)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
+            DaemonApiRequest::PrepareEnclosure(request) => self
+                .service_orchestrator
+                .prepare_enclosure(request, &self.clock.now_utc())
+                .map(DaemonApiResponse::PrepareEnclosure)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime),
             DaemonApiRequest::CreateLocalGroup(request) => self
                 .service_orchestrator
                 .create_local_group(request, &self.clock.now_utc())
@@ -116,6 +121,17 @@ pub trait DaemonServiceOrchestrator {
         request: DaemonServiceProvisionRequest,
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError>;
+
+    fn prepare_enclosure(
+        &self,
+        _request: PrepareEnclosureRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<PrepareEnclosureResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "prepare_enclosure requires an enclosure preparation orchestrator"
+                .to_string(),
+        })
+    }
 
     fn create_local_group(
         &self,
@@ -347,6 +363,7 @@ impl DaemonApiRequest {
             Self::ServiceStatus(_) => "service_status",
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
+            Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         }
@@ -365,7 +382,9 @@ mod tests {
         DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
         DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
         DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        PrepareEnclosureResponse, StoreInventoryRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
     };
     use crate::runtime::{
         DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, LocalAdminRuntimeError,
@@ -611,6 +630,54 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_prepare_enclosure_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T19:40:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::PrepareEnclosure(
+                PrepareEnclosureRequest {
+                    ssd_device: "/dev/disk/by-id/nvme-ssd".into(),
+                    hdd_devices: vec![PrepareEnclosureHddDevice {
+                        disk_id: "qnap-1057".to_string(),
+                        device_path: "/dev/disk/by-id/usb-qnap-1057".into(),
+                    }],
+                    mount_root: "/srv/dasobjectstore".into(),
+                    filesystem: PrepareEnclosureFilesystem::Ext4,
+                    owner: Some("stephen".to_string()),
+                    dry_run: true,
+                    client_request_id: Some("request-prepare-1".to_string()),
+                    administrator_actor: Some("operator".to_string()),
+                    allow_format: true,
+                    confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::PrepareEnclosure(PrepareEnclosureResponse {
+                accepted,
+                ..
+            }) if accepted.job_id.as_str() == "enclosure-prepare-2026-07-08t19-40-00z"
+                && accepted.dry_run
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .prepare_enclosure_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-08T19:40:00Z".to_string(),
+                "/dev/disk/by-id/nvme-ssd".to_string(),
+                true,
+            )]
+        );
+    }
+
+    #[test]
     fn reports_submit_ingest_runtime_failures_as_api_errors() {
         let service = FakeService {
             ingest_error: Some("source is unreadable".to_string()),
@@ -706,6 +773,7 @@ mod tests {
             )>,
         >,
         ingest_calls: RefCell<Vec<(String, String, bool)>>,
+        prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         ingest_error: Option<String>,
     }
 
@@ -850,6 +918,29 @@ mod tests {
                 accepted_at_utc: accepted_at_utc.to_string(),
                 dry_run: request.dry_run,
             })
+        }
+
+        fn prepare_enclosure(
+            &self,
+            request: PrepareEnclosureRequest,
+            accepted_at_utc: &str,
+        ) -> Result<PrepareEnclosureResponse, DaemonServiceRuntimeError> {
+            self.prepare_enclosure_calls.borrow_mut().push((
+                accepted_at_utc.to_string(),
+                request.ssd_device.display().to_string(),
+                request.dry_run,
+            ));
+            Ok(PrepareEnclosureResponse::accepted(
+                DaemonJobId::new("enclosure-prepare-2026-07-08t19-40-00z").expect("job id"),
+                accepted_at_utc,
+                request.dry_run,
+                request.ssd_device,
+                request.hdd_devices,
+                request.mount_root,
+                request.filesystem,
+                request.owner,
+                request.administrator_actor,
+            ))
         }
     }
 }

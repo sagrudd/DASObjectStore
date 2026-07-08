@@ -15,8 +15,9 @@ use crate::api::{
     DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestJobStatusRequest,
-    IngestJobStatusResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    IngestJobStatusResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -168,6 +169,16 @@ where
         }
     }
 
+    pub fn prepare_enclosure(
+        &self,
+        request: PrepareEnclosureRequest,
+    ) -> Result<PrepareEnclosureResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::PrepareEnclosure(request))? {
+            DaemonApiResponse::PrepareEnclosure(response) => Ok(response),
+            response => Err(unexpected("prepare_enclosure", response)),
+        }
+    }
+
     pub fn create_local_group(
         &self,
         request: CreateLocalGroupRequest,
@@ -210,6 +221,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceStatus(_) => "service_status",
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
+        DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
@@ -225,8 +237,10 @@ mod tests {
         CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
         DaemonIngestConflictPolicy, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
         DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-        DaemonServiceStatusRequest, DaemonServiceStatusResponse, StoreInventoryRequest,
-        StoreInventoryResponse, SubmitIngestFilesRequest,
+        DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+        ENCLOSURE_PREPARE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -429,6 +443,56 @@ mod tests {
     }
 
     #[test]
+    fn prepare_enclosure_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::PrepareEnclosure(
+                PrepareEnclosureResponse::accepted(
+                    crate::api::DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+                    "2026-07-08T19:40:00Z",
+                    true,
+                    "/dev/disk/by-id/nvme-ssd".into(),
+                    vec![PrepareEnclosureHddDevice {
+                        disk_id: "qnap-1057".to_string(),
+                        device_path: "/dev/disk/by-id/usb-qnap-1057".into(),
+                    }],
+                    "/srv/dasobjectstore".into(),
+                    PrepareEnclosureFilesystem::Ext4,
+                    Some("stephen".to_string()),
+                    Some("operator".to_string()),
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .prepare_enclosure(PrepareEnclosureRequest {
+                ssd_device: "/dev/disk/by-id/nvme-ssd".into(),
+                hdd_devices: vec![PrepareEnclosureHddDevice {
+                    disk_id: "qnap-1057".to_string(),
+                    device_path: "/dev/disk/by-id/usb-qnap-1057".into(),
+                }],
+                mount_root: "/srv/dasobjectstore".into(),
+                filesystem: PrepareEnclosureFilesystem::Ext4,
+                owner: Some("stephen".to_string()),
+                dry_run: true,
+                client_request_id: Some("request-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                allow_format: true,
+                confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
+            })
+            .expect("prepare enclosure response");
+
+        assert!(response.accepted.dry_run);
+        assert_eq!(response.hdd_devices.len(), 1);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::PrepareEnclosure(_)]
+        ));
+    }
+
+    #[test]
     fn create_local_group_uses_typed_request_and_response() {
         let seen = RefCell::new(Vec::new());
         let transport = InProcessDaemonTransport::new(|request| {
@@ -517,6 +581,31 @@ mod tests {
                 confirmation_marker: "confirm create local group".to_string(),
             })
             .expect_err("invalid group name rejected");
+
+        assert!(matches!(err, DaemonClientError::RequestValidation(_)));
+    }
+
+    #[test]
+    fn rejects_invalid_prepare_enclosure_request_before_transport_send() {
+        let transport = InProcessDaemonTransport::new(|_request| {
+            panic!("invalid request should not reach transport")
+        });
+        let client = DaemonClient::new(transport);
+
+        let err = client
+            .prepare_enclosure(PrepareEnclosureRequest {
+                ssd_device: "relative".into(),
+                hdd_devices: Vec::new(),
+                mount_root: "/srv/dasobjectstore".into(),
+                filesystem: PrepareEnclosureFilesystem::Ext4,
+                owner: None,
+                dry_run: false,
+                client_request_id: None,
+                administrator_actor: None,
+                allow_format: false,
+                confirmation_marker: "wrong".to_string(),
+            })
+            .expect_err("invalid prepare request rejected");
 
         assert!(matches!(err, DaemonClientError::RequestValidation(_)));
     }

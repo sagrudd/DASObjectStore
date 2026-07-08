@@ -299,12 +299,16 @@ pub enum DaemonIngestPipelineStage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DaemonRequestValidationError {
     RelativeSourcePath { path: PathBuf },
+    RelativePath { field: &'static str, path: PathBuf },
     InvalidCopyCount { copies: u8 },
     BlankClientRequestId,
     BlankCancellationReason,
     BlankField { field: &'static str },
     UnsafeLocalName { field: &'static str, value: String },
     BlankConfirmationMarker,
+    ConfirmationMismatch { expected: &'static str },
+    FormatNotAllowed,
+    DuplicateFieldValue { field: &'static str, value: String },
     UnsupportedServiceProvider { provider: String },
 }
 
@@ -315,6 +319,13 @@ impl Display for DaemonRequestValidationError {
                 write!(
                     formatter,
                     "ingest source path must be absolute: {}",
+                    path.display()
+                )
+            }
+            Self::RelativePath { field, path } => {
+                write!(
+                    formatter,
+                    "{field} must be an absolute path: {}",
                     path.display()
                 )
             }
@@ -334,6 +345,18 @@ impl Display for DaemonRequestValidationError {
             ),
             Self::BlankConfirmationMarker => {
                 formatter.write_str("confirmation_marker must not be blank")
+            }
+            Self::ConfirmationMismatch { expected } => {
+                write!(
+                    formatter,
+                    "confirmation_marker must exactly match \"{expected}\""
+                )
+            }
+            Self::FormatNotAllowed => {
+                formatter.write_str("allow_format must be true for this operation")
+            }
+            Self::DuplicateFieldValue { field, value } => {
+                write!(formatter, "duplicate {field}: {value}")
             }
             Self::UnsupportedServiceProvider { provider } => write!(
                 formatter,

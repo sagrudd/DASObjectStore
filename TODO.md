@@ -580,7 +580,7 @@ older checklist claims.
     confirmation phrase validation.
   - [ ] Submit the confirmed plan as a daemon preparation job and render
     daemon job progress, result, failure, cancellation, and retry state.
-- [ ] Add API request/response DTOs and daemon client methods for Web-submitted
+- [x] Add API request/response DTOs and daemon client methods for Web-submitted
   enclosure preparation so the browser never mutates devices or managed roots
   directly.
 - [ ] Add risk-gate tests for enclosure preparation: non-admin denied,

@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.31.0 - 2026-07-08
+
+- Add transport-neutral daemon DTOs for Web-submitted enclosure preparation,
+  including SSD/HDD media, mount root, filesystem, owner, administrator actor,
+  destructive format allowance, and the required confirmation marker.
+- Add typed ``DaemonClient::prepare_enclosure`` support plus request-handler
+  dispatch coverage so Web administrator workflows can submit through the daemon
+  boundary instead of mutating devices directly.
+- Add validation coverage for absolute device paths, duplicate HDD devices,
+  safe local names, format allowance, and the exact ``confirm prepare das``
+  marker.
+
 ## 0.30.0 - 2026-07-08
 
 - Add a Web Enclosures preparation wizard that selects detected SSD/HDD media,

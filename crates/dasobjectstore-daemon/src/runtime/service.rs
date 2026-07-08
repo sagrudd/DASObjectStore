@@ -236,6 +236,9 @@ pub enum DaemonServiceRuntimeError {
         service_name: String,
     },
     InvalidJobId(String),
+    UnsupportedOperation {
+        operation: String,
+    },
     Validation(DaemonRequestValidationError),
     ObjectService(ObjectServiceError),
 }
@@ -273,6 +276,12 @@ impl Display for DaemonServiceRuntimeError {
                 )
             }
             Self::InvalidJobId(value) => write!(formatter, "invalid service job id: {value}"),
+            Self::UnsupportedOperation { operation } => {
+                write!(
+                    formatter,
+                    "unsupported daemon service operation: {operation}"
+                )
+            }
             Self::Validation(error) => Display::fmt(error, formatter),
             Self::ObjectService(error) => Display::fmt(error, formatter),
         }

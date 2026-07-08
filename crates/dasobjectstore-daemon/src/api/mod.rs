@@ -1,5 +1,6 @@
 //! Transport-neutral daemon API contracts.
 
+mod enclosure;
 mod health;
 mod ingest;
 mod jobs;
@@ -7,6 +8,10 @@ mod local_admin;
 mod service;
 mod stores;
 
+pub use enclosure::{
+    PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, PrepareEnclosureValidationError, ENCLOSURE_PREPARE_CONFIRMATION,
+};
 pub use health::{
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
     DaemonHealthSummaryResponse, DaemonIngestSummary, DaemonSsdPressure,
@@ -61,6 +66,7 @@ pub enum DaemonApiRequest {
     ServiceStatus(DaemonServiceStatusRequest),
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
+    PrepareEnclosure(PrepareEnclosureRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
 }
@@ -72,6 +78,9 @@ impl DaemonApiRequest {
             Self::CancelIngestJob(request) => request.validate(),
             Self::ServiceLifecycle(request) => request.validate(),
             Self::ServiceProvision(request) => request.validate(),
+            Self::PrepareEnclosure(request) => request
+                .validate()
+                .map_err(prepare_enclosure_validation_error),
             Self::CreateLocalGroup(request) => {
                 request.validate().map_err(local_admin_validation_error)
             }
@@ -97,10 +106,53 @@ pub enum DaemonApiResponse {
     ServiceStatus(DaemonServiceStatusResponse),
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
+    PrepareEnclosure(PrepareEnclosureResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
+}
+
+fn prepare_enclosure_validation_error(
+    err: PrepareEnclosureValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        PrepareEnclosureValidationError::RelativePath { field, path } => {
+            DaemonRequestValidationError::RelativePath { field, path }
+        }
+        PrepareEnclosureValidationError::NoHddDevices => DaemonRequestValidationError::BlankField {
+            field: "hdd_devices",
+        },
+        PrepareEnclosureValidationError::BlankHddDiskId => {
+            DaemonRequestValidationError::BlankField { field: "disk_id" }
+        }
+        PrepareEnclosureValidationError::UnsafeName { field, value } => {
+            DaemonRequestValidationError::UnsafeLocalName { field, value }
+        }
+        PrepareEnclosureValidationError::DuplicateHddDiskId { disk_id } => {
+            DaemonRequestValidationError::DuplicateFieldValue {
+                field: "hdd_devices.disk_id",
+                value: disk_id,
+            }
+        }
+        PrepareEnclosureValidationError::DuplicateHddDevicePath { device_path } => {
+            DaemonRequestValidationError::DuplicateFieldValue {
+                field: "hdd_devices.device_path",
+                value: device_path.display().to_string(),
+            }
+        }
+        PrepareEnclosureValidationError::FormatNotAllowed => {
+            DaemonRequestValidationError::FormatNotAllowed
+        }
+        PrepareEnclosureValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: ENCLOSURE_PREPARE_CONFIRMATION,
+            }
+        }
+        PrepareEnclosureValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+    }
 }
 
 fn local_admin_validation_error(
@@ -147,8 +199,9 @@ mod tests {
     use super::{
         AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, DaemonApiRequest,
         DaemonIngestConflictPolicy, DaemonServiceLifecycleRequest, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, StoreInventoryRequest,
-        SubmitIngestFilesRequest,
+        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, StoreInventoryRequest,
+        SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -231,6 +284,31 @@ mod tests {
     }
 
     #[test]
+    fn prepare_enclosure_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::PrepareEnclosure(PrepareEnclosureRequest {
+            ssd_device: "/dev/disk/by-id/nvme-ssd".into(),
+            hdd_devices: vec![PrepareEnclosureHddDevice {
+                disk_id: "qnap-1057".to_string(),
+                device_path: "/dev/disk/by-id/usb-qnap-1057".into(),
+            }],
+            mount_root: "/srv/dasobjectstore".into(),
+            filesystem: PrepareEnclosureFilesystem::Ext4,
+            owner: Some("stephen".to_string()),
+            dry_run: false,
+            client_request_id: Some("request-1".to_string()),
+            administrator_actor: Some("operator".to_string()),
+            allow_format: true,
+            confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
+        });
+
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "prepare_enclosure");
+        assert_eq!(encoded["payload"]["filesystem"], "ext4");
+        assert_eq!(encoded["payload"]["hdd_devices"][0]["disk_id"], "qnap-1057");
+    }
+
+    #[test]
     fn delegates_service_lifecycle_validation() {
         let request = DaemonApiRequest::ServiceLifecycle(DaemonServiceLifecycleRequest {
             operation: DaemonServiceOperation::Start,
@@ -261,6 +339,24 @@ mod tests {
             client_request_id: None,
             administrator_actor: None,
             confirmation_marker: "confirm create local group".to_string(),
+        });
+
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn delegates_prepare_enclosure_validation() {
+        let request = DaemonApiRequest::PrepareEnclosure(PrepareEnclosureRequest {
+            ssd_device: "relative".into(),
+            hdd_devices: Vec::new(),
+            mount_root: "/srv/dasobjectstore".into(),
+            filesystem: PrepareEnclosureFilesystem::Ext4,
+            owner: None,
+            dry_run: false,
+            client_request_id: None,
+            administrator_actor: None,
+            allow_format: false,
+            confirmation_marker: "wrong".to_string(),
         });
 
         assert!(request.validate().is_err());

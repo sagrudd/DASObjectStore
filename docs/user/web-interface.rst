@@ -271,6 +271,15 @@ does not format devices directly from the browser. The next administrator
 workflow slice will submit the confirmed plan as a daemon preparation job and
 render job progress, failure, cancellation, and retry state in the Web console.
 
+The daemon API now exposes a typed enclosure-preparation request and response
+contract for that handoff. The request includes SSD media, HDD media, mount
+root, filesystem, optional mounted-root owner, optional administrator actor,
+destructive format allowance, and the confirmation marker
+``confirm prepare das``. The daemon client validates the request before
+transport submission, including absolute device paths and duplicate HDD
+rejection, so browser and API callers do not pass raw shell fragments or write
+directly to managed roots.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the
