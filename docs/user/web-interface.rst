@@ -198,6 +198,14 @@ renders cards with connection topology, mount path, drive counts, capacity,
 warning count, and health, plus a selected detail panel for enclosure identity
 and bay membership when the daemon provides it.
 
+The current Enclosures API aggregator reads the same managed SSD and HDD roots
+as the Home dashboard. HDD roots are included only when their
+``.dasobjectstore/device.env`` marker declares ``role=hdd:<disk-id>``. The
+dashboard reports mounted drive counts, capacity, marker health, and detail
+slots from those root markers; managed disk IDs beginning with ``qnap-`` are
+presented as a QNAP TL-D800C enclosure until the deeper physical bay probe is
+available from the daemon.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the

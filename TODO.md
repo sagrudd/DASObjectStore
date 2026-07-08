@@ -532,7 +532,7 @@ older checklist claims.
   the product home workspace from probe, health, store registry, ingest queue,
   destage queue, SMART, throughput, and memory sources instead of
   `bootstrap_fixture`.
-- [ ] Wire `EnclosuresPage` to fetch live enclosure payloads and render detected
+- [x] Wire `EnclosuresPage` to fetch live enclosure payloads and render detected
   supported DAS enclosures as cards, including QNAP TL-D800C identity, topology,
   mounted state, SSD/HDD counts, capacity, bay membership, SMART warning count,
   and health state.

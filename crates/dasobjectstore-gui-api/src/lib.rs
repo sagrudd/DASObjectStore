@@ -5,6 +5,7 @@ pub mod auth;
 pub mod auth_guard;
 pub mod auth_routes;
 pub mod dashboard;
+mod enclosures_aggregator;
 pub mod endpoints;
 mod home_aggregator;
 pub mod routes;

@@ -14,8 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
-const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
+pub(crate) const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
+pub(crate) const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 const DEFAULT_THROUGHPUT_PATH: &str = "/var/lib/dasobjectstore/telemetry/throughput-7d.json";
 const DEFAULT_SMART_WARNINGS_PATH: &str = "/var/lib/dasobjectstore/health/smart-warnings.json";
 const DEFAULT_MEMINFO_PATH: &str = "/proc/meminfo";
@@ -156,13 +156,16 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
     }
 }
 
-fn env_path(name: &str, default: &str) -> PathBuf {
+pub(crate) fn env_path(name: &str, default: &str) -> PathBuf {
     env::var_os(name)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(default))
 }
 
-fn discover_hdd_roots(hdd_root: &Path, warnings: &mut Vec<DashboardWarning>) -> Vec<PathBuf> {
+pub(crate) fn discover_hdd_roots(
+    hdd_root: &Path,
+    warnings: &mut Vec<DashboardWarning>,
+) -> Vec<PathBuf> {
     let entries = match fs::read_dir(hdd_root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -210,13 +213,13 @@ fn is_managed_hdd_root(path: &Path) -> bool {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct FilesystemCapacity {
-    total_bytes: u64,
-    available_bytes: u64,
+pub(crate) struct FilesystemCapacity {
+    pub(crate) total_bytes: u64,
+    pub(crate) available_bytes: u64,
 }
 
 #[cfg(unix)]
-fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
+pub(crate) fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
@@ -235,11 +238,11 @@ fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
 }
 
 #[cfg(not(unix))]
-fn capacity_for_root(_path: &Path) -> Option<FilesystemCapacity> {
+pub(crate) fn capacity_for_root(_path: &Path) -> Option<FilesystemCapacity> {
     None
 }
 
-fn capacity_summary(capacities: &[FilesystemCapacity]) -> CapacitySummaryView {
+pub(crate) fn capacity_summary(capacities: &[FilesystemCapacity]) -> CapacitySummaryView {
     let total = capacities
         .iter()
         .map(|capacity| capacity.total_bytes)
@@ -258,7 +261,7 @@ fn capacity_summary(capacities: &[FilesystemCapacity]) -> CapacitySummaryView {
     }
 }
 
-fn drive_count_summary(ssd_present: bool, hdd_count: usize) -> DriveCountSummaryView {
+pub(crate) fn drive_count_summary(ssd_present: bool, hdd_count: usize) -> DriveCountSummaryView {
     let mounted = usize::from(ssd_present) + hdd_count;
     DriveCountSummaryView {
         total: mounted,
@@ -548,7 +551,7 @@ fn mib_per_second(bytes_per_second: u64) -> u32 {
     (bytes_per_second / (1024 * 1024)).min(u64::from(u32::MAX)) as u32
 }
 
-fn now_utc_string() -> String {
+pub(crate) fn now_utc_string() -> String {
     Command::new("date")
         .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
         .output()

@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.22.0 - 2026-07-08
+
+- Replace the Web Enclosures dashboard bootstrap fixture route with a live
+  managed-root aggregator that reports SSD/HDD root membership, capacity,
+  mounted drive counts, inferred QNAP TL-D800C identity for `qnap-*` managed
+  disks, and initial slot detail payloads.
+- Add Web API regression coverage proving the Enclosures dashboard no longer
+  reports the old pending fixture warning.
+
 ## 0.21.0 - 2026-07-08
 
 - Replace the Web Home dashboard bootstrap fixture route with a live API

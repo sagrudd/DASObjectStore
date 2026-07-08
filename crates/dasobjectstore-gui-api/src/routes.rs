@@ -56,7 +56,7 @@ async fn home_dashboard() -> Json<HomeDashboardView> {
 }
 
 async fn enclosures_dashboard() -> Json<EnclosuresPageView> {
-    Json(EnclosuresPageView::bootstrap_fixture())
+    Json(crate::enclosures_aggregator::live_enclosures_dashboard())
 }
 
 async fn object_stores_dashboard() -> Json<ObjectStoresPageView> {
@@ -169,13 +169,14 @@ mod tests {
         let encoded = response_json(response).await;
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
-        assert_eq!(encoded["selected_enclosure_id"], serde_json::Value::Null);
-        assert_eq!(
-            encoded["enclosures"].as_array().expect("enclosures").len(),
-            0
-        );
-        assert_eq!(encoded["details"], serde_json::Value::Null);
-        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 1);
+        assert!(encoded["generated_at_utc"].is_string());
+        assert!(encoded["enclosures"].is_array());
+        assert!(encoded["warnings"].is_array());
+        assert!(!encoded["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning["code"] == "enclosure_inventory_pending"));
     }
 
     #[tokio::test]
