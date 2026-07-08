@@ -1,5 +1,7 @@
+use dasobjectstore_core::store::StoreClass;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct GuiActionCatalog {
@@ -36,9 +38,23 @@ impl GuiActionCatalog {
                 ),
                 GuiActionDescriptor::confirmation_required(
                     GuiActionKind::StoreCreate,
-                    "Create or update ObjectStore",
+                    "Create ObjectStore",
                     GuiActionSafety::ConfigurationMutation,
                     &["store_id", "store_class"],
+                ),
+                GuiActionDescriptor::confirmation_required(
+                    GuiActionKind::StoreConfigure,
+                    "Configure ObjectStore policy",
+                    GuiActionSafety::ConfigurationMutation,
+                    &[
+                        "store_id",
+                        "store_class",
+                        "store_copies",
+                        "writer_group",
+                        "capacity_behavior",
+                        "retention",
+                        "endpoint_export_mode",
+                    ],
                 ),
                 GuiActionDescriptor::confirmation_required(
                     GuiActionKind::SubobjectCreate,
@@ -111,6 +127,7 @@ pub enum GuiActionKind {
     ServiceStop,
     PoolImportReadOnly,
     StoreCreate,
+    StoreConfigure,
     SubobjectCreate,
     EnclosurePrepare,
 }
@@ -139,6 +156,11 @@ pub struct GuiActionPlanRequest {
     pub bucket: Option<String>,
     pub writer_group: Option<String>,
     pub ssd_root: Option<PathBuf>,
+    pub public: Option<bool>,
+    pub writeable: Option<bool>,
+    pub capacity_behavior: Option<String>,
+    pub retention: Option<String>,
+    pub endpoint_export_mode: Option<String>,
     pub subobject_name: Option<String>,
     pub parent_store_id: Option<String>,
     pub parent_subobject_name: Option<String>,
@@ -168,6 +190,11 @@ impl Default for GuiActionPlanRequest {
             bucket: None,
             writer_group: None,
             ssd_root: None,
+            public: None,
+            writeable: None,
+            capacity_behavior: None,
+            retention: None,
+            endpoint_export_mode: None,
             subobject_name: None,
             parent_store_id: None,
             parent_subobject_name: None,
@@ -222,6 +249,7 @@ pub fn plan_action(request: GuiActionPlanRequest) -> Result<GuiActionPlan, GuiAc
         GuiActionKind::ServiceStop => plan_service_lifecycle(request, "down"),
         GuiActionKind::PoolImportReadOnly => plan_read_only_import(request),
         GuiActionKind::StoreCreate => plan_store_create(request),
+        GuiActionKind::StoreConfigure => plan_store_configure(request),
         GuiActionKind::SubobjectCreate => plan_subobject_create(request),
         GuiActionKind::EnclosurePrepare => plan_enclosure_prepare(request),
     }
@@ -305,6 +333,164 @@ fn plan_store_create(request: GuiActionPlanRequest) -> Result<GuiActionPlan, Gui
         writes_recovery_metadata: false,
         confirmation_required: true,
     })
+}
+
+fn plan_store_configure(
+    request: GuiActionPlanRequest,
+) -> Result<GuiActionPlan, GuiActionPlanError> {
+    let mut missing = Vec::new();
+    if request
+        .store_id
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("store_id".to_string());
+    }
+    if request
+        .store_class
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("store_class".to_string());
+    }
+    if request.store_copies.is_none() {
+        missing.push("store_copies".to_string());
+    }
+    if request
+        .writer_group
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("writer_group".to_string());
+    }
+    if request
+        .capacity_behavior
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("capacity_behavior".to_string());
+    }
+    if request
+        .retention
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("retention".to_string());
+    }
+    if request
+        .endpoint_export_mode
+        .as_ref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        missing.push("endpoint_export_mode".to_string());
+    }
+    if !missing.is_empty() {
+        return Err(GuiActionPlanError {
+            action: request.action,
+            missing_fields: missing,
+        });
+    }
+    validate_store_configure_policy(&request)?;
+
+    let mut argv = strings(["dasobjectstore", "store", "configure"]);
+    argv.push(request.store_id.expect("validated store id"));
+    argv.push("--class".to_string());
+    argv.push(request.store_class.expect("validated store class"));
+    argv.push("--copies".to_string());
+    argv.push(
+        request
+            .store_copies
+            .expect("validated store copies")
+            .to_string(),
+    );
+    argv.push("--writer-group".to_string());
+    argv.push(request.writer_group.expect("validated writer group"));
+    argv.push("--capacity-behavior".to_string());
+    argv.push(
+        request
+            .capacity_behavior
+            .expect("validated capacity behavior"),
+    );
+    argv.push("--retention".to_string());
+    argv.push(request.retention.expect("validated retention"));
+    argv.push("--export-mode".to_string());
+    argv.push(
+        request
+            .endpoint_export_mode
+            .expect("validated endpoint export mode"),
+    );
+    if let Some(public) = request.public {
+        argv.push("--public".to_string());
+        argv.push(public.to_string());
+    }
+    if let Some(writeable) = request.writeable {
+        argv.push("--writeable".to_string());
+        argv.push(writeable.to_string());
+    }
+    if let Some(ssd_root) = request.ssd_root {
+        argv.push("--ssd-root".to_string());
+        argv.push(path_arg(ssd_root));
+    }
+    argv.push("--json".to_string());
+
+    Ok(GuiActionPlan {
+        action: request.action,
+        execution: GuiActionExecution::PlannedCli,
+        argv,
+        mutates_pool: false,
+        writes_recovery_metadata: false,
+        confirmation_required: true,
+    })
+}
+
+fn validate_store_configure_policy(
+    request: &GuiActionPlanRequest,
+) -> Result<(), GuiActionPlanError> {
+    let mut invalid = Vec::new();
+    if request
+        .store_class
+        .as_deref()
+        .is_some_and(|value| StoreClass::from_str(value).is_err())
+    {
+        invalid.push("store_class".to_string());
+    }
+    if request
+        .store_copies
+        .is_some_and(|copies| copies == 0 || copies > 3)
+    {
+        invalid.push("store_copies".to_string());
+    }
+    if request.capacity_behavior.as_deref().is_some_and(|value| {
+        !matches!(
+            value,
+            "reject_writes" | "backpressure_by_priority" | "mark_redownload_required"
+        )
+    }) {
+        invalid.push("capacity_behavior".to_string());
+    }
+    if request
+        .retention
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "immediate_delete" | "tombstone_then_gc"))
+    {
+        invalid.push("retention".to_string());
+    }
+    if request
+        .endpoint_export_mode
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "s3" | "read_only_file_export" | "disabled"))
+    {
+        invalid.push("endpoint_export_mode".to_string());
+    }
+
+    if invalid.is_empty() {
+        Ok(())
+    } else {
+        Err(GuiActionPlanError {
+            action: request.action,
+            missing_fields: invalid,
+        })
+    }
 }
 
 fn plan_subobject_create(
@@ -502,7 +688,7 @@ mod tests {
     fn catalog_lists_safe_web_actions() {
         let catalog = action_catalog();
 
-        assert_eq!(catalog.actions.len(), 7);
+        assert_eq!(catalog.actions.len(), 8);
         assert_eq!(catalog.actions[0].kind, GuiActionKind::HealthCheck);
         assert_eq!(catalog.actions[1].safety, GuiActionSafety::ServiceLifecycle);
         assert_eq!(
@@ -519,19 +705,32 @@ mod tests {
             catalog.actions[4].required_fields,
             ["store_id", "store_class"]
         );
-        assert_eq!(catalog.actions[5].kind, GuiActionKind::SubobjectCreate);
+        assert_eq!(catalog.actions[5].kind, GuiActionKind::StoreConfigure);
         assert_eq!(
             catalog.actions[5].required_fields,
+            [
+                "store_id",
+                "store_class",
+                "store_copies",
+                "writer_group",
+                "capacity_behavior",
+                "retention",
+                "endpoint_export_mode"
+            ]
+        );
+        assert_eq!(catalog.actions[6].kind, GuiActionKind::SubobjectCreate);
+        assert_eq!(
+            catalog.actions[6].required_fields,
             ["subobject_name", "parent_store_id_or_parent_subobject_name"]
         );
-        assert!(catalog.actions[5].confirmation_required);
-        assert_eq!(catalog.actions[6].kind, GuiActionKind::EnclosurePrepare);
+        assert!(catalog.actions[6].confirmation_required);
+        assert_eq!(catalog.actions[7].kind, GuiActionKind::EnclosurePrepare);
         assert_eq!(
-            catalog.actions[6].safety,
+            catalog.actions[7].safety,
             GuiActionSafety::DestructiveStoragePreparation
         );
         assert_eq!(
-            catalog.actions[6].required_fields,
+            catalog.actions[7].required_fields,
             [
                 "ssd_device",
                 "hdd_devices",
@@ -669,6 +868,106 @@ mod tests {
         .expect_err("store id and class are required");
 
         assert_eq!(err.missing_fields, ["store_id", "store_class"]);
+    }
+
+    #[test]
+    fn plans_store_configure_with_policy_fields() {
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::StoreConfigure,
+            store_id: Some("generated-data".to_string()),
+            store_class: Some("generated_data".to_string()),
+            store_copies: Some(2),
+            writer_group: Some("mnemosyne".to_string()),
+            ssd_root: Some(PathBuf::from("/srv/dasobjectstore/ssd")),
+            public: Some(false),
+            writeable: Some(true),
+            capacity_behavior: Some("backpressure_by_priority".to_string()),
+            retention: Some("tombstone_then_gc".to_string()),
+            endpoint_export_mode: Some("s3".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("store configure plan");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "store",
+                "configure",
+                "generated-data",
+                "--class",
+                "generated_data",
+                "--copies",
+                "2",
+                "--writer-group",
+                "mnemosyne",
+                "--capacity-behavior",
+                "backpressure_by_priority",
+                "--retention",
+                "tombstone_then_gc",
+                "--export-mode",
+                "s3",
+                "--public",
+                "false",
+                "--writeable",
+                "true",
+                "--ssd-root",
+                "/srv/dasobjectstore/ssd",
+                "--json"
+            ])
+        );
+        assert!(!plan.mutates_pool);
+        assert!(!plan.writes_recovery_metadata);
+        assert!(plan.confirmation_required);
+    }
+
+    #[test]
+    fn rejects_store_configure_without_policy_fields() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::StoreConfigure,
+            store_id: Some("generated-data".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("configuration policy fields are required");
+
+        assert_eq!(
+            err.missing_fields,
+            [
+                "store_class",
+                "store_copies",
+                "writer_group",
+                "capacity_behavior",
+                "retention",
+                "endpoint_export_mode"
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_store_configure_with_invalid_policy_values() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::StoreConfigure,
+            store_id: Some("generated-data".to_string()),
+            store_class: Some("unknown".to_string()),
+            store_copies: Some(4),
+            writer_group: Some("mnemosyne".to_string()),
+            capacity_behavior: Some("fast".to_string()),
+            retention: Some("forever".to_string()),
+            endpoint_export_mode: Some("ftp".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("invalid policy values are rejected");
+
+        assert_eq!(
+            err.missing_fields,
+            [
+                "store_class",
+                "store_copies",
+                "capacity_behavior",
+                "retention",
+                "endpoint_export_mode"
+            ]
+        );
     }
 
     #[test]

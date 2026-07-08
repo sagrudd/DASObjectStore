@@ -614,7 +614,7 @@ older checklist claims.
 - [x] Connect ObjectStore creation to the existing action-plan/daemon boundary
   and convert the current `store_create` holder into a confirmation and
   submission workflow with audit metadata.
-- [ ] Add ObjectStore edit/configuration flows for redundancy, retention,
+- [x] Add ObjectStore edit/configuration flows for redundancy, retention,
   writer group, public/writeable policy, export mode, and capacity behavior,
   using the same validation as CLI/domain policy code.
 - [ ] Implement SubObject creation/configuration UI for nested prefixes, parent

@@ -361,6 +361,15 @@ the daemon ObjectStore creation contract. The browser displays the accepted
 administrator job identifier, dry-run state, administrator actor, client request
 identifier, and policy summary after the daemon accepts the request.
 
+Existing ObjectStores can be selected in the ``Configure ObjectStore`` card.
+The policy editor is populated from the live ObjectStore card and lets an
+administrator review changes to redundancy, writer group, public/writeable
+state, retention, capacity behavior, export mode, store class, and SSD root.
+The browser requests a distinct ``store_configure`` action plan and validates
+store class, copy count, retention, capacity behavior, and export mode against
+the supported domain vocabulary before displaying the planned command. This is
+a review surface only until the matching daemon execution endpoint is wired.
+
 The browser must still not edit store registry files directly. When a creation
 form includes a writer group, the daemon remains responsible for validating the
 group, applying ACL or policy changes, and recording the store in managed

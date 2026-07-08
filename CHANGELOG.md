@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.38.0 - 2026-07-08
+
+- Add a Web ObjectStore configuration workflow for existing stores, including
+  store selection, redundancy, writer group, public/writeable policy,
+  retention, capacity behavior, export mode, store class, and SSD-root review.
+- Add a distinct ``store_configure`` GUI action-plan contract with conservative
+  validation for store class, copy count, retention, capacity behavior, and
+  export mode before administrators can review policy changes.
+- Add GUI API and Web regression coverage for ObjectStore configuration action
+  catalog entries, route planning, invalid policy rejection, and browser review
+  summaries.
+
 ## 0.37.0 - 2026-07-08
 
 - Add a transport-neutral daemon ObjectStore creation command, validation

@@ -489,6 +489,21 @@ mod tests {
                 && action["confirmation_required"] == true
         }));
         assert!(actions.iter().any(|action| {
+            action["kind"] == "store_configure"
+                && action["safety"] == "configuration_mutation"
+                && action["required_fields"]
+                    == json!([
+                        "store_id",
+                        "store_class",
+                        "store_copies",
+                        "writer_group",
+                        "capacity_behavior",
+                        "retention",
+                        "endpoint_export_mode"
+                    ])
+                && action["confirmation_required"] == true
+        }));
+        assert!(actions.iter().any(|action| {
             action["kind"] == "subobject_create"
                 && action["safety"] == "configuration_mutation"
                 && action["confirmation_required"] == true
@@ -541,6 +556,62 @@ mod tests {
                 "2",
                 "--writer-group",
                 "mnemosyne",
+                "--ssd-root",
+                "/srv/dasobjectstore/ssd",
+                "--json"
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn action_plan_route_returns_store_configure_plan() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "store_configure",
+                "store_id": "generated-data",
+                "store_class": "generated_data",
+                "store_copies": 2,
+                "writer_group": "mnemosyne",
+                "ssd_root": "/srv/dasobjectstore/ssd",
+                "public": false,
+                "writeable": true,
+                "capacity_behavior": "backpressure_by_priority",
+                "retention": "tombstone_then_gc",
+                "endpoint_export_mode": "s3"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "store_configure");
+        assert_eq!(encoded["confirmation_required"], true);
+        assert_eq!(encoded["mutates_pool"], false);
+        assert_eq!(
+            encoded["argv"],
+            json!([
+                "dasobjectstore",
+                "store",
+                "configure",
+                "generated-data",
+                "--class",
+                "generated_data",
+                "--copies",
+                "2",
+                "--writer-group",
+                "mnemosyne",
+                "--capacity-behavior",
+                "backpressure_by_priority",
+                "--retention",
+                "tombstone_then_gc",
+                "--export-mode",
+                "s3",
+                "--public",
+                "false",
+                "--writeable",
+                "true",
                 "--ssd-root",
                 "/srv/dasobjectstore/ssd",
                 "--json"
