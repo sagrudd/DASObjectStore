@@ -2,11 +2,11 @@ use crate::dashboard::{
     CapacitySummaryView, CreateObjectStoreAffordanceView, DasEnclosureCardView,
     DashboardHealthStateView, DashboardWarning, DriveCountSummaryView, EnclosureConnectionView,
     HealthSummaryView, HomeDashboardView, MemoryStressStateView, MemoryStressView,
-    ObjectStoreCardView, SmartWarningView, SmartWarningsSummaryView, ThroughputDayView,
-    ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    SmartWarningView, SmartWarningsSummaryView, ThroughputDayView, ThroughputSummaryView,
+    REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
-use dasobjectstore_core::store::{ExportPolicy, MutabilityPolicy, PlacementStrategy};
-use dasobjectstore_object_service::{default_store_registry_path, read_store_registry};
+use crate::object_stores_aggregator::registry_object_store_cards;
+use dasobjectstore_object_service::default_store_registry_path;
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -112,7 +112,8 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
             }
             Vec::new()
         });
-    let object_stores = registry_object_stores(&config.store_registry_path, &mut source_warnings);
+    let object_stores =
+        registry_object_store_cards(&config.store_registry_path, None, &mut source_warnings);
     let memory_stress = memory_stress(&config.meminfo_path, &mut source_warnings);
     let throughput_7d = read_throughput_7d(&config.throughput_path).unwrap_or_else(|| {
         source_warnings.push(DashboardWarning::new(
@@ -303,70 +304,6 @@ fn enclosure_cards(
         last_seen_at_utc: generated_at_utc.to_string(),
         warnings: source_warnings.to_vec(),
     }]
-}
-
-fn registry_object_stores(
-    registry_path: &Path,
-    warnings: &mut Vec<DashboardWarning>,
-) -> Vec<ObjectStoreCardView> {
-    let definitions = match read_store_registry(registry_path) {
-        Ok(definitions) => definitions,
-        Err(error) => {
-            warnings.push(DashboardWarning::new(
-                "store_registry_unreadable",
-                format!(
-                    "ObjectStore registry {} could not be read: {error}.",
-                    registry_path.display()
-                ),
-            ));
-            return Vec::new();
-        }
-    };
-
-    definitions
-        .into_iter()
-        .map(|definition| {
-            let policy = definition.policy;
-            ObjectStoreCardView {
-                store_id: definition.store_id.to_string(),
-                display_name: definition.store_id.to_string(),
-                store_class: policy.class.name().to_string(),
-                object_type: "naive".to_string(),
-                health: DashboardHealthStateView::Healthy,
-                required_copies: policy.copies,
-                object_count: 0,
-                capacity: capacity_summary(&[]),
-                placement_policy: placement_strategy_label(policy.placement_strategy).to_string(),
-                endpoint_export_mode: export_policy_label(policy.export_policy).to_string(),
-                writer_group: definition.writer_group,
-                public: false,
-                writeable: policy.mutability_policy == MutabilityPolicy::Mutable
-                    || policy.export_policy != ExportPolicy::Disabled,
-                created_at_utc: "registry-managed".to_string(),
-                last_ingested_at_utc: None,
-                warnings: vec![DashboardWarning::new(
-                    "store_usage_pending",
-                    "Object counts and per-store used capacity require daemon metadata aggregation.",
-                )],
-            }
-        })
-        .collect()
-}
-
-fn placement_strategy_label(strategy: PlacementStrategy) -> &'static str {
-    match strategy {
-        PlacementStrategy::WeightedHealthCapacityPerformance => {
-            "weighted_health_capacity_performance"
-        }
-    }
-}
-
-fn export_policy_label(policy: ExportPolicy) -> &'static str {
-    match policy {
-        ExportPolicy::S3 => "s3_bucket",
-        ExportPolicy::ReadOnlyFileExport => "read_only_file_export",
-        ExportPolicy::Disabled => "disabled",
-    }
 }
 
 fn memory_stress(path: &Path, warnings: &mut Vec<DashboardWarning>) -> MemoryStressView {

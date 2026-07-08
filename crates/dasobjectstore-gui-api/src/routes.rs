@@ -60,7 +60,7 @@ async fn enclosures_dashboard() -> Json<EnclosuresPageView> {
 }
 
 async fn object_stores_dashboard() -> Json<ObjectStoresPageView> {
-    Json(ObjectStoresPageView::bootstrap_fixture())
+    Json(crate::object_stores_aggregator::live_object_stores_dashboard())
 }
 
 async fn overview_workspace() -> Json<OverviewWorkspaceView> {
@@ -197,8 +197,13 @@ mod tests {
         let encoded = response_json(response).await;
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
-        assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
-        assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
+        assert!(encoded["generated_at_utc"].is_string());
+        assert!(encoded["stores"].is_array());
+        assert!(!encoded["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning["code"] == "object_store_inventory_pending"));
         assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["defaults"]["required_copies"],

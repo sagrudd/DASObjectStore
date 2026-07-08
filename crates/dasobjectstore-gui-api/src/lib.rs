@@ -8,6 +8,7 @@ pub mod dashboard;
 mod enclosures_aggregator;
 pub mod endpoints;
 mod home_aggregator;
+mod object_stores_aggregator;
 pub mod routes;
 pub mod server_config;
 pub mod tls_assets;

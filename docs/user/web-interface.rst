@@ -228,21 +228,35 @@ or data-moving operations require an explicit plan review and confirmation.
 ObjectStores Page
 -----------------
 
+The redesigned ObjectStores page loads its inventory from
+``/products/dasobjectstore/api/v1/dashboard/object-stores`` using the browser
+session issued at login. The route reads the same system ObjectStore registry
+used by the CLI and object-service orchestration layer, so visible cards are
+registry-backed rather than placeholder fixtures.
+
+Each ObjectStore card shows the store name, store class, object type, required
+copy count, placement strategy, S3/export state, writer group, public/writeable
+state, object count, used capacity, warning count, and last-ingest timestamp.
+Registry fields come from ``/etc/dasobjectstore/stores.json`` on Linux unless
+the packaged environment overrides the registry path. Object count, used
+capacity, object type, and last-ingest time are read from live SQLite at
+``/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite`` by default, or from
+``DASOBJECTSTORE_WEB_LIVE_SQLITE_PATH`` when that override is set.
+
+If live SQLite is unavailable, the card remains visible from the registry but
+reports an explicit usage warning rather than hiding the ObjectStore or
+presenting fixture data. The ``Create ObjectStore`` card remains disabled for
+non-admin users until the administrator workflow submits confirmed daemon action
+plans.
+
 The ObjectStores page is the Web counterpart to ``dasobjectstore store`` and
 managed store policy. It should list each store with class, writer group,
 copy/redundancy policy, ingest mode, bucket or endpoint identity, capacity
 behavior, and current health.
-
-The redesigned ObjectStores page loads its inventory from
-``/products/dasobjectstore/api/v1/dashboard/object-stores`` using the browser
-session issued at login. It shows explicit loading, empty-inventory,
-permission-denied, and transport-error states instead of using fixture store
-cards. When store data is present, the page renders cards for store class,
-object type, public/writeable access, redundancy/copy policy, placement policy,
-used/free capacity, object count, writer group, endpoint export mode, last
-ingest time, warning count, and health.
-The create card reflects the daemon/API create affordance, including whether
-creation is currently available or blocked by administrator requirements.
+It shows explicit loading, empty-inventory, permission-denied, and
+transport-error states instead of using fixture store cards. The create card
+reflects the daemon/API create affordance, including whether creation is
+currently available or blocked by administrator requirements.
 
 Creating or changing an object store is an admin-only workflow. The Web UI
 should present class defaults before creation and submit the request to

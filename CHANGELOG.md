@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.25.0 - 2026-07-08
+
+- Replace the Web ObjectStores dashboard bootstrap fixture route with a live
+  registry-backed aggregator.
+- Populate ObjectStore cards from the system store registry and live SQLite
+  usage metadata, including writer group, object type, copy count, used
+  capacity, object count, S3/export state, warnings, and last-ingest time.
+- Document the ObjectStores page live-data sources and usage-warning behavior.
+
 ## 0.24.0 - 2026-07-08
 
 - Add a live Web Enclosures `Add enclosure` affordance payload that reports

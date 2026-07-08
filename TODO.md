@@ -542,7 +542,7 @@ older checklist claims.
 - [x] Replace the static Enclosures "Add enclosure" card with a disabled/enabled
   state driven by authenticated administrator capability, supported enclosure
   discovery, and daemon readiness.
-- [ ] Wire `ObjectStoresPage` to fetch live object-store registry data and render
+- [x] Wire `ObjectStoresPage` to fetch live object-store registry data and render
   cards with name, writer group, object type, public/writeable flags, redundancy,
   object count, used capacity, S3/export state, warning state, and last ingest
   time.
