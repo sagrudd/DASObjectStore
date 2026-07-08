@@ -103,7 +103,7 @@ async fn endpoints_workspace() -> Json<EndpointsWorkspaceView> {
 }
 
 async fn activity_workspace() -> Json<ActivityWorkspaceView> {
-    Json(ActivityWorkspaceView::empty())
+    Json(ActivityWorkspaceView::bootstrap())
 }
 
 async fn plan_action(
@@ -463,6 +463,11 @@ mod tests {
 
         assert_eq!(encoded["ingest"], serde_json::Value::Null);
         assert_eq!(encoded["destage"], serde_json::Value::Null);
+        assert_eq!(
+            encoded["categories"].as_array().expect("categories").len(),
+            8
+        );
+        assert_eq!(encoded["categories"][0]["kind"], "system_administration");
         assert_eq!(encoded["tasks"].as_array().expect("tasks").len(), 0);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }

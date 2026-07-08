@@ -578,6 +578,7 @@ impl EndpointsWorkspaceView {
 pub struct ActivityWorkspaceView {
     pub ingest: Option<IngestQueueView>,
     pub destage: Option<DestageQueueView>,
+    pub categories: Vec<ActivityCategoryView>,
     pub tasks: Vec<ActivityTaskView>,
     pub warnings: Vec<DashboardWarning>,
 }
@@ -585,6 +586,10 @@ pub struct ActivityWorkspaceView {
 impl ActivityWorkspaceView {
     pub fn empty() -> Self {
         Self::from_sections(None, None, Vec::new())
+    }
+
+    pub fn bootstrap() -> Self {
+        Self::empty().with_categories(default_activity_categories())
     }
 
     pub fn from_sections(
@@ -604,10 +609,78 @@ impl ActivityWorkspaceView {
         Self {
             ingest,
             destage,
+            categories: Vec::new(),
             tasks,
             warnings,
         }
     }
+
+    pub fn with_categories(mut self, categories: Vec<ActivityCategoryView>) -> Self {
+        self.categories = categories;
+        self
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ActivityCategoryView {
+    pub kind: ActivityTaskKindView,
+    pub label: String,
+    pub description: String,
+}
+
+impl ActivityCategoryView {
+    fn new(kind: ActivityTaskKindView, label: &str, description: &str) -> Self {
+        Self {
+            kind,
+            label: label.to_string(),
+            description: description.to_string(),
+        }
+    }
+}
+
+pub fn default_activity_categories() -> Vec<ActivityCategoryView> {
+    vec![
+        ActivityCategoryView::new(
+            ActivityTaskKindView::SystemAdministration,
+            "Administrator jobs",
+            "Local group, user, and privileged appliance administration submitted to the daemon.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::EnclosurePreparation,
+            "Enclosure preparation",
+            "Supported DAS detection, SSD/HDD selection, and destructive preparation jobs.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::ObjectStoreCreation,
+            "ObjectStore creation",
+            "Daemon-owned ObjectStore creation and policy materialization.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::SubObjectCreation,
+            "SubObject creation",
+            "Folder-level and nested object routing registrations for workflow-ready data.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::Ingest,
+            "Ingest",
+            "SSD-first file and folder upload jobs, including queued and active ingress.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::Destage,
+            "Destage",
+            "SSD-to-HDD settlement, verification, and protected-object queue movement.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::Repair,
+            "Repair",
+            "Disk repair, replacement, redownload, and redundancy restoration work.",
+        ),
+        ActivityCategoryView::new(
+            ActivityTaskKindView::EndpointValidation,
+            "Endpoint validation",
+            "Object-service, S3, NAS/NFS, and Mnemosyne endpoint validation tasks.",
+        ),
+    ]
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -625,6 +698,11 @@ pub struct ActivityTaskView {
 pub enum ActivityTaskKindView {
     Ingest,
     Destage,
+    SystemAdministration,
+    EnclosurePreparation,
+    ObjectStoreCreation,
+    SubObjectCreation,
+    Repair,
     HealthCheck,
     DiskDrain,
     DiskReplace,

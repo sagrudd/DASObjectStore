@@ -517,6 +517,38 @@ pub struct DestageQueueSummaryResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ActivityWorkspaceResponse {
+    #[serde(default)]
+    pub ingest: Option<IngestQueueSummaryResponse>,
+    #[serde(default)]
+    pub destage: Option<DestageQueueSummaryResponse>,
+    #[serde(default)]
+    pub categories: Vec<ActivityCategoryResponse>,
+    #[serde(default)]
+    pub tasks: Vec<ActivityTaskResponse>,
+    #[serde(default)]
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ActivityCategoryResponse {
+    pub kind: String,
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ActivityTaskResponse {
+    pub task_id: String,
+    pub kind: String,
+    pub state: String,
+    pub label: String,
+    pub updated_at_utc: String,
+    #[serde(default)]
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct MemoryStressResponse {
     pub state: String,
     pub pressure_percent: u8,
@@ -732,6 +764,11 @@ pub async fn get_object_stores_dashboard(path: &str) -> Result<ObjectStoresPageR
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn get_activity_workspace(path: &str) -> Result<ActivityWorkspaceResponse, ApiError> {
+    get_json(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn get_bioinformatics_workspace(
     path: &str,
 ) -> Result<BioinformaticsWorkspaceResponse, ApiError> {
@@ -915,10 +952,10 @@ where
 mod tests {
     use super::{
         admin_job_cancel_path, admin_job_status_path, auth_path, object_store_create_path,
-        AdminJobCancelResponse, AdminJobStatusResponse, BioinformaticsWorkspaceResponse,
-        CreateObjectStoreResponse, EnclosurePrepareResponse, EnclosuresPageResponse,
-        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
-        ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
+        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
+        EnclosuresPageResponse, GuiActionPlanResponse, HomeDashboardResponse,
+        LocalGroupAdminResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
 
     #[test]
@@ -1337,6 +1374,49 @@ mod tests {
             .supported_object_types
             .iter()
             .any(|object_type| object_type == "POD5"));
+    }
+
+    #[test]
+    fn decodes_activity_workspace_response_subset() {
+        let payload = serde_json::json!({
+            "ingest": {
+                "pressure": "normal",
+                "queued_jobs": 1,
+                "active_jobs": 2,
+                "failed_jobs": 0,
+                "jobs": [],
+                "warnings": []
+            },
+            "destage": {
+                "pending_objects": 4,
+                "copying_objects": 1,
+                "verified_objects": 12,
+                "objects": [],
+                "warnings": []
+            },
+            "categories": [{
+                "kind": "system_administration",
+                "label": "Administrator jobs",
+                "description": "Privileged daemon jobs"
+            }],
+            "tasks": [{
+                "task_id": "job-1",
+                "kind": "system_administration",
+                "state": "running",
+                "label": "Create local writer group",
+                "updated_at_utc": "2026-07-09T00:00:00Z",
+                "warnings": []
+            }],
+            "warnings": []
+        });
+
+        let decoded = serde_json::from_value::<ActivityWorkspaceResponse>(payload)
+            .expect("activity workspace decodes");
+
+        assert_eq!(decoded.ingest.expect("ingest").active_jobs, 2);
+        assert_eq!(decoded.destage.expect("destage").pending_objects, 4);
+        assert_eq!(decoded.categories[0].kind, "system_administration");
+        assert_eq!(decoded.tasks[0].state, "running");
     }
 
     #[test]

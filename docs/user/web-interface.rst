@@ -100,13 +100,13 @@ standalone appliance and the embedded DASObjectStore surface when mounted behind
 Synoptikon. After login, the first screen is the Home dashboard rather than a
 marketing or setup page.
 
-The Web console is live-data first. The Home, Enclosures, ObjectStores, and
-Bioinformatics pages request authenticated API payloads from the appliance and
-show loading, empty, permission-denied, transport-error, and stale-data states
-explicitly. They must not present bootstrap fixtures, mock hardware, or
-placeholder store cards as though they were live appliance state. If a daemon
-writer or data source is not implemented yet, the page should show a clear
-unavailable-source warning or reserved-workflow message.
+The Web console is live-data first. The Home, Enclosures, ObjectStores,
+Activity, and Bioinformatics pages request authenticated API payloads from the
+appliance and show loading, empty, permission-denied, transport-error, and
+stale-data states explicitly. They must not present bootstrap fixtures, mock
+hardware, or placeholder store cards as though they were live appliance state.
+If a daemon writer or data source is not implemented yet, the page should show a
+clear unavailable-source warning, idle category, or reserved-workflow message.
 
 The primary navigation is:
 
@@ -125,6 +125,12 @@ The primary navigation is:
    policy, class defaults, redundancy, ingest behavior, endpoint/export state,
    and store lifecycle actions.
 
+``Activity``
+   Daemon job and queue view. It shows administrator jobs, enclosure
+   preparation, ObjectStore/SubObject creation, ingest, destage, repair, and
+   endpoint validation categories from the shared daemon job model, plus any
+   active task rows and queue summaries reported by the API.
+
 ``Users/Groups``
    Standalone appliance identity and writer-policy view. It is shown in primary
    navigation when the DASObjectStore host mode uses local-user authentication
@@ -137,8 +143,6 @@ The primary navigation is:
    future integration surface rather than a place where storage mutations are
    already available.
 
-``Activity`` or equivalent status surfaces may also expose daemon jobs, ingest
-queues, repair work, and audit/provenance events as the implementation expands.
 Regardless of labels, storage mutation must still be submitted to
 ``dasobjectstored`` and must use the same job model as CLI and API operations.
 
@@ -160,6 +164,8 @@ experience. The active Web console surfaces are:
 * ``Enclosures`` for live DAS and drive inventory;
 * ``ObjectStores`` for registry-backed store cards and writer-policy
   readiness;
+* ``Activity`` for daemon job categories, active task rows, ingest queue, and
+  destage queue state;
 * ``Users/Groups`` for standalone local-user authority, writer-policy
   readiness, and administrator capability when host mode permits it; and
 * ``Bioinformatics`` for clearly reserved workflow-readiness state.
@@ -168,9 +174,8 @@ Legacy ``workspaces/stores`` remains a compatibility API endpoint only. The
 ``workspaces/users-groups`` route is now consumed by the first-class
 ``Users/Groups`` page in standalone local-user host mode; Synoptikon or Monas
 integrated deployments should continue to omit this page until the host product
-supplies the authority surface. Milestone 20 continues with administrator
-workflow forms, Activity views, and concrete bioinformatics workflow-readiness
-cards.
+supplies the authority surface. Milestone 20 continues with concrete
+bioinformatics workflow-readiness cards.
 
 Home Dashboard
 --------------
@@ -402,6 +407,29 @@ group, applying ACL or policy changes, and recording the store in managed
 metadata. Non-admin users may inspect stores and submit writes only when store
 writer policy allows it.
 
+Activity Workspace
+------------------
+
+The ``Activity`` primary navigation entry loads
+``/products/dasobjectstore/api/v1/workspaces/activity`` and renders the shared
+daemon activity model. The page always shows the supported activity categories
+so operators can distinguish an idle appliance from an unimplemented browser
+holder. Categories currently include administrator jobs, enclosure preparation,
+ObjectStore creation, SubObject creation, ingest, destage, repair, and endpoint
+validation.
+
+When daemon sources report work, the page shows active task rows with task ID,
+kind, state, label, and update timestamp. Ingest and destage queue summaries
+are rendered separately so SSD upload pressure and HDD settlement activity are
+visible even when no administrator job is active. If the daemon returns no task
+rows, the page must state that no active tasks are currently reported rather
+than implying completion.
+
+The Activity page is observational. Operators may navigate from submitted
+administrator workflows to their daemon job status, but the page itself must not
+cancel, mutate, or retry storage operations without using the same
+authenticated daemon job routes and risk gates as the originating workflow.
+
 Users/Groups Workspace
 ----------------------
 
@@ -425,7 +453,7 @@ clear permission-denied response if they attempt to submit through the API.
 
 Legacy ``workspaces/stores`` Web holder components are not part of the primary
 browser navigation. Operators should use ``Home``, ``Enclosures``,
-``ObjectStores``, ``Users/Groups``, and ``Bioinformatics`` as the
+``ObjectStores``, ``Activity``, ``Users/Groups``, and ``Bioinformatics`` as the
 canonical Web console surfaces.
 
 Bioinformatics Workspace
@@ -472,9 +500,9 @@ Screenshot regression coverage is available through:
 
 The check builds the real Trunk/WebAssembly interface, serves it under
 ``/products/dasobjectstore/`` with deterministic mocked API payloads, captures
-login, Home, Enclosures, ObjectStores, and Bioinformatics screenshots at desktop
-and mobile widths, and fails if the footer, primary navigation, major cards, or
-page headers visibly overlap. Generated screenshots are written under
+login, Home, Enclosures, ObjectStores, Activity, and Bioinformatics screenshots
+at desktop and mobile widths, and fails if the footer, primary navigation,
+major cards, or page headers visibly overlap. Generated screenshots are written under
 ``target/web-screenshots/`` for review and are not committed. The check expects
 the same Web packaging prerequisites as ``make web`` plus Node.js and Playwright
 with Chromium installed.

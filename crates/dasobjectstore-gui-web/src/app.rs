@@ -2,7 +2,7 @@ use crate::components::DasObjectStoreFooter;
 use crate::mount::{FrontendHost, FrontendMount};
 use crate::session::{AppState, StableState};
 use crate::workspace::{
-    primary_navigation_for_host, BioinformaticsPage, EnclosuresPage, HomeDashboard,
+    primary_navigation_for_host, ActivityPage, BioinformaticsPage, EnclosuresPage, HomeDashboard,
     ObjectStoresPage, UsersGroupsPage, WorkspacePage,
 };
 use crate::{api, storage};
@@ -281,6 +281,9 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                 },
                 WorkspacePage::ObjectStores => html! {
                     <ObjectStoresPage api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::Activity => html! {
+                    <ActivityPage api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::UsersGroups => html! {
                     <UsersGroupsPage api_base_path={props.api_base_path.clone()} />

@@ -1,3 +1,7 @@
+use crate::api::{
+    ActivityWorkspaceResponse, EnclosureDriveSlotResponse, EnclosuresPageResponse,
+    HomeDashboardResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+};
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
     AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
@@ -11,10 +15,6 @@ use crate::api::{
 use crate::api::{
     AdminJobCancelResponse, AdminJobStatusResponse, AdminJobSummary, EnclosurePrepareResponse,
 };
-use crate::api::{
-    EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
-    ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
-};
 use crate::mount::FrontendHost;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::Timeout;
@@ -22,6 +22,7 @@ use gloo_timers::callback::Timeout;
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
 pub const OBJECTSTORES_WORKSPACE_ROUTE: &str = "dashboard/object-stores";
+pub const ACTIVITY_WORKSPACE_ROUTE: &str = crate::activity::ACTIVITY_WORKSPACE_ROUTE;
 pub const BIOINFORMATICS_WORKSPACE_ROUTE: &str = "workspaces/bioinformatics";
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
@@ -30,6 +31,7 @@ pub enum WorkspacePage {
     Home,
     Enclosures,
     ObjectStores,
+    Activity,
     UsersGroups,
     Bioinformatics,
 }
@@ -40,6 +42,7 @@ impl WorkspacePage {
             Self::Home => "home",
             Self::Enclosures => "enclosures",
             Self::ObjectStores => "objectstores",
+            Self::Activity => "activity",
             Self::UsersGroups => "users-groups",
             Self::Bioinformatics => "bioinformatics",
         }
@@ -50,6 +53,7 @@ impl WorkspacePage {
             Self::Home => "Home",
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
+            Self::Activity => "Activity",
             Self::UsersGroups => "Users/Groups",
             Self::Bioinformatics => "Bioinformatics",
         }
@@ -60,6 +64,7 @@ impl WorkspacePage {
             Self::Home => "Home",
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
+            Self::Activity => "Activity",
             Self::UsersGroups => "Users/Groups",
             Self::Bioinformatics => "Bioinformatics",
         }
@@ -70,24 +75,27 @@ impl WorkspacePage {
             Self::Home => home_workspace_api_path(api_base_path),
             Self::Enclosures => enclosures_workspace_api_path(api_base_path),
             Self::ObjectStores => objectstores_workspace_api_path(api_base_path),
+            Self::Activity => activity_workspace_api_path(api_base_path),
             Self::UsersGroups => users_groups_workspace_api_path(api_base_path),
             Self::Bioinformatics => bioinformatics_workspace_api_path(api_base_path),
         }
     }
 }
 
-pub const PRIMARY_NAVIGATION: [WorkspacePage; 5] = [
+pub const PRIMARY_NAVIGATION: [WorkspacePage; 6] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
+    WorkspacePage::Activity,
     WorkspacePage::UsersGroups,
     WorkspacePage::Bioinformatics,
 ];
 
-pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 4] = [
+pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 5] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
+    WorkspacePage::Activity,
     WorkspacePage::Bioinformatics,
 ];
 
@@ -120,6 +128,10 @@ pub fn objectstores_workspace_api_path(api_base_path: &str) -> String {
         api_base_path.trim_end_matches('/'),
         OBJECTSTORES_WORKSPACE_ROUTE
     )
+}
+
+pub fn activity_workspace_api_path(api_base_path: &str) -> String {
+    crate::activity::activity_workspace_api_path(api_base_path)
 }
 
 pub fn bioinformatics_workspace_api_path(api_base_path: &str) -> String {
@@ -530,6 +542,150 @@ fn queue_attention_state(pressure: &str, failed_jobs: usize) -> &'static str {
     } else {
         "warning"
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActivityCategorySummary {
+    pub kind: String,
+    pub label: String,
+    pub description: String,
+    pub active_count: usize,
+    pub waiting_count: usize,
+    pub failed_count: usize,
+    pub complete_count: usize,
+    pub state: String,
+}
+
+pub fn activity_category_summaries(
+    view: &ActivityWorkspaceResponse,
+) -> Vec<ActivityCategorySummary> {
+    view.categories
+        .iter()
+        .map(|category| {
+            let matching_tasks = view.tasks.iter().filter(|task| task.kind == category.kind);
+            let mut active_count = 0;
+            let mut waiting_count = 0;
+            let mut failed_count = 0;
+            let mut complete_count = 0;
+
+            for task in matching_tasks {
+                match task.state.as_str() {
+                    "failed" => failed_count += 1,
+                    "complete" => complete_count += 1,
+                    "queued" | "waiting" => waiting_count += 1,
+                    _ => active_count += 1,
+                }
+            }
+
+            let state = if failed_count > 0 {
+                "critical"
+            } else if active_count > 0 {
+                "running"
+            } else if waiting_count > 0 {
+                "waiting"
+            } else {
+                "idle"
+            };
+
+            ActivityCategorySummary {
+                kind: category.kind.clone(),
+                label: category.label.clone(),
+                description: category.description.clone(),
+                active_count,
+                waiting_count,
+                failed_count,
+                complete_count,
+                state: state.to_string(),
+            }
+        })
+        .collect()
+}
+
+pub fn activity_queue_summary(view: &ActivityWorkspaceResponse) -> Vec<DashboardMetric> {
+    let ingest = view
+        .ingest
+        .as_ref()
+        .map(|ingest| {
+            DashboardMetric::new(
+                "Ingest",
+                format!("{} active", ingest.active_jobs),
+                format!(
+                    "{} queued; {} failed; pressure {}",
+                    ingest.queued_jobs, ingest.failed_jobs, ingest.pressure
+                ),
+                queue_attention_state(&ingest.pressure, ingest.failed_jobs),
+            )
+        })
+        .unwrap_or_else(|| {
+            DashboardMetric::new(
+                "Ingest",
+                "No queue",
+                "No daemon ingest queue payload has been reported.",
+                "idle",
+            )
+        });
+    let destage = view
+        .destage
+        .as_ref()
+        .map(|destage| {
+            DashboardMetric::new(
+                "Destage",
+                format!("{} copying", destage.copying_objects),
+                format!(
+                    "{} pending; {} verified",
+                    destage.pending_objects, destage.verified_objects
+                ),
+                if destage.copying_objects > 0 {
+                    "running"
+                } else if destage.pending_objects > 0 {
+                    "waiting"
+                } else {
+                    "idle"
+                },
+            )
+        })
+        .unwrap_or_else(|| {
+            DashboardMetric::new(
+                "Destage",
+                "No queue",
+                "No daemon destage queue payload has been reported.",
+                "idle",
+            )
+        });
+
+    vec![ingest, destage]
+}
+
+#[cfg(target_arch = "wasm32")]
+fn activity_task_kind_label(kind: &str) -> String {
+    match kind {
+        "ingest" => "Ingest",
+        "destage" => "Destage",
+        "system_administration" => "Administrator",
+        "enclosure_preparation" => "Enclosure",
+        "object_store_creation" => "ObjectStore",
+        "sub_object_creation" => "SubObject",
+        "repair" => "Repair",
+        "health_check" => "Health",
+        "disk_drain" => "Disk drain",
+        "disk_replace" => "Disk replace",
+        "endpoint_validation" => "Endpoint",
+        other => other,
+    }
+    .to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn activity_task_state_label(state: &str) -> String {
+    match state {
+        "queued" => "Queued",
+        "running" => "Running",
+        "waiting" => "Waiting",
+        "complete" => "Complete",
+        "failed" => "Failed",
+        other => other,
+    }
+    .to_string()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -4145,6 +4301,156 @@ fn render_users_groups_state_message(label: &str, title: &str, message: &str) ->
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq, Properties)]
+pub struct ActivityPageProps {
+    pub api_base_path: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[function_component(ActivityPage)]
+pub fn activity_page(props: &ActivityPageProps) -> Html {
+    let api_path = WorkspacePage::Activity.api_path(&props.api_base_path);
+    let activity_state = use_state(|| ApiLoadState::<ActivityWorkspaceResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let activity_state = activity_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                activity_state.set(page_load_state_from_result(
+                    crate::api::get_activity_workspace(&path).await,
+                    |view| {
+                        view.categories.is_empty().then(|| {
+                            "No daemon activity categories were reported by the workspace API."
+                                .to_string()
+                        })
+                    },
+                ));
+            });
+            || ()
+        });
+    }
+
+    html! {
+        <section class="dos-page" data-page="activity" data-api-route={api_path}>
+            <PageHeader
+                eyebrow="Daemon jobs"
+                title="Activity"
+                summary="Administrator work, ingest, settlement, repair, and endpoint validation from the shared daemon job model."
+            />
+            { render_activity_state(&*activity_state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_activity_state(state: &ApiLoadState<ActivityWorkspaceResponse>) -> Html {
+    match state {
+        ApiLoadState::Loading => render_activity_state_message(
+            "Loading",
+            "Loading daemon activity",
+            "The Web console is requesting the shared daemon activity workspace.",
+        ),
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
+            render_activity_workspace(view)
+        }
+        ApiLoadState::Empty(message) => {
+            render_activity_state_message("Inventory", "No daemon activity data", message)
+        }
+        ApiLoadState::PermissionDenied(message) => render_activity_state_message(
+            "Permission denied",
+            "Activity requires an authenticated session",
+            message,
+        ),
+        ApiLoadState::TransportError(message) => {
+            render_activity_state_message("Error", "Unable to load Activity", message)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_activity_workspace(view: &ActivityWorkspaceResponse) -> Html {
+    html! {
+        <>
+            <div class="dos-metric-grid dos-activity-queues">
+                { for activity_queue_summary(view).into_iter().map(render_metric_card) }
+            </div>
+            <div class="dos-activity-grid">
+                { for activity_category_summaries(view).into_iter().map(render_activity_category_card) }
+            </div>
+            <section class="dos-card dos-wide-card dos-activity-tasks">
+                <div class="dos-card-row">
+                    <span class="dos-card-label">{ "Daemon task stream" }</span>
+                    <span class="dos-status-pill">{ format!("{} task(s)", view.tasks.len()) }</span>
+                </div>
+                if view.tasks.is_empty() {
+                    <p>{ "No active administrator, ingest, destage, repair, or endpoint validation tasks are currently reported." }</p>
+                } else {
+                    <div class="dos-task-list">
+                        { for view.tasks.iter().map(render_activity_task) }
+                    </div>
+                }
+            </section>
+            if !view.warnings.is_empty() {
+                <section class="dos-card dos-wide-card" data-state="warning">
+                    <span class="dos-card-label">{ "Activity warnings" }</span>
+                    <div class="dos-task-list">
+                        { for view.warnings.iter().map(|warning| html! {
+                            <p>{ format!("{}: {}", warning.code, warning.message) }</p>
+                        }) }
+                    </div>
+                </section>
+            }
+        </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_activity_category_card(summary: ActivityCategorySummary) -> Html {
+    html! {
+        <section class="dos-card dos-activity-card" data-kind={summary.kind.clone()} data-state={summary.state.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ summary.label.clone() }</span>
+                <span class="dos-status-pill">{ summary.state.clone() }</span>
+            </div>
+            <strong>{ format!("{} active", summary.active_count) }</strong>
+            <p>{ summary.description }</p>
+            <div class="dos-drive-meta">
+                <span>{ format!("{} waiting", summary.waiting_count) }</span>
+                <span>{ format!("{} failed", summary.failed_count) }</span>
+                <span>{ format!("{} complete", summary.complete_count) }</span>
+            </div>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_activity_task(task: &crate::api::ActivityTaskResponse) -> Html {
+    html! {
+        <article class="dos-task-card" data-state={task.state.clone()} data-kind={task.kind.clone()}>
+            <div>
+                <span class="dos-card-label">{ activity_task_kind_label(&task.kind) }</span>
+                <strong>{ task.label.clone() }</strong>
+                <p>{ format!("{} · updated {}", task.task_id, task.updated_at_utc) }</p>
+            </div>
+            <span class="dos-status-pill">{ activity_task_state_label(&task.state) }</span>
+        </article>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_activity_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label }</span>
+            <h2>{ title }</h2>
+            <p>{ message }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Properties)]
 pub struct BioinformaticsPageProps {
     pub api_base_path: String,
 }
@@ -4267,6 +4573,7 @@ fn page_header(props: &PageHeaderProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::{
+        activity_category_summaries, activity_queue_summary, activity_workspace_api_path,
         admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
@@ -4277,20 +4584,22 @@ mod tests {
         objectstores_workspace_api_path, primary_navigation_for_host,
         subobject_registry_preview_from_values, users_groups_summary_cards,
         users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, WorkspacePage,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-        LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE,
+        PRIMARY_NAVIGATION,
     };
     use super::{
         local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
         local_group_create_fields_ready,
     };
     use crate::api::{
+        ActivityCategoryResponse, ActivityTaskResponse, ActivityWorkspaceResponse,
         AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
-        EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice, EnclosurePrepareResponse,
-        EnclosuresPageResponse, HomeDashboardResponse, LocalGroupMembershipResponse,
-        LocalGroupOperationResponse, LocalUserAuthorityResponse, ObjectStoresPageResponse,
-        StandaloneUserAccountResponse, StorageGroupResponse, UsersGroupsCapabilitiesResponse,
-        UsersGroupsWorkspaceResponse,
+        DestageQueueSummaryResponse, EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice,
+        EnclosurePrepareResponse, EnclosuresPageResponse, HomeDashboardResponse,
+        IngestQueueSummaryResponse, LocalGroupMembershipResponse, LocalGroupOperationResponse,
+        LocalUserAuthorityResponse, ObjectStoresPageResponse, StandaloneUserAccountResponse,
+        StorageGroupResponse, UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
     };
     use crate::mount::FrontendHost;
     use crate::stores::STORES_WORKSPACE_ROUTE;
@@ -4306,6 +4615,7 @@ mod tests {
                 "Home",
                 "Enclosures",
                 "ObjectStores",
+                "Activity",
                 "Users/Groups",
                 "Bioinformatics"
             ]
@@ -4323,6 +4633,8 @@ mod tests {
             .map(|page| page.label())
             .collect();
 
+        assert!(standalone_labels.contains(&"Activity"));
+        assert!(synoptikon_labels.contains(&"Activity"));
         assert!(standalone_labels.contains(&"Users/Groups"));
         assert!(!synoptikon_labels.contains(&"Users/Groups"));
     }
@@ -4344,6 +4656,10 @@ mod tests {
             "/products/dasobjectstore/api/v1/dashboard/object-stores"
         );
         assert_eq!(
+            WorkspacePage::Activity.api_path(base),
+            "/products/dasobjectstore/api/v1/workspaces/activity"
+        );
+        assert_eq!(
             WorkspacePage::UsersGroups.api_path(base),
             "/products/dasobjectstore/api/v1/workspaces/users-groups"
         );
@@ -4358,6 +4674,7 @@ mod tests {
         assert_eq!(HOME_WORKSPACE_ROUTE, "dashboard/home");
         assert_eq!(ENCLOSURES_WORKSPACE_ROUTE, "dashboard/enclosures");
         assert_eq!(OBJECTSTORES_WORKSPACE_ROUTE, "dashboard/object-stores");
+        assert_eq!(ACTIVITY_WORKSPACE_ROUTE, "workspaces/activity");
         assert_eq!(home_workspace_api_path("/api/"), "/api/dashboard/home");
         assert_eq!(
             enclosures_workspace_api_path("/api/"),
@@ -4366,6 +4683,10 @@ mod tests {
         assert_eq!(
             objectstores_workspace_api_path("/api/"),
             "/api/dashboard/object-stores"
+        );
+        assert_eq!(
+            activity_workspace_api_path("/api/"),
+            "/api/workspaces/activity"
         );
         assert_eq!(
             users_groups_workspace_api_path("/api/"),
@@ -4389,7 +4710,85 @@ mod tests {
             .any(|path| path.ends_with(USERS_GROUPS_WORKSPACE_ROUTE)));
         assert!(primary_paths
             .iter()
+            .any(|path| path.ends_with(ACTIVITY_WORKSPACE_ROUTE)));
+        assert!(primary_paths
+            .iter()
             .any(|path| path.ends_with(OBJECTSTORES_WORKSPACE_ROUTE)));
+    }
+
+    #[test]
+    fn activity_category_summaries_cover_daemon_job_states() {
+        let view = ActivityWorkspaceResponse {
+            ingest: Some(IngestQueueSummaryResponse {
+                pressure: "normal".to_string(),
+                queued_jobs: 2,
+                active_jobs: 1,
+                failed_jobs: 0,
+                warnings: Vec::new(),
+            }),
+            destage: Some(DestageQueueSummaryResponse {
+                pending_objects: 3,
+                copying_objects: 1,
+                verified_objects: 8,
+                warnings: Vec::new(),
+            }),
+            categories: vec![
+                ActivityCategoryResponse {
+                    kind: "system_administration".to_string(),
+                    label: "Administrator jobs".to_string(),
+                    description: "Privileged work".to_string(),
+                },
+                ActivityCategoryResponse {
+                    kind: "ingest".to_string(),
+                    label: "Ingest".to_string(),
+                    description: "Uploads".to_string(),
+                },
+                ActivityCategoryResponse {
+                    kind: "repair".to_string(),
+                    label: "Repair".to_string(),
+                    description: "Repair work".to_string(),
+                },
+            ],
+            tasks: vec![
+                ActivityTaskResponse {
+                    task_id: "job-admin".to_string(),
+                    kind: "system_administration".to_string(),
+                    state: "running".to_string(),
+                    label: "Create local writer group".to_string(),
+                    updated_at_utc: "2026-07-09T00:00:00Z".to_string(),
+                    warnings: Vec::new(),
+                },
+                ActivityTaskResponse {
+                    task_id: "job-ingest".to_string(),
+                    kind: "ingest".to_string(),
+                    state: "queued".to_string(),
+                    label: "Ingest zymo".to_string(),
+                    updated_at_utc: "2026-07-09T00:01:00Z".to_string(),
+                    warnings: Vec::new(),
+                },
+                ActivityTaskResponse {
+                    task_id: "job-repair".to_string(),
+                    kind: "repair".to_string(),
+                    state: "failed".to_string(),
+                    label: "Restore copy".to_string(),
+                    updated_at_utc: "2026-07-09T00:02:00Z".to_string(),
+                    warnings: Vec::new(),
+                },
+            ],
+            warnings: Vec::new(),
+        };
+
+        let summaries = activity_category_summaries(&view);
+        let queues = activity_queue_summary(&view);
+
+        assert_eq!(summaries[0].active_count, 1);
+        assert_eq!(summaries[0].state, "running");
+        assert_eq!(summaries[1].waiting_count, 1);
+        assert_eq!(summaries[1].state, "waiting");
+        assert_eq!(summaries[2].failed_count, 1);
+        assert_eq!(summaries[2].state, "critical");
+        assert_eq!(queues[0].value, "1 active");
+        assert_eq!(queues[1].value, "1 copying");
     }
 
     #[test]

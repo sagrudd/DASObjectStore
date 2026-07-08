@@ -42,6 +42,12 @@ const authenticatedPages = [
     readySelector: "[data-store-id='zymo-fecal-2025-05']",
   },
   {
+    name: "activity",
+    selector: "button[data-page='activity']",
+    pageSelector: "section[data-page='activity']",
+    readySelector: "text=Daemon task stream",
+  },
+  {
     name: "bioinformatics",
     selector: "button[data-page='bioinformatics']",
     pageSelector: "section[data-page='bioinformatics']",
@@ -301,6 +307,9 @@ function apiResponse(pathname, method) {
   if (pathname === `${apiV1Base}/dashboard/object-stores`) {
     return objectStoresDashboard();
   }
+  if (pathname === `${apiV1Base}/workspaces/activity`) {
+    return activityWorkspace();
+  }
   if (pathname === `${apiV1Base}/workspaces/bioinformatics`) {
     return bioinformaticsWorkspace();
   }
@@ -501,6 +510,66 @@ function objectStoresDashboard() {
     },
     warnings: [],
   };
+}
+
+function activityWorkspace() {
+  return {
+    ingest: { pressure: "normal", queued_jobs: 2, active_jobs: 1, failed_jobs: 0, warnings: [] },
+    destage: { pending_objects: 12, copying_objects: 2, verified_objects: 950, warnings: [] },
+    categories: [
+      activityCategory(
+        "system_administration",
+        "Administrator jobs",
+        "Privileged appliance and local group administration submitted to the daemon.",
+      ),
+      activityCategory(
+        "enclosure_preparation",
+        "Enclosure preparation",
+        "Supported DAS detection and media preparation jobs.",
+      ),
+      activityCategory(
+        "object_store_creation",
+        "ObjectStore creation",
+        "Daemon-owned ObjectStore creation and policy materialization.",
+      ),
+      activityCategory(
+        "sub_object_creation",
+        "SubObject creation",
+        "Folder-level and nested object routing registrations.",
+      ),
+      activityCategory("ingest", "Ingest", "SSD-first upload jobs and queue pressure."),
+      activityCategory("destage", "Destage", "SSD-to-HDD settlement and verification."),
+      activityCategory("repair", "Repair", "Repair and redundancy restoration work."),
+      activityCategory(
+        "endpoint_validation",
+        "Endpoint validation",
+        "Object-service, S3, NAS/NFS, and Mnemosyne endpoint checks.",
+      ),
+    ],
+    tasks: [
+      {
+        task_id: "admin-job-visual-1",
+        kind: "system_administration",
+        state: "running",
+        label: "Create local writer group",
+        updated_at_utc: "2026-07-08T19:05:00Z",
+        warnings: [],
+      },
+      {
+        task_id: "ingest-visual-1",
+        kind: "ingest",
+        state: "queued",
+        label: "Ingest zymo_fecal_2025.05",
+        updated_at_utc: "2026-07-08T19:06:00Z",
+        warnings: [],
+      },
+    ],
+    warnings: [],
+  };
+}
+
+function activityCategory(kind, label, description) {
+  return { kind, label, description };
 }
 
 function bioinformaticsWorkspace() {

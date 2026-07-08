@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.44.0 - 2026-07-09
+
+- Promote Activity into the primary Web navigation and render daemon activity
+  categories, ingest/destage queue summaries, active task rows, warnings, and
+  empty states from the shared Activity workspace API.
+- Extend the Activity workspace contract with administrator, enclosure
+  preparation, ObjectStore/SubObject creation, ingest, destage, repair, and
+  endpoint-validation categories.
+- Add Web/API regression coverage for Activity response decoding, route
+  construction, navigation, and category-state summaries.
+
 ## 0.43.0 - 2026-07-09
 
 - Add Users/Groups Web forms for daemon-backed local group creation and local

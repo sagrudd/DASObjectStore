@@ -628,9 +628,14 @@ older checklist claims.
 - [x] Implement Users/Groups forms for local group creation and local
   user-to-group assignment against the existing daemon-backed routes, including
   dry-run/preview, confirmation, result, and permission-denied states.
-- [ ] Extend Web Activity to show administrator jobs, enclosure preparation,
+- [x] Extend Web Activity to show administrator jobs, enclosure preparation,
   ObjectStore/SubObject creation, ingest, destage, repair, and endpoint
-  validation using the shared daemon job/event stream.
+  validation categories, active task rows, queue summaries, warnings, and empty
+  states from the shared Activity workspace contract.
+- [ ] Connect the Activity workspace API to live daemon job/event sources:
+  administrator job registry listing, ingest queue events, destage/repair
+  events, and endpoint-validation events, without browser-side storage
+  mutation.
 - [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.
