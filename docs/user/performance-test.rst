@@ -392,11 +392,24 @@ Use this option sparingly on production appliances.
 Report Outputs
 --------------
 
-Every successful run writes a final PDF report. ``--report`` must point to a
-``.pdf`` path. The report has a tabular header containing Mnemosyne Biosciences
-branding, DASObjectStore product identity, run ID, generation timestamp,
-repository revision, CLI version, command line, artifact paths, and the
-reproduction QR payload reference.
+Every successful formal run writes a final PDF report. ``--report`` must point
+to a ``.pdf`` path. The report is rendered through the Mnemosyne Grammateus
+report provider using the same ``gnostikon-workflow-control render-report-pdf``
+handoff used by Mnematikon. The report includes the Mnemosyne Biosciences
+template, title-panel metadata table, document identifier, provenance QR
+payload, footer branding, operator signature field, and cryptographic signature
+field.
+
+If the formal renderer is unavailable or fails, DASObjectStore does not emit a
+degraded fallback PDF. The JSON artifact remains the machine-readable benchmark
+record and can be used to rebuild the PDF after the Grammateus provider has
+been installed or repaired:
+
+.. code-block:: console
+
+   dasobjectstore performance-report \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-source.json \
+     --report /var/lib/dasobjectstore/reports/performance-zymo-source.pdf
 
 The PDF report includes:
 
@@ -419,9 +432,9 @@ The command also writes:
 
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
 * ``<report-stem>-*.svg`` quantitative bar-chart artifacts embedded into the
-  PDF report when the renderer supports local images;
+  PDF report by the formal renderer;
 * ``<report-stem>-io-*.svg`` per-run IO line-chart artifacts embedded into the
-  PDF report when the renderer supports local images;
+  PDF report by the formal renderer;
 * a temporary Markdown source under ``--tmp-dir`` only while rendering the PDF.
 
 The temporary Markdown source is removed after PDF generation. It is not a
@@ -551,12 +564,23 @@ still writes a fallback SVG artifact and records that fallback in the report's
 ``QR status`` field; install ``qrencode`` before formal commissioning runs that
 require a scannable QR code.
 
-When ``grammateus_markdown_pdf`` is available, the PDF is rendered with the
-standard ``dasobjectstore-performance`` Mnemosyne report template, including
-the title-panel metadata table, provenance QR payload, and signature fields. If
-Grammateus is unavailable, DASObjectStore tries ``pandoc`` and then writes a
-built-in fallback PDF artifact so that the benchmark run has a complete local
-evidence bundle.
+Formal PDF rendering requires ``gnostikon-workflow-control`` with access to the
+Grammateus report provider and the ``dasobjectstore-performance`` standard
+report template. The provider may run natively or through the configured
+container runtime, but the resulting PDF must contain the Mnemosyne title
+metadata panel, provenance QR payload, branded footer, rendered Markdown
+tables, embedded figures, and signature rows.
+
+Use ``dasobjectstore performance-report`` to rebuild the formal PDF from an
+existing JSON artifact. The rebuild path recreates the report Markdown, chart
+SVGs, IO line-chart SVGs, metadata JSON, and provenance QR payload from the
+artifact before handing the document to Grammateus:
+
+.. code-block:: console
+
+   dasobjectstore performance-report \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-100x2GiB.json \
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.pdf
 
 Reproducibility Notes
 ---------------------

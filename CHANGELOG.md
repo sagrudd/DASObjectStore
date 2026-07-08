@@ -6,6 +6,19 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.20.1 - 2026-07-08
+
+- Require formal ``gnostikon-workflow-control``/Grammateus rendering for
+  ``dasobjectstore performance-test`` PDF reports instead of emitting degraded
+  pandoc or built-in fallback PDFs.
+- Add ``dasobjectstore performance-report`` to rebuild branded Mnemosyne PDF
+  reports, chart SVGs, metadata, and provenance QR payloads from existing
+  performance-test JSON artifacts.
+- Expand the DASObjectStore performance report metadata envelope to include the
+  canonical document identifier, test identifier, version/state, device,
+  operator, timestamp, run ID, test status, operator signature, and
+  cryptographic signature fields.
+
 ## 0.20.0 - 2026-07-08
 
 - Add ``dasobjectstore performance-test --file_order`` with ``fifo``,

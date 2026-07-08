@@ -6,12 +6,12 @@ use crate::cli::{
     IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs,
     IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
     ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder,
-    PerformanceFileSelection, PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand,
-    PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StatusArgs, StoreAdoptArgs, StoreCommand,
-    StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
-    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand,
-    SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
+    PerformanceFileSelection, PerformanceReportArgs, PerformanceScenarioSelection,
+    PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
+    ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StatusArgs,
+    StoreAdoptArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs,
+    StoreDeleteArgs, StoreDrainArgs, StoreListArgs, StoreS3UploadArgs, StoreValidateArgs,
+    SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -112,6 +112,7 @@ use ratatui::{
     Terminal,
 };
 use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt::{self, Display};
@@ -294,8 +295,50 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             }
         },
         Some(Command::PerformanceTest(args)) => run_performance_test(args, writer),
+        Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
+}
+
+fn run_performance_report(
+    args: &PerformanceReportArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let artifact = read_performance_json_artifact(args.json_artifact())?;
+    let report_path = args
+        .report()
+        .map(Path::to_path_buf)
+        .or_else(|| artifact_pdf_path(&artifact))
+        .ok_or_else(|| {
+            CliError::CommandFailed(
+                "performance-report requires --report when the JSON artifact does not record a PDF path"
+                    .to_string(),
+            )
+        })?;
+    validate_pdf_report_path(&report_path)?;
+    let markdown_path = args.tmp_dir().join(format!(
+        "{}-rebuilt.md",
+        report_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("dasobjectstore-performance-report")
+    ));
+    if let Some(parent) = markdown_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = report_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    write_performance_chart_svgs_from_json(&artifact, &report_path)?;
+    let markdown = render_performance_report_from_json_artifact(&artifact, &report_path);
+    fs::write(&markdown_path, markdown)?;
+    write_formal_performance_pdf_report_from_artifact(&markdown_path, &report_path, &artifact)?;
+    if !args.keep_markdown() {
+        let _ = fs::remove_file(&markdown_path);
+    }
+    writeln!(writer, "Report: {}", report_path.display())?;
+    writeln!(writer, "JSON: {}", args.json_artifact().display())?;
+    Ok(())
 }
 
 fn run_performance_test(
@@ -845,7 +888,9 @@ fn run_performance_test(
     let results = result?;
     let recommendation = recommend_performance_strategy(&results);
 
-    let qr_status = write_report_qr_svg(&qr_path, &reproduction_payload)?;
+    let reproduction_qr_payload =
+        format!("mnemosyne-report:DASObjectStore:{run_id}:{reproduction_payload_sha256}");
+    let qr_status = write_report_qr_svg(&qr_path, &reproduction_qr_payload)?;
     let performance_report = PerformanceReport {
         run_id,
         generated_at_utc,
@@ -5284,31 +5329,19 @@ fn write_pdf_report(
     if let Some(parent) = pdf_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    if write_grammateus_pdf_report(markdown_path, pdf_path, report) {
-        return Ok(());
-    }
-    if ProcessCommand::new("pandoc")
-        .arg(markdown_path)
-        .arg("-o")
-        .arg(pdf_path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-    {
-        return Ok(());
-    }
-    let markdown = fs::read_to_string(markdown_path)?;
-    fs::write(pdf_path, render_simple_pdf(&markdown))?;
-    Ok(())
+    write_formal_performance_pdf_report(markdown_path, pdf_path, report)
 }
 
-fn write_grammateus_pdf_report(
+fn write_formal_performance_pdf_report(
     markdown_path: &Path,
     pdf_path: &Path,
     report: &PerformanceReport,
-) -> bool {
-    ProcessCommand::new("grammateus_markdown_pdf")
+) -> Result<(), CliError> {
+    let metadata_json = performance_report_metadata_json(report);
+    let status = ProcessCommand::new("gnostikon-workflow-control")
+        .arg("render-report-pdf")
+        .arg("--provider")
+        .arg("container")
         .arg("--input")
         .arg(markdown_path)
         .arg("--output")
@@ -5318,43 +5351,605 @@ fn write_grammateus_pdf_report(
         .arg("--title-explanation")
         .arg("Reproducible DAS performance evidence for SSD staging, drain-time SSD reads, and concurrent HDD settlement planning.")
         .arg("--metadata-json")
-        .arg(performance_report_metadata_json(report))
+        .arg(&metadata_json)
         .arg("--provenance-qr-payload")
-        .arg(&report.reproduction_payload)
+        .arg(performance_report_qr_payload(report))
         .arg("--report-template")
         .arg("dasobjectstore-performance")
         .arg("--footer-label")
         .arg("DASObjectStore performance")
         .arg("--generated-at-utc")
         .arg(&report.generated_at_utc)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(CliError::CommandFailed(format!(
+            "formal performance PDF rendering failed with status {status}; install/repair gnostikon-workflow-control and the Grammateus report provider, then rebuild with `dasobjectstore performance-report --json-artifact {}`",
+            report.json_path.display()
+        ))),
+        Err(error) => Err(CliError::CommandFailed(format!(
+            "formal performance PDF rendering requires gnostikon-workflow-control with Grammateus support: {error}; rebuild later with `dasobjectstore performance-report --json-artifact {}`",
+            report.json_path.display()
+        ))),
+    }
+}
+
+fn write_formal_performance_pdf_report_from_artifact(
+    markdown_path: &Path,
+    pdf_path: &Path,
+    artifact: &Value,
+) -> Result<(), CliError> {
+    let metadata_json = performance_report_metadata_json_from_artifact(artifact);
+    let generated_at =
+        json_string(artifact, &["run", "generated_at_utc"]).unwrap_or_else(|| now_utc_string());
+    let qr_payload = performance_report_qr_payload_from_artifact(artifact);
+    let status = ProcessCommand::new("gnostikon-workflow-control")
+        .arg("render-report-pdf")
+        .arg("--provider")
+        .arg("container")
+        .arg("--input")
+        .arg(markdown_path)
+        .arg("--output")
+        .arg(pdf_path)
+        .arg("--title")
+        .arg("DASObjectStore Performance Test Report")
+        .arg("--title-explanation")
+        .arg("Reproducible DAS performance evidence for SSD staging, drain-time SSD reads, and concurrent HDD settlement planning.")
+        .arg("--metadata-json")
+        .arg(metadata_json)
+        .arg("--provenance-qr-payload")
+        .arg(qr_payload)
+        .arg("--report-template")
+        .arg("dasobjectstore-performance")
+        .arg("--footer-label")
+        .arg("DASObjectStore performance")
+        .arg("--generated-at-utc")
+        .arg(generated_at)
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(CliError::CommandFailed(format!(
+            "formal performance PDF rendering failed with status {status}; install/repair gnostikon-workflow-control and the Grammateus report provider"
+        ))),
+        Err(error) => Err(CliError::CommandFailed(format!(
+            "formal performance PDF rendering requires gnostikon-workflow-control with Grammateus support: {error}"
+        ))),
+    }
 }
 
 fn performance_report_metadata_json(report: &PerformanceReport) -> String {
+    let document_id = format!("DOS-{}", report.run_id);
     serde_json::json!({
         "header": "DASObjectStore performance report",
         "rows": [
             [
+                {"label": "Document ID", "value": document_id},
+                {"label": "Performance test identifier", "value": "DASObjectStore-Disk-Speed"},
+                {"label": "Version", "value": dasobjectstore_core::VERSION},
+                {"label": "Report state", "value": "FINAL"},
+            ],
+            [
+                {"label": "DeviceID", "value": hostname_for_report()},
+                {"label": "Operator", "value": std::env::var("USER").unwrap_or_else(|_| "not recorded".to_string())},
+                {"label": "Timestamp", "value": report.generated_at_utc},
                 {"label": "Run ID", "value": report.run_id},
             ],
             [
-                {"label": "Report state", "value": "final"},
-                {"label": "Generated at (UTC)", "value": report.generated_at_utc},
-            ],
-            [
                 {"label": "Repository revision", "value": report.repository_revision},
-                {"label": "CLI version", "value": dasobjectstore_core::VERSION},
-            ],
-            [
+                {"label": "Test status", "value": "VALID"},
                 {"label": "Signature of operator", "value": "Pending operator signature"},
                 {"label": "Cryptographic signature", "value": report.reproduction_payload_sha256},
             ],
         ],
     })
     .to_string()
+}
+
+fn performance_report_qr_payload(report: &PerformanceReport) -> String {
+    format!(
+        "mnemosyne-report:DASObjectStore:{}:{}",
+        report.run_id, report.reproduction_payload_sha256
+    )
+}
+
+fn read_performance_json_artifact(path: &Path) -> Result<Value, CliError> {
+    let artifact = fs::read_to_string(path)?;
+    let artifact = serde_json::from_str::<Value>(&artifact).map_err(|error| {
+        CliError::CommandFailed(format!(
+            "could not parse performance JSON artifact {}: {error}",
+            path.display()
+        ))
+    })?;
+    let schema = json_string(&artifact, &["schema"]).unwrap_or_default();
+    if schema != "dasobjectstore.performance_test.recommendation.v1" {
+        return Err(CliError::CommandFailed(format!(
+            "unsupported performance JSON schema '{}'; expected dasobjectstore.performance_test.recommendation.v1",
+            schema
+        )));
+    }
+    Ok(artifact)
+}
+
+fn artifact_pdf_path(artifact: &Value) -> Option<PathBuf> {
+    json_string(artifact, &["run", "artifacts", "pdf_path"]).map(PathBuf::from)
+}
+
+fn performance_report_metadata_json_from_artifact(artifact: &Value) -> String {
+    let run_id =
+        json_string(artifact, &["run", "run_id"]).unwrap_or_else(|| "not recorded".to_string());
+    let generated_at = json_string(artifact, &["run", "generated_at_utc"])
+        .unwrap_or_else(|| "not recorded".to_string());
+    let revision = json_string(artifact, &["run", "repository_revision"])
+        .unwrap_or_else(|| "not recorded".to_string());
+    let version = json_string(artifact, &["run", "cli_version"])
+        .unwrap_or_else(|| dasobjectstore_core::VERSION.to_string());
+    let signature = performance_artifact_signature(artifact);
+    serde_json::json!({
+        "header": "DASObjectStore performance report",
+        "rows": [
+            [
+                {"label": "Document ID", "value": format!("DOS-{run_id}")},
+                {"label": "Performance test identifier", "value": "DASObjectStore-Disk-Speed"},
+                {"label": "Version", "value": version},
+                {"label": "Report state", "value": "FINAL"},
+            ],
+            [
+                {"label": "DeviceID", "value": hostname_for_report()},
+                {"label": "Operator", "value": std::env::var("USER").unwrap_or_else(|_| "not recorded".to_string())},
+                {"label": "Timestamp", "value": generated_at},
+                {"label": "Run ID", "value": run_id},
+            ],
+            [
+                {"label": "Repository revision", "value": revision},
+                {"label": "Test status", "value": "VALID"},
+                {"label": "Signature of operator", "value": "Pending operator signature"},
+                {"label": "Cryptographic signature", "value": signature},
+            ],
+        ],
+    })
+    .to_string()
+}
+
+fn performance_artifact_signature(artifact: &Value) -> String {
+    let canonical = serde_json::to_vec(artifact).unwrap_or_default();
+    sha256_hex_bytes(&canonical)
+}
+
+fn performance_report_qr_payload_from_artifact(artifact: &Value) -> String {
+    let run_id = json_string(artifact, &["run", "run_id"]).unwrap_or_else(|| "unknown".to_string());
+    let signature = performance_artifact_signature(artifact);
+    format!("mnemosyne-report:DASObjectStore:{run_id}:{signature}")
+}
+
+fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &Path) -> String {
+    let run_id =
+        json_string(artifact, &["run", "run_id"]).unwrap_or_else(|| "not recorded".to_string());
+    let generated_at = json_string(artifact, &["run", "generated_at_utc"])
+        .unwrap_or_else(|| "not recorded".to_string());
+    let command = json_array_strings(artifact, &["run", "command"]).join(" ");
+    let mut output = String::new();
+    output.push_str("# DASObjectStore Performance Test Report\n\n");
+    output.push_str("## Executive Summary\n\n");
+    output.push_str(&format!("- Run ID: `{run_id}`\n"));
+    output.push_str(&format!("- Generated at: `{generated_at}`\n"));
+    output.push_str(&format!("- Report artifact: `{}`\n", report_path.display()));
+    output.push_str(&format!(
+        "- JSON artifact: `{}`\n",
+        json_string(artifact, &["run", "artifacts", "json_path"])
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    if !command.is_empty() {
+        output.push_str(&format!("- Reproduction command: `{command}`\n"));
+    }
+    output.push('\n');
+
+    output.push_str("## Recommendation\n\n");
+    output.push_str("| Field | Value |\n| --- | --- |\n");
+    output.push_str(&format!(
+        "| Strategy | `{}` |\n",
+        json_string(artifact, &["recommendation", "strategy"])
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    output.push_str(&format!(
+        "| File order | `{}` |\n",
+        json_string(artifact, &["recommendation", "file_order"])
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    output.push_str(&format!(
+        "| HDD concurrency | {} |\n",
+        json_u64(artifact, &["recommendation", "hdd_concurrency"])
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    output.push_str(&format!(
+        "| Redundancy | {} |\n",
+        json_u64(artifact, &["recommendation", "redundancy"])
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    output.push_str(&format!(
+        "| Estimated aggregate | {}/s |\n\n",
+        json_u64(
+            artifact,
+            &["recommendation", "estimated_aggregate_bytes_per_second"]
+        )
+        .map(|value| format_bytes(value as f64))
+        .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    if let Some(rows) = json_array(artifact, &["recommendation", "rationale"]) {
+        for row in rows.iter().filter_map(Value::as_str) {
+            output.push_str(&format!("- {row}\n"));
+        }
+        output.push('\n');
+    }
+
+    output.push_str("## Workload and Hardware\n\n");
+    output.push_str("| Field | Value |\n| --- | --- |\n");
+    for (label, path) in [
+        ("Workload kind", &["run", "parameters", "workload_kind"][..]),
+        ("Source path", &["run", "parameters", "source_path"][..]),
+        (
+            "File selection",
+            &["run", "parameters", "file_selection"][..],
+        ),
+        ("SSD root", &["hardware", "roots", "ssd_root"][..]),
+        ("HDD root", &["hardware", "roots", "hdd_root"][..]),
+    ] {
+        output.push_str(&format!(
+            "| {label} | `{}` |\n",
+            json_string(artifact, path).unwrap_or_else(|| "not recorded".to_string())
+        ));
+    }
+    output.push_str(&format!(
+        "| File orders | `{}` |\n",
+        json_array_strings(artifact, &["run", "parameters", "file_orders"]).join("`, `")
+    ));
+    output.push_str(&format!(
+        "| Planned files | {} |\n",
+        json_u64(artifact, &["run", "parameters", "file_count"])
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    output.push_str(&format!(
+        "| Logical source bytes | {} |\n\n",
+        json_u64(artifact, &["run", "parameters", "total_source_bytes"])
+            .map(|value| format_bytes(value as f64))
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+
+    output.push_str("## Scenario Summary\n\n");
+    output.push_str("| Scenario | File order | HDD concurrency | Redundancy | Logical source | Physical HDD writes | Operations | Aggregate landing | Overlapped SSD staging |\n");
+    output.push_str("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
+    for row in performance_scenario_rows_from_json(artifact) {
+        output.push_str(&format!(
+            "| {} | `{}` | {} | {} | {} | {} | {} | {}/s | {} |\n",
+            row.scenario,
+            row.file_order,
+            row.hdd_concurrency,
+            row.redundancy,
+            format_bytes(row.logical_source_bytes as f64),
+            format_bytes(row.physical_hdd_write_bytes as f64),
+            row.operations,
+            format_bytes(row.aggregate_bytes_per_second as f64),
+            yes_no(row.overlapped)
+        ));
+    }
+
+    output.push_str("\n## Per-Disk HDD Write Rates\n\n");
+    output.push_str(
+        "| Scenario | File order | HDD concurrency | Disk | Assigned | Write rate | Operations |\n",
+    );
+    output.push_str("| --- | --- | ---: | --- | ---: | ---: | ---: |\n");
+    for row in json_array(artifact, &["plot_data", "per_disk_hdd_write_rate"])
+        .into_iter()
+        .flatten()
+    {
+        output.push_str(&format!(
+            "| {} | `{}` | {} | {} | {} GiB | {} MiB/s | {} |\n",
+            json_string(row, &["scenario_label"]).unwrap_or_else(|| json_string(
+                row,
+                &["scenario"]
+            )
+            .unwrap_or_else(|| "unknown".to_string())),
+            json_string(row, &["file_order"]).unwrap_or_else(|| "not recorded".to_string()),
+            json_u64(row, &["hdd_concurrency"]).unwrap_or_default(),
+            json_string(row, &["disk_id"]).unwrap_or_else(|| "unknown".to_string()),
+            json_f64(row, &["assigned_gib"]).unwrap_or_default(),
+            json_f64(row, &["write_mib_per_second"]).unwrap_or_default(),
+            json_u64(row, &["write_operations"]).unwrap_or_default(),
+        ));
+    }
+
+    output.push_str("\n## Figures\n\n");
+    for artifact in performance_chart_artifacts_from_pdf_path(report_path) {
+        output.push_str(&format!(
+            "![{}]({})\n\n",
+            artifact.title,
+            artifact.path.display()
+        ));
+    }
+    for artifact in performance_io_chart_artifacts_from_json(artifact, report_path) {
+        output.push_str(&format!(
+            "![{}]({})\n\n",
+            artifact.title,
+            artifact.path.display()
+        ));
+    }
+
+    output.push_str("## Reproduction Payload\n\n");
+    output.push_str("```json\n");
+    output.push_str(&serde_json::to_string_pretty(artifact).unwrap_or_else(|_| "{}".to_string()));
+    output.push_str("\n```\n");
+    output
+}
+
+#[derive(Debug)]
+struct JsonScenarioRow {
+    scenario: String,
+    file_order: String,
+    hdd_concurrency: u64,
+    redundancy: u64,
+    logical_source_bytes: u64,
+    physical_hdd_write_bytes: u64,
+    operations: u64,
+    aggregate_bytes_per_second: u64,
+    overlapped: bool,
+}
+
+fn performance_scenario_rows_from_json(artifact: &Value) -> Vec<JsonScenarioRow> {
+    let mut rows = Vec::new();
+    for order in json_array(artifact, &["scenarios", "ssd_only", "orders"])
+        .into_iter()
+        .flatten()
+    {
+        rows.push(JsonScenarioRow {
+            scenario: "SSD only".to_string(),
+            file_order: json_string(order, &["file_order"])
+                .unwrap_or_else(|| "not recorded".to_string()),
+            hdd_concurrency: 0,
+            redundancy: 0,
+            logical_source_bytes: json_u64(artifact, &["scenarios", "ssd_only", "total_bytes"])
+                .unwrap_or_default(),
+            physical_hdd_write_bytes: 0,
+            operations: 0,
+            aggregate_bytes_per_second: json_u64(order, &["median_ssd_write_bytes_per_second"])
+                .unwrap_or_default(),
+            overlapped: false,
+        });
+    }
+    for path in [
+        &["scenarios", "ssd_stage_then_drain_pipeline", "concurrency"][..],
+        &["scenarios", "ssd_hdd_pipeline", "concurrency"][..],
+        &["scenarios", "direct_hdd_pipeline", "concurrency"][..],
+    ] {
+        for row in json_array(artifact, path).into_iter().flatten() {
+            rows.push(JsonScenarioRow {
+                scenario: json_string(row, &["scenario"]).unwrap_or_else(|| "unknown".to_string()),
+                file_order: json_string(row, &["file_order"])
+                    .unwrap_or_else(|| "not recorded".to_string()),
+                hdd_concurrency: json_u64(row, &["concurrency"]).unwrap_or_default(),
+                redundancy: json_u64(row, &["redundancy"]).unwrap_or_default(),
+                logical_source_bytes: json_u64(row, &["logical_source_bytes"]).unwrap_or_default(),
+                physical_hdd_write_bytes: json_u64(row, &["physical_hdd_write_bytes"])
+                    .unwrap_or_default(),
+                operations: json_u64(row, &["hdd_write_operations"]).unwrap_or_default(),
+                aggregate_bytes_per_second: json_u64(row, &["aggregate_write_bytes_per_second"])
+                    .unwrap_or_default(),
+                overlapped: json_bool(row, &["hdd_drain_started_before_all_ssd_staged"])
+                    .unwrap_or(false),
+            });
+        }
+    }
+    rows
+}
+
+fn write_performance_chart_svgs_from_json(
+    artifact: &Value,
+    pdf_path: &Path,
+) -> Result<(), CliError> {
+    let artifacts = performance_chart_artifacts_from_pdf_path(pdf_path);
+    let chart_specs = [
+        ("landing_rate_by_strategy", "value"),
+        ("elapsed_seconds_by_strategy", "value"),
+        ("hdd_write_volume_by_strategy", "value"),
+        ("hdd_write_operations_by_strategy", "value"),
+    ];
+    for (artifact_meta, (dataset, value_key)) in artifacts.iter().take(4).zip(chart_specs) {
+        if let Some(parent) = artifact_meta.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let rows = json_array(artifact, &["plot_data", dataset])
+            .into_iter()
+            .flatten()
+            .map(|row| {
+                (
+                    json_plot_label(row),
+                    json_f64(row, &[value_key]).unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        fs::write(
+            &artifact_meta.path,
+            render_svg_bar_chart(&artifact_meta.title, "Tested strategy", dataset, &rows),
+        )?;
+    }
+    if let Some(artifact_meta) = artifacts.get(4) {
+        let rows = json_array(artifact, &["plot_data", "per_disk_hdd_write_rate"])
+            .into_iter()
+            .flatten()
+            .map(|row| {
+                (
+                    format!(
+                        "{} {} c{} {}",
+                        json_string(row, &["scenario"]).unwrap_or_else(|| "unknown".to_string()),
+                        json_string(row, &["file_order"]).unwrap_or_else(|| "order".to_string()),
+                        json_u64(row, &["hdd_concurrency"]).unwrap_or_default(),
+                        json_string(row, &["disk_id"]).unwrap_or_else(|| "disk".to_string())
+                    ),
+                    json_f64(row, &["write_mib_per_second"]).unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        fs::write(
+            &artifact_meta.path,
+            render_svg_bar_chart(
+                &artifact_meta.title,
+                "Scenario and disk",
+                "HDD write rate (MiB/s)",
+                &rows,
+            ),
+        )?;
+    }
+    for io_artifact in performance_io_chart_artifacts_from_json(artifact, pdf_path) {
+        if let Some(parent) = io_artifact.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let samples = io_samples_from_json_for_label(artifact, &io_artifact.title);
+        fs::write(
+            &io_artifact.path,
+            render_svg_io_line_chart(&io_artifact.title, &samples),
+        )?;
+    }
+    Ok(())
+}
+
+fn json_plot_label(row: &Value) -> String {
+    format!(
+        "{} {} c{} r{}",
+        json_string(row, &["scenario"]).unwrap_or_else(|| "unknown".to_string()),
+        json_string(row, &["file_order"]).unwrap_or_else(|| "order".to_string()),
+        json_u64(row, &["hdd_concurrency"]).unwrap_or_default(),
+        json_u64(row, &["redundancy"]).unwrap_or_default()
+    )
+}
+
+fn performance_chart_artifacts_from_pdf_path(pdf_path: &Path) -> Vec<PerformanceChartArtifact> {
+    let base = pdf_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("performance-report");
+    let parent = pdf_path.parent().unwrap_or_else(|| Path::new("."));
+    [
+        ("Landing rate by strategy", "landing-rate"),
+        ("Elapsed time by strategy", "elapsed-time"),
+        ("Physical HDD write volume by strategy", "hdd-write-volume"),
+        ("HDD write operations by strategy", "hdd-write-operations"),
+        ("Per-disk HDD write rate", "per-disk-write-rate"),
+    ]
+    .into_iter()
+    .map(|(title, suffix)| PerformanceChartArtifact {
+        title: title.to_string(),
+        path: parent.join(format!("{base}-{suffix}.svg")),
+    })
+    .collect()
+}
+
+fn performance_io_chart_artifacts_from_json(
+    artifact: &Value,
+    pdf_path: &Path,
+) -> Vec<PerformanceChartArtifact> {
+    let base = pdf_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("performance-report");
+    let parent = pdf_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut labels = BTreeSet::new();
+    for row in json_array(artifact, &["plot_data", "io_time_series"])
+        .into_iter()
+        .flatten()
+    {
+        labels.insert(json_plot_label(row));
+    }
+    labels
+        .into_iter()
+        .map(|label| PerformanceChartArtifact {
+            title: format!("Per-second IO rates: {label}"),
+            path: parent.join(format!(
+                "{base}-io-{}.svg",
+                label.replace(' ', "-").replace('/', "-")
+            )),
+        })
+        .collect()
+}
+
+fn io_samples_from_json_for_label(artifact: &Value, title: &str) -> Vec<PerformanceIoSample> {
+    let label = title.trim_start_matches("Per-second IO rates: ");
+    json_array(artifact, &["plot_data", "io_time_series"])
+        .into_iter()
+        .flatten()
+        .filter(|row| json_plot_label(row) == label)
+        .map(|row| PerformanceIoSample {
+            elapsed_second: json_u64(row, &["elapsed_second"]).unwrap_or_default(),
+            device_label: json_string(row, &["device_label"])
+                .unwrap_or_else(|| "device".to_string()),
+            device_name: json_string(row, &["device_name"]).unwrap_or_else(|| "device".to_string()),
+            read_bytes_per_second: (json_f64(row, &["read_mib_per_second"]).unwrap_or_default()
+                * 1024.0
+                * 1024.0)
+                .round() as u64,
+            write_bytes_per_second: (json_f64(row, &["write_mib_per_second"]).unwrap_or_default()
+                * 1024.0
+                * 1024.0)
+                .round() as u64,
+        })
+        .collect()
+}
+
+fn json_string(value: &Value, path: &[&str]) -> Option<String> {
+    let value = json_path(value, path)?;
+    if value.is_null() {
+        None
+    } else if let Some(text) = value.as_str() {
+        Some(text.to_string())
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn json_array_strings(value: &Value, path: &[&str]) -> Vec<String> {
+    json_array(value, path)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+fn json_u64(value: &Value, path: &[&str]) -> Option<u64> {
+    json_path(value, path)?.as_u64()
+}
+
+fn json_f64(value: &Value, path: &[&str]) -> Option<f64> {
+    json_path(value, path)?.as_f64()
+}
+
+fn json_bool(value: &Value, path: &[&str]) -> Option<bool> {
+    json_path(value, path)?.as_bool()
+}
+
+fn json_array<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Vec<Value>> {
+    json_path(value, path)?.as_array()
+}
+
+fn json_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    Some(current)
+}
+
+fn hostname_for_report() -> String {
+    ProcessCommand::new("hostname")
+        .output()
+        .ok()
+        .and_then(|output| {
+            output
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "not recorded".to_string())
 }
 
 fn sha256_hex_bytes(bytes: &[u8]) -> String {
@@ -5365,6 +5960,7 @@ fn sha256_hex_bytes(bytes: &[u8]) -> String {
         .collect::<String>()
 }
 
+#[cfg(test)]
 fn render_simple_pdf(markdown: &str) -> Vec<u8> {
     let lines = markdown
         .lines()
@@ -5427,6 +6023,7 @@ fn render_simple_pdf(markdown: &str) -> Vec<u8> {
     pdf.into_bytes()
 }
 
+#[cfg(test)]
 fn strip_markdown_for_pdf(line: &str) -> String {
     line.replace("**", "")
         .replace('`', "")
@@ -5436,6 +6033,7 @@ fn strip_markdown_for_pdf(line: &str) -> String {
         .collect()
 }
 
+#[cfg(test)]
 fn escape_pdf_text(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -10371,21 +10969,23 @@ mod tests {
         connection_status_from_probe, current_user_group_names,
         materialize_generated_performance_workload, measure_copy_with_progress,
         measure_copy_with_split_progress, measure_ssd_stage_payload_with_progress,
-        parse_binary_size, performance_report_metadata_json, performance_sync_all_calls,
+        parse_binary_size, performance_report_metadata_json,
+        performance_report_metadata_json_from_artifact,
+        performance_report_qr_payload_from_artifact, performance_sync_all_calls,
         plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
-        render_performance_report, render_performance_tui_snapshot, render_simple_pdf,
-        reset_performance_sync_all_calls, run, source_performance_workload, throughput,
-        try_submit_pending_ssd_pipeline_jobs, update_file_read_measurements_from_disk_results,
-        validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
-        write_health_summary, write_health_verbose, write_host_connection_status,
-        write_pretty_report, zero_measurement, ActiveHddWrite, ActiveHddWriteMap, CliError,
-        ConnectionAssessment, DiskHealthSummary, DiskPlacementScheduler, HealthReport,
-        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
-        PerformanceCopyProgressPhase, PerformanceDiskResult, PerformanceFileResult,
-        PerformanceIoSample, PerformanceLiveRateCounters, PerformanceMeasurement,
-        PerformancePayload, PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
-        PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceSsdSettler,
-        PerformanceTuiContext, PerformanceTuiSnapshot, PerformanceWorkload,
+        render_performance_report, render_performance_report_from_json_artifact,
+        render_performance_tui_snapshot, render_simple_pdf, reset_performance_sync_all_calls, run,
+        source_performance_workload, throughput, try_submit_pending_ssd_pipeline_jobs,
+        update_file_read_measurements_from_disk_results, validate_managed_hdds_on_supported_das,
+        validate_pdf_report_path, write_health_json, write_health_summary, write_health_verbose,
+        write_host_connection_status, write_pretty_report, zero_measurement, ActiveHddWrite,
+        ActiveHddWriteMap, CliError, ConnectionAssessment, DiskHealthSummary,
+        DiskPlacementScheduler, HealthReport, ManagedHddDevice, PerformanceBenchmarkResults,
+        PerformanceConcurrencyResult, PerformanceCopyProgressPhase, PerformanceDiskResult,
+        PerformanceFileResult, PerformanceIoSample, PerformanceLiveRateCounters,
+        PerformanceMeasurement, PerformancePayload, PerformanceRecommendation, PerformanceReport,
+        PerformanceScenarioKind, PerformanceScenarioResult, PerformanceSsdResidencyBudget,
+        PerformanceSsdSettler, PerformanceTuiContext, PerformanceTuiSnapshot, PerformanceWorkload,
         PerformanceWorkloadKind, SsdPipelineBenchmarkOptions, SsdPipelineJob,
         PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
@@ -11775,20 +12375,56 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(metadata["header"], "DASObjectStore performance report");
-        assert_eq!(labels[0], "Run ID");
+        assert_eq!(labels[0], "Document ID");
         for required in [
-            "Run ID",
+            "Document ID",
+            "Performance test identifier",
+            "Version",
             "Report state",
-            "Generated at (UTC)",
+            "DeviceID",
+            "Operator",
+            "Timestamp",
+            "Run ID",
             "Repository revision",
+            "Test status",
             "Signature of operator",
             "Cryptographic signature",
         ] {
             assert!(labels.contains(&required), "{required}");
         }
         assert_eq!(
-            metadata["rows"][3][1]["value"],
+            metadata["rows"][2][3]["value"],
             "623f8d191890968ec394ff02950710ecb9e5eed5a0b68c064e28e8ffa0876f58"
+        );
+    }
+
+    #[test]
+    fn performance_report_can_be_rebuilt_from_json_artifact() {
+        let artifact = serde_json::from_str::<serde_json::Value>(&render_performance_json(
+            &example_performance_report(),
+        ))
+        .expect("performance JSON parses");
+
+        let metadata = serde_json::from_str::<serde_json::Value>(
+            &performance_report_metadata_json_from_artifact(&artifact),
+        )
+        .expect("metadata parses");
+        let markdown =
+            render_performance_report_from_json_artifact(&artifact, Path::new("/tmp/rebuilt.pdf"));
+        let qr_payload = performance_report_qr_payload_from_artifact(&artifact);
+
+        assert_eq!(metadata["header"], "DASObjectStore performance report");
+        assert_eq!(metadata["rows"][0][0]["label"], "Document ID");
+        assert_eq!(metadata["rows"][0][1]["value"], "DASObjectStore-Disk-Speed");
+        assert_eq!(metadata["rows"][2][2]["label"], "Signature of operator");
+        assert_eq!(metadata["rows"][2][3]["label"], "Cryptographic signature");
+        assert!(qr_payload.starts_with("mnemosyne-report:DASObjectStore:perf-test-run:"));
+        assert!(markdown.contains("## Scenario Summary"));
+        assert!(markdown.contains("## Per-Disk HDD Write Rates"));
+        assert!(markdown.contains("![Landing rate by strategy]"));
+        assert!(markdown.contains("```json"));
+        assert!(
+            markdown.contains("\"schema\": \"dasobjectstore.performance_test.recommendation.v1\"")
         );
     }
 

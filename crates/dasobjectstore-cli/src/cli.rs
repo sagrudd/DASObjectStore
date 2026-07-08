@@ -65,6 +65,8 @@ pub(crate) enum Command {
     Mnemosyne(MnemosyneArgs),
     /// Benchmark SSD and HDD ingest settlement performance.
     PerformanceTest(PerformanceTestArgs),
+    /// Rebuild a formal performance PDF report from an existing JSON artifact.
+    PerformanceReport(PerformanceReportArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -286,6 +288,40 @@ impl PerformanceTestArgs {
 
     pub(crate) fn keep_temp(&self) -> bool {
         self.keep_temp
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct PerformanceReportArgs {
+    /// Existing performance-test JSON artifact to rebuild from.
+    #[arg(long = "json-artifact")]
+    json_artifact: PathBuf,
+    /// Final PDF report path. Defaults to the PDF path recorded in the JSON artifact.
+    #[arg(long)]
+    report: Option<PathBuf>,
+    /// Directory for temporary Markdown during report rendering; defaults to /tmp.
+    #[arg(long, default_value = "/tmp")]
+    tmp_dir: PathBuf,
+    /// Keep the temporary Markdown report source for inspection.
+    #[arg(long)]
+    keep_markdown: bool,
+}
+
+impl PerformanceReportArgs {
+    pub(crate) fn json_artifact(&self) -> &Path {
+        &self.json_artifact
+    }
+
+    pub(crate) fn report(&self) -> Option<&Path> {
+        self.report.as_deref()
+    }
+
+    pub(crate) fn tmp_dir(&self) -> &Path {
+        &self.tmp_dir
+    }
+
+    pub(crate) fn keep_markdown(&self) -> bool {
+        self.keep_markdown
     }
 }
 
@@ -2139,6 +2175,36 @@ mod tests {
         assert_eq!(args.file_size(), None);
         assert_eq!(args.file_count(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);
+    }
+
+    #[test]
+    fn parses_performance_report_rebuild_options() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "performance-report",
+            "--json-artifact",
+            "/var/lib/dasobjectstore/reports/performance.json",
+            "--report",
+            "/var/lib/dasobjectstore/reports/performance.pdf",
+            "--tmp-dir",
+            "/var/tmp",
+            "--keep-markdown",
+        ])
+        .expect("performance-report parses");
+
+        let Some(Command::PerformanceReport(args)) = cli.command() else {
+            panic!("expected performance-report command");
+        };
+        assert_eq!(
+            args.json_artifact(),
+            Path::new("/var/lib/dasobjectstore/reports/performance.json")
+        );
+        assert_eq!(
+            args.report(),
+            Some(Path::new("/var/lib/dasobjectstore/reports/performance.pdf"))
+        );
+        assert_eq!(args.tmp_dir(), Path::new("/var/tmp"));
+        assert!(args.keep_markdown());
     }
 
     #[test]
