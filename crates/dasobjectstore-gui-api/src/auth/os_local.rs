@@ -55,6 +55,111 @@ impl std::error::Error for LocalUserDiscoveryError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PamLocalPasswordAuthenticator {
+    service_name: String,
+}
+
+impl PamLocalPasswordAuthenticator {
+    pub fn new(service_name: impl Into<String>) -> Self {
+        Self {
+            service_name: service_name.into(),
+        }
+    }
+
+    pub fn authenticate(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<(), LocalPasswordAuthError> {
+        authenticate_local_password(&self.service_name, username, password)
+    }
+}
+
+impl Default for PamLocalPasswordAuthenticator {
+    fn default() -> Self {
+        Self::new("dasobjectstore")
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LocalPasswordAuthError {
+    UsernameRequired,
+    PasswordRequired,
+    InvalidCredentials,
+    BackendUnavailable { message: String },
+}
+
+impl fmt::Display for LocalPasswordAuthError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UsernameRequired => write!(formatter, "username is required"),
+            Self::PasswordRequired => write!(formatter, "password is required"),
+            Self::InvalidCredentials => write!(formatter, "invalid local username or password"),
+            Self::BackendUnavailable { message } => {
+                write!(
+                    formatter,
+                    "local password authentication unavailable: {message}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for LocalPasswordAuthError {}
+
+#[cfg(target_os = "linux")]
+fn authenticate_local_password(
+    service_name: &str,
+    username: &str,
+    password: &str,
+) -> Result<(), LocalPasswordAuthError> {
+    use pam_client::conv_mock::Conversation;
+    use pam_client::{Context, Flag};
+
+    let username = username.trim();
+    if username.is_empty() {
+        return Err(LocalPasswordAuthError::UsernameRequired);
+    }
+    if password.is_empty() {
+        return Err(LocalPasswordAuthError::PasswordRequired);
+    }
+
+    let conversation = Conversation::with_credentials(username, password);
+    let mut context = Context::new(service_name, Some(username), conversation).map_err(|err| {
+        LocalPasswordAuthError::BackendUnavailable {
+            message: err.to_string(),
+        }
+    })?;
+    context
+        .authenticate(Flag::NONE)
+        .map_err(|_| LocalPasswordAuthError::InvalidCredentials)?;
+    context
+        .acct_mgmt(Flag::NONE)
+        .map_err(|err| LocalPasswordAuthError::BackendUnavailable {
+            message: err.to_string(),
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn authenticate_local_password(
+    _service_name: &str,
+    username: &str,
+    password: &str,
+) -> Result<(), LocalPasswordAuthError> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Err(LocalPasswordAuthError::UsernameRequired);
+    }
+    if password.is_empty() {
+        return Err(LocalPasswordAuthError::PasswordRequired);
+    }
+
+    Err(LocalPasswordAuthError::BackendUnavailable {
+        message: "PAM local password authentication is only available on Linux".to_string(),
+    })
+}
+
 #[cfg(unix)]
 pub fn discover_current_local_user() -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
     let username = current_username().ok_or(LocalUserDiscoveryError::MissingUsername)?;

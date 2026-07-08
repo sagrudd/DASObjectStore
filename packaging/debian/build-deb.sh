@@ -33,6 +33,7 @@ rm -rf "$build_root"
 install -d \
   "$build_root/DEBIAN" \
   "$build_root/etc/dasobjectstore" \
+  "$build_root/etc/pam.d" \
   "$build_root/lib/systemd/system" \
   "$build_root/opt/dasobjectstore" \
   "$build_root/opt/dasobjectstore/web" \
@@ -50,6 +51,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
+install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
+  "$build_root/etc/pam.d/dasobjectstore"
 install -m 0644 "$packaging_product/config.json" \
   "$build_root/opt/dasobjectstore/config.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
@@ -70,7 +73,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl
+Depends: ca-certificates, acl, libpam0g
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics

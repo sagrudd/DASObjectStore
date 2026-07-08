@@ -11,6 +11,7 @@ const SYSUSERS: &str = include_str!("../../../packaging/linux/sysusers.d/dasobje
 const TMPFILES: &str = include_str!("../../../packaging/linux/tmpfiles.d/dasobjectstore.conf");
 const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobjectstore/daemon.json");
 const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectstore/config.json");
+const PAM_SERVICE: &str = include_str!("../../../packaging/linux/pam.d/dasobjectstore");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
 const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
@@ -100,6 +101,18 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
 }
 
 #[test]
+fn package_installs_named_pam_service_for_local_web_login() {
+    assert_contains(PAM_SERVICE, "auth required pam_unix.so");
+    assert_contains(PAM_SERVICE, "account required pam_unix.so");
+    assert_contains(BUILD_DEB, "etc/pam.d");
+    assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
+    assert_contains(BUILD_DEB, "Depends: ca-certificates, acl, libpam0g");
+    assert_contains(BUILD_RPM, "etc/pam.d");
+    assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
+    assert_contains(BUILD_RPM, "Requires:       pam");
+}
+
+#[test]
 fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-daemon");
     assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-remote");
@@ -120,8 +133,9 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "opt/dasobjectstore/web");
     assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
+    assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
-    assert_contains(BUILD_DEB, "Depends: ca-certificates, acl");
+    assert_contains(BUILD_DEB, "Depends: ca-certificates, acl, libpam0g");
 }
 
 #[test]
@@ -142,6 +156,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "opt/dasobjectstore/web");
     assert_contains(BUILD_RPM, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_RPM, "usr/lib/tmpfiles.d/dasobjectstore.conf");
+    assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
     assert_contains(
         BUILD_RPM,
         "systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf",
@@ -152,6 +167,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     );
     assert_contains(BUILD_RPM, "Requires:       ca-certificates");
     assert_contains(BUILD_RPM, "Requires:       acl");
+    assert_contains(BUILD_RPM, "Requires:       pam");
 }
 
 #[test]

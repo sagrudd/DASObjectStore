@@ -37,6 +37,7 @@ source_path="$rpm_root/SOURCES/${payload_name}.tar.gz"
 rm -rf "$payload_root"
 install -d \
   "$payload_root/etc/dasobjectstore" \
+  "$payload_root/etc/pam.d" \
   "$payload_root/opt/dasobjectstore" \
   "$payload_root/opt/dasobjectstore/web" \
   "$payload_root/usr/bin" \
@@ -56,6 +57,8 @@ install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_nam
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$payload_root/etc/dasobjectstore/daemon.json"
+install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
+  "$payload_root/etc/pam.d/dasobjectstore"
 install -m 0644 "$packaging_product/config.json" \
   "$payload_root/opt/dasobjectstore/config.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
@@ -82,6 +85,7 @@ Source0:        %{name}-%{version}.tar.gz
 
 Requires:       acl
 Requires:       ca-certificates
+Requires:       pam
 Requires:       systemd
 Requires(post): coreutils
 Requires(post): findutils
@@ -167,6 +171,7 @@ fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
+%config(noreplace) /etc/pam.d/dasobjectstore
 %config(noreplace) /opt/dasobjectstore/config.json
 /opt/dasobjectstore/web
 /usr/bin/dasobjectstore

@@ -58,10 +58,12 @@ external authority modes; those deployments should mount DASObjectStore behind
 the host product surface so account, entitlement, audit, and correlation context
 come from that host.
 
-Standalone login uses the product-local browser session store under
-``/opt/dasobjectstore/users.json``. That session gates Web UI access. OS-local
-sudo status and daemon policy remain the authority for administrative storage
-mutation.
+Standalone login verifies the supplied username and password against the
+appliance OS through PAM using the packaged ``dasobjectstore`` PAM service. The
+product-local file under ``/opt/dasobjectstore/users.json`` stores only
+DASObjectStore browser session tokens; users do not need to be pre-created in
+that file before logging in. OS-local sudo status and daemon policy remain the
+authority for administrative storage mutation.
 
 The server can also be started manually with explicit overrides:
 

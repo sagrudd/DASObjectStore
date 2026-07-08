@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.7 - 2026-07-08
+
+- Authenticate standalone Web UI logins against OS-local users through PAM
+  instead of requiring users to exist first in the DASObjectStore session
+  registry.
+- Keep `/opt/dasobjectstore/users.json` as a browser-session token registry and
+  auto-create a session record after successful OS password authentication.
+- Package a named `/etc/pam.d/dasobjectstore` PAM service and add Debian/RPM
+  package regression coverage for the PAM asset and runtime dependencies.
+
 ## 0.10.6 - 2026-07-08
 
 - Redirect Trunk build logs to stderr during Web UI asset preparation so Debian

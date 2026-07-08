@@ -1,6 +1,7 @@
 use crate::{
     discover_current_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
-    LocalAuthStoreError, LoginResponse, LogoutResponse, RegisterResponse, SessionCheckResponse,
+    LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
+    PamLocalPasswordAuthenticator, RegisterResponse, SessionCheckResponse,
     UsersGroupsWorkspaceView,
 };
 use axum::{
@@ -44,12 +45,16 @@ pub fn gui_api_router_for_host_mode(
 }
 
 pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {
+    standalone_auth_router_with_state(StandaloneAuthRouteState::system(auth_store))
+}
+
+fn standalone_auth_router_with_state(state: StandaloneAuthRouteState) -> Router {
     Router::new()
         .route("/api/register", post(register))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/session", post(session))
-        .with_state(auth_store)
+        .with_state(state)
 }
 
 pub fn standalone_users_groups_router(auth_store: LocalAuthStore) -> Router {
@@ -90,6 +95,36 @@ impl StandaloneUsersGroupsRouteState {
                 DaemonStandaloneLocalGroupAdminClient::default_packaged(),
             )),
         }
+    }
+}
+
+#[derive(Clone)]
+struct StandaloneAuthRouteState {
+    auth_store: LocalAuthStore,
+    local_password_authenticator: Arc<dyn LocalPasswordAuthenticator>,
+}
+
+impl StandaloneAuthRouteState {
+    fn system(auth_store: LocalAuthStore) -> Self {
+        Self {
+            auth_store,
+            local_password_authenticator: Arc::new(SystemLocalPasswordAuthenticator::default()),
+        }
+    }
+}
+
+trait LocalPasswordAuthenticator: Send + Sync {
+    fn authenticate(&self, username: &str, password: &str) -> Result<(), LocalPasswordAuthError>;
+}
+
+#[derive(Default)]
+struct SystemLocalPasswordAuthenticator {
+    pam: PamLocalPasswordAuthenticator,
+}
+
+impl LocalPasswordAuthenticator for SystemLocalPasswordAuthenticator {
+    fn authenticate(&self, username: &str, password: &str) -> Result<(), LocalPasswordAuthError> {
+        self.pam.authenticate(username, password)
     }
 }
 
@@ -262,44 +297,48 @@ impl StandaloneLocalGroupAdminClient for DaemonStandaloneLocalGroupAdminClient {
 }
 
 async fn register(
-    State(auth_store): State<LocalAuthStore>,
+    State(state): State<StandaloneAuthRouteState>,
     Json(request): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, (StatusCode, Json<AuthRouteError>)> {
-    auth_store
+    state
+        .auth_store
         .register_with_token(&request.username, &request.token, &request.password)
         .map(Json)
         .map_err(auth_route_error)
 }
 
 async fn login(
-    State(auth_store): State<LocalAuthStore>,
+    State(state): State<StandaloneAuthRouteState>,
     Json(request): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, Json<AuthRouteError>)> {
-    auth_store
-        .login_with_session_ttl_seconds(
-            &request.username,
-            &request.password,
-            request.session_ttl_seconds,
-        )
+    state
+        .local_password_authenticator
+        .authenticate(&request.username, &request.password)
+        .map_err(local_password_auth_route_error)?;
+    state
+        .auth_store
+        .create_session_for_authenticated_local_user(&request.username, request.session_ttl_seconds)
         .map(Json)
         .map_err(auth_route_error)
 }
 
 async fn logout(
-    State(auth_store): State<LocalAuthStore>,
+    State(state): State<StandaloneAuthRouteState>,
     Json(request): Json<LogoutRequest>,
 ) -> Result<Json<LogoutResponse>, (StatusCode, Json<AuthRouteError>)> {
-    auth_store
+    state
+        .auth_store
         .logout(&request.username, &request.session_token)
         .map(Json)
         .map_err(auth_route_error)
 }
 
 async fn session(
-    State(auth_store): State<LocalAuthStore>,
+    State(state): State<StandaloneAuthRouteState>,
     Json(request): Json<SessionCheckRequest>,
 ) -> Result<Json<SessionCheckResponse>, (StatusCode, Json<AuthRouteError>)> {
-    auth_store
+    state
+        .auth_store
         .verify_session(&request.username, &request.session_token)
         .map(Json)
         .map_err(auth_route_error)
@@ -573,6 +612,26 @@ fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteErro
     )
 }
 
+fn local_password_auth_route_error(
+    err: LocalPasswordAuthError,
+) -> (StatusCode, Json<AuthRouteError>) {
+    match err {
+        LocalPasswordAuthError::UsernameRequired | LocalPasswordAuthError::PasswordRequired => {
+            route_error(StatusCode::BAD_REQUEST, "invalid_request", err.to_string())
+        }
+        LocalPasswordAuthError::InvalidCredentials => route_error(
+            StatusCode::UNAUTHORIZED,
+            "invalid_credentials",
+            err.to_string(),
+        ),
+        LocalPasswordAuthError::BackendUnavailable { .. } => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "local_auth_unavailable",
+            err.to_string(),
+        ),
+    }
+}
+
 fn route_error(
     status: StatusCode,
     code: impl Into<String>,
@@ -590,18 +649,19 @@ fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_api_router_for_host_mode, standalone_auth_router,
+        gui_api_router_for_host_mode, standalone_auth_router_with_state,
         standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
-        CreateLocalGroupRequest, GuiApiHostMode, LocalUserAuthorityProvider, LoginRequest,
-        LogoutRequest, RegisterRequest, SessionCheckRequest,
-        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
-        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
-        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-        StandaloneUsersGroupsRouteState, LOCAL_ADMIN_CONFIRMATION_MARKER,
+        CreateLocalGroupRequest, GuiApiHostMode, LocalPasswordAuthenticator,
+        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, RegisterRequest,
+        SessionCheckRequest, StandaloneAuthRouteState, StandaloneLocalGroupAdminAcceptedResponse,
+        StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
+        StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
+        StandaloneLocalGroupOperation, StandaloneUsersGroupsRouteState,
+        LOCAL_ADMIN_CONFIRMATION_MARKER,
     };
     use crate::{
-        LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata, LoginResponse,
-        STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+        LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
+        LoginResponse, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
@@ -620,7 +680,7 @@ mod tests {
         let registration_token = auth_store
             .issue_registration_token("admin", Some(3_600))
             .expect("registration token issued");
-        let app = standalone_auth_router(auth_store);
+        let app = test_auth_router(auth_store, vec![("admin", "secret")]);
 
         let register = post_json::<crate::RegisterResponse>(
             app.clone(),
@@ -681,7 +741,7 @@ mod tests {
         auth_store
             .register_with_token("admin", &token, "secret")
             .expect("registered");
-        let app = standalone_auth_router(auth_store);
+        let app = test_auth_router(auth_store, vec![("admin", "secret")]);
 
         let response = app
             .oneshot(
@@ -711,7 +771,7 @@ mod tests {
     async fn session_route_rejects_expired_session() {
         let root = temp_root("expired-session-route");
         let auth_store = registered_auth_store(&root);
-        let app = standalone_auth_router(auth_store.clone());
+        let app = test_auth_router(auth_store.clone(), vec![("admin", "secret")]);
         let login = post_json::<LoginResponse>(
             app.clone(),
             "/api/login",
@@ -743,7 +803,7 @@ mod tests {
     async fn session_route_rejects_logged_out_session() {
         let root = temp_root("logged-out-session-route");
         let auth_store = registered_auth_store(&root);
-        let app = standalone_auth_router(auth_store);
+        let app = test_auth_router(auth_store, vec![("admin", "secret")]);
         let login = post_json::<LoginResponse>(
             app.clone(),
             "/api/login",
@@ -799,6 +859,32 @@ mod tests {
             .expect("request completes");
 
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn login_route_accepts_os_authenticated_user_without_product_registration() {
+        let root = temp_root("os-login-without-product-registration");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = test_auth_router(auth_store.clone(), vec![("stephen", "secret")]);
+
+        let login = post_json::<LoginResponse>(
+            app.clone(),
+            "/api/login",
+            &LoginRequest {
+                username: "stephen".to_string(),
+                password: "secret".to_string(),
+                session_ttl_seconds: Some(3_600),
+            },
+        )
+        .await;
+        let session = auth_store
+            .verify_session("stephen", &login.session_token)
+            .expect("session verifies");
+
+        assert_eq!(login.username, "stephen");
+        assert!(session.valid);
 
         cleanup(&root);
     }
@@ -1200,6 +1286,52 @@ mod tests {
             local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
             local_group_admin_client: local_group_admin_client
                 .map(|client| client as Arc<dyn StandaloneLocalGroupAdminClient>),
+        }
+    }
+
+    fn test_auth_router(
+        auth_store: LocalAuthStore,
+        accepted_credentials: Vec<(&str, &str)>,
+    ) -> axum::Router {
+        standalone_auth_router_with_state(StandaloneAuthRouteState {
+            auth_store,
+            local_password_authenticator: Arc::new(FixedPasswordAuthenticator {
+                accepted_credentials: accepted_credentials
+                    .into_iter()
+                    .map(|(username, password)| (username.to_string(), password.to_string()))
+                    .collect(),
+            }),
+        })
+    }
+
+    #[derive(Clone)]
+    struct FixedPasswordAuthenticator {
+        accepted_credentials: Vec<(String, String)>,
+    }
+
+    impl LocalPasswordAuthenticator for FixedPasswordAuthenticator {
+        fn authenticate(
+            &self,
+            username: &str,
+            password: &str,
+        ) -> Result<(), LocalPasswordAuthError> {
+            if username.trim().is_empty() {
+                return Err(LocalPasswordAuthError::UsernameRequired);
+            }
+            if password.is_empty() {
+                return Err(LocalPasswordAuthError::PasswordRequired);
+            }
+            if self
+                .accepted_credentials
+                .iter()
+                .any(|(accepted_username, accepted_password)| {
+                    accepted_username == username.trim() && accepted_password == password
+                })
+            {
+                Ok(())
+            } else {
+                Err(LocalPasswordAuthError::InvalidCredentials)
+            }
         }
     }
 

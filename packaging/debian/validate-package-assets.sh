@@ -8,6 +8,7 @@ sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
 tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
 daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
 web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
+pam_service="$repo_root/packaging/linux/pam.d/dasobjectstore"
 postinst="$repo_root/packaging/debian/postinst"
 build_deb="$repo_root/packaging/debian/build-deb.sh"
 build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
@@ -38,6 +39,7 @@ require_file "$sysusers"
 require_file "$tmpfiles"
 require_file "$daemon_config"
 require_file "$web_config"
+require_file "$pam_service"
 require_file "$postinst"
 require_file "$build_deb"
 require_file "$build_rpm"
@@ -64,6 +66,8 @@ require_text "$tmpfiles" "d /opt/dasobjectstore 0750 dasobjectstore dasobjectsto
 require_text "$web_config" "\"bind_address\": \"0.0.0.0\""
 require_text "$web_config" "\"https_port\": 8448"
 require_text "$daemon_config" "\"socket_path\": \"/run/dasobjectstore/dasobjectstored.sock\""
+require_text "$pam_service" "auth required pam_unix.so"
+require_text "$pam_service" "account required pam_unix.so"
 
 require_text "$postinst" "service_user=\"dasobjectstore\""
 require_text "$postinst" "managed_root=\"/srv/dasobjectstore\""
@@ -88,9 +92,11 @@ require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-server.service'
 require_text "$build_deb" 'opt/dasobjectstore/config.json'
 require_text "$build_deb" 'opt/dasobjectstore/web'
+require_text "$build_deb" 'etc/pam.d/dasobjectstore'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_deb" 'DEBIAN/postinst'
+require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g'
 
 require_text "$build_rpm" "rpmbuild"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
@@ -99,10 +105,12 @@ require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'
 require_text "$build_rpm" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_rpm" 'usr/lib/systemd/system/dasobjectstored.service'
+require_text "$build_rpm" 'etc/pam.d/dasobjectstore'
 require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf'
+require_text "$build_rpm" 'Requires:       pam'
 
 require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."

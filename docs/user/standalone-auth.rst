@@ -9,11 +9,12 @@ such as ``mnemosyne`` or a future store-specific group, authorize ordinary users
 to submit daemon jobs for allowed stores. These groups do not give users direct
 write access to managed DAS disks.
 
-The Web UI may still use a product-local browser session while standalone UI
-support is being built. That session is not the source of administrator
-authority. For administrator workflows, DASObjectStore will use OS-local
-identity and sudo-derived administrator status, then submit the action to
-``dasobjectstored``.
+The Web UI verifies local usernames and passwords against the appliance OS
+through PAM. DASObjectStore stores only its browser session token locally after
+PAM succeeds; users do not need a separate product-local password account. That
+session is not the source of administrator authority. For administrator
+workflows, DASObjectStore uses OS-local identity and sudo-derived administrator
+status, then submits the action to ``dasobjectstored``.
 
 Local group administration is also daemon-backed. Creating a local writer or
 administrator group, and assigning a local user to one of those groups, is

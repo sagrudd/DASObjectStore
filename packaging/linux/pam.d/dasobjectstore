@@ -1,0 +1,7 @@
+# DASObjectStore standalone local-user authentication.
+#
+# The Web UI proves local OS credentials through PAM, then DASObjectStore stores
+# only its own browser session token. Administrator authority is still derived
+# from OS group membership and daemon policy.
+auth required pam_unix.so
+account required pam_unix.so

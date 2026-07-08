@@ -156,6 +156,45 @@ impl LocalAuthStore {
         })
     }
 
+    pub fn create_session_for_authenticated_local_user(
+        &self,
+        username: &str,
+        ttl_seconds: Option<i64>,
+    ) -> Result<LoginResponse, LocalAuthStoreError> {
+        let username = normalize_username(username);
+        reject_blank_username(&username)?;
+        let mut registry = self.load_registry()?;
+        let now = unix_now_seconds();
+        let user_index = if let Some(index) = registry
+            .users
+            .iter()
+            .position(|user| user.username == username)
+        {
+            index
+        } else {
+            registry.users.push(AuthenticatedUser {
+                username: username.clone(),
+                created_at_unix_seconds: now,
+                password_hash: None,
+                registered_at_unix_seconds: None,
+                registration_tokens: Vec::new(),
+                sessions: Vec::new(),
+            });
+            registry.users.len() - 1
+        };
+        let user = registry
+            .users
+            .get_mut(user_index)
+            .expect("session user index was just resolved");
+        let (session_token, expires_at_unix_seconds) = push_session(user, ttl_seconds, now);
+        self.save_registry(&registry)?;
+        Ok(LoginResponse {
+            username,
+            session_token,
+            expires_at_unix_seconds,
+        })
+    }
+
     pub fn verify_session(
         &self,
         username: &str,

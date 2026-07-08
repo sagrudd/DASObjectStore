@@ -87,6 +87,28 @@ fn rejects_invalid_password() {
 }
 
 #[test]
+fn os_authenticated_user_session_is_created_without_password_registration() {
+    let root = temp_root("os-auth-session");
+    let store = LocalAuthStore::new(&root);
+
+    let login = store
+        .create_session_for_authenticated_local_user(" stephen ", Some(3_600))
+        .expect("local OS session created");
+    let session = store
+        .verify_session("stephen", &login.session_token)
+        .expect("session verifies");
+    let users = store.list_users().expect("users list");
+
+    assert_eq!(login.username, "stephen");
+    assert!(session.valid);
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0].username, "stephen");
+    assert!(!users[0].registered);
+
+    cleanup(&root);
+}
+
+#[test]
 fn session_ttl_defaults_to_one_hour() {
     let root = temp_root("ttl");
     let store = registered_store(&root);

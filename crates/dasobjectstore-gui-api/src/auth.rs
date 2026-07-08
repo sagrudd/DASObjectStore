@@ -12,6 +12,7 @@ pub use model::{
 };
 pub use os_local::{
     discover_current_local_user, local_user_metadata_from_unix_account_files,
-    LocalUserDiscoveryError, LocalUserMetadata, SUDO_ADMIN_GROUPS,
+    LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
+    PamLocalPasswordAuthenticator, SUDO_ADMIN_GROUPS,
 };
 pub use store::{LocalAuthStore, LocalAuthStoreError};
