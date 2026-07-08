@@ -117,6 +117,56 @@ pub struct EnclosurePrepareAcceptedResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct AdminJobStatusResponse {
+    pub job: AdminJobSummary,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct AdminJobSummary {
+    pub job_id: String,
+    pub kind: String,
+    pub state: String,
+    pub progress: AdminJobProgress,
+    pub percent_complete: Option<u8>,
+    pub submitted_at_utc: String,
+    pub updated_at_utc: String,
+    pub actor: Option<String>,
+    pub failure_message: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct AdminJobProgress {
+    pub stage: String,
+    pub work_bytes_done: u64,
+    pub work_bytes_total: u64,
+    pub work_units_done: u64,
+    pub work_units_total: u64,
+    pub message: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct AdminJobCancelResponse {
+    pub job_id: String,
+    pub accepted: bool,
+    pub state: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AdminJobCancelRequest {
+    pub reason: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct EnclosurePrepareHddDevice {
     pub disk_id: String,
@@ -551,6 +601,41 @@ pub async fn submit_enclosure_prepare(
     .await
 }
 
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+pub async fn get_admin_job_status(
+    api_base_path: &str,
+    job_id: &str,
+) -> Result<AdminJobStatusResponse, ApiError> {
+    get_json(&admin_job_status_path(api_base_path, job_id)).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
+pub async fn cancel_admin_job(
+    api_base_path: &str,
+    job_id: &str,
+    request: &AdminJobCancelRequest,
+) -> Result<AdminJobCancelResponse, ApiError> {
+    post_json(&admin_job_cancel_path(api_base_path, job_id), request).await
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+pub fn admin_job_status_path(api_base_path: &str, job_id: &str) -> String {
+    format!(
+        "{}/workspaces/admin/jobs/{}",
+        api_base_path.trim_end_matches('/'),
+        job_id
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+pub fn admin_job_cancel_path(api_base_path: &str, job_id: &str) -> String {
+    format!("{}/cancel", admin_job_status_path(api_base_path, job_id))
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn auth_path(auth_base_path: &str, route: &str) -> String {
     format!("{}/{}", auth_base_path.trim_end_matches('/'), route)
@@ -616,7 +701,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_path, BioinformaticsWorkspaceResponse, EnclosurePrepareResponse,
+        admin_job_cancel_path, admin_job_status_path, auth_path, AdminJobCancelResponse,
+        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, EnclosurePrepareResponse,
         EnclosuresPageResponse, GuiActionPlanResponse, HomeDashboardResponse,
         ObjectStoresPageResponse,
     };
@@ -830,6 +916,63 @@ mod tests {
         assert_eq!(decoded.accepted.kind, "enclosure_preparation");
         assert_eq!(decoded.hdd_devices[0].disk_id, "qnap-1057");
         assert_eq!(decoded.administrator_actor.as_deref(), Some("operator"));
+    }
+
+    #[test]
+    fn builds_admin_job_routes_under_product_mount() {
+        assert_eq!(
+            admin_job_status_path("/products/dasobjectstore/api/v1/", "enclosure-prepare-1"),
+            "/products/dasobjectstore/api/v1/workspaces/admin/jobs/enclosure-prepare-1"
+        );
+        assert_eq!(
+            admin_job_cancel_path("/products/dasobjectstore/api/v1/", "enclosure-prepare-1"),
+            "/products/dasobjectstore/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel"
+        );
+    }
+
+    #[test]
+    fn decodes_admin_job_status_response_subset() {
+        let payload = serde_json::json!({
+            "job": {
+                "job_id": "enclosure-prepare-1",
+                "kind": "enclosure_preparation",
+                "state": "running",
+                "progress": {
+                    "stage": "formatting",
+                    "work_bytes_done": 5,
+                    "work_bytes_total": 10,
+                    "work_units_done": 1,
+                    "work_units_total": 2,
+                    "message": "formatting selected devices"
+                },
+                "percent_complete": 50,
+                "submitted_at_utc": "2026-07-08T20:05:00Z",
+                "updated_at_utc": "2026-07-08T20:05:10Z",
+                "actor": "operator",
+                "failure_message": null
+            }
+        });
+
+        let decoded =
+            serde_json::from_value::<AdminJobStatusResponse>(payload).expect("status decodes");
+
+        assert_eq!(decoded.job.kind, "enclosure_preparation");
+        assert_eq!(decoded.job.percent_complete, Some(50));
+    }
+
+    #[test]
+    fn decodes_admin_job_cancel_response_subset() {
+        let payload = serde_json::json!({
+            "job_id": "enclosure-prepare-1",
+            "accepted": true,
+            "state": "cancelled"
+        });
+
+        let decoded =
+            serde_json::from_value::<AdminJobCancelResponse>(payload).expect("cancel decodes");
+
+        assert!(decoded.accepted);
+        assert_eq!(decoded.state, "cancelled");
     }
 
     #[test]

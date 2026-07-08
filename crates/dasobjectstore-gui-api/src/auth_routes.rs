@@ -6,7 +6,7 @@ use crate::{
     UsersGroupsWorkspaceView,
 };
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
     Extension, Json, Router,
@@ -17,6 +17,8 @@ use dasobjectstore_daemon::{
     AssignLocalUserToLocalGroupResponse as DaemonAssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest as DaemonCreateLocalGroupRequest,
     CreateLocalGroupResponse as DaemonCreateLocalGroupResponse, DaemonClient,
+    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress,
+    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminCommand, DaemonRuntimeConfig,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
@@ -100,6 +102,14 @@ fn standalone_enclosure_admin_router_with_state(
         .route(
             "/api/v1/workspaces/enclosures/prepare",
             post(prepare_enclosure),
+        )
+        .route(
+            "/api/v1/workspaces/admin/jobs/{job_id}",
+            get(admin_job_status),
+        )
+        .route(
+            "/api/v1/workspaces/admin/jobs/{job_id}/cancel",
+            post(cancel_admin_job),
         )
         .layer(Extension(state.auth_store.clone()))
         .with_state(state)
@@ -203,6 +213,16 @@ trait StandaloneEnclosureAdminClient: Send + Sync {
         &self,
         request: StandaloneEnclosurePrepareDaemonRequest,
     ) -> Result<StandaloneEnclosurePrepareResponse, StandaloneEnclosureAdminClientError>;
+
+    fn job_status(
+        &self,
+        request: StandaloneAdminJobStatusDaemonRequest,
+    ) -> Result<StandaloneAdminJobStatusResponse, StandaloneEnclosureAdminClientError>;
+
+    fn cancel_job(
+        &self,
+        request: StandaloneAdminJobCancelDaemonRequest,
+    ) -> Result<StandaloneAdminJobCancelResponse, StandaloneEnclosureAdminClientError>;
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -325,6 +345,46 @@ pub struct StandaloneEnclosurePrepareAcceptedResponse {
     pub dry_run: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CancelAdminJobRequest {
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneAdminJobStatusResponse {
+    pub job: StandaloneAdminJobSummary,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneAdminJobSummary {
+    pub job_id: String,
+    pub kind: String,
+    pub state: String,
+    pub progress: StandaloneAdminJobProgress,
+    pub percent_complete: Option<u8>,
+    pub submitted_at_utc: String,
+    pub updated_at_utc: String,
+    pub actor: Option<String>,
+    pub failure_message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneAdminJobProgress {
+    pub stage: String,
+    pub work_bytes_done: u64,
+    pub work_bytes_total: u64,
+    pub work_units_done: u64,
+    pub work_units_total: u64,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneAdminJobCancelResponse {
+    pub job_id: String,
+    pub accepted: bool,
+    pub state: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct StandaloneLocalGroupAdminDaemonRequest {
     operation: StandaloneLocalGroupOperation,
@@ -348,6 +408,17 @@ struct StandaloneEnclosurePrepareDaemonRequest {
     administrator_actor: Option<String>,
     allow_format: bool,
     confirmation_marker: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StandaloneAdminJobStatusDaemonRequest {
+    job_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StandaloneAdminJobCancelDaemonRequest {
+    job_id: String,
+    reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -451,6 +522,39 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
                 confirmation_marker: request.confirmation_marker,
             })
             .map(enclosure_prepare_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn job_status(
+        &self,
+        request: StandaloneAdminJobStatusDaemonRequest,
+    ) -> Result<StandaloneAdminJobStatusResponse, StandaloneEnclosureAdminClientError> {
+        let job_id = DaemonJobId::new(request.job_id).map_err(|err| {
+            StandaloneEnclosureAdminClientError {
+                message: err.to_string(),
+            }
+        })?;
+        self.client
+            .job_status(DaemonJobStatusRequest { job_id })
+            .map(admin_job_status_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn cancel_job(
+        &self,
+        request: StandaloneAdminJobCancelDaemonRequest,
+    ) -> Result<StandaloneAdminJobCancelResponse, StandaloneEnclosureAdminClientError> {
+        let job_id = DaemonJobId::new(request.job_id).map_err(|err| {
+            StandaloneEnclosureAdminClientError {
+                message: err.to_string(),
+            }
+        })?;
+        self.client
+            .cancel_job(DaemonJobCancelRequest {
+                job_id,
+                reason: request.reason,
+            })
+            .map(admin_job_cancel_response_from_daemon)
             .map_err(standalone_enclosure_admin_client_error)
     }
 }
@@ -569,6 +673,29 @@ async fn prepare_enclosure(
     submit_prepare_enclosure_request(&state, request).map(Json)
 }
 
+async fn admin_job_status(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Path(job_id): Path<String>,
+) -> Result<Json<StandaloneAdminJobStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    let request = StandaloneAdminJobStatusDaemonRequest {
+        job_id: required_field("job_id", job_id)?,
+    };
+    submit_admin_job_status_request(&state, request).map(Json)
+}
+
+async fn cancel_admin_job(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Path(job_id): Path<String>,
+    Json(request): Json<CancelAdminJobRequest>,
+) -> Result<Json<StandaloneAdminJobCancelResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    let request = validate_cancel_admin_job_request(job_id, request)?;
+    submit_admin_job_cancel_request(&state, request).map(Json)
+}
+
 fn validate_create_local_group_request(
     request: CreateLocalGroupRequest,
 ) -> Result<StandaloneLocalGroupAdminDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
@@ -658,6 +785,21 @@ fn validate_prepare_enclosure_request(
     })
 }
 
+fn validate_cancel_admin_job_request(
+    job_id: String,
+    request: CancelAdminJobRequest,
+) -> Result<StandaloneAdminJobCancelDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
+    let reason = request
+        .reason
+        .map(|value| required_field("reason", value))
+        .transpose()?;
+
+    Ok(StandaloneAdminJobCancelDaemonRequest {
+        job_id: required_field("job_id", job_id)?,
+        reason,
+    })
+}
+
 fn require_local_administrator(
     local_user_provider: &dyn LocalUserAuthorityProvider,
     actor: &AuthenticatedGuiActor,
@@ -722,6 +864,48 @@ fn submit_prepare_enclosure_request(
         route_error(
             StatusCode::BAD_GATEWAY,
             "daemon_enclosure_prepare_failed",
+            err.message,
+        )
+    })
+}
+
+fn submit_admin_job_status_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: StandaloneAdminJobStatusDaemonRequest,
+) -> Result<StandaloneAdminJobStatusResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_admin_jobs_unavailable",
+            "daemon administrator job status contract is not available",
+        )
+    })?;
+
+    client.job_status(request).map_err(|err| {
+        route_error(
+            StatusCode::BAD_GATEWAY,
+            "daemon_admin_job_status_failed",
+            err.message,
+        )
+    })
+}
+
+fn submit_admin_job_cancel_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: StandaloneAdminJobCancelDaemonRequest,
+) -> Result<StandaloneAdminJobCancelResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_admin_jobs_unavailable",
+            "daemon administrator job cancellation contract is not available",
+        )
+    })?;
+
+    client.cancel_job(request).map_err(|err| {
+        route_error(
+            StatusCode::BAD_GATEWAY,
+            "daemon_admin_job_cancel_failed",
             err.message,
         )
     })
@@ -875,6 +1059,75 @@ fn enclosure_prepare_response_from_daemon(
     }
 }
 
+fn admin_job_status_response_from_daemon(
+    response: DaemonJobStatusResponse,
+) -> StandaloneAdminJobStatusResponse {
+    StandaloneAdminJobStatusResponse {
+        job: admin_job_summary_from_daemon(response.job),
+    }
+}
+
+fn admin_job_summary_from_daemon(job: DaemonJobSummary) -> StandaloneAdminJobSummary {
+    let percent_complete = job.progress.percent_complete();
+    StandaloneAdminJobSummary {
+        job_id: job.job_id.to_string(),
+        kind: admin_job_kind_label(job.kind).to_string(),
+        state: admin_job_state_label(job.state).to_string(),
+        progress: admin_job_progress_from_daemon(job.progress),
+        percent_complete,
+        submitted_at_utc: job.submitted_at_utc,
+        updated_at_utc: job.updated_at_utc,
+        actor: job.actor,
+        failure_message: job.failure_message,
+    }
+}
+
+fn admin_job_progress_from_daemon(progress: DaemonJobProgress) -> StandaloneAdminJobProgress {
+    StandaloneAdminJobProgress {
+        stage: progress.stage,
+        work_bytes_done: progress.work_bytes_done,
+        work_bytes_total: progress.work_bytes_total,
+        work_units_done: progress.work_units_done,
+        work_units_total: progress.work_units_total,
+        message: progress.message,
+    }
+}
+
+fn admin_job_cancel_response_from_daemon(
+    response: DaemonJobCancelResponse,
+) -> StandaloneAdminJobCancelResponse {
+    StandaloneAdminJobCancelResponse {
+        job_id: response.job_id.to_string(),
+        accepted: response.accepted,
+        state: admin_job_state_label(response.state).to_string(),
+    }
+}
+
+fn admin_job_kind_label(kind: DaemonJobKind) -> &'static str {
+    match kind {
+        DaemonJobKind::IngestFiles => "ingest_files",
+        DaemonJobKind::DirectImport => "direct_import",
+        DaemonJobKind::DiskDrain => "disk_drain",
+        DaemonJobKind::DiskRetire => "disk_retire",
+        DaemonJobKind::DiskReplace => "disk_replace",
+        DaemonJobKind::EnclosurePreparation => "enclosure_preparation",
+        DaemonJobKind::Repair => "repair",
+        DaemonJobKind::ServiceOperation => "service_operation",
+        DaemonJobKind::SystemAdministration => "system_administration",
+    }
+}
+
+fn admin_job_state_label(state: DaemonJobState) -> &'static str {
+    match state {
+        DaemonJobState::Queued => "queued",
+        DaemonJobState::Running => "running",
+        DaemonJobState::Waiting => "waiting",
+        DaemonJobState::Complete => "complete",
+        DaemonJobState::Failed => "failed",
+        DaemonJobState::Cancelled => "cancelled",
+    }
+}
+
 fn standalone_accepted_response_from_daemon(
     accepted: dasobjectstore_daemon::DaemonLocalAdminAcceptedResponse,
 ) -> StandaloneLocalGroupAdminAcceptedResponse {
@@ -977,10 +1230,13 @@ mod tests {
     use super::{
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
         standalone_enclosure_admin_router_with_state, standalone_users_groups_router_with_state,
-        AssignLocalUserToGroupRequest, CreateLocalGroupRequest, GuiApiHostMode,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        SessionCheckRequest, StandaloneAuthRouteState, StandaloneEnclosureAdminClient,
+        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
+        GuiApiHostMode, LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest,
+        LogoutRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
+        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState, StandaloneEnclosureAdminClient,
         StandaloneEnclosureAdminClientError, StandaloneEnclosureAdminRouteState,
         StandaloneEnclosurePrepareAcceptedResponse, StandaloneEnclosurePrepareDaemonRequest,
         StandaloneEnclosurePrepareResponse, StandaloneLocalGroupAdminAcceptedResponse,
@@ -1700,6 +1956,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_job_status_requires_local_admin() {
+        let root = temp_root("admin-job-status-non-admin");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["users"]),
+            Some(recording_enclosure_client()),
+        ));
+
+        let response = get_response_with_session(
+            app,
+            "/api/v1/workspaces/admin/jobs/enclosure-prepare-1",
+            "admin",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn admin_job_status_forwards_request_to_daemon_client() {
+        let root = temp_root("admin-job-status-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client.clone()),
+        ));
+
+        let response = get_json_with_session::<StandaloneAdminJobStatusResponse>(
+            app,
+            "/api/v1/workspaces/admin/jobs/enclosure-prepare-1",
+            "admin",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(response.job.job_id, "enclosure-prepare-1");
+        assert_eq!(response.job.kind, "enclosure_preparation");
+        assert_eq!(response.job.state, "running");
+        assert_eq!(response.job.percent_complete, Some(50));
+        assert_eq!(
+            client.status_requests(),
+            vec![StandaloneAdminJobStatusDaemonRequest {
+                job_id: "enclosure-prepare-1".to_string(),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn admin_job_cancel_rejects_blank_reason() {
+        let root = temp_root("admin-job-cancel-blank-reason");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel",
+            "admin",
+            &login.session_token,
+            &CancelAdminJobRequest {
+                reason: Some(" ".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "invalid_request");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn admin_job_cancel_forwards_request_to_daemon_client() {
+        let root = temp_root("admin-job-cancel-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneAdminJobCancelResponse>(
+            app,
+            "/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel",
+            "admin",
+            &login.session_token,
+            &CancelAdminJobRequest {
+                reason: Some("operator requested cancellation".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.job_id, "enclosure-prepare-1");
+        assert!(response.accepted);
+        assert_eq!(response.state, "cancelled");
+        assert_eq!(
+            client.cancel_requests(),
+            vec![StandaloneAdminJobCancelDaemonRequest {
+                job_id: "enclosure-prepare-1".to_string(),
+                reason: Some("operator requested cancellation".to_string()),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn synoptikon_integrated_host_mode_omits_local_auth_routes() {
         let root = temp_root("integrated-host-mode");
         let auth_store = LocalAuthStore::new(&root);
@@ -1801,6 +2181,24 @@ mod tests {
         serde_json::from_slice(&bytes).expect("response decodes")
     }
 
+    async fn get_json_with_session<T>(
+        app: axum::Router,
+        path: &str,
+        username: &str,
+        session_token: &str,
+    ) -> T
+    where
+        T: DeserializeOwned,
+    {
+        let response = get_response_with_session(app, path, username, session_token).await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        serde_json::from_slice(&bytes).expect("response decodes")
+    }
+
     async fn post_json_response(
         app: axum::Router,
         path: &str,
@@ -1837,6 +2235,25 @@ mod tests {
                 .body(Body::from(
                     serde_json::to_vec(body).expect("request encodes"),
                 ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes")
+    }
+
+    async fn get_response_with_session(
+        app: axum::Router,
+        path: &str,
+        username: &str,
+        session_token: &str,
+    ) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header(STANDALONE_USERNAME_HEADER, username)
+                .header(STANDALONE_SESSION_TOKEN_HEADER, session_token)
+                .body(Body::empty())
                 .expect("request builds"),
         )
         .await
@@ -2002,12 +2419,28 @@ mod tests {
     #[derive(Default)]
     struct RecordingEnclosureClient {
         requests: Mutex<Vec<StandaloneEnclosurePrepareDaemonRequest>>,
+        status_requests: Mutex<Vec<StandaloneAdminJobStatusDaemonRequest>>,
+        cancel_requests: Mutex<Vec<StandaloneAdminJobCancelDaemonRequest>>,
         fail_message: Option<String>,
     }
 
     impl RecordingEnclosureClient {
         fn requests(&self) -> Vec<StandaloneEnclosurePrepareDaemonRequest> {
             self.requests.lock().expect("requests lock").clone()
+        }
+
+        fn status_requests(&self) -> Vec<StandaloneAdminJobStatusDaemonRequest> {
+            self.status_requests
+                .lock()
+                .expect("status requests lock")
+                .clone()
+        }
+
+        fn cancel_requests(&self) -> Vec<StandaloneAdminJobCancelDaemonRequest> {
+            self.cancel_requests
+                .lock()
+                .expect("cancel requests lock")
+                .clone()
         }
     }
 
@@ -2042,6 +2475,51 @@ mod tests {
                 client_request_id: request.client_request_id,
             })
         }
+
+        fn job_status(
+            &self,
+            request: StandaloneAdminJobStatusDaemonRequest,
+        ) -> Result<StandaloneAdminJobStatusResponse, StandaloneEnclosureAdminClientError> {
+            self.status_requests
+                .lock()
+                .expect("status requests lock")
+                .push(request.clone());
+            Ok(StandaloneAdminJobStatusResponse {
+                job: StandaloneAdminJobSummary {
+                    job_id: request.job_id,
+                    kind: "enclosure_preparation".to_string(),
+                    state: "running".to_string(),
+                    progress: StandaloneAdminJobProgress {
+                        stage: "formatting".to_string(),
+                        work_bytes_done: 5,
+                        work_bytes_total: 10,
+                        work_units_done: 1,
+                        work_units_total: 2,
+                        message: Some("formatting selected devices".to_string()),
+                    },
+                    percent_complete: Some(50),
+                    submitted_at_utc: "2026-07-08T20:05:00Z".to_string(),
+                    updated_at_utc: "2026-07-08T20:05:10Z".to_string(),
+                    actor: Some("operator".to_string()),
+                    failure_message: None,
+                },
+            })
+        }
+
+        fn cancel_job(
+            &self,
+            request: StandaloneAdminJobCancelDaemonRequest,
+        ) -> Result<StandaloneAdminJobCancelResponse, StandaloneEnclosureAdminClientError> {
+            self.cancel_requests
+                .lock()
+                .expect("cancel requests lock")
+                .push(request.clone());
+            Ok(StandaloneAdminJobCancelResponse {
+                job_id: request.job_id,
+                accepted: true,
+                state: "cancelled".to_string(),
+            })
+        }
     }
 
     fn recording_enclosure_client() -> Arc<RecordingEnclosureClient> {
@@ -2051,6 +2529,8 @@ mod tests {
     fn recording_enclosure_client_with_failure(message: &str) -> Arc<RecordingEnclosureClient> {
         Arc::new(RecordingEnclosureClient {
             requests: Mutex::new(Vec::new()),
+            status_requests: Mutex::new(Vec::new()),
+            cancel_requests: Mutex::new(Vec::new()),
             fail_message: Some(message.to_string()),
         })
     }

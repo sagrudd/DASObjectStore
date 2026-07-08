@@ -1,7 +1,8 @@
 use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest,
-    DaemonApiResponse, DaemonIngestProgressEvent, DaemonServiceLifecycleRequest,
+    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
     PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
@@ -80,6 +81,16 @@ where
                 .assign_local_user_to_local_group(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::AssignLocalUserToLocalGroup)
                 .map_err(DaemonRequestHandlerError::LocalAdminRuntime),
+            DaemonApiRequest::JobStatus(request) => self
+                .service_orchestrator
+                .job_status(request)
+                .map(DaemonApiResponse::JobStatus)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime),
+            DaemonApiRequest::CancelJob(request) => self
+                .service_orchestrator
+                .cancel_job(request, &self.clock.now_utc())
+                .map(DaemonApiResponse::CancelJob)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime),
             DaemonApiRequest::SubmitIngestFiles(request) => {
                 match self.service_orchestrator.submit_ingest_files(
                     request,
@@ -151,6 +162,25 @@ pub trait DaemonServiceOrchestrator {
         Err(LocalAdminRuntimeError::UnsupportedOperation {
             operation: "assign_local_user_to_local_group requires a local admin orchestrator"
                 .to_string(),
+        })
+    }
+
+    fn job_status(
+        &self,
+        _request: DaemonJobStatusRequest,
+    ) -> Result<DaemonJobStatusResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "job_status requires a daemon job orchestrator".to_string(),
+        })
+    }
+
+    fn cancel_job(
+        &self,
+        _request: DaemonJobCancelRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<DaemonJobCancelResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "cancel_job requires a daemon job orchestrator".to_string(),
         })
     }
 
@@ -360,6 +390,8 @@ impl DaemonApiRequest {
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
             Self::CancelIngestJob(_) => "cancel_ingest_job",
+            Self::JobStatus(_) => "job_status",
+            Self::CancelJob(_) => "cancel_job",
             Self::ServiceStatus(_) => "service_status",
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
@@ -379,7 +411,9 @@ mod tests {
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
+        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
+        DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
+        DaemonJobSummary, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
         DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
         DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
@@ -678,6 +712,72 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_job_status_to_orchestrator() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T20:05:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    kind: DaemonJobKind::EnclosurePreparation,
+                    state: DaemonJobState::Running,
+                    ..
+                }
+            })
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .job_status_calls
+                .borrow()
+                .as_slice(),
+            &["enclosure-prepare-1".to_string()]
+        );
+    }
+
+    #[test]
+    fn dispatches_cancel_job_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T20:06:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::CancelJob(DaemonJobCancelRequest {
+                job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+                reason: Some("operator requested cancellation".to_string()),
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::CancelJob(DaemonJobCancelResponse {
+                accepted: true,
+                state: DaemonJobState::Cancelled,
+                ..
+            })
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .cancel_job_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-08T20:06:00Z".to_string(),
+                "enclosure-prepare-1".to_string(),
+            )]
+        );
+    }
+
+    #[test]
     fn reports_submit_ingest_runtime_failures_as_api_errors() {
         let service = FakeService {
             ingest_error: Some("source is unreadable".to_string()),
@@ -774,6 +874,8 @@ mod tests {
         >,
         ingest_calls: RefCell<Vec<(String, String, bool)>>,
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
+        job_status_calls: RefCell<Vec<String>>,
+        cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
     }
 
@@ -941,6 +1043,49 @@ mod tests {
                 request.owner,
                 request.administrator_actor,
             ))
+        }
+
+        fn job_status(
+            &self,
+            request: DaemonJobStatusRequest,
+        ) -> Result<DaemonJobStatusResponse, DaemonServiceRuntimeError> {
+            self.job_status_calls
+                .borrow_mut()
+                .push(request.job_id.to_string());
+            Ok(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    job_id: request.job_id,
+                    kind: DaemonJobKind::EnclosurePreparation,
+                    state: DaemonJobState::Running,
+                    progress: DaemonJobProgress {
+                        stage: "formatting".to_string(),
+                        work_bytes_done: 5,
+                        work_bytes_total: 10,
+                        work_units_done: 1,
+                        work_units_total: 2,
+                        message: Some("formatting selected devices".to_string()),
+                    },
+                    submitted_at_utc: "2026-07-08T20:05:00Z".to_string(),
+                    updated_at_utc: "2026-07-08T20:05:10Z".to_string(),
+                    actor: Some("operator".to_string()),
+                    failure_message: None,
+                },
+            })
+        }
+
+        fn cancel_job(
+            &self,
+            request: DaemonJobCancelRequest,
+            accepted_at_utc: &str,
+        ) -> Result<DaemonJobCancelResponse, DaemonServiceRuntimeError> {
+            self.cancel_job_calls
+                .borrow_mut()
+                .push((accepted_at_utc.to_string(), request.job_id.to_string()));
+            Ok(DaemonJobCancelResponse {
+                job_id: request.job_id,
+                accepted: true,
+                state: DaemonJobState::Cancelled,
+            })
         }
     }
 }

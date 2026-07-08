@@ -12,12 +12,13 @@ use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
     CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest,
-    DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestJobStatusRequest,
-    IngestJobStatusResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest,
+    DaemonJobCancelResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
+    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
+    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    IngestJobStatusRequest, IngestJobStatusResponse, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -139,6 +140,26 @@ where
         }
     }
 
+    pub fn job_status(
+        &self,
+        request: DaemonJobStatusRequest,
+    ) -> Result<DaemonJobStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::JobStatus(request))? {
+            DaemonApiResponse::JobStatus(response) => Ok(response),
+            response => Err(unexpected("job_status", response)),
+        }
+    }
+
+    pub fn cancel_job(
+        &self,
+        request: DaemonJobCancelRequest,
+    ) -> Result<DaemonJobCancelResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CancelJob(request))? {
+            DaemonApiResponse::CancelJob(response) => Ok(response),
+            response => Err(unexpected("cancel_job", response)),
+        }
+    }
+
     pub fn service_status(
         &self,
         request: DaemonServiceStatusRequest,
@@ -218,6 +239,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",
         DaemonApiResponse::CancelIngestJob(_) => "cancel_ingest_job",
+        DaemonApiResponse::JobStatus(_) => "job_status",
+        DaemonApiResponse::CancelJob(_) => "cancel_job",
         DaemonApiResponse::ServiceStatus(_) => "service_status",
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
@@ -235,12 +258,14 @@ mod tests {
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonIngestConflictPolicy, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
-        DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-        DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-        ENCLOSURE_PREPARE_CONFIRMATION,
+        DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
+        DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+        DaemonJobStatusResponse, DaemonJobSummary, DaemonServiceLifecycleRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
+        SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -489,6 +514,73 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::PrepareEnclosure(_)]
+        ));
+    }
+
+    #[test]
+    fn job_status_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+                    kind: DaemonJobKind::EnclosurePreparation,
+                    state: DaemonJobState::Running,
+                    progress: DaemonJobProgress {
+                        stage: "formatting".to_string(),
+                        work_bytes_done: 5,
+                        work_bytes_total: 10,
+                        work_units_done: 1,
+                        work_units_total: 2,
+                        message: Some("formatting selected devices".to_string()),
+                    },
+                    submitted_at_utc: "2026-07-08T20:05:00Z".to_string(),
+                    updated_at_utc: "2026-07-08T20:05:10Z".to_string(),
+                    actor: Some("operator".to_string()),
+                    failure_message: None,
+                },
+            }))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .job_status(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+            })
+            .expect("job status response");
+
+        assert_eq!(response.job.kind, DaemonJobKind::EnclosurePreparation);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::JobStatus(_)]
+        ));
+    }
+
+    #[test]
+    fn cancel_job_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::CancelJob(DaemonJobCancelResponse {
+                job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+                accepted: true,
+                state: DaemonJobState::Cancelled,
+            }))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .cancel_job(DaemonJobCancelRequest {
+                job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+                reason: Some("operator requested cancellation".to_string()),
+            })
+            .expect("cancel job response");
+
+        assert!(response.accepted);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::CancelJob(_)]
         ));
     }
 

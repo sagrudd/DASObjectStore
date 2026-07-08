@@ -289,6 +289,14 @@ are returned as explicit Web API errors. The browser wizard displays accepted
 daemon job metadata when submission succeeds and shows the daemon error message
 when submission fails.
 
+Administrator jobs accepted by the daemon are also exposed through the
+standalone Web API at ``/api/v1/workspaces/admin/jobs/<job_id>``. This status
+route and the companion cancellation route
+``/api/v1/workspaces/admin/jobs/<job_id>/cancel`` require the same local session
+and sudo-derived administrator authority. The routes forward to typed daemon
+job status and cancellation commands; the browser must treat daemon responses as
+the source of truth for job progress, terminal state, and cancellation result.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the

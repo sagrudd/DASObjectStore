@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.33.0 - 2026-07-08
+
+- Add transport-neutral daemon commands and typed client methods for generic
+  administrator job status and cancellation.
+- Expose standalone authenticated Web routes for administrator job status and
+  cancellation so enclosure preparation progress can be polled through a
+  daemon-owned boundary.
+- Add Web and daemon regression coverage for administrator job command names,
+  typed client forwarding, local administrator gating, blank cancel-reason
+  rejection, status forwarding, and cancellation forwarding.
+
 ## 0.32.0 - 2026-07-08
 
 - Add authenticated standalone Web submission for Enclosures preparation at

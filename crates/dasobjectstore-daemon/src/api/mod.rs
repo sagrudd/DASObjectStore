@@ -63,6 +63,8 @@ pub enum DaemonApiRequest {
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
     CancelIngestJob(CancelIngestJobRequest),
+    JobStatus(DaemonJobStatusRequest),
+    CancelJob(DaemonJobCancelRequest),
     ServiceStatus(DaemonServiceStatusRequest),
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
@@ -76,6 +78,7 @@ impl DaemonApiRequest {
         match self {
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::CancelIngestJob(request) => request.validate(),
+            Self::CancelJob(request) => request.validate().map_err(generic_job_validation_error),
             Self::ServiceLifecycle(request) => request.validate(),
             Self::ServiceProvision(request) => request.validate(),
             Self::PrepareEnclosure(request) => request
@@ -90,6 +93,7 @@ impl DaemonApiRequest {
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
             | Self::IngestJobStatus(_)
+            | Self::JobStatus(_)
             | Self::ServiceStatus(_) => Ok(()),
         }
     }
@@ -103,6 +107,8 @@ pub enum DaemonApiResponse {
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
     CancelIngestJob(CancelIngestJobResponse),
+    JobStatus(DaemonJobStatusResponse),
+    CancelJob(DaemonJobCancelResponse),
     ServiceStatus(DaemonServiceStatusResponse),
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
@@ -179,6 +185,14 @@ fn local_admin_validation_error(
     }
 }
 
+fn generic_job_validation_error(err: DaemonJobValidationError) -> DaemonRequestValidationError {
+    match err {
+        DaemonJobValidationError::BlankCancellationReason => {
+            DaemonRequestValidationError::BlankCancellationReason
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonApiErrorResponse {
     pub code: String,
@@ -198,10 +212,11 @@ impl DaemonApiErrorResponse {
 mod tests {
     use super::{
         AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, DaemonApiRequest,
-        DaemonIngestConflictPolicy, DaemonServiceLifecycleRequest, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, StoreInventoryRequest,
-        SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobId, DaemonJobStatusRequest,
+        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceStatusRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+        PrepareEnclosureRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        ENCLOSURE_PREPARE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -255,6 +270,28 @@ mod tests {
         assert_eq!(lifecycle["command"], "service_lifecycle");
         assert_eq!(lifecycle["payload"]["operation"], "start");
         assert_eq!(provision["command"], "service_provision");
+    }
+
+    #[test]
+    fn generic_job_commands_use_stable_command_names() {
+        let job_id = DaemonJobId::new("enclosure-prepare-1").expect("job id");
+        let status = DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
+            job_id: job_id.clone(),
+        });
+        let cancel = DaemonApiRequest::CancelJob(DaemonJobCancelRequest {
+            job_id,
+            reason: Some("operator requested cancellation".to_string()),
+        });
+
+        let status = serde_json::to_value(status).expect("status request serializes");
+        let cancel = serde_json::to_value(cancel).expect("cancel request serializes");
+
+        assert_eq!(status["command"], "job_status");
+        assert_eq!(cancel["command"], "cancel_job");
+        assert_eq!(
+            cancel["payload"]["reason"],
+            "operator requested cancellation"
+        );
     }
 
     #[test]

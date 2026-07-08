@@ -583,6 +583,9 @@ older checklist claims.
     - [x] Add authenticated standalone Web submission to the daemon
       ``prepare_enclosure`` client boundary and render accepted job/failure
       state in the Enclosures wizard.
+    - [x] Add generic daemon/Web administrator job status and cancellation
+      contracts so Web workflows can poll daemon-owned progress and request
+      cancellation without browser-side storage mutation.
     - [ ] Render live daemon job progress, cancellation, retry, and completed
       result state once persistent administrator job status is available.
 - [x] Add API request/response DTOs and daemon client methods for Web-submitted
@@ -594,6 +597,9 @@ older checklist claims.
   - [x] Cover missing session, non-admin, unsupported empty HDD set, missing
     destructive format allowance, daemon failure, and successful daemon-client
     forwarding on the standalone Web submission route.
+  - [x] Cover administrator job status/cancel Web risk gates, including
+    non-admin denial, blank cancellation reason rejection, status forwarding,
+    and cancellation forwarding.
   - [ ] Cover existing-data preflight and cancellation/retry preservation when
     the daemon preparation runtime exposes those states.
 - [ ] Implement ObjectStore creation form controls for store name, writer group,
