@@ -12,6 +12,36 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
   implementing a scoped request.
 - Prefer surgical modifications and additions over broad rewrites.
 
+## Multi-Agent Coordination
+
+- Use multiple worker agents judiciously when the requested work is substantial
+  enough to benefit from parallel delivery, especially when planning,
+  implementation, documentation, and testing can be separated cleanly.
+- Keep the lead agent accountable for the final design, integration, review,
+  test selection, and user-facing summary. Worker agents may accelerate bounded
+  slices, but they do not replace coherent technical ownership.
+- Separate work by responsibility whenever practical:
+  - planning/design agents should clarify scope, risks, data-loss boundaries,
+    interfaces, and acceptance criteria;
+  - coding agents should own specific files, modules, or behavior changes with
+    minimal overlap;
+  - documentation agents should update user-facing `.rst` material, examples,
+    release notes, and operator guidance;
+  - testing agents should add or run focused regression, integration, packaging,
+    or deployment checks.
+- Give each worker a concrete, non-overlapping write scope and tell workers
+  they are not alone in the codebase. They must not revert unrelated edits and
+  must adapt to changes made by other contributors.
+- Avoid spawning workers for tiny, tightly coupled, or urgent blocking tasks
+  where delegation would add coordination overhead. Prefer local execution for
+  the immediate critical path and use workers for parallel sidecar tasks.
+- Integrate worker output deliberately: inspect diffs, reconcile overlapping
+  assumptions, run appropriate tests from the lead context, and keep the final
+  commit focused.
+- When the user explicitly asks for multiple agents, make a brief coordination
+  plan before delegation and keep the user informed about which responsibilities
+  are being handled in parallel.
+
 ## Deployment Host
 
 - The DAS appliance currently used for deployment testing is
