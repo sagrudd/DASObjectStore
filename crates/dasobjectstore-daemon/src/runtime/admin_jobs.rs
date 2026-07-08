@@ -1,6 +1,7 @@
 use crate::api::{
-    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobListRequest,
+    DaemonJobListResponse, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
+    DaemonJobSummary,
 };
 use crate::runtime::DaemonServiceRuntimeError;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,11 @@ pub trait AdminJobRegistry: Send + Sync {
         &self,
         request: DaemonJobStatusRequest,
     ) -> Result<DaemonJobStatusResponse, DaemonServiceRuntimeError>;
+
+    fn list(
+        &self,
+        request: DaemonJobListRequest,
+    ) -> Result<DaemonJobListResponse, DaemonServiceRuntimeError>;
 
     fn cancel(
         &self,
@@ -73,6 +79,20 @@ impl AdminJobRegistry for FileBackedAdminJobRegistry {
             }
         })?;
         Ok(DaemonJobStatusResponse { job })
+    }
+
+    fn list(
+        &self,
+        request: DaemonJobListRequest,
+    ) -> Result<DaemonJobListResponse, DaemonServiceRuntimeError> {
+        let _guard = self.lock.lock().expect("admin job registry lock poisoned");
+        let registry = read_registry(&self.path)?;
+        let mut jobs = registry.jobs.clone();
+        jobs.sort_by(|left, right| right.updated_at_utc.cmp(&left.updated_at_utc));
+        if let Some(limit) = request.limit {
+            jobs.truncate(limit);
+        }
+        Ok(DaemonJobListResponse { jobs })
     }
 
     fn cancel(
@@ -185,8 +205,8 @@ fn write_registry(
 mod tests {
     use super::{admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry};
     use crate::api::{
-        DaemonJobCancelRequest, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState,
-        DaemonJobStatusRequest, DaemonJobSummary,
+        DaemonJobCancelRequest, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
+        DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobSummary,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -217,6 +237,37 @@ mod tests {
         assert_eq!(response.job.job_id.as_str(), "job-1");
         assert_eq!(response.job.state, DaemonJobState::Running);
         assert!(path.exists());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn lists_jobs_by_latest_update_with_optional_limit() {
+        let root = temp_root("list");
+        let path = admin_job_registry_path(&root);
+        let registry = FileBackedAdminJobRegistry::new(&path);
+
+        registry
+            .record(job_with_update(
+                "job-old",
+                DaemonJobState::Complete,
+                "2026-07-08T20:18:00Z",
+            ))
+            .expect("old job recorded");
+        registry
+            .record(job_with_update(
+                "job-new",
+                DaemonJobState::Running,
+                "2026-07-08T20:22:00Z",
+            ))
+            .expect("new job recorded");
+
+        let response = registry
+            .list(DaemonJobListRequest { limit: Some(1) })
+            .expect("jobs listed");
+
+        assert_eq!(response.jobs.len(), 1);
+        assert_eq!(response.jobs[0].job_id.as_str(), "job-new");
 
         cleanup(&root);
     }
@@ -279,6 +330,14 @@ mod tests {
     }
 
     fn job(job_id: &str, state: DaemonJobState) -> DaemonJobSummary {
+        job_with_update(job_id, state, "2026-07-08T20:19:00Z")
+    }
+
+    fn job_with_update(
+        job_id: &str,
+        state: DaemonJobState,
+        updated_at_utc: &str,
+    ) -> DaemonJobSummary {
         DaemonJobSummary {
             job_id: DaemonJobId::new(job_id).expect("job id"),
             kind: DaemonJobKind::EnclosurePreparation,
@@ -292,7 +351,7 @@ mod tests {
                 message: Some("accepted".to_string()),
             },
             submitted_at_utc: "2026-07-08T20:19:00Z".to_string(),
-            updated_at_utc: "2026-07-08T20:19:00Z".to_string(),
+            updated_at_utc: updated_at_utc.to_string(),
             actor: Some("operator".to_string()),
             failure_message: None,
         }

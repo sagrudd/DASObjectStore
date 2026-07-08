@@ -1,6 +1,7 @@
 //! Axum API boundary for GUI-facing DASObjectStore views.
 
 pub mod actions;
+mod activity_aggregator;
 pub mod auth;
 pub mod auth_guard;
 pub mod auth_routes;

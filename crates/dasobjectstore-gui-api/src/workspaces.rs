@@ -619,6 +619,13 @@ impl ActivityWorkspaceView {
         self.categories = categories;
         self
     }
+
+    pub fn with_tasks(mut self, tasks: Vec<ActivityTaskView>) -> Self {
+        self.tasks = tasks;
+        self.warnings
+            .extend(self.tasks.iter().flat_map(|task| task.warnings.clone()));
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -717,6 +724,7 @@ pub enum ActivityTaskStateView {
     Waiting,
     Complete,
     Failed,
+    Cancelled,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.45.0 - 2026-07-09
+
+- Add a transport-neutral daemon `job_list` request/response and typed client
+  method backed by the persistent administrator job registry.
+- Connect the Web Activity workspace API to live daemon administrator jobs,
+  mapping enclosure preparation, ObjectStore creation, local administration,
+  service, ingest, and repair-oriented job kinds into Activity task rows.
+- Preserve Activity rendering when the daemon socket is unavailable by returning
+  the category view with an explicit daemon-activity warning.
+
 ## 0.44.0 - 2026-07-09
 
 - Promote Activity into the primary Web navigation and render daemon activity

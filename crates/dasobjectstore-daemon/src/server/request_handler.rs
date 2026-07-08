@@ -3,8 +3,9 @@ use crate::api::{
     CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
     CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
     DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobKind,
-    DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
-    DaemonJobSummary, DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
+    DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
     PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
@@ -134,6 +135,10 @@ where
                 ))?;
                 Ok(DaemonApiResponse::AssignLocalUserToLocalGroup(response))
             }
+            DaemonApiRequest::JobList(request) => self
+                .admin_job_list(request)
+                .map(DaemonApiResponse::JobList)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime),
             DaemonApiRequest::JobStatus(request) => self
                 .admin_job_status(request)
                 .map(DaemonApiResponse::JobStatus)
@@ -182,6 +187,16 @@ where
             return registry.status(request);
         }
         self.service_orchestrator.job_status(request)
+    }
+
+    fn admin_job_list(
+        &self,
+        request: DaemonJobListRequest,
+    ) -> Result<DaemonJobListResponse, DaemonServiceRuntimeError> {
+        if let Some(registry) = &self.admin_job_registry {
+            return registry.list(request);
+        }
+        self.service_orchestrator.job_list(request)
     }
 
     fn cancel_admin_job(
@@ -264,6 +279,15 @@ pub trait DaemonServiceOrchestrator {
     ) -> Result<DaemonJobStatusResponse, DaemonServiceRuntimeError> {
         Err(DaemonServiceRuntimeError::UnsupportedOperation {
             operation: "job_status requires a daemon job orchestrator".to_string(),
+        })
+    }
+
+    fn job_list(
+        &self,
+        _request: DaemonJobListRequest,
+    ) -> Result<DaemonJobListResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "job_list requires a daemon job orchestrator".to_string(),
         })
     }
 
@@ -621,6 +645,7 @@ impl DaemonApiRequest {
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
             Self::CancelIngestJob(_) => "cancel_ingest_job",
+            Self::JobList(_) => "job_list",
             Self::JobStatus(_) => "job_status",
             Self::CancelJob(_) => "cancel_job",
             Self::ServiceStatus(_) => "service_status",
@@ -644,14 +669,14 @@ mod tests {
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
         CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonJobCancelRequest,
-        DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState,
-        DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
-        DaemonRequestValidationError, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, StoreInventoryRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
+        DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
+        DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+        DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
+        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+        PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::runtime::{
@@ -1094,6 +1119,41 @@ mod tests {
                 state: DaemonJobState::Complete,
                 ..
             })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn lists_recorded_admin_jobs_from_registry() {
+        let root = temp_root("list-recorded");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-08T19:40:00Z"),
+            registry,
+        );
+
+        handler
+            .handle(DaemonApiRequest::PrepareEnclosure(
+                prepare_enclosure_request(),
+            ))
+            .expect("prepare request handled");
+        let response = handler
+            .handle(DaemonApiRequest::JobList(DaemonJobListRequest {
+                limit: Some(10),
+            }))
+            .expect("list request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::JobList(DaemonJobListResponse { jobs })
+                if jobs.len() == 1
+                    && jobs[0].kind == DaemonJobKind::EnclosurePreparation
+                    && jobs[0].state == DaemonJobState::Complete
         ));
 
         cleanup(&root);

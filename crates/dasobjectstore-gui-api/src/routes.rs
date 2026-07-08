@@ -103,7 +103,7 @@ async fn endpoints_workspace() -> Json<EndpointsWorkspaceView> {
 }
 
 async fn activity_workspace() -> Json<ActivityWorkspaceView> {
-    Json(ActivityWorkspaceView::bootstrap())
+    Json(crate::activity_aggregator::live_activity_workspace())
 }
 
 async fn plan_action(
@@ -468,8 +468,8 @@ mod tests {
             8
         );
         assert_eq!(encoded["categories"][0]["kind"], "system_administration");
-        assert_eq!(encoded["tasks"].as_array().expect("tasks").len(), 0);
-        assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
+        assert!(encoded["tasks"].as_array().is_some());
+        assert!(encoded["warnings"].as_array().is_some());
     }
 
     #[tokio::test]

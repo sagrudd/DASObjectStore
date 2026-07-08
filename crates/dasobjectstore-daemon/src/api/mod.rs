@@ -39,8 +39,9 @@ pub use ingest::{
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
-    DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonJobValidationError,
+    DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse,
+    DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
+    DaemonJobSummary, DaemonJobValidationError,
 };
 pub use local_admin::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
@@ -68,6 +69,7 @@ pub enum DaemonApiRequest {
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
     CancelIngestJob(CancelIngestJobRequest),
+    JobList(DaemonJobListRequest),
     JobStatus(DaemonJobStatusRequest),
     CancelJob(DaemonJobCancelRequest),
     ServiceStatus(DaemonServiceStatusRequest),
@@ -102,6 +104,7 @@ impl DaemonApiRequest {
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
             | Self::IngestJobStatus(_)
+            | Self::JobList(_)
             | Self::JobStatus(_)
             | Self::ServiceStatus(_) => Ok(()),
         }
@@ -116,6 +119,7 @@ pub enum DaemonApiResponse {
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
     CancelIngestJob(CancelIngestJobResponse),
+    JobList(DaemonJobListResponse),
     JobStatus(DaemonJobStatusResponse),
     CancelJob(DaemonJobCancelResponse),
     ServiceStatus(DaemonServiceStatusResponse),
@@ -259,10 +263,11 @@ mod tests {
     use super::{
         AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
         DaemonApiRequest, DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobId,
-        DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, StoreInventoryRequest,
-        SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        DaemonJobListRequest, DaemonJobStatusRequest, DaemonServiceLifecycleRequest,
+        DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceStatusRequest,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        StoreInventoryRequest, SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -321,6 +326,7 @@ mod tests {
     #[test]
     fn generic_job_commands_use_stable_command_names() {
         let job_id = DaemonJobId::new("enclosure-prepare-1").expect("job id");
+        let list = DaemonApiRequest::JobList(DaemonJobListRequest { limit: Some(25) });
         let status = DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
             job_id: job_id.clone(),
         });
@@ -329,9 +335,12 @@ mod tests {
             reason: Some("operator requested cancellation".to_string()),
         });
 
+        let list = serde_json::to_value(list).expect("list request serializes");
         let status = serde_json::to_value(status).expect("status request serializes");
         let cancel = serde_json::to_value(cancel).expect("cancel request serializes");
 
+        assert_eq!(list["command"], "job_list");
+        assert_eq!(list["payload"]["limit"], 25);
         assert_eq!(status["command"], "job_status");
         assert_eq!(cancel["command"], "cancel_job");
         assert_eq!(

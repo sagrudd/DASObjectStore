@@ -412,18 +412,21 @@ Activity Workspace
 
 The ``Activity`` primary navigation entry loads
 ``/products/dasobjectstore/api/v1/workspaces/activity`` and renders the shared
-daemon activity model. The page always shows the supported activity categories
-so operators can distinguish an idle appliance from an unimplemented browser
-holder. Categories currently include administrator jobs, enclosure preparation,
-ObjectStore creation, SubObject creation, ingest, destage, repair, and endpoint
-validation.
+daemon activity model. The page requests the live daemon administrator job
+registry through the packaged daemon socket and maps recorded jobs into task
+rows. The page always shows the supported activity categories so operators can
+distinguish an idle appliance from an unimplemented browser holder. Categories
+currently include administrator jobs, enclosure preparation, ObjectStore
+creation, SubObject creation, ingest, destage, repair, and endpoint validation.
 
 When daemon sources report work, the page shows active task rows with task ID,
 kind, state, label, and update timestamp. Ingest and destage queue summaries
 are rendered separately so SSD upload pressure and HDD settlement activity are
 visible even when no administrator job is active. If the daemon returns no task
 rows, the page must state that no active tasks are currently reported rather
-than implying completion.
+than implying completion. If the daemon socket or job registry cannot be read,
+the API returns the category view with an explicit ``daemon_activity_unavailable``
+warning instead of silently falling back to fixture data.
 
 The Activity page is observational. Operators may navigate from submitted
 administrator workflows to their daemon job status, but the page itself must not

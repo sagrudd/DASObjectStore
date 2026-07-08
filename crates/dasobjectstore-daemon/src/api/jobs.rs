@@ -133,6 +133,16 @@ pub struct DaemonJobStatusRequest {
     pub job_id: DaemonJobId,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonJobListRequest {
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonJobListResponse {
+    pub jobs: Vec<DaemonJobSummary>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonJobStatusResponse {
     pub job: DaemonJobSummary,
@@ -195,8 +205,8 @@ impl std::error::Error for DaemonJobValidationError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonJobCancelRequest, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState,
-        DaemonJobStatusResponse, DaemonJobSummary,
+        DaemonJobCancelRequest, DaemonJobId, DaemonJobKind, DaemonJobListResponse,
+        DaemonJobProgress, DaemonJobState, DaemonJobStatusResponse, DaemonJobSummary,
     };
 
     #[test]
@@ -232,6 +242,27 @@ mod tests {
 
         assert_eq!(encoded["job"]["kind"], "ingest_files");
         assert_eq!(encoded["job"]["state"], "running");
+    }
+
+    #[test]
+    fn serializes_job_list_response_with_stable_case() {
+        let response = DaemonJobListResponse {
+            jobs: vec![DaemonJobSummary {
+                job_id: DaemonJobId::new("job-1").expect("job id"),
+                kind: DaemonJobKind::EnclosurePreparation,
+                state: DaemonJobState::Complete,
+                progress: DaemonJobProgress::default(),
+                submitted_at_utc: "2026-07-07T10:20:12Z".to_string(),
+                updated_at_utc: "2026-07-07T10:21:12Z".to_string(),
+                actor: Some("stephen".to_string()),
+                failure_message: None,
+            }],
+        };
+
+        let encoded = serde_json::to_value(response).expect("list serializes");
+
+        assert_eq!(encoded["jobs"][0]["kind"], "enclosure_preparation");
+        assert_eq!(encoded["jobs"][0]["state"], "complete");
     }
 
     #[test]

@@ -571,7 +571,7 @@ pub fn activity_category_summaries(
             for task in matching_tasks {
                 match task.state.as_str() {
                     "failed" => failed_count += 1,
-                    "complete" => complete_count += 1,
+                    "complete" | "cancelled" => complete_count += 1,
                     "queued" | "waiting" => waiting_count += 1,
                     _ => active_count += 1,
                 }
@@ -683,6 +683,7 @@ fn activity_task_state_label(state: &str) -> String {
         "waiting" => "Waiting",
         "complete" => "Complete",
         "failed" => "Failed",
+        "cancelled" => "Cancelled",
         other => other,
     }
     .to_string()
@@ -4774,6 +4775,14 @@ mod tests {
                     updated_at_utc: "2026-07-09T00:02:00Z".to_string(),
                     warnings: Vec::new(),
                 },
+                ActivityTaskResponse {
+                    task_id: "job-repair-cancelled".to_string(),
+                    kind: "repair".to_string(),
+                    state: "cancelled".to_string(),
+                    label: "Cancelled replacement".to_string(),
+                    updated_at_utc: "2026-07-09T00:03:00Z".to_string(),
+                    warnings: Vec::new(),
+                },
             ],
             warnings: Vec::new(),
         };
@@ -4786,6 +4795,7 @@ mod tests {
         assert_eq!(summaries[1].waiting_count, 1);
         assert_eq!(summaries[1].state, "waiting");
         assert_eq!(summaries[2].failed_count, 1);
+        assert_eq!(summaries[2].complete_count, 1);
         assert_eq!(summaries[2].state, "critical");
         assert_eq!(queues[0].value, "1 active");
         assert_eq!(queues[1].value, "1 copying");
