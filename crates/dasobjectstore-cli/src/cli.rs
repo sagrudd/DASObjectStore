@@ -88,10 +88,10 @@ pub(crate) struct PerformanceTestArgs {
     /// Directory for generated source files; defaults to /tmp.
     #[arg(long, default_value = "/tmp")]
     tmp_dir: PathBuf,
-    /// Markdown report path; defaults to a timestamped file in /tmp.
+    /// Final PDF report path; defaults to a timestamped PDF file in /tmp.
     #[arg(long)]
     report: Option<PathBuf>,
-    /// JSON artifact path; defaults beside the Markdown report.
+    /// JSON artifact path; defaults beside the PDF report.
     #[arg(long = "json-artifact")]
     json_artifact: Option<PathBuf>,
     /// Render an embedded terminal benchmark view while the run executes.
@@ -1910,7 +1910,7 @@ mod tests {
             "--tmp-dir",
             "/tmp/dos-perf",
             "--report",
-            "/tmp/dos-perf/report.md",
+            "/tmp/dos-perf/report.pdf",
             "--json-artifact",
             "/tmp/dos-perf/report.json",
             "--tui",
@@ -1928,7 +1928,7 @@ mod tests {
         assert_eq!(args.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
         assert_eq!(args.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
         assert_eq!(args.tmp_dir(), Path::new("/tmp/dos-perf"));
-        assert_eq!(args.report(), Some(Path::new("/tmp/dos-perf/report.md")));
+        assert_eq!(args.report(), Some(Path::new("/tmp/dos-perf/report.pdf")));
         assert_eq!(
             args.json_artifact(),
             Some(Path::new("/tmp/dos-perf/report.json"))

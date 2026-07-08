@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.2 - 2026-07-08
+
+- Make `performance-test --report` PDF-only, requiring a `.pdf` path and using
+  temporary Markdown only as an internal renderer source that is removed after
+  PDF generation.
+- Update performance-test examples, TUI labels, and recommendation JSON
+  artifacts so the PDF is the only human report artifact.
+
 ## 0.4.1 - 2026-07-08
 
 - Keep `performance-test --tui` rendering isolated from benchmark progress log

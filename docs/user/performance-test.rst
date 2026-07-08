@@ -90,19 +90,18 @@ roots are discoverable and that report generation works:
      --file_size 100MiB \
      --file_count 2 \
      --max-hdd-concurrency 2 \
-     --report /tmp/dasobjectstore-performance-smoke.md
+     --report /tmp/dasobjectstore-performance-smoke.pdf
 
-The command prints progress while it runs and finishes with the Markdown and PDF
-artifact paths:
+The command prints progress while it runs and finishes with the PDF report and
+JSON artifact paths:
 
 .. code-block:: text
 
-   Report: /tmp/dasobjectstore-performance-smoke.md
+   Report: /tmp/dasobjectstore-performance-smoke.pdf
    JSON: /tmp/dasobjectstore-performance-smoke.json
-   PDF: /tmp/dasobjectstore-performance-smoke.pdf
 
-The JSON and QR artifacts are written beside the Markdown report using the same
-base name unless an explicit JSON artifact path is supplied:
+The JSON and QR artifacts are written beside the PDF report using the same base
+name unless an explicit JSON artifact path is supplied:
 
 .. code-block:: text
 
@@ -120,7 +119,7 @@ support more than one concurrent HDD writer:
      --file_size 2GiB \
      --file_count 100 \
      --max-hdd-concurrency 5 \
-     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.pdf
 
 To benchmark an existing folder instead of generated data, pass the source
 directory. The benchmark will explore the same SSD-only, SSD-first FIFO drain,
@@ -132,7 +131,7 @@ and direct-to-HDD paths using the actual file sizes and folder structure:
      --source /data/zymo_fecal_2025.05 \
      --max-hdd-concurrency 5 \
      --tui \
-     --report /var/lib/dasobjectstore/reports/performance-zymo-source.md \
+     --report /var/lib/dasobjectstore/reports/performance-zymo-source.pdf \
      --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-source.json
 
 Use ``--tmp-dir`` when the default report location under ``/tmp`` is unsuitable:
@@ -143,7 +142,7 @@ Use ``--tmp-dir`` when the default report location under ``/tmp`` is unsuitable:
      --file_size 1GiB \
      --file_count 20 \
      --tmp-dir /srv/dasobjectstore/tmp \
-     --report /var/lib/dasobjectstore/reports/performance-20x1GiB.md
+     --report /var/lib/dasobjectstore/reports/performance-20x1GiB.pdf
 
 Use ``--ssd-root`` only when testing a non-default prepared SSD root:
 
@@ -153,7 +152,7 @@ Use ``--ssd-root`` only when testing a non-default prepared SSD root:
      --file_size 1GiB \
      --file_count 10 \
      --ssd-root /srv/dasobjectstore/ssd \
-     --report /var/lib/dasobjectstore/reports/performance-explicit-ssd.md
+     --report /var/lib/dasobjectstore/reports/performance-explicit-ssd.pdf
 
 Terminal View
 -------------
@@ -168,7 +167,7 @@ administrative run:
      --file_count 100 \
      --max-hdd-concurrency 5 \
      --tui \
-     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.pdf
 
 The TUI is an operator convenience for the same command. It should show the
 current benchmark phase, elapsed time, generated data volume, SSD write/read
@@ -188,19 +187,20 @@ and HDD capacity until the matching run directories are removed.
      --file_size 100MiB \
      --file_count 1 \
      --keep-temp \
-     --report /tmp/dasobjectstore-performance-keep-temp.md
+     --report /tmp/dasobjectstore-performance-keep-temp.pdf
 
 Use this option sparingly on production appliances.
 
 Report Outputs
 --------------
 
-Every successful run writes a Markdown report. The report has a tabular header
-containing Mnemosyne Biosciences branding, DASObjectStore product identity, run
-ID, generation timestamp, repository revision, CLI version, command line,
-artifact paths, and the reproduction QR payload reference.
+Every successful run writes a final PDF report. ``--report`` must point to a
+``.pdf`` path. The report has a tabular header containing Mnemosyne Biosciences
+branding, DASObjectStore product identity, run ID, generation timestamp,
+repository revision, CLI version, command line, artifact paths, and the
+reproduction QR payload reference.
 
-The Markdown report includes:
+The PDF report includes:
 
 * a scenario summary;
 * the exact reproduction command;
@@ -216,7 +216,10 @@ The Markdown report includes:
 The command also writes:
 
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
-* ``<report>.pdf`` as the final PDF report artifact.
+* a temporary Markdown source under ``--tmp-dir`` only while rendering the PDF.
+
+The temporary Markdown source is removed after PDF generation. It is not a
+supported report artifact.
 
 Use ``--json-artifact`` to write the structured benchmark artifact beside the
 human-readable report bundle:
@@ -227,23 +230,22 @@ human-readable report bundle:
      --file_size 2GiB \
      --file_count 100 \
      --max-hdd-concurrency 5 \
-     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md \
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.pdf \
      --json-artifact /var/lib/dasobjectstore/reports/performance-100x2GiB.json
 
 The JSON artifact is intended for automation and audit ingestion. It should
 include the run ID, generation timestamp, CLI version, repository revision,
-input parameters, discovered disks, Markdown/PDF/QR artifact paths, per-file
-SSD measurements, per-disk assigned bytes and HDD write rates, concurrency
-scenario rows, and the generated recommendation. Keep it with the Markdown, QR
-SVG, and PDF files for a complete evidence bundle.
+input parameters, discovered disks, PDF/QR artifact paths, per-file SSD
+measurements, per-disk assigned bytes and HDD write rates, concurrency scenario
+rows, and the generated recommendation. Keep it with the PDF and QR SVG files
+for a complete evidence bundle.
 
 Recommendation JSON Contract
 ----------------------------
 
 The structured artifact uses schema
 ``dasobjectstore.performance_test.recommendation.v1``. It is the contract that
-future ingress planners should consume rather than scraping Markdown report
-tables.
+future ingress planners should consume rather than scraping PDF report tables.
 
 The artifact records:
 
@@ -263,7 +265,7 @@ The artifact records:
   whether SSD readback appears limiting, and short rationale strings.
 
 Numeric byte counts and rates are emitted as JSON numbers in bytes and
-bytes-per-second. Display-friendly strings in the Markdown report are not a
+bytes-per-second. Display-friendly strings in the PDF report are not a
 substitute for these numeric fields. A representative contract fixture is
 maintained at
 ``docs/user/examples/performance-recommendation.v1.json``.
@@ -284,9 +286,9 @@ evidence bundle.
 Reproducibility Notes
 ---------------------
 
-Keep the Markdown, JSON, QR SVG, and PDF artifacts together. The Markdown report
-is the primary human-reviewable artifact, while the JSON artifact is the
-preferred machine-ingestion artifact.
+Keep the PDF, JSON, and QR SVG artifacts together. The PDF report is the
+primary human-reviewable artifact, while the JSON artifact is the preferred
+machine-ingestion artifact.
 
 For reproducible comparisons between runs:
 

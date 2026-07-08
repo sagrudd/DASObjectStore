@@ -5,7 +5,7 @@
     "run_id": "dasobjectstore-performance-20260708T120000Z",
     "generated_at_utc": "2026-07-08T12:00:00Z",
     "repository_revision": "abc1234",
-    "cli_version": "0.3.8",
+    "cli_version": "0.4.2",
     "command": [
       "dasobjectstore",
       "performance-test",
@@ -26,7 +26,6 @@
       "keep_temp": false
     },
     "artifacts": {
-      "markdown_path": "/var/lib/dasobjectstore/reports/performance.md",
       "pdf_path": "/var/lib/dasobjectstore/reports/performance.pdf",
       "qr_path": "/var/lib/dasobjectstore/reports/performance.qr.svg",
       "json_path": "/var/lib/dasobjectstore/reports/performance.json"

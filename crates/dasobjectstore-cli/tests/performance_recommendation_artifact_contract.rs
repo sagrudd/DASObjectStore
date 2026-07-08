@@ -23,7 +23,6 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
     assert_positive_u64(&artifact, &["run", "parameters", "file_count"]);
     assert_positive_u64(&artifact, &["run", "parameters", "total_source_bytes"]);
     assert_positive_u64(&artifact, &["run", "parameters", "max_hdd_concurrency"]);
-    assert_string(&artifact, &["run", "artifacts", "markdown_path"]);
     assert_string(&artifact, &["run", "artifacts", "pdf_path"]);
     assert_string(&artifact, &["run", "artifacts", "qr_path"]);
     assert_string(&artifact, &["run", "artifacts", "json_path"]);

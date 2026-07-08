@@ -247,9 +247,10 @@ fn run_performance_test(
     let report_path = args
         .report()
         .map(Path::to_path_buf)
-        .unwrap_or_else(|| args.tmp_dir().join(format!("{run_id}-report.md")));
+        .unwrap_or_else(|| args.tmp_dir().join(format!("{run_id}-report.pdf")));
+    validate_pdf_report_path(&report_path)?;
     let qr_path = report_path.with_extension("qr.svg");
-    let pdf_path = report_path.with_extension("pdf");
+    let markdown_source_path = args.tmp_dir().join(format!("{run_id}-report-source.md"));
     let json_path = args
         .json_artifact()
         .map(Path::to_path_buf)
@@ -287,8 +288,7 @@ fn run_performance_test(
             "keep_temp": args.keep_temp(),
         },
         "artifacts": {
-            "markdown_path": report_path.to_string_lossy(),
-            "pdf_path": pdf_path.to_string_lossy(),
+            "pdf_path": report_path.to_string_lossy(),
             "qr_path": qr_path.to_string_lossy(),
             "json_path": json_path.to_string_lossy(),
         }
@@ -468,10 +468,9 @@ fn run_performance_test(
         disks: hdd_bench_roots.clone(),
         reproduction_args,
         keep_temp: args.keep_temp(),
-        report_path: report_path.clone(),
         json_path: json_path.clone(),
         qr_path: qr_path.clone(),
-        pdf_path: pdf_path.clone(),
+        pdf_path: report_path.clone(),
         reproduce_command,
         reproduction_payload,
         reproduction_payload_sha256,
@@ -481,15 +480,18 @@ fn run_performance_test(
     if let Some(parent) = report_path.parent() {
         fs::create_dir_all(parent)?;
     }
+    if let Some(parent) = markdown_source_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     if let Some(parent) = json_path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(&json_path, render_performance_json(&performance_report))?;
-    fs::write(&report_path, &report)?;
-    write_pdf_report(&report_path, &pdf_path, &performance_report)?;
+    fs::write(&markdown_source_path, &report)?;
+    write_pdf_report(&markdown_source_path, &report_path, &performance_report)?;
+    let _ = fs::remove_file(&markdown_source_path);
     writeln!(writer, "Report: {}", report_path.display())?;
     writeln!(writer, "JSON: {}", json_path.display())?;
-    writeln!(writer, "PDF: {}", pdf_path.display())?;
     Ok(())
 }
 
@@ -654,7 +656,6 @@ struct PerformanceReport {
     disks: Vec<(DiskId, PathBuf)>,
     reproduction_args: Vec<String>,
     keep_temp: bool,
-    report_path: PathBuf,
     json_path: PathBuf,
     qr_path: PathBuf,
     pdf_path: PathBuf,
@@ -705,6 +706,21 @@ fn performance_test_reproduction_args(
         command.push("--keep-temp".to_string());
     }
     command
+}
+
+fn validate_pdf_report_path(path: &Path) -> Result<(), CliError> {
+    let is_pdf = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
+    if is_pdf {
+        Ok(())
+    } else {
+        Err(CliError::CommandFailed(format!(
+            "performance-test --report must be a PDF path ending in .pdf; got {}",
+            path.display()
+        )))
+    }
 }
 
 fn shell_join(args: &[String]) -> String {
@@ -1003,7 +1019,7 @@ fn render_performance_tui_snapshot(
         );
         frame.render_widget(
             Paragraph::new(vec![
-                Line::from(format!("Markdown: {}", snapshot.report_path.display())),
+                Line::from(format!("PDF: {}", snapshot.report_path.display())),
                 Line::from(format!("JSON: {}", snapshot.json_path.display())),
             ])
             .block(Block::default().borders(Borders::ALL).title("Artifacts")),
@@ -1891,7 +1907,6 @@ fn render_performance_json(report: &PerformanceReport) -> String {
                 "keep_temp": report.keep_temp,
             },
             "artifacts": {
-                "markdown_path": report.report_path.to_string_lossy(),
                 "pdf_path": report.pdf_path.to_string_lossy(),
                 "qr_path": report.qr_path.to_string_lossy(),
                 "json_path": report.json_path.to_string_lossy(),
@@ -2059,7 +2074,6 @@ fn render_performance_report(report: PerformanceReport) -> String {
 | Repository revision | `{}` |\n\
 | CLI version | `{}` |\n\
 | Command | `{}` |\n\
-| Markdown artifact | `{}` |\n\
 | JSON artifact | `{}` |\n\
 | PDF artifact | `{}` |\n\
 | QR artifact | `{}` |\n\
@@ -2071,7 +2085,6 @@ fn render_performance_report(report: PerformanceReport) -> String {
         report.repository_revision,
         dasobjectstore_core::VERSION,
         report.reproduce_command,
-        report.report_path.display(),
         report.json_path.display(),
         report.pdf_path.display(),
         report.qr_path.display(),
@@ -5682,13 +5695,14 @@ mod tests {
         benchmark_ssd_only, collect_ingest_files, connection_status_from_probe,
         current_user_group_names, parse_binary_size, performance_report_metadata_json,
         render_performance_json, render_performance_report, render_simple_pdf, run,
-        source_performance_workload, validate_managed_hdds_on_supported_das, write_health_json,
-        write_health_summary, write_health_verbose, write_host_connection_status,
-        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
-        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
-        PerformanceDiskResult, PerformanceFileResult, PerformanceMeasurement, PerformancePayload,
-        PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
-        PerformanceScenarioResult, PerformanceWorkload, PerformanceWorkloadKind,
+        source_performance_workload, validate_managed_hdds_on_supported_das,
+        validate_pdf_report_path, write_health_json, write_health_summary, write_health_verbose,
+        write_host_connection_status, write_pretty_report, CliError, ConnectionAssessment,
+        DiskHealthSummary, HealthReport, ManagedHddDevice, PerformanceBenchmarkResults,
+        PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
+        PerformanceMeasurement, PerformancePayload, PerformanceRecommendation, PerformanceReport,
+        PerformanceScenarioKind, PerformanceScenarioResult, PerformanceWorkload,
+        PerformanceWorkloadKind,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -5833,6 +5847,16 @@ mod tests {
     }
 
     #[test]
+    fn performance_report_path_must_be_pdf() {
+        validate_pdf_report_path(Path::new("/tmp/report.pdf")).expect("pdf path accepted");
+
+        let err =
+            validate_pdf_report_path(Path::new("/tmp/report.md")).expect_err("markdown rejected");
+
+        assert!(err.to_string().contains("must be a PDF path"));
+    }
+
+    #[test]
     fn performance_ssd_only_suppresses_progress_logs_for_tui_rendering() {
         let root = temp_root("performance-tui-log-suppression");
         let workload = PerformanceWorkload {
@@ -5870,6 +5894,7 @@ mod tests {
         assert!(report.contains("# DASObjectStore Performance Test Report"));
         assert!(report.contains("| Brand | Mnemosyne Biosciences |"));
         assert!(report.contains("| JSON artifact | `/tmp/perf-test-run.json` |"));
+        assert!(report.contains("| PDF artifact | `/tmp/perf-test-run.pdf` |"));
         assert!(report.contains("| QR artifact | `/tmp/perf-test-run.qr.svg` |"));
         assert!(report.contains("| QR status | `qrencode SVG` |"));
         assert!(report.contains("Reproduction payload SHA-256"));
@@ -6148,7 +6173,6 @@ mod tests {
                 "--file_count".to_string(),
                 "1".to_string(),
             ],
-            report_path: PathBuf::from("/tmp/perf-test-run.md"),
             json_path: PathBuf::from("/tmp/perf-test-run.json"),
             qr_path: PathBuf::from("/tmp/perf-test-run.qr.svg"),
             pdf_path: PathBuf::from("/tmp/perf-test-run.pdf"),
