@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.23.0 - 2026-07-08
+
+- Extend Web enclosure slot payloads with role, mount path, device path,
+  filesystem, SMART warning count, and daemon-managed action availability.
+- Replace the selected-enclosure slot rows with compact drive cards for SSD and
+  HDD members in the Yew detail panel.
+
 ## 0.22.0 - 2026-07-08
 
 - Replace the Web Enclosures dashboard bootstrap fixture route with a live

@@ -133,9 +133,21 @@ pub struct DasEnclosureDetailResponse {
 pub struct EnclosureDriveSlotResponse {
     pub slot_number: u8,
     pub drive_id: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub mount_path: Option<String>,
+    #[serde(default)]
+    pub device_path: Option<String>,
+    #[serde(default)]
+    pub filesystem: Option<String>,
     pub size_tib: String,
     pub health: String,
     pub mounted: bool,
+    #[serde(default)]
+    pub smart_warning_count: usize,
+    #[serde(default)]
+    pub actions_available: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]

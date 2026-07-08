@@ -186,11 +186,17 @@ fn enclosure_slots(
                 .as_deref()
                 .unwrap_or("managed-ssd")
                 .to_string(),
+            role: "ssd_landing".to_string(),
+            mount_path: ssd_root.display().to_string(),
+            device_path: ssd_marker.device.clone(),
+            filesystem: ssd_marker.filesystem.clone(),
             size_tib: capacity_for_root(ssd_root)
                 .map(|capacity| capacity_summary(&[capacity]).total_tib)
                 .unwrap_or_else(|| "0.0".to_string()),
             health: marker_health(ssd_marker, "ssd"),
             mounted: true,
+            smart_warning_count: 0,
+            actions_available: vec!["inspect".to_string(), "health_check".to_string()],
         });
     }
 
@@ -207,11 +213,21 @@ fn enclosure_slots(
                         .unwrap_or("hdd")
                 })
                 .to_string(),
+            role: "hdd_capacity".to_string(),
+            mount_path: root.display().to_string(),
+            device_path: marker.device.clone(),
+            filesystem: marker.filesystem.clone(),
             size_tib: capacity_for_root(root)
                 .map(|capacity| capacity_summary(&[capacity]).total_tib)
                 .unwrap_or_else(|| "0.0".to_string()),
             health: marker_health(&marker, "hdd"),
             mounted: root.exists(),
+            smart_warning_count: 0,
+            actions_available: vec![
+                "inspect".to_string(),
+                "health_check".to_string(),
+                "drain".to_string(),
+            ],
         });
     }
 
@@ -302,7 +318,14 @@ mod tests {
         assert_eq!(detail.vendor, "QNAP");
         assert_eq!(detail.model, "TL-D800C");
         assert_eq!(detail.slots.len(), 3);
+        assert_eq!(detail.slots[0].role, "ssd_landing");
+        assert_eq!(detail.slots[0].filesystem.as_deref(), Some("ext4"));
+        assert_eq!(detail.slots[1].role, "hdd_capacity");
         assert_eq!(detail.slots[1].drive_id, "qnap-1057");
+        assert!(detail.slots[1].mount_path.ends_with("qnap-1057"));
+        assert!(detail.slots[1]
+            .actions_available
+            .contains(&"drain".to_string()));
     }
 
     #[test]

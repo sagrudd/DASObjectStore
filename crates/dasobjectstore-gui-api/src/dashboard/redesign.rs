@@ -250,9 +250,15 @@ pub struct DasEnclosureDetailView {
 pub struct EnclosureDriveSlotView {
     pub slot_number: u8,
     pub drive_id: String,
+    pub role: String,
+    pub mount_path: String,
+    pub device_path: Option<String>,
+    pub filesystem: Option<String>,
     pub size_tib: String,
     pub health: String,
     pub mounted: bool,
+    pub smart_warning_count: usize,
+    pub actions_available: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

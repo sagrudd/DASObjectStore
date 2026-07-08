@@ -1,7 +1,9 @@
 #[cfg(target_arch = "wasm32")]
 use crate::api::BioinformaticsWorkspaceResponse;
 #[cfg(target_arch = "wasm32")]
-use crate::api::{DasEnclosureCardResponse, DasEnclosureDetailResponse};
+use crate::api::{
+    DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosureDriveSlotResponse,
+};
 use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
 
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
@@ -986,15 +988,52 @@ fn render_enclosure_detail(
                 <div><dt>{ "Warnings" }</dt><dd>{ enclosure.warnings.len().to_string() }</dd></div>
             </dl>
             <div class="dos-slot-list">
-                { for detail.slots.iter().map(|slot| html! {
-                    <div class="dos-slot-row">
-                        <span>{ format!("Bay {}", slot.slot_number) }</span>
-                        <strong>{ &slot.drive_id }</strong>
-                        <span>{ format!("{} TiB · {} · {}", slot.size_tib, slot.health, if slot.mounted { "mounted" } else { "not mounted" }) }</span>
-                    </div>
-                }) }
+                { for detail.slots.iter().map(render_drive_slot_card) }
             </div>
         </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_drive_slot_card(slot: &EnclosureDriveSlotResponse) -> Html {
+    let bay_label = if slot.slot_number == 0 {
+        "SSD".to_string()
+    } else {
+        format!("Bay {}", slot.slot_number)
+    };
+    let role = slot.role.as_deref().unwrap_or("unassigned");
+    let mount = slot
+        .mount_path
+        .as_deref()
+        .unwrap_or("mount path unavailable");
+    let filesystem = slot.filesystem.as_deref().unwrap_or("filesystem unknown");
+    let device = slot.device_path.as_deref().unwrap_or("device unknown");
+    let actions = if slot.actions_available.is_empty() {
+        "Actions unavailable".to_string()
+    } else {
+        slot.actions_available.join(", ")
+    };
+
+    html! {
+        <article class="dos-drive-card">
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ bay_label }</span>
+                <span class="dos-status-pill">{ &slot.health }</span>
+            </div>
+            <strong>{ &slot.drive_id }</strong>
+            <div class="dos-drive-meta">
+                <span>{ format!("Role: {}", role) }</span>
+                <span>{ format!("Capacity: {} TiB", slot.size_tib) }</span>
+                <span>{ if slot.mounted { "Mounted" } else { "Not mounted" } }</span>
+                <span>{ format!("SMART warnings: {}", slot.smart_warning_count) }</span>
+            </div>
+            <dl class="dos-drive-detail-list">
+                <div><dt>{ "Mount" }</dt><dd>{ mount }</dd></div>
+                <div><dt>{ "Device" }</dt><dd>{ device }</dd></div>
+                <div><dt>{ "Filesystem" }</dt><dd>{ filesystem }</dd></div>
+                <div><dt>{ "Actions" }</dt><dd>{ actions }</dd></div>
+            </dl>
+        </article>
     }
 }
 

@@ -460,26 +460,65 @@ h2 {
 
 .dos-slot-list {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin-top: 18px;
 }
 
-.dos-slot-row {
-  display: grid;
-  grid-template-columns: 72px minmax(120px, 1fr) minmax(0, 1.6fr);
-  gap: 12px;
-  align-items: center;
-  padding: 10px 0;
-  border-top: 1px solid #e7ecef;
-}
-
-.dos-slot-row span {
-  color: #5d6a72;
-  font-size: 0.88rem;
-}
-
-.dos-slot-row strong {
+.dos-drive-card {
   min-width: 0;
+  padding: 12px;
+  border: 1px solid #e0e7eb;
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.dos-drive-card strong {
+  display: block;
+  min-width: 0;
+  margin-top: 6px;
+  color: #182128;
+  overflow-wrap: anywhere;
+}
+
+.dos-drive-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.dos-drive-meta span {
+  padding: 3px 7px;
+  border-radius: 6px;
+  color: #41505a;
+  background: #eef3f5;
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.dos-drive-detail-list {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.dos-drive-detail-list div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.dos-drive-detail-list dt {
+  color: #66737b;
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.dos-drive-detail-list dd {
+  min-width: 0;
+  margin: 0;
+  color: #22313a;
+  font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
 

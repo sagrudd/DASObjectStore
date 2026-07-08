@@ -536,7 +536,7 @@ older checklist claims.
   supported DAS enclosures as cards, including QNAP TL-D800C identity, topology,
   mounted state, SSD/HDD counts, capacity, bay membership, SMART warning count,
   and health state.
-- [ ] Implement selected-enclosure detail panels with drive cards for SSD and
+- [x] Implement selected-enclosure detail panels with drive cards for SSD and
   HDD members, mounted paths, bay labels, role assignment, capacity, health,
   SMART warnings, and daemon-managed action availability.
 - [ ] Replace the static Enclosures "Add enclosure" card with a disabled/enabled

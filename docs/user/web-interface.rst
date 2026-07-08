@@ -206,6 +206,12 @@ slots from those root markers; managed disk IDs beginning with ``qnap-`` are
 presented as a QNAP TL-D800C enclosure until the deeper physical bay probe is
 available from the daemon.
 
+Selected enclosure detail panels render each SSD and HDD member as a drive card
+with bay label, role assignment, capacity, mount path, device path, filesystem,
+health, SMART warning count, and the daemon-managed actions currently available
+for that member. These controls are informational until the administrator
+workflow routes submit confirmed daemon jobs.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the
