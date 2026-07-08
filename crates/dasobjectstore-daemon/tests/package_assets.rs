@@ -13,6 +13,7 @@ const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobject
 const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectstore/config.json");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
 const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
+const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 
@@ -108,6 +109,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     );
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_DEB, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-remote");
     assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
     assert_contains(
@@ -129,6 +131,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_RPM, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-remote");
     assert_contains(BUILD_RPM, "usr/lib/systemd/system/dasobjectstored.service");
     assert_contains(
@@ -152,12 +155,21 @@ fn rpm_build_installs_daemon_boundary_assets() {
 }
 
 #[test]
+fn web_dist_preparation_builds_or_provides_fallback_assets() {
+    assert_contains(PREPARE_WEB_DIST, "trunk build --release");
+    assert_contains(PREPARE_WEB_DIST, "target/web-fallback/dist");
+    assert_contains(PREPARE_WEB_DIST, "index.html");
+}
+
+#[test]
 fn makefile_exposes_distribution_targets() {
     assert_contains(MAKEFILE, "build:");
     assert_contains(MAKEFILE, "cargo build --release --workspace");
-    assert_contains(MAKEFILE, "deb:");
+    assert_contains(MAKEFILE, "web:");
+    assert_contains(MAKEFILE, "bash packaging/web/prepare-web-dist.sh");
+    assert_contains(MAKEFILE, "deb: web");
     assert_contains(MAKEFILE, "bash packaging/debian/build-deb.sh");
-    assert_contains(MAKEFILE, "rpm:");
+    assert_contains(MAKEFILE, "rpm: web");
     assert_contains(MAKEFILE, "bash packaging/rpm/build-rpm.sh");
     assert_contains(MAKEFILE, "package: deb rpm");
     assert_contains(MAKEFILE, "distclean: clean");

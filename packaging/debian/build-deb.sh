@@ -22,6 +22,7 @@ package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"
 packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
 packaging_product="$packaging_linux/opt/dasobjectstore"
+web_dist="$(bash "$repo_root/packaging/web/prepare-web-dist.sh")"
 bash "$packaging_debian/validate-package-assets.sh"
 
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
@@ -59,7 +60,7 @@ install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$build_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$build_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
-cp -a "$repo_root/crates/dasobjectstore-gui-web/dist/." "$build_root/opt/dasobjectstore/web/"
+cp -a "$web_dist/." "$build_root/opt/dasobjectstore/web/"
 install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 
 cat >"$build_root/DEBIAN/control" <<CONTROL

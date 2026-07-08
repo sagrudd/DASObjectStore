@@ -2,11 +2,12 @@ SHELL := /usr/bin/env bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test fmt check deb rpm remote-deb remote-rpm package clean distclean
+.PHONY: help build web test fmt check deb rpm remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
 	@printf '  make build      Build release CLI, server, and daemon binaries\n'
+	@printf '  make web        Build or prepare the packaged web interface assets\n'
 	@printf '  make test       Run the full Rust workspace test suite\n'
 	@printf '  make fmt        Format Rust sources\n'
 	@printf '  make check      Run cargo check for the workspace\n'
@@ -21,6 +22,9 @@ help:
 build:
 	cargo build --release --workspace
 
+web:
+	bash packaging/web/prepare-web-dist.sh
+
 test:
 	cargo test --workspace
 
@@ -30,10 +34,10 @@ fmt:
 check:
 	cargo check --workspace
 
-deb:
+deb: web
 	bash packaging/debian/build-deb.sh
 
-rpm:
+rpm: web
 	bash packaging/rpm/build-rpm.sh
 
 remote-deb:

@@ -105,6 +105,20 @@ transitional Web session layer until OS-local actor discovery is implemented; it
 must not supersede sudo-derived administrator status. The full decision is
 recorded in [Standalone Authentication Decision](standalone-auth.md).
 
+## Web Assets
+
+The packaged standalone Web UI assets are prepared through the `make web`
+target:
+
+```text
+make web
+```
+
+`make deb` and `make rpm` depend on `make web`, and the package scripts also
+prepare the assets defensively when called directly. If an existing Trunk
+`dist/` directory is present it is reused; otherwise the package build runs
+`trunk build --release` when Trunk is available.
+
 ## TLS Assets
 
 Default standalone TLS assets live under the product root:

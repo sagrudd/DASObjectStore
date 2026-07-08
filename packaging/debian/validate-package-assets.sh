@@ -13,6 +13,7 @@ build_deb="$repo_root/packaging/debian/build-deb.sh"
 build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
 build_remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
 build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
+prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
 
 require_file() {
   local path="$1"
@@ -42,6 +43,7 @@ require_file "$build_deb"
 require_file "$build_rpm"
 require_file "$build_remote_deb"
 require_file "$build_remote_rpm"
+require_file "$prepare_web_dist"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -81,6 +83,7 @@ require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'
 require_text "$build_deb" 'target/release/dasobjectstore-remote'
+require_text "$build_deb" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-server.service'
 require_text "$build_deb" 'opt/dasobjectstore/config.json'
@@ -94,6 +97,7 @@ require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'
+require_text "$build_rpm" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_rpm" 'usr/lib/systemd/system/dasobjectstored.service'
 require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
@@ -113,3 +117,6 @@ require_text "$build_remote_rpm" 'target/release/dasobjectstore-remote'
 require_text "$build_remote_rpm" 'docs/user/remote-client.rst'
 require_text "$build_remote_rpm" '/usr/bin/dasobjectstore-remote'
 require_text "$build_remote_rpm" 'Recommends:      awscli'
+
+require_text "$prepare_web_dist" "trunk build --release"
+require_text "$prepare_web_dist" "target/web-fallback/dist"

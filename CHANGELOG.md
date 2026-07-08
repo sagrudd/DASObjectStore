@@ -16,6 +16,8 @@ agreement before landing.
 - Add top-level ``dasobjectstore status`` to report daemon, Web UI, and
   S3-compatible object-service endpoints, including configured ports and
   listener activity.
+- Add ``make web`` and route Debian/RPM package builds through packaged Web UI
+  asset preparation so the standalone interface is installed with the service.
 
 ## 0.8.1 - 2026-07-08
 

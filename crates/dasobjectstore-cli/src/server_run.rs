@@ -1,4 +1,5 @@
 use crate::server_cli::ServerCli;
+use axum::extract::Path as AxumPath;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
@@ -11,7 +12,7 @@ use dasobjectstore_gui_api::{
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 pub(crate) async fn run(cli: &ServerCli, writer: &mut impl Write) -> Result<(), ServerRunError> {
     let config = cli.server_config()?;
@@ -59,9 +60,7 @@ async fn start_server(
 fn standalone_router(web_root: PathBuf) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
-    let js_root = web_root.clone();
-    let wasm_root = web_root.clone();
-    let css_root = web_root;
+    let asset_root = web_root;
     Router::new()
         .route("/", get(root_redirect))
         .route(
@@ -78,30 +77,9 @@ fn standalone_router(web_root: PathBuf) -> Router {
             }),
         )
         .route(
-            "/products/dasobjectstore/dasobjectstore-gui-web-68f9565a632c3ded.js",
-            get(move || {
-                serve_asset(
-                    js_root.join("dasobjectstore-gui-web-68f9565a632c3ded.js"),
-                    "application/javascript",
-                )
-            }),
-        )
-        .route(
-            "/products/dasobjectstore/dasobjectstore-gui-web-68f9565a632c3ded_bg.wasm",
-            get(move || {
-                serve_asset(
-                    wasm_root.join("dasobjectstore-gui-web-68f9565a632c3ded_bg.wasm"),
-                    "application/wasm",
-                )
-            }),
-        )
-        .route(
-            "/products/dasobjectstore/styles-ddee865e3ae271da.css",
-            get(move || {
-                serve_asset(
-                    css_root.join("styles-ddee865e3ae271da.css"),
-                    "text/css; charset=utf-8",
-                )
+            "/products/dasobjectstore/{*asset}",
+            get(move |AxumPath(asset): AxumPath<String>| {
+                serve_named_asset(asset_root.clone(), asset)
             }),
         )
         .merge(gui_api_router())
@@ -118,6 +96,45 @@ async fn serve_asset(path: PathBuf, content_type: &'static str) -> Response {
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
     bytes_response(content_type, bytes)
+}
+
+async fn serve_named_asset(web_root: PathBuf, asset: String) -> Response {
+    let Some(path) = static_asset_path(web_root, &asset) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let content_type = static_asset_content_type(&path);
+    serve_asset(path, content_type).await
+}
+
+fn static_asset_path(web_root: PathBuf, asset: &str) -> Option<PathBuf> {
+    let relative = PathBuf::from(asset.trim_start_matches('/'));
+    if relative.as_os_str().is_empty() {
+        return Some(web_root.join("index.html"));
+    }
+    let mut resolved = web_root;
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    Some(resolved)
+}
+
+fn static_asset_content_type(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("css") => "text/css; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "application/javascript",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("wasm") => "application/wasm",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("ico") => "image/x-icon",
+        _ => "application/octet-stream",
+    }
 }
 
 fn bytes_response(content_type: &'static str, bytes: Vec<u8>) -> Response {
@@ -283,17 +300,9 @@ mod tests {
             "index.html",
             "<!doctype html><title>DASObjectStore</title>",
         );
-        write_web_asset(
-            &root,
-            "dasobjectstore-gui-web-68f9565a632c3ded.js",
-            "export {};",
-        );
-        write_web_asset(
-            &root,
-            "dasobjectstore-gui-web-68f9565a632c3ded_bg.wasm",
-            "wasm",
-        );
-        write_web_asset(&root, "styles-ddee865e3ae271da.css", "body{}");
+        write_web_asset(&root, "dasobjectstore-gui-web-abcdef.js", "export {};");
+        write_web_asset(&root, "dasobjectstore-gui-web-abcdef_bg.wasm", "wasm");
+        write_web_asset(&root, "styles-abcdef.css", "body{}");
 
         let response = standalone_router(root.clone())
             .oneshot(
@@ -310,6 +319,18 @@ mod tests {
         let response = standalone_router(root.clone())
             .oneshot(
                 Request::builder()
+                    .uri("/products/dasobjectstore/dasobjectstore-gui-web-abcdef.js")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("asset response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = standalone_router(root.clone())
+            .oneshot(
+                Request::builder()
                     .uri("/products/dasobjectstore/api/v1/health")
                     .body(Body::empty())
                     .expect("request builds"),
@@ -318,6 +339,25 @@ mod tests {
             .expect("api response");
 
         assert_eq!(response.status(), StatusCode::OK);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_router_rejects_asset_traversal() {
+        let root = temp_root("server-run-web-traversal");
+        write_web_asset(&root, "index.html", "<!doctype html>");
+
+        let response = standalone_router(root.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/products/dasobjectstore/../secret")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("asset response");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         cleanup(&root);
     }
 
