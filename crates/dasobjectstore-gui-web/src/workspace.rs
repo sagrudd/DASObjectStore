@@ -23,6 +23,7 @@ pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
 pub const OBJECTSTORES_WORKSPACE_ROUTE: &str = "dashboard/object-stores";
 pub const ACTIVITY_WORKSPACE_ROUTE: &str = crate::activity::ACTIVITY_WORKSPACE_ROUTE;
+pub const ENDPOINTS_WORKSPACE_ROUTE: &str = crate::endpoints::ENDPOINTS_WORKSPACE_ROUTE;
 pub const BIOINFORMATICS_WORKSPACE_ROUTE: &str = "workspaces/bioinformatics";
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
@@ -32,6 +33,7 @@ pub enum WorkspacePage {
     Enclosures,
     ObjectStores,
     Activity,
+    Endpoints,
     UsersGroups,
     Bioinformatics,
 }
@@ -43,6 +45,7 @@ impl WorkspacePage {
             Self::Enclosures => "enclosures",
             Self::ObjectStores => "objectstores",
             Self::Activity => "activity",
+            Self::Endpoints => "endpoints",
             Self::UsersGroups => "users-groups",
             Self::Bioinformatics => "bioinformatics",
         }
@@ -54,6 +57,7 @@ impl WorkspacePage {
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
+            Self::Endpoints => "Endpoints",
             Self::UsersGroups => "Users/Groups",
             Self::Bioinformatics => "Bioinformatics",
         }
@@ -65,6 +69,7 @@ impl WorkspacePage {
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
+            Self::Endpoints => "Endpoints",
             Self::UsersGroups => "Users/Groups",
             Self::Bioinformatics => "Bioinformatics",
         }
@@ -76,16 +81,18 @@ impl WorkspacePage {
             Self::Enclosures => enclosures_workspace_api_path(api_base_path),
             Self::ObjectStores => objectstores_workspace_api_path(api_base_path),
             Self::Activity => activity_workspace_api_path(api_base_path),
+            Self::Endpoints => endpoints_workspace_api_path(api_base_path),
             Self::UsersGroups => users_groups_workspace_api_path(api_base_path),
             Self::Bioinformatics => bioinformatics_workspace_api_path(api_base_path),
         }
     }
 }
 
-pub const PRIMARY_NAVIGATION: [WorkspacePage; 6] = [
+pub const PRIMARY_NAVIGATION: [WorkspacePage; 7] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
+    WorkspacePage::Endpoints,
     WorkspacePage::Activity,
     WorkspacePage::UsersGroups,
     WorkspacePage::Bioinformatics,
@@ -132,6 +139,10 @@ pub fn objectstores_workspace_api_path(api_base_path: &str) -> String {
 
 pub fn activity_workspace_api_path(api_base_path: &str) -> String {
     crate::activity::activity_workspace_api_path(api_base_path)
+}
+
+pub fn endpoints_workspace_api_path(api_base_path: &str) -> String {
+    crate::endpoints::endpoints_workspace_api_path(api_base_path)
 }
 
 pub fn bioinformatics_workspace_api_path(api_base_path: &str) -> String {
@@ -4578,14 +4589,15 @@ mod tests {
         admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
-        enclosures_workspace_api_path, home_dashboard_attention, home_dashboard_metrics,
-        home_workspace_api_path, object_store_bucket_default, object_store_card_summaries,
-        object_store_configure_review_from_values, object_store_create_confirmation_matches,
-        object_store_create_review_from_values, object_store_creation_fields_ready,
-        objectstores_workspace_api_path, primary_navigation_for_host,
-        subobject_registry_preview_from_values, users_groups_summary_cards,
-        users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, WorkspacePage,
-        ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        enclosures_workspace_api_path, endpoints_workspace_api_path, home_dashboard_attention,
+        home_dashboard_metrics, home_workspace_api_path, object_store_bucket_default,
+        object_store_card_summaries, object_store_configure_review_from_values,
+        object_store_create_confirmation_matches, object_store_create_review_from_values,
+        object_store_creation_fields_ready, objectstores_workspace_api_path,
+        primary_navigation_for_host, subobject_registry_preview_from_values,
+        users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
+        EnclosureWizardState, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
+        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
         HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE,
         PRIMARY_NAVIGATION,
     };
@@ -4616,6 +4628,7 @@ mod tests {
                 "Home",
                 "Enclosures",
                 "ObjectStores",
+                "Endpoints",
                 "Activity",
                 "Users/Groups",
                 "Bioinformatics"
@@ -4636,6 +4649,8 @@ mod tests {
 
         assert!(standalone_labels.contains(&"Activity"));
         assert!(synoptikon_labels.contains(&"Activity"));
+        assert!(standalone_labels.contains(&"Endpoints"));
+        assert!(!synoptikon_labels.contains(&"Endpoints"));
         assert!(standalone_labels.contains(&"Users/Groups"));
         assert!(!synoptikon_labels.contains(&"Users/Groups"));
     }
@@ -4661,6 +4676,10 @@ mod tests {
             "/products/dasobjectstore/api/v1/workspaces/activity"
         );
         assert_eq!(
+            WorkspacePage::Endpoints.api_path(base),
+            "/products/dasobjectstore/api/v1/workspaces/endpoints"
+        );
+        assert_eq!(
             WorkspacePage::UsersGroups.api_path(base),
             "/products/dasobjectstore/api/v1/workspaces/users-groups"
         );
@@ -4676,6 +4695,7 @@ mod tests {
         assert_eq!(ENCLOSURES_WORKSPACE_ROUTE, "dashboard/enclosures");
         assert_eq!(OBJECTSTORES_WORKSPACE_ROUTE, "dashboard/object-stores");
         assert_eq!(ACTIVITY_WORKSPACE_ROUTE, "workspaces/activity");
+        assert_eq!(ENDPOINTS_WORKSPACE_ROUTE, "workspaces/endpoints");
         assert_eq!(home_workspace_api_path("/api/"), "/api/dashboard/home");
         assert_eq!(
             enclosures_workspace_api_path("/api/"),
@@ -4688,6 +4708,10 @@ mod tests {
         assert_eq!(
             activity_workspace_api_path("/api/"),
             "/api/workspaces/activity"
+        );
+        assert_eq!(
+            endpoints_workspace_api_path("/api/"),
+            "/api/workspaces/endpoints"
         );
         assert_eq!(
             users_groups_workspace_api_path("/api/"),
@@ -4712,6 +4736,9 @@ mod tests {
         assert!(primary_paths
             .iter()
             .any(|path| path.ends_with(ACTIVITY_WORKSPACE_ROUTE)));
+        assert!(primary_paths
+            .iter()
+            .any(|path| path.ends_with(ENDPOINTS_WORKSPACE_ROUTE)));
         assert!(primary_paths
             .iter()
             .any(|path| path.ends_with(OBJECTSTORES_WORKSPACE_ROUTE)));

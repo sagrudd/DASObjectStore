@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.50.0 - 2026-07-09
+
+- Promote the Endpoints workspace into standalone Web primary navigation and
+  render registry-backed endpoint inventory cards from the authenticated API.
+- Add Yew endpoint-administration controls for endpoint identity, validation
+  state, active ObjectStore/governance-domain bindings, dry-run/live
+  confirmation, daemon acceptance results, and permission-denied handling.
+- Document the browser-side Endpoints workflow for daemon-owned endpoint
+  inventory updates.
+
 ## 0.49.0 - 2026-07-09
 
 - Add a daemon `upsert_endpoint_inventory` request/response for administrator

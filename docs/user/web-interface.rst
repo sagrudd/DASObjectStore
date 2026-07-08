@@ -450,7 +450,7 @@ authenticated daemon job routes and risk gates as the originating workflow.
 Endpoints Workspace
 -------------------
 
-The legacy operations ``Endpoints`` workspace loads
+The standalone ``Endpoints`` navigation entry loads
 ``/products/dasobjectstore/api/v1/workspaces/endpoints``. It reads endpoint
 inventory from ``/opt/dasobjectstore/endpoints.json`` by default, or from the
 path named by ``DASOBJECTSTORE_ENDPOINTS_PATH`` when that environment variable
@@ -471,14 +471,20 @@ Endpoint validation states are ``draft``, ``pending_validation``,
 unknown, draft, and pending states generate visible warnings.
 
 Standalone administrator sessions can submit endpoint inventory creation or
-updates through ``POST /api/v1/workspaces/endpoints/upsert``. The route requires
-the same standalone session headers as other Web administrator routes and the
-current OS user must have sudo-derived administrator authority. Live submissions
-must include the exact confirmation marker ``record endpoint inventory``; dry
-runs may omit it. The request body carries the endpoint identity, kind,
+updates from the ``Endpoints`` page. The form records endpoint identity, kind,
 object-service URL, validation state, optional validation timestamp/message,
-manager product ID, optional active bindings, dry-run flag, and optional client
-request ID.
+manager product ID, and optional active ObjectStore/governance-domain binding
+controls. It shows the daemon acceptance result inline and reports
+permission-denied responses without editing browser-side state.
+
+The form submits to ``POST /api/v1/workspaces/endpoints/upsert``. The route
+requires the same standalone session headers as other Web administrator routes
+and the current OS user must have sudo-derived administrator authority. Live
+submissions must include the exact confirmation marker
+``record endpoint inventory``; dry runs may omit it. The request body carries
+the endpoint identity, kind, object-service URL, validation state, optional
+validation timestamp/message, manager product ID, optional active bindings,
+dry-run flag, and optional client request ID.
 
 The Web route validates the request and forwards it to ``dasobjectstored`` as an
 ``upsert_endpoint_inventory`` daemon request. The daemon writes the shared

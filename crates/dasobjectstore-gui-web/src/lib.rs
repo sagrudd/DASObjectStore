@@ -24,7 +24,10 @@ pub use activity::{activity_workspace_api_path, ACTIVITY_WORKSPACE_ROUTE};
 #[cfg(target_arch = "wasm32")]
 pub use app::App;
 pub use disks::{disks_workspace_api_path, DISKS_WORKSPACE_ROUTE};
-pub use endpoints::{endpoints_workspace_api_path, ENDPOINTS_WORKSPACE_ROUTE};
+pub use endpoints::{
+    endpoint_inventory_upsert_action_api_path, endpoints_workspace_api_path,
+    ENDPOINTS_WORKSPACE_ROUTE, ENDPOINT_INVENTORY_UPSERT_ROUTE, ENDPOINT_RECORD_CONFIRMATION,
+};
 pub use entrypoint::{
     post_login_workspace_api_path, POST_LOGIN_WORKSPACE_ID, POST_LOGIN_WORKSPACE_ROUTE,
 };

@@ -1,4 +1,5 @@
 use crate::components::DasObjectStoreFooter;
+use crate::endpoints::EndpointsWorkspace;
 use crate::mount::{FrontendHost, FrontendMount};
 use crate::session::{AppState, StableState};
 use crate::workspace::{
@@ -284,6 +285,9 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                 },
                 WorkspacePage::Activity => html! {
                     <ActivityPage api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::Endpoints => html! {
+                    <EndpointsWorkspace api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::UsersGroups => html! {
                     <UsersGroupsPage api_base_path={props.api_base_path.clone()} />

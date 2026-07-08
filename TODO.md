@@ -648,7 +648,7 @@ older checklist claims.
 - [x] Add administrator Web and daemon workflows to create/update endpoint
   inventory records from validated NAS/NFS, S3-compatible, and Mnemosyne
   endpoint definitions.
-- [ ] Add Yew endpoint-administration forms for creating and updating
+- [x] Add Yew endpoint-administration forms for creating and updating
   registry-backed endpoint records through the authenticated daemon-backed Web
   route, including validation-state review, active binding controls,
   dry-run/live confirmation, result display, and permission-denied states.

@@ -549,6 +549,120 @@ pub struct ActivityTaskResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct EndpointsWorkspaceResponse {
+    pub inventory: EndpointInventoryResponse,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct EndpointInventoryResponse {
+    pub schema_version: String,
+    pub endpoint_count: usize,
+    pub degraded_endpoint_count: usize,
+    pub binding_count: usize,
+    pub endpoints: Vec<EndpointInventoryItemResponse>,
+    pub warnings: Vec<EndpointWarningResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct EndpointInventoryItemResponse {
+    pub endpoint_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub manager_product_id: String,
+    pub object_service_url: String,
+    pub validation: EndpointValidationResponse,
+    pub active_bindings: Vec<EndpointBindingResponse>,
+    pub warnings: Vec<EndpointWarningResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct EndpointValidationResponse {
+    pub state: String,
+    pub checked_at_utc: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct EndpointBindingResponse {
+    pub binding_id: String,
+    pub governance_domain: String,
+    pub store_id: String,
+    pub readiness: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct EndpointWarningResponse {
+    pub code: String,
+    pub severity: String,
+    pub endpoint_id: String,
+    pub binding_id: Option<String>,
+    pub message: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[allow(dead_code)]
+pub struct EndpointInventoryUpsertRequest {
+    pub endpoint_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub object_service_url: String,
+    pub validation: EndpointValidationUpsertRequest,
+    pub manager_product_id: String,
+    pub active_bindings: Vec<EndpointBindingUpsertRequest>,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub confirmation_marker: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[allow(dead_code)]
+pub struct EndpointValidationUpsertRequest {
+    pub state: String,
+    pub checked_at_utc: Option<String>,
+    pub message: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[allow(dead_code)]
+pub struct EndpointBindingUpsertRequest {
+    pub binding_id: String,
+    pub governance_domain: String,
+    pub store_id: String,
+    pub readiness: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EndpointInventoryUpsertResponse {
+    pub accepted: EndpointInventoryAcceptedResponse,
+    pub endpoint_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub validation_state: String,
+    pub registry_path: String,
+    pub administrator_actor: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EndpointInventoryAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct MemoryStressResponse {
     pub state: String,
     pub pressure_percent: u8,
@@ -769,6 +883,11 @@ pub async fn get_activity_workspace(path: &str) -> Result<ActivityWorkspaceRespo
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn get_endpoints_workspace(path: &str) -> Result<EndpointsWorkspaceResponse, ApiError> {
+    get_json(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn get_bioinformatics_workspace(
     path: &str,
 ) -> Result<BioinformaticsWorkspaceResponse, ApiError> {
@@ -842,11 +961,28 @@ pub async fn submit_object_store_create(
     post_json(&object_store_create_path(api_base_path), request).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn submit_endpoint_inventory_upsert(
+    api_base_path: &str,
+    request: &EndpointInventoryUpsertRequest,
+) -> Result<EndpointInventoryUpsertResponse, ApiError> {
+    post_json(&endpoint_inventory_upsert_path(api_base_path), request).await
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[allow(dead_code)]
 pub fn object_store_create_path(api_base_path: &str) -> String {
     format!(
         "{}/workspaces/object-stores/create",
+        api_base_path.trim_end_matches('/')
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+pub fn endpoint_inventory_upsert_path(api_base_path: &str) -> String {
+    format!(
+        "{}/workspaces/endpoints/upsert",
         api_base_path.trim_end_matches('/')
     )
 }
@@ -951,10 +1087,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_job_cancel_path, admin_job_status_path, auth_path, object_store_create_path,
-        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
-        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
-        EnclosuresPageResponse, GuiActionPlanResponse, HomeDashboardResponse,
+        admin_job_cancel_path, admin_job_status_path, auth_path, endpoint_inventory_upsert_path,
+        object_store_create_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
+        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
+        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
+        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
         LocalGroupAdminResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
 
@@ -1224,6 +1361,14 @@ mod tests {
     }
 
     #[test]
+    fn builds_endpoint_inventory_upsert_route_under_product_mount() {
+        assert_eq!(
+            endpoint_inventory_upsert_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/workspaces/endpoints/upsert"
+        );
+    }
+
+    #[test]
     fn decodes_admin_job_status_response_subset() {
         let payload = serde_json::json!({
             "job": {
@@ -1355,6 +1500,72 @@ mod tests {
             decoded.create_object_store.defaults.endpoint_export_mode,
             "s3_bucket"
         );
+    }
+
+    #[test]
+    fn decodes_endpoints_workspace_response_subset() {
+        let payload = serde_json::json!({
+            "inventory": {
+                "schema_version": "dasobjectstore.endpoint_inventory.v1",
+                "endpoint_count": 1,
+                "degraded_endpoint_count": 0,
+                "binding_count": 1,
+                "endpoints": [{
+                    "endpoint_id": "nas-staging",
+                    "display_name": "NAS staging",
+                    "kind": "dasobjectstore_nfs",
+                    "manager_product_id": "dasobjectstore",
+                    "object_service_url": "https://nas.example.test:9443",
+                    "validation": {
+                        "state": "validated",
+                        "checked_at_utc": "2026-07-09T00:00:00Z",
+                        "message": "validated"
+                    },
+                    "active_bindings": [{
+                        "binding_id": "binding-1",
+                        "governance_domain": "local",
+                        "store_id": "zymo",
+                        "readiness": "ready"
+                    }],
+                    "warnings": []
+                }],
+                "warnings": []
+            }
+        });
+
+        let decoded = serde_json::from_value::<EndpointsWorkspaceResponse>(payload)
+            .expect("endpoints workspace decodes");
+
+        assert_eq!(decoded.inventory.endpoint_count, 1);
+        assert_eq!(decoded.inventory.binding_count, 1);
+        assert_eq!(decoded.inventory.endpoints[0].kind, "dasobjectstore_nfs");
+        assert_eq!(decoded.inventory.endpoints[0].validation.state, "validated");
+    }
+
+    #[test]
+    fn decodes_endpoint_inventory_upsert_response_subset() {
+        let payload = serde_json::json!({
+            "accepted": {
+                "job_id": "endpoint-upsert-1",
+                "kind": "endpoint_validation",
+                "accepted_at_utc": "2026-07-09T00:00:00Z",
+                "dry_run": false
+            },
+            "endpoint_id": "nas-staging",
+            "display_name": "NAS staging",
+            "kind": "dasobjectstore_nfs",
+            "validation_state": "validated",
+            "registry_path": "/opt/dasobjectstore/endpoints.json",
+            "administrator_actor": "stephen",
+            "client_request_id": null
+        });
+
+        let decoded = serde_json::from_value::<EndpointInventoryUpsertResponse>(payload)
+            .expect("endpoint inventory upsert response decodes");
+
+        assert_eq!(decoded.accepted.kind, "endpoint_validation");
+        assert_eq!(decoded.endpoint_id, "nas-staging");
+        assert_eq!(decoded.registry_path, "/opt/dasobjectstore/endpoints.json");
     }
 
     #[test]
