@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.3 - 2026-07-08
+
+- Move performance-test SSD file settlement onto a bounded background
+  `sync_all()` worker so the next SSD staging write can begin after the byte
+  stream completes instead of waiting for per-file filesystem durability.
+- Keep final-media HDD benchmark writes on the durable `sync_all()` path so
+  reported HDD landing rates still include settlement to disk.
+- Add a regression test proving SSD staging does not call `sync_all()` on the
+  foreground upload path while the background settler still flushes the staged
+  file.
+
 ## 0.10.2 - 2026-07-08
 
 - Show per-active-file HDD landing rates in the performance-test TUI so each

@@ -132,6 +132,101 @@ use std::sync::{mpsc, Arc, Mutex};
 
 #[cfg(unix)]
 static UPLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+thread_local! {
+    static PERFORMANCE_SYNC_ALL_CALLS: RefCell<u32> = const { RefCell::new(0) };
+}
+const PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY: usize = 8;
+
+struct PerformanceSsdSettleJob {
+    path: PathBuf,
+    file: File,
+}
+
+struct PerformanceSsdSettler {
+    sender: Option<mpsc::SyncSender<PerformanceSsdSettleJob>>,
+    handle: Option<thread::JoinHandle<Result<(), CliError>>>,
+    completed: Arc<AtomicU32>,
+}
+
+impl PerformanceSsdSettler {
+    fn start(capacity: usize) -> Self {
+        let (sender, receiver) = mpsc::sync_channel::<PerformanceSsdSettleJob>(capacity);
+        let completed = Arc::new(AtomicU32::new(0));
+        let worker_completed = Arc::clone(&completed);
+        let handle = thread::spawn(move || -> Result<(), CliError> {
+            loop {
+                check_performance_cancelled()?;
+                let job = match receiver.recv() {
+                    Ok(job) => job,
+                    Err(_) => break,
+                };
+                performance_sync_all(&job.file).map_err(|err| {
+                    CliError::CommandFailed(format!(
+                        "performance-test SSD settle failed for {}: {err}",
+                        job.path.display()
+                    ))
+                })?;
+                worker_completed.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(())
+        });
+        Self {
+            sender: Some(sender),
+            handle: Some(handle),
+            completed,
+        }
+    }
+
+    fn submit(&self, path: PathBuf, file: File) -> Result<(), CliError> {
+        let sender = self.sender.as_ref().ok_or_else(|| {
+            CliError::CommandFailed("performance-test SSD settler is closed".to_string())
+        })?;
+        let mut pending = Some(PerformanceSsdSettleJob { path, file });
+        loop {
+            check_performance_cancelled()?;
+            let job = pending.take().expect("pending SSD settle job");
+            match sender.try_send(job) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Full(job)) => {
+                    pending = Some(job);
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err(CliError::CommandFailed(
+                        "performance-test SSD settler stopped early".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    fn finish(mut self) -> Result<u32, CliError> {
+        drop(self.sender.take());
+        self.join_worker()?;
+        Ok(self.completed.load(Ordering::SeqCst))
+    }
+
+    fn join_worker(&mut self) -> Result<(), CliError> {
+        if let Some(handle) = self.handle.take() {
+            match handle.join() {
+                Ok(result) => result,
+                Err(_) => Err(CliError::CommandFailed(
+                    "performance-test SSD settler panicked".to_string(),
+                )),
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for PerformanceSsdSettler {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+        let _ = self.join_worker();
+    }
+}
 
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
@@ -1685,6 +1780,7 @@ fn benchmark_ssd_only(
     tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let ssd_settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
     let scenario_root = ssd_bench_root.join("ssd-only");
     let residency_budget = performance_ssd_residency_budget(&scenario_root)?;
     let batches = plan_ssd_residency_batches(workload, residency_budget)?;
@@ -1794,14 +1890,15 @@ fn benchmark_ssd_only(
                         },
                     )
                 };
-                measure_land_payload_with_progress(
+                measure_ssd_stage_payload_with_progress(
                     &payload,
                     &destination,
                     payload.file_index,
                     Some(&mut progress),
+                    &ssd_settler,
                 )?
             } else {
-                measure_land_payload(&payload, &destination)?
+                measure_ssd_stage_payload(&payload, &destination, &ssd_settler)?
             };
             written_bytes = written_bytes.saturating_add(ssd_write.bytes);
             ssd_write_measurements.push(ssd_write);
@@ -1935,6 +2032,7 @@ fn benchmark_ssd_only(
             }
         }
     }
+    ssd_settler.finish()?;
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let total_bytes = written_bytes;
     Ok(PerformanceScenarioResult {
@@ -1972,6 +2070,7 @@ fn benchmark_ssd_stage_then_drain(
     tui_context: Option<PerformanceTuiContext<'_>>,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let ssd_settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
     let scenario_root = ssd_bench_root
         .join("ssd-stage-then-drain")
         .join(format!("c{concurrency}"));
@@ -2089,14 +2188,15 @@ fn benchmark_ssd_stage_then_drain(
                         },
                     )
                 };
-                measure_land_payload_with_progress(
+                measure_ssd_stage_payload_with_progress(
                     &payload,
                     &ssd_path,
                     payload.file_index,
                     Some(&mut progress),
+                    &ssd_settler,
                 )
             } else {
-                measure_land_payload(&payload, &ssd_path)
+                measure_ssd_stage_payload(&payload, &ssd_path, &ssd_settler)
             } {
                 Ok(measurement) => measurement,
                 Err(err) => {
@@ -2427,6 +2527,7 @@ fn benchmark_ssd_stage_then_drain(
         disk_results.append(&mut batch_disk_results);
     }
 
+    ssd_settler.finish()?;
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     disk_results.sort_by(|left, right| {
         left.file_index
@@ -2518,6 +2619,7 @@ fn benchmark_ssd_pipeline_with_options(
     options: SsdPipelineBenchmarkOptions,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
+    let ssd_settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
     let scenario_root = ssd_bench_root
         .join("ssd-pipeline")
         .join(format!("c{concurrency}"));
@@ -2853,14 +2955,15 @@ fn benchmark_ssd_pipeline_with_options(
                     },
                 )
             };
-            measure_land_payload_with_progress(
+            measure_ssd_stage_payload_with_progress(
                 payload,
                 &ssd_path,
                 payload.file_index,
                 Some(&mut progress),
+                &ssd_settler,
             )
         } else {
-            measure_land_payload(payload, &ssd_path)
+            measure_ssd_stage_payload(payload, &ssd_path, &ssd_settler)
         } {
             Ok(measurement) => measurement,
             Err(err) => {
@@ -3079,6 +3182,7 @@ fn benchmark_ssd_pipeline_with_options(
         let ssd_path = scenario_root.join(&payload.relative_path);
         let _ = fs::remove_file(&ssd_path);
     }
+    ssd_settler.finish()?;
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let mut disk_results = Arc::try_unwrap(worker_results)
         .map_err(|_| {
@@ -3185,10 +3289,12 @@ fn benchmark_direct_hdd(
                     .join("direct-hdd")
                     .join(format!("c{concurrency}"))
                     .join(&job.payload.relative_path);
-                let measurement = measure_land_payload_with_seed(
+                let measurement = measure_land_payload_with_progress_and_sync_policy(
                     &job.payload,
                     &destination,
                     job.payload.file_index ^ worker_index as u32 ^ job.copy_index as u32,
+                    None,
+                    PerformanceCopySyncPolicy::SyncAll,
                 );
                 let _ = fs::remove_file(&destination);
                 let measurement = measurement?;
@@ -3541,6 +3647,7 @@ fn measure_generate_random_file_with_progress(
     size_bytes: u64,
     seed: u32,
     mut progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+    sync_policy: PerformanceCopySyncPolicy<'_>,
 ) -> Result<PerformanceMeasurement, CliError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -3568,7 +3675,14 @@ fn measure_generate_random_file_with_progress(
         }
     }
     check_performance_cancelled()?;
-    file.sync_all()?;
+    match sync_policy {
+        PerformanceCopySyncPolicy::SyncAll => {
+            performance_sync_all(&file)?;
+        }
+        PerformanceCopySyncPolicy::AsyncSsdSettle(settler) => {
+            settler.submit(path.to_path_buf(), file)?;
+        }
+    }
     if let Some(callback) = progress.as_deref_mut() {
         callback(size_bytes, started.elapsed().as_secs_f64().max(0.001))?;
     }
@@ -3578,32 +3692,54 @@ fn measure_generate_random_file_with_progress(
     })
 }
 
-fn measure_land_payload(
+fn measure_ssd_stage_payload(
     payload: &PerformancePayload,
     destination: &Path,
+    settler: &PerformanceSsdSettler,
 ) -> Result<PerformanceMeasurement, CliError> {
-    measure_land_payload_with_seed(payload, destination, payload.file_index)
+    measure_ssd_stage_payload_with_progress(payload, destination, payload.file_index, None, settler)
 }
 
-fn measure_land_payload_with_seed(
-    payload: &PerformancePayload,
-    destination: &Path,
-    seed: u32,
-) -> Result<PerformanceMeasurement, CliError> {
-    measure_land_payload_with_progress(payload, destination, seed, None)
-}
-
-fn measure_land_payload_with_progress(
+fn measure_ssd_stage_payload_with_progress(
     payload: &PerformancePayload,
     destination: &Path,
     seed: u32,
     progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+    settler: &PerformanceSsdSettler,
+) -> Result<PerformanceMeasurement, CliError> {
+    measure_land_payload_with_progress_and_sync_policy(
+        payload,
+        destination,
+        seed,
+        progress,
+        PerformanceCopySyncPolicy::AsyncSsdSettle(settler),
+    )
+}
+
+fn measure_land_payload_with_progress_and_sync_policy(
+    payload: &PerformancePayload,
+    destination: &Path,
+    seed: u32,
+    progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+    sync_policy: PerformanceCopySyncPolicy<'_>,
 ) -> Result<PerformanceMeasurement, CliError> {
     if let Some(source) = &payload.source_path {
-        measure_copy_with_progress(source, destination, progress)
+        measure_copy_with_progress_and_sync_policy(source, destination, progress, sync_policy)
     } else {
-        measure_generate_random_file_with_progress(destination, payload.size_bytes, seed, progress)
+        measure_generate_random_file_with_progress(
+            destination,
+            payload.size_bytes,
+            seed,
+            progress,
+            sync_policy,
+        )
     }
+}
+
+#[derive(Clone, Copy)]
+enum PerformanceCopySyncPolicy<'a> {
+    SyncAll,
+    AsyncSsdSettle(&'a PerformanceSsdSettler),
 }
 
 fn fill_pseudorandom(buffer: &mut [u8], state: &mut u64) {
@@ -3619,7 +3755,21 @@ fn fill_pseudorandom(buffer: &mut [u8], state: &mut u64) {
 fn measure_copy_with_progress(
     source: &Path,
     destination: &Path,
+    progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+) -> Result<PerformanceMeasurement, CliError> {
+    measure_copy_with_progress_and_sync_policy(
+        source,
+        destination,
+        progress,
+        PerformanceCopySyncPolicy::SyncAll,
+    )
+}
+
+fn measure_copy_with_progress_and_sync_policy(
+    source: &Path,
+    destination: &Path,
     mut progress: Option<&mut dyn FnMut(u64, f64) -> Result<(), CliError>>,
+    sync_policy: PerformanceCopySyncPolicy<'_>,
 ) -> Result<PerformanceMeasurement, CliError> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
@@ -3651,7 +3801,14 @@ fn measure_copy_with_progress(
         }
     }
     check_performance_cancelled()?;
-    writer.sync_all()?;
+    match sync_policy {
+        PerformanceCopySyncPolicy::SyncAll => {
+            performance_sync_all(&writer)?;
+        }
+        PerformanceCopySyncPolicy::AsyncSsdSettle(settler) => {
+            settler.submit(destination.to_path_buf(), writer)?;
+        }
+    }
     if let Some(callback) = progress.as_deref_mut() {
         callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
     }
@@ -3659,6 +3816,26 @@ fn measure_copy_with_progress(
         bytes,
         seconds: started.elapsed().as_secs_f64().max(0.001),
     })
+}
+
+fn performance_sync_all(file: &File) -> io::Result<()> {
+    #[cfg(test)]
+    PERFORMANCE_SYNC_ALL_CALLS.with(|calls| {
+        *calls.borrow_mut() += 1;
+    });
+    file.sync_all()
+}
+
+#[cfg(test)]
+fn reset_performance_sync_all_calls() {
+    PERFORMANCE_SYNC_ALL_CALLS.with(|calls| {
+        *calls.borrow_mut() = 0;
+    });
+}
+
+#[cfg(test)]
+fn performance_sync_all_calls() -> u32 {
+    PERFORMANCE_SYNC_ALL_CALLS.with(|calls| *calls.borrow())
 }
 
 fn measure_read(source: &Path) -> Result<PerformanceMeasurement, CliError> {
@@ -8551,9 +8728,11 @@ mod tests {
     use super::{
         active_hdd_landing_lines, benchmark_ssd_only, benchmark_ssd_pipeline_with_options,
         benchmark_ssd_stage_then_drain, collect_ingest_files, connection_status_from_probe,
-        current_user_group_names, parse_binary_size, performance_report_metadata_json,
-        plan_ssd_residency_batches, render_performance_json, render_performance_report,
-        render_performance_tui_snapshot, render_simple_pdf, run, source_performance_workload,
+        current_user_group_names, measure_copy_with_progress,
+        measure_ssd_stage_payload_with_progress, parse_binary_size,
+        performance_report_metadata_json, performance_sync_all_calls, plan_ssd_residency_batches,
+        render_performance_json, render_performance_report, render_performance_tui_snapshot,
+        render_simple_pdf, reset_performance_sync_all_calls, run, source_performance_workload,
         validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
         write_health_summary, write_health_verbose, write_host_connection_status,
         write_pretty_report, ActiveHddWrite, ActiveHddWriteMap, CliError, ConnectionAssessment,
@@ -8561,8 +8740,9 @@ mod tests {
         PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
         PerformanceMeasurement, PerformancePayload, PerformanceRecommendation, PerformanceReport,
         PerformanceScenarioKind, PerformanceScenarioResult, PerformanceSsdResidencyBudget,
-        PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
-        SsdPipelineBenchmarkOptions,
+        PerformanceSsdSettler, PerformanceTuiSnapshot, PerformanceWorkload,
+        PerformanceWorkloadKind, SsdPipelineBenchmarkOptions,
+        PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -8911,6 +9091,61 @@ mod tests {
             );
         }
 
+        fs::remove_dir_all(root).expect("cleanup benchmark fixture");
+    }
+
+    #[test]
+    fn performance_ssd_staging_does_not_sync_each_uploaded_file() {
+        let root = temp_root("performance-ssd-stage-no-sync");
+        let settler = PerformanceSsdSettler::start(PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY);
+        let payload = PerformancePayload {
+            file_index: 0,
+            relative_path: PathBuf::from("a.bin"),
+            source_path: None,
+            size_bytes: 8,
+        };
+        let ssd_destination = root.join("ssd").join("a.bin");
+        reset_performance_sync_all_calls();
+
+        let mut progress_calls = 0_u32;
+        let mut progress = |_bytes: u64, _seconds: f64| -> Result<(), CliError> {
+            progress_calls += 1;
+            Ok(())
+        };
+        measure_ssd_stage_payload_with_progress(
+            &payload,
+            &ssd_destination,
+            payload.file_index,
+            Some(&mut progress),
+            &settler,
+        )
+        .expect("SSD staging succeeds");
+
+        assert!(
+            progress_calls > 0,
+            "staging should still report byte progress"
+        );
+        assert_eq!(
+            performance_sync_all_calls(),
+            0,
+            "SSD staging should copy bytes linearly and leave durability settlement off the per-file upload path"
+        );
+        let settled_files = settler.finish().expect("SSD settlement finishes");
+        assert_eq!(
+            settled_files, 1,
+            "SSD staging should settle the completed file on the background worker"
+        );
+
+        let source = root.join("source.bin");
+        let durable_destination = root.join("hdd").join("a.bin");
+        fs::write(&source, b"durable").expect("write source fixture");
+        measure_copy_with_progress(&source, &durable_destination, None)
+            .expect("durable HDD-style copy succeeds");
+        assert_eq!(
+            performance_sync_all_calls(),
+            1,
+            "durable final-media copies should still call sync_all"
+        );
         fs::remove_dir_all(root).expect("cleanup benchmark fixture");
     }
 
