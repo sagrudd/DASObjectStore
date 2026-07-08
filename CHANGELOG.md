@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.29.0 - 2026-07-08
+
+- Add a Trunk-backed Playwright screenshot regression harness for login, Home,
+  Enclosures, ObjectStores, and Bioinformatics pages at desktop and mobile
+  widths.
+- Add `make web-screenshots` to build the real WebAssembly app, serve mocked
+  authenticated API payloads, capture screenshot artifacts, and fail on missing
+  footer/navigation or major layout overlaps.
+- Document the Web screenshot regression workflow and artifact location.
+
 ## 0.28.0 - 2026-07-08
 
 - Add a reusable Web `DasObjectStoreFooter` component with Mnemosyne product

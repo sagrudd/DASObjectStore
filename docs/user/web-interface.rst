@@ -323,6 +323,21 @@ dark Mnemosyne product style used by sibling Web surfaces: monospace text,
 ``DASObjectStore v<version>``, "Developed by", a ``https://mnemosyne.co.uk``
 Mnemosyne link, and 2026 Mnemosyne Biosciences attribution.
 
+Screenshot regression coverage is available through:
+
+.. code-block:: console
+
+   make web-screenshots
+
+The check builds the real Trunk/WebAssembly interface, serves it under
+``/products/dasobjectstore/`` with deterministic mocked API payloads, captures
+login, Home, Enclosures, ObjectStores, and Bioinformatics screenshots at desktop
+and mobile widths, and fails if the footer, primary navigation, major cards, or
+page headers visibly overlap. Generated screenshots are written under
+``target/web-screenshots/`` for review and are not committed. The check expects
+the same Web packaging prerequisites as ``make web`` plus Node.js and Playwright
+with Chromium installed.
+
 Checking the Web Server
 -----------------------
 

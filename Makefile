@@ -6,13 +6,14 @@ GITHUB_OWNER ?= sagrudd
 MNEMOSYNE_WORKSPACE ?= $(abspath ..)
 MNEMOSYNE_REPO_MATCH ?= mnemosyne|mneion|monas|synoptikon|mnematikon|grammateus|flounder
 
-.PHONY: help pull build web test fmt check deb rpm remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots test fmt check deb rpm remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
 	@printf '  make pull       Pull this repo and clone/pull sibling Mnemosyne product repos\n'
 	@printf '  make build      Build release CLI, server, and daemon binaries\n'
 	@printf '  make web        Build or prepare the packaged web interface assets\n'
+	@printf '  make web-screenshots Build the Web UI and run Playwright screenshot regressions\n'
 	@printf '  make test       Run the full Rust workspace test suite\n'
 	@printf '  make fmt        Format Rust sources\n'
 	@printf '  make check      Run cargo check for the workspace\n'
@@ -62,6 +63,9 @@ build:
 
 web:
 	bash packaging/web/prepare-web-dist.sh
+
+web-screenshots:
+	node tools/web-screenshot-regression.mjs
 
 test:
 	cargo test --workspace

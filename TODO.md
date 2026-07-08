@@ -563,7 +563,7 @@ older checklist claims.
   styling does not drift from Grammateus report conventions.
 - [x] Add Yew/component tests proving the footer renders on disconnected,
   checking-session, connected, busy, and error states.
-- [ ] Add Playwright or trunk-driven screenshot regression coverage for login,
+- [x] Add Playwright or trunk-driven screenshot regression coverage for login,
   Home, Enclosures, ObjectStores, and Bioinformatics at desktop and mobile
   widths, including footer fidelity and no-overlap checks.
 - [ ] Update `docs/user/web-interface.rst` with the live Web dashboard behavior,
