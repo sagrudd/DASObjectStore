@@ -378,6 +378,8 @@ pub struct ObjectStoreCardSummary {
     pub label: String,
     pub name: String,
     pub health: String,
+    pub object_type: String,
+    pub access: String,
     pub policy: String,
     pub capacity: String,
     pub objects: String,
@@ -416,6 +418,20 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                 label: store_class,
                 name: store.display_name.clone(),
                 health: store.health.clone(),
+                object_type: store.object_type.as_deref().unwrap_or("naive").to_string(),
+                access: format!(
+                    "{} / {}",
+                    if store.public.unwrap_or(false) {
+                        "public"
+                    } else {
+                        "private"
+                    },
+                    if store.writeable.unwrap_or(false) {
+                        "writeable"
+                    } else {
+                        "read-only"
+                    }
+                ),
                 policy: format!(
                     "{}; {}",
                     copies,
@@ -961,6 +977,7 @@ fn render_object_store_card(store: ObjectStoreCardSummary) -> Html {
                 <span class="dos-status-pill">{ store.health }</span>
             </div>
             <strong>{ store.name }</strong>
+            <p>{ format!("type: {} · access: {}", store.object_type, store.access) }</p>
             <p>{ store.policy }</p>
             <p>{ store.capacity }</p>
             <p>{ format!("{} · writer group: {}", store.objects, store.writer_group) }</p>
@@ -1125,6 +1142,7 @@ mod tests {
                 "store_id": "zymo_fecal_2025.05",
                 "display_name": "zymo_fecal_2025.05",
                 "store_class": "generated_data",
+                "object_type": "pod5",
                 "health": "healthy",
                 "required_copies": 2,
                 "object_count": 42,
@@ -1137,6 +1155,8 @@ mod tests {
                 "placement_policy": "fractional_free_space",
                 "endpoint_export_mode": "s3_bucket",
                 "writer_group": "bioinformatics",
+                "public": false,
+                "writeable": true,
                 "created_at_utc": "2026-07-08T08:00:00Z",
                 "last_ingested_at_utc": "2026-07-08T08:30:00Z",
                 "warnings": [{
@@ -1171,6 +1191,8 @@ mod tests {
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, "zymo_fecal_2025.05");
         assert_eq!(summaries[0].label, "generated_data");
+        assert_eq!(summaries[0].object_type, "pod5");
+        assert_eq!(summaries[0].access, "private / writeable");
         assert!(summaries[0].policy.contains("2 required copy/copies"));
         assert!(summaries[0].capacity.contains("12.5 TiB used"));
         assert_eq!(summaries[0].writer_group, "bioinformatics");

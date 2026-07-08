@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.17.0 - 2026-07-08
+
+- Extend the Web ObjectStores dashboard card contract with object type,
+  public/private state, and writeable/read-only state.
+- Render ObjectStore object type and access state on redesigned Web
+  ObjectStores cards.
+- Add dashboard serialization and Yew mapping regression coverage for the new
+  ObjectStore card fields.
+
 ## 0.16.0 - 2026-07-08
 
 - Wire the redesigned Web ObjectStores page to load the authenticated

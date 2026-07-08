@@ -164,6 +164,7 @@ pub struct ObjectStoreCardResponse {
     pub store_id: String,
     pub display_name: String,
     pub store_class: Option<String>,
+    pub object_type: Option<String>,
     pub health: String,
     pub required_copies: Option<u8>,
     pub object_count: usize,
@@ -171,6 +172,8 @@ pub struct ObjectStoreCardResponse {
     pub placement_policy: Option<String>,
     pub endpoint_export_mode: Option<String>,
     pub writer_group: Option<String>,
+    pub public: Option<bool>,
+    pub writeable: Option<bool>,
     pub created_at_utc: Option<String>,
     pub last_ingested_at_utc: Option<String>,
     pub warnings: Vec<DashboardWarning>,
@@ -557,6 +560,7 @@ mod tests {
                 "store_id": "zymo_fecal_2025.05",
                 "display_name": "zymo_fecal_2025.05",
                 "store_class": "generated_data",
+                "object_type": "pod5",
                 "health": "healthy",
                 "required_copies": 2,
                 "object_count": 42,
@@ -569,6 +573,8 @@ mod tests {
                 "placement_policy": "fractional_free_space",
                 "endpoint_export_mode": "s3_bucket",
                 "writer_group": "bioinformatics",
+                "public": false,
+                "writeable": true,
                 "created_at_utc": "2026-07-08T08:00:00Z",
                 "last_ingested_at_utc": "2026-07-08T08:30:00Z",
                 "warnings": []
@@ -599,6 +605,9 @@ mod tests {
         assert_eq!(decoded.stores.len(), 1);
         assert_eq!(decoded.stores[0].store_id, "zymo_fecal_2025.05");
         assert_eq!(decoded.stores[0].required_copies, Some(2));
+        assert_eq!(decoded.stores[0].object_type.as_deref(), Some("pod5"));
+        assert_eq!(decoded.stores[0].public, Some(false));
+        assert_eq!(decoded.stores[0].writeable, Some(true));
         assert_eq!(
             decoded.create_object_store.defaults.endpoint_export_mode,
             "s3_bucket"

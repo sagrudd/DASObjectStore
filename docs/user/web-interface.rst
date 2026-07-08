@@ -189,8 +189,9 @@ The redesigned ObjectStores page loads its inventory from
 session issued at login. It shows explicit loading, empty-inventory,
 permission-denied, and transport-error states instead of using fixture store
 cards. When store data is present, the page renders cards for store class,
-redundancy/copy policy, placement policy, used/free capacity, object count,
-writer group, endpoint export mode, last ingest time, warning count, and health.
+object type, public/writeable access, redundancy/copy policy, placement policy,
+used/free capacity, object count, writer group, endpoint export mode, last
+ingest time, warning count, and health.
 The create card reflects the daemon/API create affordance, including whether
 creation is currently available or blocked by administrator requirements.
 

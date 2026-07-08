@@ -282,6 +282,7 @@ pub struct ObjectStoreCardView {
     pub store_id: String,
     pub display_name: String,
     pub store_class: String,
+    pub object_type: String,
     pub health: DashboardHealthStateView,
     pub required_copies: u8,
     pub object_count: usize,
@@ -289,6 +290,8 @@ pub struct ObjectStoreCardView {
     pub placement_policy: String,
     pub endpoint_export_mode: String,
     pub writer_group: Option<String>,
+    pub public: bool,
+    pub writeable: bool,
     pub created_at_utc: String,
     pub last_ingested_at_utc: Option<String>,
     pub warnings: Vec<DashboardWarning>,
@@ -404,8 +407,9 @@ impl StoreClassOptionView {
 #[cfg(test)]
 mod tests {
     use super::{
-        CreateObjectStoreAffordanceView, EnclosuresPageView, HomeDashboardView,
-        ObjectStoresPageView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+        CapacitySummaryView, CreateObjectStoreAffordanceView, DashboardHealthStateView,
+        EnclosuresPageView, HomeDashboardView, ObjectStoreCardView, ObjectStoresPageView,
+        REDESIGN_DASHBOARD_SCHEMA_VERSION,
     };
 
     #[test]
@@ -454,12 +458,38 @@ mod tests {
 
     #[test]
     fn serializes_object_stores_page_redesign_contract() {
-        let encoded = serde_json::to_value(ObjectStoresPageView::bootstrap_fixture())
-            .expect("object stores serializes");
+        let mut view = ObjectStoresPageView::bootstrap_fixture();
+        view.stores = vec![ObjectStoreCardView {
+            store_id: "zymo_fecal_2025.05".to_string(),
+            display_name: "zymo_fecal_2025.05".to_string(),
+            store_class: "generated_data".to_string(),
+            object_type: "pod5".to_string(),
+            health: DashboardHealthStateView::Healthy,
+            required_copies: 2,
+            object_count: 42,
+            capacity: CapacitySummaryView {
+                total_tib: "100.0".to_string(),
+                used_tib: "12.5".to_string(),
+                free_tib: "87.5".to_string(),
+                used_percent_basis_points: 1250,
+            },
+            placement_policy: "fractional_free_space".to_string(),
+            endpoint_export_mode: "s3_bucket".to_string(),
+            writer_group: Some("bioinformatics".to_string()),
+            public: false,
+            writeable: true,
+            created_at_utc: "2026-07-08T08:00:00Z".to_string(),
+            last_ingested_at_utc: Some("2026-07-08T08:30:00Z".to_string()),
+            warnings: Vec::new(),
+        }];
+        let encoded = serde_json::to_value(view).expect("object stores serializes");
 
         assert_eq!(encoded["schema_version"], REDESIGN_DASHBOARD_SCHEMA_VERSION);
         assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
-        assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
+        assert_eq!(encoded["stores"].as_array().expect("stores").len(), 1);
+        assert_eq!(encoded["stores"][0]["object_type"], "pod5");
+        assert_eq!(encoded["stores"][0]["public"], false);
+        assert_eq!(encoded["stores"][0]["writeable"], true);
         assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["defaults"]["store_class"],
