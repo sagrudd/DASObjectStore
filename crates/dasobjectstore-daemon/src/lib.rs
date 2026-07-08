@@ -46,14 +46,17 @@ pub use client::{
     UnixSocketDaemonTransport,
 };
 pub use runtime::{
-    provision_garage_store_registry, DaemonRuntimeConfig, DaemonRuntimeConfigError,
+    authoritative_performance_recommendation_path, provision_garage_store_registry,
+    read_authoritative_ingest_policy, AuthoritativeIngestPolicy,
+    AuthoritativePerformancePolicyError, DaemonRuntimeConfig, DaemonRuntimeConfigError,
     DaemonServiceRuntimeError, GarageProvisioningSummary, GarageServiceController,
     GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary, ServiceCommandOutput,
-    ServiceCommandRunner, SystemServiceCommandRunner, DEFAULT_DAEMON_CONFIG_PATH,
+    ServiceCommandRunner, SystemServiceCommandRunner, AUTHORITATIVE_PERFORMANCE_DIR_NAME,
+    AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME, DEFAULT_DAEMON_CONFIG_PATH,
     DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR,
     DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
     LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
-    LINUX_DAEMON_STATE_DIR,
+    LINUX_DAEMON_STATE_DIR, PERFORMANCE_RECOMMENDATION_SCHEMA,
 };
 pub use server::{
     DaemonApiHandler, DaemonClock, DaemonRequestHandler, DaemonRequestHandlerError,

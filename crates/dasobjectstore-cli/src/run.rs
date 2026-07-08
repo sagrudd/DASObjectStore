@@ -45,9 +45,10 @@ use dasobjectstore_core::risk::{
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestProgressEvent,
-    DaemonIngestStage, DaemonRuntimeConfig, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UnixSocketDaemonTransport,
+    authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
+    DaemonClientTransport, DaemonIngestProgressEvent, DaemonIngestStage, DaemonRuntimeConfig,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, delete_store, drain_ingest_queue, drain_store,
@@ -288,6 +289,7 @@ fn run_performance_test(
             "hdd_root": hdd_root.to_string_lossy(),
             "tmp_dir": args.tmp_dir().to_string_lossy(),
             "keep_temp": args.keep_temp(),
+            "authoritative": args.authoritative(),
         },
         "artifacts": {
             "pdf_path": report_path.to_string_lossy(),
@@ -525,6 +527,10 @@ fn run_performance_test(
         elapsed_seconds: total_started.elapsed().as_secs_f64(),
         results,
         recommendation,
+        authoritative: args.authoritative(),
+        authoritative_path: args
+            .authoritative()
+            .then(|| authoritative_performance_recommendation_path(DEFAULT_DAEMON_STATE_DIR)),
         tmp_dir: args.tmp_dir().to_path_buf(),
         disks: hdd_bench_roots.clone(),
         reproduction_args,
@@ -547,12 +553,30 @@ fn run_performance_test(
     if let Some(parent) = json_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&json_path, render_performance_json(&performance_report))?;
+    let performance_json = render_performance_json(&performance_report);
+    fs::write(&json_path, &performance_json)?;
+    if let Some(authoritative_path) = &performance_report.authoritative_path {
+        if let Some(parent) = authoritative_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(authoritative_path, &performance_json)?;
+    }
     fs::write(&markdown_source_path, &report)?;
     write_pdf_report(&markdown_source_path, &report_path, &performance_report)?;
     let _ = fs::remove_file(&markdown_source_path);
     writeln!(writer, "Report: {}", report_path.display())?;
     writeln!(writer, "JSON: {}", json_path.display())?;
+    if let Some(authoritative_path) = &performance_report.authoritative_path {
+        writeln!(
+            writer,
+            "Authoritative performance policy: {}",
+            authoritative_path.display()
+        )?;
+        writeln!(
+            writer,
+            "Restart dasobjectstored for the authoritative policy to govern new ingest jobs"
+        )?;
+    }
     Ok(())
 }
 
@@ -713,6 +737,8 @@ struct PerformanceReport {
     elapsed_seconds: f64,
     results: PerformanceBenchmarkResults,
     recommendation: PerformanceRecommendation,
+    authoritative: bool,
+    authoritative_path: Option<PathBuf>,
     tmp_dir: PathBuf,
     disks: Vec<(DiskId, PathBuf)>,
     reproduction_args: Vec<String>,
@@ -762,6 +788,9 @@ fn performance_test_reproduction_args(
     if let Some(json_artifact) = args.json_artifact() {
         command.push("--json-artifact".to_string());
         command.push(json_artifact.display().to_string());
+    }
+    if args.authoritative() {
+        command.push("--authoritative".to_string());
     }
     if args.keep_temp() {
         command.push("--keep-temp".to_string());
@@ -2362,6 +2391,24 @@ fn render_performance_json(report: &PerformanceReport) -> String {
             "estimated_aggregate_bytes_per_second": rate_u64(report.recommendation.aggregate_bytes_per_second),
             "ssd_read_limited": recommendation_is_ssd_read_limited(report),
             "rationale": recommendation_rationale(report),
+        },
+        "daemon_policy": {
+            "authoritative": report.authoritative,
+            "effective_after": "daemon_restart",
+            "authoritative_path": report
+                .authoritative_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            "source_routes": {
+                "remote_upload": "ssd_first",
+                "external_disk_ingress": "ssd_first",
+                "nvme_source_ingress": recommendation_strategy_name(report.recommendation.strategy),
+            },
+            "ssd_hdd_settlement": {
+                "strategy": "ssd_hdd_pipeline",
+                "hdd_concurrency": report.recommendation.hdd_concurrency,
+                "estimated_aggregate_bytes_per_second": rate_u64(report.recommendation.aggregate_bytes_per_second),
+            },
         },
     });
     serde_json::to_string_pretty(&artifact).expect("serialize performance recommendation JSON")
@@ -6379,6 +6426,19 @@ mod tests {
         assert_eq!(artifact["artifact_kind"], "ingress_recommendation");
         assert_eq!(artifact["recommendation"]["strategy"], "ssd_hdd_pipeline");
         assert_eq!(artifact["recommendation"]["hdd_concurrency"], 2);
+        assert_eq!(artifact["daemon_policy"]["authoritative"], true);
+        assert_eq!(
+            artifact["daemon_policy"]["source_routes"]["remote_upload"],
+            "ssd_first"
+        );
+        assert_eq!(
+            artifact["daemon_policy"]["source_routes"]["external_disk_ingress"],
+            "ssd_first"
+        );
+        assert_eq!(
+            artifact["daemon_policy"]["ssd_hdd_settlement"]["hdd_concurrency"],
+            2
+        );
         assert_eq!(artifact["hardware"]["disks"].as_array().unwrap().len(), 2);
         assert_eq!(
             artifact["scenarios"]["ssd_hdd_pipeline"]["concurrency"]
@@ -6578,6 +6638,10 @@ mod tests {
                 aggregate_bytes_per_second: 2_097_152.0,
                 reason: "SSD-first ingest remained competitive in the fixture".to_string(),
             },
+            authoritative: true,
+            authoritative_path: Some(PathBuf::from(
+                "/var/lib/dasobjectstore/performance/authoritative-recommendation.json",
+            )),
             tmp_dir: PathBuf::from("/tmp"),
             disks: vec![
                 (disk_a, PathBuf::from("/hdd/disk-a")),

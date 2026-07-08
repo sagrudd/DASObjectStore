@@ -97,6 +97,9 @@ pub(crate) struct PerformanceTestArgs {
     /// Render an embedded terminal benchmark view while the run executes.
     #[arg(long)]
     tui: bool,
+    /// Store the benchmark recommendation as the daemon's authoritative ingest policy.
+    #[arg(long)]
+    authoritative: bool,
     /// Keep temporary benchmark files for inspection instead of deleting them.
     #[arg(long)]
     keep_temp: bool,
@@ -141,6 +144,10 @@ impl PerformanceTestArgs {
 
     pub(crate) fn tui(&self) -> bool {
         self.tui
+    }
+
+    pub(crate) fn authoritative(&self) -> bool {
+        self.authoritative
     }
 
     pub(crate) fn keep_temp(&self) -> bool {
@@ -1914,6 +1921,7 @@ mod tests {
             "--json-artifact",
             "/tmp/dos-perf/report.json",
             "--tui",
+            "--authoritative",
             "--keep-temp",
         ])
         .expect("performance-test parses");
@@ -1934,6 +1942,7 @@ mod tests {
             Some(Path::new("/tmp/dos-perf/report.json"))
         );
         assert!(args.tui());
+        assert!(args.authoritative());
         assert!(args.keep_temp());
     }
 

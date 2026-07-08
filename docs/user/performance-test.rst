@@ -115,11 +115,12 @@ support more than one concurrent HDD writer:
 
 .. code-block:: console
 
-   dasobjectstore performance-test \
+   sudo dasobjectstore performance-test \
      --file_size 2GiB \
      --file_count 100 \
      --max-hdd-concurrency 5 \
-     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.pdf
+     --report /var/lib/dasobjectstore/reports/performance-100x2GiB.pdf \
+     --authoritative
 
 To benchmark an existing folder instead of generated data, pass the source
 directory. The benchmark will explore the same SSD-only, SSD-first FIFO drain,
@@ -132,7 +133,40 @@ and direct-to-HDD paths using the actual file sizes and folder structure:
      --max-hdd-concurrency 5 \
      --tui \
      --report /var/lib/dasobjectstore/reports/performance-zymo-source.pdf \
-     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-source.json
+     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-source.json \
+     --authoritative
+
+Authoritative Policy
+--------------------
+
+Add ``--authoritative`` only for commissioning or re-commissioning runs whose
+results should govern future ingest behavior on the appliance:
+
+.. code-block:: console
+
+   sudo dasobjectstore performance-test \
+     --source /data/zymo_fecal_2025.05 \
+     --max-hdd-concurrency 5 \
+     --tui \
+     --report /var/lib/dasobjectstore/reports/performance-zymo-source.pdf \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-source.json \
+     --authoritative
+
+The command still writes the requested JSON artifact beside the PDF report, and
+also writes the same structured recommendation to the daemon's persistent
+policy location:
+
+.. code-block:: text
+
+   /var/lib/dasobjectstore/performance/authoritative-recommendation.json
+
+Restart ``dasobjectstored`` after the authoritative run. New ingest jobs after
+the restart use the persisted benchmark recommendation to size the SSD-to-HDD
+settlement worker pool. Remote S3 uploads and ingress from external disks remain
+SSD-first; the authoritative result controls how staged SSD backlog is drained
+to HDD from that point onwards. The JSON also records the recommended route for
+NVMe/local-source ingest so future planner work can distinguish local NVMe
+sources from external media without changing the remote/external safety rule.
 
 Use ``--tmp-dir`` when the default report location under ``/tmp`` is unsuitable:
 
@@ -262,7 +296,11 @@ The artifact records:
 * direct-to-HDD pipeline metrics for every tested concurrency value from ``1``
   to ``N``, with the same aggregate and per-disk fields;
 * the recommended ingress strategy, HDD concurrency, estimated aggregate rate,
-  whether SSD readback appears limiting, and short rationale strings.
+  whether SSD readback appears limiting, and short rationale strings;
+* a ``daemon_policy`` block that records whether the artifact is authoritative,
+  when it becomes effective, the fixed SSD-first route for remote and external
+  disk ingress, the recommended route for NVMe/local-source ingest, and the
+  HDD settlement concurrency consumed by the daemon.
 
 Numeric byte counts and rates are emitted as JSON numbers in bytes and
 bytes-per-second. Display-friendly strings in the PDF report are not a

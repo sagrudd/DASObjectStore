@@ -4,6 +4,10 @@ use crate::api::{
     DaemonIngestWorkerTelemetry, DaemonSsdPressure, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse,
 };
+use crate::runtime::{
+    authoritative_performance_recommendation_path, read_authoritative_ingest_policy,
+    AuthoritativeIngestPolicy, DEFAULT_DAEMON_STATE_DIR,
+};
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::HealthState;
 use dasobjectstore_core::object_type::ObjectType;
@@ -26,7 +30,7 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 const SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
@@ -34,6 +38,7 @@ const HDD_ROOT_ENV: &str = "DASOBJECTSTORE_HDD_ROOT";
 const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
+const MAX_HDD_SETTLEMENT_WORKERS: usize = 32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonFileIngestSummary {
@@ -84,6 +89,7 @@ struct ResolvedIngestEndpoint {
 struct LocalFileIngestExecutor {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
+    authoritative_policy_path: PathBuf,
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
 }
@@ -93,6 +99,7 @@ impl LocalFileIngestExecutor {
         Self {
             ssd_root: default_ssd_root(),
             hdd_root: default_hdd_root(),
+            authoritative_policy_path: default_authoritative_policy_path(),
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
         }
@@ -196,13 +203,22 @@ impl LocalFileIngestExecutor {
             return Ok(summary);
         }
 
-        let mut state =
-            PipelineProgressState::new(files.len() as u64, source_bytes, total_work_bytes);
+        let ingest_policy = read_ingest_policy(&self.authoritative_policy_path)?;
+        let hdd_worker_count = ingest_policy
+            .hdd_settlement_concurrency
+            .min(managed_disk_roots.len())
+            .clamp(1, MAX_HDD_SETTLEMENT_WORKERS);
+        let mut state = PipelineProgressState::new(
+            files.len() as u64,
+            source_bytes,
+            total_work_bytes,
+            hdd_worker_count as u16,
+        );
         let capacity_policy = SsdCapacityPolicy::default();
-        let (settle_tx, settle_rx) =
-            mpsc::sync_channel::<HddSettlementWork>(HDD_SETTLEMENT_QUEUE_CAPACITY);
+        let queue_capacity = HDD_SETTLEMENT_QUEUE_CAPACITY.max(hdd_worker_count.saturating_mul(2));
+        let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
         let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
-        let hdd_worker = spawn_hdd_settlement_worker(settle_rx, event_tx);
+        let hdd_workers = spawn_hdd_settlement_workers(settle_rx, event_tx, hdd_worker_count);
 
         for entry in &files {
             wait_for_ssd_admission(
@@ -286,11 +302,13 @@ impl LocalFileIngestExecutor {
                 true,
             )?;
         }
-        hdd_worker.join().map_err(|_| {
-            DaemonIngestFilesRuntimeError::CommandFailed(
-                "HDD settlement worker panicked".to_string(),
-            )
-        })?;
+        for hdd_worker in hdd_workers {
+            hdd_worker.join().map_err(|_| {
+                DaemonIngestFilesRuntimeError::CommandFailed(
+                    "HDD settlement worker panicked".to_string(),
+                )
+            })?;
+        }
 
         progress(DaemonIngestProgressEvent {
             job_id: job_id.clone(),
@@ -350,13 +368,19 @@ struct PipelineProgressState {
     completed_work_bytes: u64,
     ssd_active: u16,
     hdd_active: u16,
+    hdd_worker_count: u16,
     hdd_queued: u32,
     ssd_pressure: DaemonSsdPressure,
     progress_offsets: BTreeMap<(ObjectId, String), u64>,
 }
 
 impl PipelineProgressState {
-    fn new(total_files: u64, source_bytes_total: u64, work_bytes_total: u64) -> Self {
+    fn new(
+        total_files: u64,
+        source_bytes_total: u64,
+        work_bytes_total: u64,
+        hdd_worker_count: u16,
+    ) -> Self {
         Self {
             total_files,
             source_bytes_total,
@@ -367,6 +391,7 @@ impl PipelineProgressState {
             completed_work_bytes: 0,
             ssd_active: 0,
             hdd_active: 0,
+            hdd_worker_count: hdd_worker_count.max(1),
             hdd_queued: 0,
             ssd_pressure: DaemonSsdPressure::AcceptingWrites,
             progress_offsets: BTreeMap::new(),
@@ -413,7 +438,7 @@ impl PipelineProgressState {
             },
             hdd_write: DaemonIngestWorkerActivity {
                 active: self.hdd_active,
-                idle: u16::from(self.hdd_active == 0),
+                idle: self.hdd_worker_count.saturating_sub(self.hdd_active),
             },
             ..DaemonIngestWorkerTelemetry::default()
         };
@@ -422,36 +447,52 @@ impl PipelineProgressState {
     }
 }
 
-fn spawn_hdd_settlement_worker(
+fn spawn_hdd_settlement_workers(
     settle_rx: mpsc::Receiver<HddSettlementWork>,
     event_tx: mpsc::Sender<HddSettlementEvent>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        for work in settle_rx {
-            let _ = event_tx.send(HddSettlementEvent::Started {
-                entry: work.entry.clone(),
-            });
-            let entry = work.entry.clone();
-            let result =
-                settle_staged_object_to_hdd_with_controlled_progress(work.staged, |progress| {
-                    event_tx
-                        .send(HddSettlementEvent::Progress {
-                            entry: entry.clone(),
-                            progress,
-                        })
-                        .map_err(|_| ObjectPutError::Cancelled)
-                });
-            match result {
-                Ok(_report) => {
-                    let _ = event_tx.send(HddSettlementEvent::Settled { entry: work.entry });
-                }
-                Err(error) => {
-                    let _ = event_tx.send(HddSettlementEvent::Failed { error });
+    worker_count: usize,
+) -> Vec<thread::JoinHandle<()>> {
+    let settle_rx = Arc::new(Mutex::new(settle_rx));
+    (0..worker_count.max(1))
+        .map(|_| {
+            let settle_rx = Arc::clone(&settle_rx);
+            let event_tx = event_tx.clone();
+            thread::spawn(move || loop {
+                let work = {
+                    let receiver = match settle_rx.lock() {
+                        Ok(receiver) => receiver,
+                        Err(_) => break,
+                    };
+                    receiver.recv()
+                };
+                let Ok(work) = work else {
                     break;
+                };
+                let _ = event_tx.send(HddSettlementEvent::Started {
+                    entry: work.entry.clone(),
+                });
+                let entry = work.entry.clone();
+                let result =
+                    settle_staged_object_to_hdd_with_controlled_progress(work.staged, |progress| {
+                        event_tx
+                            .send(HddSettlementEvent::Progress {
+                                entry: entry.clone(),
+                                progress,
+                            })
+                            .map_err(|_| ObjectPutError::Cancelled)
+                    });
+                match result {
+                    Ok(_report) => {
+                        let _ = event_tx.send(HddSettlementEvent::Settled { entry: work.entry });
+                    }
+                    Err(error) => {
+                        let _ = event_tx.send(HddSettlementEvent::Failed { error });
+                        break;
+                    }
                 }
-            }
-        }
-    })
+            })
+        })
+        .collect()
 }
 
 fn enqueue_hdd_settlement_work(
@@ -572,7 +613,7 @@ fn drain_hdd_settlement_events(
         match event {
             HddSettlementEvent::Started { entry } => {
                 state.hdd_queued = state.hdd_queued.saturating_sub(1);
-                state.hdd_active = 1;
+                state.hdd_active = state.hdd_active.saturating_add(1);
                 progress(DaemonIngestProgressEvent {
                     job_id: job_id.clone(),
                     endpoint: endpoint.clone(),
@@ -613,7 +654,7 @@ fn drain_hdd_settlement_events(
                 ))?;
             }
             HddSettlementEvent::Settled { entry } => {
-                state.hdd_active = 0;
+                state.hdd_active = state.hdd_active.saturating_sub(1);
                 state.completed_files = state.completed_files.saturating_add(1);
                 progress(DaemonIngestProgressEvent {
                     job_id: job_id.clone(),
@@ -745,6 +786,18 @@ fn default_hdd_root() -> PathBuf {
     std::env::var_os(HDD_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_HDD_ROOT))
+}
+
+fn default_authoritative_policy_path() -> PathBuf {
+    authoritative_performance_recommendation_path(DEFAULT_DAEMON_STATE_DIR)
+}
+
+fn read_ingest_policy(
+    path: &Path,
+) -> Result<AuthoritativeIngestPolicy, DaemonIngestFilesRuntimeError> {
+    read_authoritative_ingest_policy(path)
+        .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))
+        .map(|policy| policy.unwrap_or_default())
 }
 
 fn validate_known_ssd_root(path: &Path) -> Result<(), DaemonIngestFilesRuntimeError> {
@@ -1128,6 +1181,7 @@ mod tests {
         let executor = LocalFileIngestExecutor {
             ssd_root: ssd_root.clone(),
             hdd_root: hdd_root.clone(),
+            authoritative_policy_path: root.join("missing-authoritative-policy.json"),
             store_registry_path: registry_path,
             subobject_registry_path,
         };
@@ -1196,7 +1250,7 @@ mod tests {
 
     #[test]
     fn pipeline_progress_tracks_concurrent_workers_fifo_depth_and_pressure() {
-        let mut state = PipelineProgressState::new(10, 1_000, 2_000);
+        let mut state = PipelineProgressState::new(10, 1_000, 2_000, 3);
         state.staged_files = 3;
         state.ssd_active = 1;
         state.hdd_active = 1;
@@ -1236,6 +1290,7 @@ mod tests {
         assert_eq!(telemetry.queue_depths.hdd_write, 2);
         assert_eq!(telemetry.workers.ssd_stage.active, 1);
         assert_eq!(telemetry.workers.hdd_write.active, 1);
+        assert_eq!(telemetry.workers.hdd_write.idle, 2);
         assert_eq!(telemetry.pressure.ssd, DaemonSsdPressure::High);
     }
 

@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.6.0 - 2026-07-08
+
+- Add ``dasobjectstore performance-test --authoritative`` to persist the
+  benchmark recommendation under the daemon state directory for use after the
+  next daemon restart.
+- Teach daemon file ingest to load the authoritative performance policy and use
+  the benchmark-selected HDD settlement worker count while keeping remote and
+  external-disk ingress SSD-first.
+
 ## 0.5.0 - 2026-07-08
 
 - Add remote-only packaging targets, ``make remote-deb`` and

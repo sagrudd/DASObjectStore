@@ -3,6 +3,7 @@
 mod config;
 mod ingest_files;
 mod local_admin;
+mod performance_policy;
 mod service;
 
 pub use config::{
@@ -21,6 +22,12 @@ pub use local_admin::{
     LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
     LocalGroupAdministrationRequest, LocalGroupAdministrationResponse, LocalGroupCommandPlanner,
     SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
+};
+pub use performance_policy::{
+    authoritative_performance_recommendation_path, read_authoritative_ingest_policy,
+    AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
+    AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
+    PERFORMANCE_RECOMMENDATION_SCHEMA,
 };
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,
