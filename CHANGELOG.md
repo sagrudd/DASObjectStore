@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.11 - 2026-07-08
+
+- Allow the packaged Web service to execute the root-owned local-auth helper
+  with its setuid transition intact by setting `NoNewPrivileges=false`.
+- Document and test the systemd setting required for PAM-backed local Web login
+  on the standalone appliance.
+
 ## 0.10.10 - 2026-07-08
 
 - Add a root-owned local authentication helper for packaged standalone Web UI

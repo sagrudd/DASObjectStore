@@ -76,7 +76,9 @@ Packaged appliances keep the Web service unprivileged and perform the PAM check
 through ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``. The
 helper must be owned by ``root:dasobjectstore`` with mode ``4750`` so
 ``pam_unix`` can verify local OS passwords without running the whole Web server
-as root.
+as root. The packaged ``dasobjectstore-server.service`` therefore sets
+``NoNewPrivileges=false``; otherwise Linux would block the helper's setuid
+transition and PAM would report valid local users as failed logins.
 
 The server can also be started manually with explicit overrides:
 

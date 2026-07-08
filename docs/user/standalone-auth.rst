@@ -20,7 +20,8 @@ The packaged service runs the Web process as the unprivileged
 ``dasobjectstore`` user. Local password verification is therefore delegated to
 the root-owned ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``
 binary, which is executable only by the ``dasobjectstore`` group and uses the
-packaged ``/etc/pam.d/dasobjectstore`` PAM service.
+packaged ``/etc/pam.d/dasobjectstore`` PAM service. The packaged Web systemd
+unit must allow this setuid transition with ``NoNewPrivileges=false``.
 
 Local group administration is also daemon-backed. Creating a local writer or
 administrator group, and assigning a local user to one of those groups, is

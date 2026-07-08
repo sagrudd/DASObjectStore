@@ -55,6 +55,7 @@ require_text "$service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectst
 
 require_text "$web_service" "User=dasobjectstore"
 require_text "$web_service" "Group=dasobjectstore"
+require_text "$web_service" "NoNewPrivileges=false"
 require_text "$web_service" "ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls"
 require_text "$web_service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /opt/dasobjectstore"
 

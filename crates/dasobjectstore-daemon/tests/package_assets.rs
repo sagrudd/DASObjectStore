@@ -62,6 +62,7 @@ fn systemd_service_uses_packaged_identity_and_paths() {
 fn web_systemd_service_uses_packaged_config_and_identity() {
     assert_contains(WEB_SERVICE, &format!("User={DEFAULT_DAEMON_SERVICE_USER}"));
     assert_contains(WEB_SERVICE, &format!("Group={DEFAULT_DAEMON_GROUP}"));
+    assert_contains(WEB_SERVICE, "NoNewPrivileges=false");
     assert_contains(
         WEB_SERVICE,
         "ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls",
