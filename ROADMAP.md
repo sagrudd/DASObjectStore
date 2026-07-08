@@ -607,6 +607,63 @@ Exit criteria:
   handoff state for basecalling and genome/transcriptome analysis workflows;
 - all risky operations are gated, auditable, daemon-owned, and recoverable.
 
+## Milestone 21: ObjectStore Web File Browser and Download Workflows
+
+Goal: provide a high-quality Web file browser for ObjectStores so users can
+inspect imported folder hierarchies, understand where data is physically
+stored, and download individual files or whole folders without shell access.
+
+Priority: this milestone follows the live ObjectStore inventory work. It turns
+ObjectStore cards into browsable data surfaces using standard filesystem
+metaphors while preserving DASObjectStore placement, permission, and streaming
+boundaries. The browser must feel native to the Mnemosyne/DASObjectStore Web
+console: compact, professional, fast with large trees, and clear about storage
+location and durability.
+
+Scope:
+
+- add daemon/API contracts for ObjectStore tree browsing, including folder
+  nodes, file nodes, object type, object size, modification/import timestamps,
+  checksum state, copy count, and the disk IDs/labels on which each file copy
+  resides;
+- implement paged and searchable object-tree queries so large ObjectStores with
+  many thousands of files remain responsive and do not require loading the
+  entire tree into the browser;
+- implement a Yew ObjectStore file browser using familiar filesystem metaphors:
+  breadcrumb navigation, expandable folder hierarchy, sortable file lists,
+  size columns, disk placement badges, object-type badges, empty-folder states,
+  loading/error/permission states, and keyboard-accessible selection;
+- expose authenticated download routes for individual files, with policy checks
+  against ObjectStore visibility, writer/read group membership, public state,
+  and object lifecycle state before streaming any bytes;
+- expose authenticated folder archive downloads that stream a `tar.gz` archive
+  for a selected folder prefix without staging the complete archive on SSD or
+  HDD, and with cancellation-aware cleanup for interrupted downloads;
+- display physical placement honestly: for each file show the disk or disks
+  holding settled copies, degraded/missing-copy warnings, and whether the file
+  is still on SSD, fully settled to HDD, redownload-required, or unavailable;
+- add operator-focused performance safeguards: pagination limits, bounded API
+  response size, server-side filtering, lazy folder expansion, streaming
+  backpressure, range/download headers where practical, and archive-size
+  preflight estimates before folder download;
+- add tests for tree construction from metadata, permissions, file download,
+  folder archive generation, interrupted archive cleanup, large-tree paging,
+  and Web rendering of dense folder/file listings.
+
+Exit criteria:
+
+- selecting an ObjectStore opens a polished browsable tree that mirrors the
+  imported folder hierarchy and scales to production-sized cohorts;
+- users can download individual files and `tar.gz` archives of whole folders
+  through the Web interface, subject to the same permissions and lifecycle rules
+  as CLI/API access;
+- file rows clearly show size, object type, checksum/readiness, and the disk or
+  disks where data is physically stored;
+- browser interactions remain responsive with large ObjectStores and do not
+  require the browser to hold the full object inventory in memory;
+- API, daemon, archive, permission, and Yew regression tests cover the primary
+  and failure paths.
+
 ## Post-MVP Direction
 
 Post-MVP work may include:

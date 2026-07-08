@@ -620,6 +620,50 @@ older checklist claims.
   users covering enclosure preparation, ObjectStore creation, SubObject
   creation, group assignment, Bioinformatics readiness, and Activity progress.
 
+## Milestone 21: ObjectStore Web File Browser and Download Workflows
+
+- [ ] Define daemon/API DTOs for ObjectStore file browsing: folder nodes, file
+  nodes, object type, size, timestamps, checksum/readiness state, lifecycle
+  state, copy count, and disk placement for each settled copy.
+- [ ] Implement metadata-backed ObjectStore tree query logic with prefix
+  browsing, breadcrumb paths, server-side filtering/search, sort options,
+  pagination, bounded response sizes, and large-tree regression fixtures.
+- [ ] Add authenticated API routes for listing ObjectStore folders and files,
+  enforcing public/read/write group permissions and object lifecycle readiness
+  before exposing metadata or download actions.
+- [ ] Implement individual file download routes that stream from the selected
+  settled copy, report content length where known, use safe content-disposition
+  headers, and fail clearly for missing, unsettled, degraded, or unauthorized
+  objects.
+- [ ] Implement folder download as streamed `tar.gz` archive generation for a
+  selected folder prefix, with archive-size preflight, bounded memory use,
+  cancellation-aware cleanup, and no requirement to stage the full archive on
+  SSD or HDD.
+- [ ] Add Yew ObjectStore file browser page/detail view with breadcrumb
+  navigation, expandable folder hierarchy, sortable file table, size and object
+  type columns, disk placement badges, lifecycle/readiness badges, and clear
+  empty/loading/error/permission states.
+- [ ] Ensure the file browser design follows the DASObjectStore/Mnemosyne Web
+  console style: compact professional cards/tables, minimal icons, dense but
+  readable rows, no landing-page treatment, and responsive desktop/mobile
+  behavior without text overlap.
+- [ ] Add Web download controls for file and folder rows, including disabled
+  states for unavailable data, confirmation/preflight for large folder archives,
+  progress/started feedback, and permission-denied messaging.
+- [ ] Surface physical placement faithfully in the browser: SSD-only, HDD
+  settled, multi-copy disk IDs/labels, degraded/missing-copy warnings,
+  redownload-required state, and unavailable objects.
+- [ ] Add tests for file browser API paging/search/sort, permission denial,
+  settled-copy selection, degraded object handling, file download streaming,
+  folder `tar.gz` archive contents, interrupted archive cleanup, and large-tree
+  response bounds.
+- [ ] Add Yew/component or screenshot regression coverage for ObjectStore tree
+  browsing, dense file lists, placement badges, download controls, empty states,
+  mobile layout, and no-overlap rendering.
+- [ ] Update `docs/user/web-interface.rst` and ObjectStore user docs with
+  browser behavior, permission boundaries, download/archive semantics,
+  performance limits, and expected failure states.
+
 ## Cross-Cutting Tasks
 
 - [x] Keep CLI examples synchronized between `README.md`,
