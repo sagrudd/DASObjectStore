@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.27.0 - 2026-07-08
+
+- Reconcile the Web console navigation boundary so legacy Stores and
+  Users/Groups routes remain compatibility API helpers without standalone Yew
+  holder components.
+- Add regression coverage proving primary navigation uses the redesigned Home,
+  Enclosures, ObjectStores, and Bioinformatics routes rather than legacy holder
+  routes.
+- Document the canonical Web console surfaces and the compatibility status of
+  legacy Stores and Users/Groups workspace routes.
+
 ## 0.26.0 - 2026-07-08
 
 - Add a server-side DASObjectStore groups registry reader for

@@ -1393,6 +1393,8 @@ mod tests {
         OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
+    use crate::stores::STORES_WORKSPACE_ROUTE;
+    use crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
     #[test]
     fn primary_navigation_uses_redesign_labels() {
@@ -1440,6 +1442,25 @@ mod tests {
             objectstores_workspace_api_path("/api/"),
             "/api/dashboard/object-stores"
         );
+    }
+
+    #[test]
+    fn primary_navigation_excludes_legacy_holder_routes() {
+        let base = "/products/dasobjectstore/api/v1/";
+        let primary_paths: Vec<_> = PRIMARY_NAVIGATION
+            .iter()
+            .map(|page| page.api_path(base))
+            .collect();
+
+        assert!(!primary_paths
+            .iter()
+            .any(|path| path.ends_with(STORES_WORKSPACE_ROUTE)));
+        assert!(!primary_paths
+            .iter()
+            .any(|path| path.ends_with(USERS_GROUPS_WORKSPACE_ROUTE)));
+        assert!(primary_paths
+            .iter()
+            .any(|path| path.ends_with(OBJECTSTORES_WORKSPACE_ROUTE)));
     }
 
     #[test]

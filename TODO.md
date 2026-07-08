@@ -549,7 +549,7 @@ older checklist claims.
 - [x] Load `/opt/dasobjectstore/groups.json` through a daemon/API boundary and
   expose group membership and writer-policy readiness to ObjectStores and
   Users/Groups pages without direct browser filesystem access.
-- [ ] Reconcile the legacy `workspaces/stores`, `workspaces/users-groups`, and
+- [x] Reconcile the legacy `workspaces/stores`, `workspaces/users-groups`, and
   operations workspace modules with the redesigned top navigation so there is
   one coherent Web console rather than parallel holder surfaces.
 - [ ] Implement a reusable `MnemosyneFooter`/`DasObjectStoreFooter` Yew component

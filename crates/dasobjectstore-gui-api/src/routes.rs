@@ -36,6 +36,9 @@ pub fn gui_api_router() -> Router {
             "/api/v1/workspaces/bioinformatics",
             get(product_bioinformatics_workspace),
         )
+        // Legacy operations workspace routes remain available for compatibility.
+        // The browser console now exposes Home, Enclosures, ObjectStores, and
+        // Bioinformatics through the redesigned dashboard navigation.
         .route("/api/v1/workspaces/disks", get(disks_workspace))
         .route("/api/v1/workspaces/stores", get(stores_workspace))
         .route("/api/v1/workspaces/objects", get(objects_workspace))

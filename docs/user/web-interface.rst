@@ -277,13 +277,20 @@ store writer policy allows it.
 Users/Groups Workspace
 ----------------------
 
-The standalone Users/Groups workspace is authenticated and loaded through
-``/products/dasobjectstore/api/v1/workspaces/users-groups``. It reports the
-current OS authority, product-local users, local group memberships,
-administrator capability, and daemon-submitted group-management operations. The
-same server-side groups registry used by the ObjectStores dashboard is included
-as ``writer_groups`` so operators can see which managed writer groups exist and
-whether the current local user is a member.
+Users/group state is currently surfaced through the coherent product console
+rather than a second standalone holder page. The compatibility API
+``/products/dasobjectstore/api/v1/workspaces/users-groups`` remains available
+for authenticated clients and future first-class Users/Groups navigation work.
+It reports the current OS authority, product-local users, local group
+memberships, administrator capability, and daemon-submitted group-management
+operations. The same server-side groups registry used by the ObjectStores
+dashboard is included as ``writer_groups`` so operators can see which managed
+writer groups exist and whether the current local user is a member.
+
+Legacy ``workspaces/stores`` and ``workspaces/users-groups`` Web holder
+components are not part of the primary browser navigation. Operators should use
+``Home``, ``Enclosures``, ``ObjectStores``, and ``Bioinformatics`` as the
+canonical Web console surfaces.
 
 Bioinformatics Workspace
 ------------------------
