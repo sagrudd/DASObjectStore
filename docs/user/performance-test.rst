@@ -376,14 +376,17 @@ maintained at
 ``docs/user/examples/performance-recommendation.v1.json``.
 
 During ``--tui`` runs the dashboard shows the active scenario objective and
-SSD residency bounds. ``ssd-only`` writes and reads back one file at a time and
-removes it, so SSD residency is bounded by the largest selected file.
-``ssd-stage-then-drain`` stages every selected file to SSD before HDD drain
-begins, then measures SSD reads only as the drain workers copy those staged
-files to HDD. ``ssd-overlap-drain`` stages to SSD while FIFO HDD drain workers
-consume the queue and measures SSD reads from that same drain work; if HDD
-drain lags, SSD backlog can grow toward the selected workload size.
-``direct-hdd`` bypasses SSD for the benchmark scenario.
+SSD residency bounds. SSD-backed scenarios are bounded by measured available
+SSD capacity and the default SSD high-water policy, so datasets larger than
+the SSD are benchmarked in safe resident batches rather than requiring the
+whole selected workload to fit at once. ``ssd-only`` writes a resident batch
+sequentially, then reads that same batch back sequentially before the next
+batch. ``ssd-stage-then-drain`` stages a resident batch to SSD before HDD
+drain begins for that batch, then frees the batch before continuing.
+``ssd-overlap-drain`` stages to SSD while FIFO HDD drain workers consume the
+queue, but source staging pauses when the measured safe SSD residency budget is
+full and resumes as drained files are removed. ``direct-hdd`` bypasses SSD for
+the benchmark scenario.
 
 The TUI workload panel separates current SSD write rate, SSD read rate,
 aggregate HDD write rate, and per-disk HDD write rates. HDD rates are reported

@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.9.3 - 2026-07-08
+
+- Make SSD-backed performance-test scenarios capacity-aware. ``ssd-only`` now
+  writes a measured SSD-resident batch sequentially, then reads that batch back
+  sequentially before continuing; ``ssd-stage-then-drain`` stages and drains
+  measured resident batches; and ``ssd-overlap-drain`` applies SSD-residency
+  backpressure while HDD workers remove staged files as copies complete.
+- Update performance-test TUI/report wording so SSD residency bounds reflect
+  measured available SSD capacity instead of assuming the complete selected
+  dataset fits on SSD.
+
 ## 0.9.2 - 2026-07-08
 
 - Split daemon file ingest into a bounded SSD pipeline by default: source
