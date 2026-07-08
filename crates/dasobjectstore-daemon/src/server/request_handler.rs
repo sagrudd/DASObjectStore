@@ -2,24 +2,29 @@ use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest,
     DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
-    PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+    DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminAcceptedResponse,
+    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
+    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    PrepareEnclosureRequest, PrepareEnclosureResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 use crate::runtime::{
     provision_garage_store_registry, submit_ingest_files_to_local_store_with_progress,
-    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, GarageServiceController,
-    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
-    LocalGroupAdministrationRequest, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ServiceCommandRunner,
+    SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_object_service::{default_store_registry_path, ObjectServiceProviderId};
 use std::fmt::{self, Display};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
     clock: C,
+    admin_job_registry: Option<Arc<dyn AdminJobRegistry>>,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -31,6 +36,19 @@ where
         Self {
             service_orchestrator,
             clock,
+            admin_job_registry: None,
+        }
+    }
+
+    pub fn new_with_admin_job_registry(
+        service_orchestrator: S,
+        clock: C,
+        admin_job_registry: Arc<dyn AdminJobRegistry>,
+    ) -> Self {
+        Self {
+            service_orchestrator,
+            clock,
+            admin_job_registry: Some(admin_job_registry),
         }
     }
 
@@ -56,39 +74,63 @@ where
                 .status(request)
                 .map(DaemonApiResponse::ServiceStatus)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
-            DaemonApiRequest::ServiceLifecycle(request) => self
-                .service_orchestrator
-                .lifecycle(request, &self.clock.now_utc())
-                .map(DaemonApiResponse::ServiceLifecycle)
-                .map_err(DaemonRequestHandlerError::ServiceRuntime),
-            DaemonApiRequest::ServiceProvision(request) => self
-                .service_orchestrator
-                .provision(request, &self.clock.now_utc())
-                .map(DaemonApiResponse::ServiceProvision)
-                .map_err(DaemonRequestHandlerError::ServiceRuntime),
-            DaemonApiRequest::PrepareEnclosure(request) => self
-                .service_orchestrator
-                .prepare_enclosure(request, &self.clock.now_utc())
-                .map(DaemonApiResponse::PrepareEnclosure)
-                .map_err(DaemonRequestHandlerError::ServiceRuntime),
-            DaemonApiRequest::CreateLocalGroup(request) => self
-                .service_orchestrator
-                .create_local_group(request, &self.clock.now_utc())
-                .map(DaemonApiResponse::CreateLocalGroup)
-                .map_err(DaemonRequestHandlerError::LocalAdminRuntime),
-            DaemonApiRequest::AssignLocalUserToLocalGroup(request) => self
-                .service_orchestrator
-                .assign_local_user_to_local_group(request, &self.clock.now_utc())
-                .map(DaemonApiResponse::AssignLocalUserToLocalGroup)
-                .map_err(DaemonRequestHandlerError::LocalAdminRuntime),
+            DaemonApiRequest::ServiceLifecycle(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .lifecycle(request, &now)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_service_lifecycle(&response))?;
+                Ok(DaemonApiResponse::ServiceLifecycle(response))
+            }
+            DaemonApiRequest::ServiceProvision(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .provision(request, &now)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_service_provision(&response))?;
+                Ok(DaemonApiResponse::ServiceProvision(response))
+            }
+            DaemonApiRequest::PrepareEnclosure(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .prepare_enclosure(request, &now)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_prepare_enclosure(&response))?;
+                Ok(DaemonApiResponse::PrepareEnclosure(response))
+            }
+            DaemonApiRequest::CreateLocalGroup(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .create_local_group(request, &now)
+                    .map_err(DaemonRequestHandlerError::LocalAdminRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_local_admin(
+                    &response.accepted,
+                    response.administrator_actor.clone(),
+                ))?;
+                Ok(DaemonApiResponse::CreateLocalGroup(response))
+            }
+            DaemonApiRequest::AssignLocalUserToLocalGroup(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .assign_local_user_to_local_group(request, &now)
+                    .map_err(DaemonRequestHandlerError::LocalAdminRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_local_admin(
+                    &response.accepted,
+                    response.administrator_actor.clone(),
+                ))?;
+                Ok(DaemonApiResponse::AssignLocalUserToLocalGroup(response))
+            }
             DaemonApiRequest::JobStatus(request) => self
-                .service_orchestrator
-                .job_status(request)
+                .admin_job_status(request)
                 .map(DaemonApiResponse::JobStatus)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
             DaemonApiRequest::CancelJob(request) => self
-                .service_orchestrator
-                .cancel_job(request, &self.clock.now_utc())
+                .cancel_admin_job(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::CancelJob)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
             DaemonApiRequest::SubmitIngestFiles(request) => {
@@ -112,6 +154,37 @@ where
                 ),
             ))),
         }
+    }
+
+    fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
+        if let Some(registry) = &self.admin_job_registry {
+            registry
+                .record(job)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+        }
+        Ok(())
+    }
+
+    fn admin_job_status(
+        &self,
+        request: DaemonJobStatusRequest,
+    ) -> Result<DaemonJobStatusResponse, DaemonServiceRuntimeError> {
+        if let Some(registry) = &self.admin_job_registry {
+            return registry.status(request);
+        }
+        self.service_orchestrator.job_status(request)
+    }
+
+    fn cancel_admin_job(
+        &self,
+        request: DaemonJobCancelRequest,
+        accepted_at_utc: &str,
+    ) -> Result<DaemonJobCancelResponse, DaemonServiceRuntimeError> {
+        if let Some(registry) = &self.admin_job_registry {
+            return registry.cancel(request, accepted_at_utc);
+        }
+        self.service_orchestrator
+            .cancel_job(request, accepted_at_utc)
     }
 }
 
@@ -195,6 +268,101 @@ pub trait DaemonServiceOrchestrator {
         Err(DaemonIngestFilesRuntimeError::CommandFailed(
             "submit_ingest_files requires a file ingest orchestrator".to_string(),
         ))
+    }
+}
+
+fn daemon_job_summary_from_service_lifecycle(
+    response: &DaemonServiceLifecycleResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        None,
+        format!("service {:?} completed", response.operation),
+    )
+}
+
+fn daemon_job_summary_from_service_provision(
+    response: &DaemonServiceProvisionResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        None,
+        format!(
+            "provisioned {} store(s), {} bucket(s), {} command(s)",
+            response.stores, response.buckets, response.commands
+        ),
+    )
+}
+
+fn daemon_job_summary_from_prepare_enclosure(
+    response: &PrepareEnclosureResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "prepared {} landing device and {} HDD device(s)",
+            response.ssd_device.display(),
+            response.hdd_devices.len()
+        ),
+    )
+}
+
+fn daemon_job_summary_from_local_admin(
+    accepted: &DaemonLocalAdminAcceptedResponse,
+    actor: Option<String>,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        accepted.job_id.clone(),
+        DaemonJobKind::SystemAdministration,
+        accepted.accepted_at_utc.clone(),
+        accepted.dry_run,
+        actor,
+        format!(
+            "local administrator command {:?} completed",
+            accepted.command
+        ),
+    )
+}
+
+fn daemon_job_summary_from_accepted(
+    job_id: crate::api::DaemonJobId,
+    kind: DaemonJobKind,
+    accepted_at_utc: String,
+    dry_run: bool,
+    actor: Option<String>,
+    message: String,
+) -> DaemonJobSummary {
+    let message = if dry_run {
+        format!("dry run: {message}")
+    } else {
+        message
+    };
+    DaemonJobSummary {
+        job_id,
+        kind,
+        state: DaemonJobState::Complete,
+        progress: DaemonJobProgress {
+            stage: "complete".to_string(),
+            work_bytes_done: 1,
+            work_bytes_total: 1,
+            work_units_done: 1,
+            work_units_total: 1,
+            message: Some(message),
+        },
+        submitted_at_utc: accepted_at_utc.clone(),
+        updated_at_utc: accepted_at_utc,
+        actor,
+        failure_message: None,
     }
 }
 
@@ -421,13 +589,16 @@ mod tests {
         SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
     };
     use crate::runtime::{
-        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, LocalAdminRuntimeError,
-        LocalGroupAdministrationOperation,
+        admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+        FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
     };
     use dasobjectstore_core::ids::{IngestJobId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::cell::RefCell;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[test]
     fn dispatches_service_status_to_orchestrator() {
@@ -712,6 +883,81 @@ mod tests {
     }
 
     #[test]
+    fn records_accepted_prepare_enclosure_job_in_registry() {
+        let root = temp_root("record-prepare");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-08T19:40:00Z"),
+            registry,
+        );
+
+        handler
+            .handle(DaemonApiRequest::PrepareEnclosure(
+                prepare_enclosure_request(),
+            ))
+            .expect("prepare request handled");
+        let response = handler
+            .handle(DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("enclosure-prepare-2026-07-08t19-40-00z").expect("job id"),
+            }))
+            .expect("status request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    kind: DaemonJobKind::EnclosurePreparation,
+                    state: DaemonJobState::Complete,
+                    ..
+                }
+            })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn registry_cancel_reports_completed_prepare_job_not_cancelled() {
+        let root = temp_root("cancel-complete");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-08T19:40:00Z"),
+            registry,
+        );
+
+        handler
+            .handle(DaemonApiRequest::PrepareEnclosure(
+                prepare_enclosure_request(),
+            ))
+            .expect("prepare request handled");
+        let response = handler
+            .handle(DaemonApiRequest::CancelJob(DaemonJobCancelRequest {
+                job_id: DaemonJobId::new("enclosure-prepare-2026-07-08t19-40-00z").expect("job id"),
+                reason: Some("operator requested cancellation".to_string()),
+            }))
+            .expect("cancel request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::CancelJob(DaemonJobCancelResponse {
+                accepted: false,
+                state: DaemonJobState::Complete,
+                ..
+            })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn dispatches_job_status_to_orchestrator() {
         let service = FakeService::default();
         let handler =
@@ -856,6 +1102,35 @@ mod tests {
     #[test]
     fn system_clock_returns_nonblank_timestamp() {
         assert!(!SystemDaemonClock.now_utc().trim().is_empty());
+    }
+
+    fn prepare_enclosure_request() -> PrepareEnclosureRequest {
+        PrepareEnclosureRequest {
+            ssd_device: "/dev/disk/by-id/nvme-ssd".into(),
+            hdd_devices: vec![PrepareEnclosureHddDevice {
+                disk_id: "qnap-1057".to_string(),
+                device_path: "/dev/disk/by-id/usb-qnap-1057".into(),
+            }],
+            mount_root: "/srv/dasobjectstore".into(),
+            filesystem: PrepareEnclosureFilesystem::Ext4,
+            owner: Some("stephen".to_string()),
+            dry_run: true,
+            client_request_id: Some("request-prepare-1".to_string()),
+            administrator_actor: Some("operator".to_string()),
+            allow_format: true,
+            confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
+        }
+    }
+
+    fn temp_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-request-handler-{label}-{}",
+            std::process::id()
+        ))
+    }
+
+    fn cleanup(root: &PathBuf) {
+        let _ = fs::remove_dir_all(root);
     }
 
     #[derive(Default)]

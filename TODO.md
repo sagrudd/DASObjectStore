@@ -586,8 +586,12 @@ older checklist claims.
     - [x] Add generic daemon/Web administrator job status and cancellation
       contracts so Web workflows can poll daemon-owned progress and request
       cancellation without browser-side storage mutation.
+    - [x] Add a daemon-owned persistent administrator job registry so accepted
+      admin jobs can be queried after submission and cancellation requests have
+      stable terminal-state semantics.
     - [ ] Render live daemon job progress, cancellation, retry, and completed
-      result state once persistent administrator job status is available.
+      result state in the Enclosures wizard using the persistent administrator
+      job status route.
 - [x] Add API request/response DTOs and daemon client methods for Web-submitted
   enclosure preparation so the browser never mutates devices or managed roots
   directly.
@@ -600,6 +604,8 @@ older checklist claims.
   - [x] Cover administrator job status/cancel Web risk gates, including
     non-admin denial, blank cancellation reason rejection, status forwarding,
     and cancellation forwarding.
+  - [x] Cover daemon administrator job registry persistence and cancellation
+    behavior, including completed-job cancellation rejection.
   - [ ] Cover existing-data preflight and cancellation/retry preservation when
     the daemon preparation runtime exposes those states.
 - [ ] Implement ObjectStore creation form controls for store name, writer group,

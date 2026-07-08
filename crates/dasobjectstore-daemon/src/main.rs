@@ -1,13 +1,14 @@
 use dasobjectstore_daemon::{
-    DaemonRequestHandler, DaemonRuntimeConfig, GarageServiceController, GarageServiceRuntimeConfig,
-    SystemDaemonClock, SystemServiceCommandRunner, UnixSocketDaemonServer,
-    DEFAULT_DAEMON_CONFIG_PATH,
+    admin_job_registry_path, DaemonRequestHandler, DaemonRuntimeConfig, FileBackedAdminJobRegistry,
+    GarageServiceController, GarageServiceRuntimeConfig, SystemDaemonClock,
+    SystemServiceCommandRunner, UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 fn main() -> ExitCode {
     match run() {
@@ -36,7 +37,14 @@ fn run() -> Result<(), String> {
 
     let garage =
         GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner);
-    let handler = DaemonRequestHandler::new(garage, SystemDaemonClock);
+    let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+        &config.state_dir,
+    )));
+    let handler = DaemonRequestHandler::new_with_admin_job_registry(
+        garage,
+        SystemDaemonClock,
+        admin_job_registry,
+    );
     let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
     println!(
         "dasobjectstored listening on {}",

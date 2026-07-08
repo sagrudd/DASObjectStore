@@ -236,6 +236,17 @@ pub enum DaemonServiceRuntimeError {
         service_name: String,
     },
     InvalidJobId(String),
+    JobNotFound {
+        job_id: String,
+    },
+    JobRegistryIo {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidJobRegistryJson {
+        path: PathBuf,
+        message: String,
+    },
     UnsupportedOperation {
         operation: String,
     },
@@ -276,6 +287,17 @@ impl Display for DaemonServiceRuntimeError {
                 )
             }
             Self::InvalidJobId(value) => write!(formatter, "invalid service job id: {value}"),
+            Self::JobNotFound { job_id } => write!(formatter, "daemon job not found: {job_id}"),
+            Self::JobRegistryIo { path, message } => write!(
+                formatter,
+                "failed to access daemon job registry {}: {message}",
+                path.display()
+            ),
+            Self::InvalidJobRegistryJson { path, message } => write!(
+                formatter,
+                "invalid daemon job registry JSON at {}: {message}",
+                path.display()
+            ),
             Self::UnsupportedOperation { operation } => {
                 write!(
                     formatter,

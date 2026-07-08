@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.34.0 - 2026-07-08
+
+- Add a daemon-owned file-backed administrator job registry under the daemon
+  state directory for persisted job status and cancellation state.
+- Wire the packaged daemon to record accepted administrator jobs and serve
+  generic job status/cancellation from the registry.
+- Record accepted service, enclosure-preparation, and local group
+  administration jobs as completed daemon job summaries until asynchronous job
+  execution is introduced.
+- Add regression coverage for registry persistence, cancellation semantics, and
+  request-handler status/cancel integration.
+
 ## 0.33.0 - 2026-07-08
 
 - Add transport-neutral daemon commands and typed client methods for generic

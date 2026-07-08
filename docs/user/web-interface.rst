@@ -296,6 +296,12 @@ route and the companion cancellation route
 and sudo-derived administrator authority. The routes forward to typed daemon
 job status and cancellation commands; the browser must treat daemon responses as
 the source of truth for job progress, terminal state, and cancellation result.
+The packaged daemon persists this administrator job state beneath
+``/var/lib/dasobjectstore/admin-jobs/jobs.json``. Until asynchronous
+administrator execution is introduced, synchronous service, local group, and
+enclosure-preparation submissions are recorded as completed job summaries; a
+cancellation request against a completed job returns the current terminal state
+without reopening the job.
 
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The

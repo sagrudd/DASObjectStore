@@ -1,11 +1,16 @@
 //! Runtime configuration for the managed daemon.
 
+mod admin_jobs;
 mod config;
 mod ingest_files;
 mod local_admin;
 mod performance_policy;
 mod service;
 
+pub use admin_jobs::{
+    admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,
+    ADMIN_JOB_REGISTRY_DIR_NAME, ADMIN_JOB_REGISTRY_FILE_NAME, ADMIN_JOB_REGISTRY_SCHEMA,
+};
 pub use config::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DEFAULT_DAEMON_CONFIG_PATH,
     DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR,
