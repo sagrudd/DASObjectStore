@@ -61,6 +61,70 @@ pub(crate) enum Command {
     Service(ServiceArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
     Mnemosyne(MnemosyneArgs),
+    /// Benchmark SSD and HDD ingest settlement performance.
+    PerformanceTest(PerformanceTestArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct PerformanceTestArgs {
+    /// Size of each generated test file, for example 100MiB, 1GiB, or 1.1TiB.
+    #[arg(long = "file_size", alias = "file-size")]
+    file_size: String,
+    /// Number of generated files to test.
+    #[arg(long = "file_count", alias = "file-count")]
+    file_count: u32,
+    /// Maximum concurrent HDD writes to model.
+    #[arg(long, default_value_t = 3)]
+    max_hdd_concurrency: usize,
+    /// SSD root to stress; defaults to DASOBJECTSTORE_SSD_ROOT or the packaged root.
+    #[arg(long)]
+    ssd_root: Option<PathBuf>,
+    /// Managed HDD root containing per-disk roots.
+    #[arg(long, hide = true)]
+    hdd_root: Option<PathBuf>,
+    /// Directory for generated source files; defaults to /tmp.
+    #[arg(long, default_value = "/tmp")]
+    tmp_dir: PathBuf,
+    /// Markdown report path; defaults to a timestamped file in /tmp.
+    #[arg(long)]
+    report: Option<PathBuf>,
+    /// Keep temporary benchmark files for inspection instead of deleting them.
+    #[arg(long)]
+    keep_temp: bool,
+}
+
+impl PerformanceTestArgs {
+    pub(crate) fn file_size(&self) -> &str {
+        &self.file_size
+    }
+
+    pub(crate) fn file_count(&self) -> u32 {
+        self.file_count
+    }
+
+    pub(crate) fn max_hdd_concurrency(&self) -> usize {
+        self.max_hdd_concurrency
+    }
+
+    pub(crate) fn ssd_root(&self) -> Option<&Path> {
+        self.ssd_root.as_deref()
+    }
+
+    pub(crate) fn hdd_root(&self) -> Option<&Path> {
+        self.hdd_root.as_deref()
+    }
+
+    pub(crate) fn tmp_dir(&self) -> &Path {
+        &self.tmp_dir
+    }
+
+    pub(crate) fn report(&self) -> Option<&Path> {
+        self.report.as_deref()
+    }
+
+    pub(crate) fn keep_temp(&self) -> bool {
+        self.keep_temp
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -1805,6 +1869,42 @@ mod tests {
 
             assert_eq!(cli.command(), Some(&expected));
         }
+    }
+
+    #[test]
+    fn parses_performance_test_options() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "performance-test",
+            "--file-size",
+            "1GiB",
+            "--file-count",
+            "2",
+            "--max-hdd-concurrency",
+            "4",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--hdd-root",
+            "/srv/dasobjectstore/hdd",
+            "--tmp-dir",
+            "/tmp/dos-perf",
+            "--report",
+            "/tmp/dos-perf/report.md",
+            "--keep-temp",
+        ])
+        .expect("performance-test parses");
+
+        let Some(Command::PerformanceTest(args)) = cli.command() else {
+            panic!("expected performance-test command");
+        };
+        assert_eq!(args.file_size(), "1GiB");
+        assert_eq!(args.file_count(), 2);
+        assert_eq!(args.max_hdd_concurrency(), 4);
+        assert_eq!(args.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
+        assert_eq!(args.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
+        assert_eq!(args.tmp_dir(), Path::new("/tmp/dos-perf"));
+        assert_eq!(args.report(), Some(Path::new("/tmp/dos-perf/report.md")));
+        assert!(args.keep_temp());
     }
 
     #[test]

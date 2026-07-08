@@ -159,11 +159,16 @@ The command also writes:
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
 * ``<report>.pdf`` as the final PDF report artifact.
 
-When ``qrencode`` is available on the host, the QR SVG is generated with that
-tool. When ``pandoc`` is available, the PDF is rendered from the Markdown report
-with ``pandoc``. If these tools are unavailable, DASObjectStore still writes
-fallback artifacts so that the benchmark run has a complete local evidence
-bundle.
+When ``qrencode`` is available on the host, the QR SVG is a scan-ready code
+for the reproduction payload. If ``qrencode`` is unavailable, DASObjectStore
+still writes a fallback SVG artifact and records that fallback in the report's
+``QR status`` field; install ``qrencode`` before formal commissioning runs that
+require a scannable QR code.
+
+When ``pandoc`` and its PDF engine are available, the PDF is rendered from the
+Markdown report with ``pandoc``. If those tools are unavailable, DASObjectStore
+still writes a fallback PDF artifact so that the benchmark run has a complete
+local evidence bundle.
 
 Reproducibility Notes
 ---------------------

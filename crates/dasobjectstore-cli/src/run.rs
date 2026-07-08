@@ -5,12 +5,12 @@ use crate::cli::{
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
     IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs,
     IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
-    ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PoolCommand, PoolImportArgs,
-    PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
-    StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs,
-    StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand, SubobjectCreateArgs,
-    SubobjectListArgs, SubobjectSearchArgs,
+    ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceTestArgs,
+    PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
+    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand,
+    StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
+    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand,
+    SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -98,6 +98,7 @@ use dasobjectstore_platform::{
     ObservedDisk, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
 use dasobjectstore_tui::{UploadTui, UploadTuiContext};
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
@@ -106,7 +107,8 @@ use std::io::{self, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
+use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::{collections::hash_map::DefaultHasher, collections::BTreeMap, collections::BTreeSet};
 
@@ -175,8 +177,882 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
                 run_mnemosyne_validate_nas_nfs_endpoint(args, writer)
             }
         },
+        Some(Command::PerformanceTest(args)) => run_performance_test(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
+}
+
+fn run_performance_test(
+    args: &PerformanceTestArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let file_size = parse_binary_size(args.file_size())?;
+    if args.file_count() == 0 {
+        return Err(CliError::CommandFailed(
+            "performance-test requires --file_count greater than 0".to_string(),
+        ));
+    }
+    if args.max_hdd_concurrency() == 0 {
+        return Err(CliError::CommandFailed(
+            "performance-test requires --max-hdd-concurrency greater than 0".to_string(),
+        ));
+    }
+
+    let ssd_root = args
+        .ssd_root()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_ssd_root);
+    validate_known_ssd_root(&ssd_root)?;
+    let hdd_root = args
+        .hdd_root()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_hdd_root);
+    let disks = discover_managed_hdd_roots(&hdd_root)?;
+    if disks.is_empty() {
+        return Err(CliError::CommandFailed(format!(
+            "performance-test found no managed HDD roots under {}",
+            hdd_root.display()
+        )));
+    }
+
+    fs::create_dir_all(args.tmp_dir())?;
+    let run_id = timestamped_run_id();
+    let source_path = args.tmp_dir().join(format!("{run_id}-source.bin"));
+    let ssd_bench_root = ssd_root
+        .join(".dasobjectstore")
+        .join("performance-test")
+        .join(&run_id);
+    fs::create_dir_all(&ssd_bench_root)?;
+    let mut hdd_bench_roots = Vec::new();
+    for disk in &disks {
+        let root = disk
+            .root_path
+            .join(".dasobjectstore")
+            .join("performance-test")
+            .join(&run_id);
+        fs::create_dir_all(&root)?;
+        hdd_bench_roots.push((disk.disk_id.clone(), root));
+    }
+    let report_path = args
+        .report()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| args.tmp_dir().join(format!("{run_id}-report.md")));
+    let qr_path = report_path.with_extension("qr.svg");
+    let pdf_path = report_path.with_extension("pdf");
+    let reproduction_args = performance_test_reproduction_args(
+        args,
+        &ssd_root,
+        &hdd_root,
+        args.tmp_dir(),
+        &report_path,
+    );
+    let reproduce_command = shell_join(&reproduction_args);
+    let generated_at_utc = now_utc_string();
+    let repository_revision = git_revision();
+    let reproduction_payload = serde_json::json!({
+        "schema": "dasobjectstore.performance_test.reproduction.v1",
+        "brand": "Mnemosyne Biosciences",
+        "product": "DASObjectStore",
+        "run_id": run_id.clone(),
+        "generated_at_utc": generated_at_utc.clone(),
+        "repository_revision": repository_revision.clone(),
+        "cli_version": dasobjectstore_core::VERSION,
+        "command": reproduction_args,
+        "parameters": {
+            "file_size": args.file_size(),
+            "file_count": args.file_count(),
+            "max_hdd_concurrency": args.max_hdd_concurrency(),
+            "ssd_root": ssd_root.to_string_lossy(),
+            "hdd_root": hdd_root.to_string_lossy(),
+            "tmp_dir": args.tmp_dir().to_string_lossy(),
+            "keep_temp": args.keep_temp(),
+        },
+        "artifacts": {
+            "markdown_path": report_path.to_string_lossy(),
+            "pdf_path": pdf_path.to_string_lossy(),
+            "qr_path": qr_path.to_string_lossy(),
+        }
+    })
+    .to_string();
+    let reproduction_payload_sha256 = sha256_hex_bytes(reproduction_payload.as_bytes());
+
+    writeln!(
+        writer,
+        "performance-test: files={} size={} disks={} max_hdd_concurrency={} report={}",
+        args.file_count(),
+        format_bytes(file_size as f64),
+        disks.len(),
+        args.max_hdd_concurrency(),
+        report_path.display()
+    )?;
+
+    let mut file_results = Vec::new();
+    let mut disk_results = Vec::new();
+    let mut concurrency_results = Vec::new();
+    let max_concurrency = args.max_hdd_concurrency().min(disks.len()).max(1);
+    let total_started = Instant::now();
+
+    let result = (|| -> Result<(), CliError> {
+        for file_index in 0..args.file_count() {
+            writeln!(
+                writer,
+                "file {}/{}: generating {}",
+                file_index + 1,
+                args.file_count(),
+                format_bytes(file_size as f64)
+            )?;
+            let generated = measure_generate_random_file(&source_path, file_size, file_index)?;
+            let ssd_payload = ssd_bench_root.join(format!("payload-{file_index:05}.bin"));
+            let ssd_write = measure_copy(&source_path, &ssd_payload)?;
+            let ssd_read = measure_read(&ssd_payload)?;
+            file_results.push(PerformanceFileResult {
+                file_index,
+                generate: generated,
+                ssd_write,
+                ssd_read,
+            });
+
+            let mut individual_rates = Vec::new();
+            for (disk_id, root) in &hdd_bench_roots {
+                let destination = root.join(format!(
+                    "payload-{file_index:05}-c1-{}.bin",
+                    disk_id.as_str()
+                ));
+                let measurement = measure_copy(&ssd_payload, &destination)?;
+                let _ = fs::remove_file(&destination);
+                let rate = throughput(measurement);
+                disk_results.push(PerformanceDiskResult {
+                    file_index,
+                    concurrency: 1,
+                    disk_id: disk_id.clone(),
+                    write: measurement,
+                });
+                concurrency_results.push(PerformanceConcurrencyResult {
+                    file_index,
+                    concurrency: 1,
+                    aggregate_bytes: measurement.bytes,
+                    seconds: measurement.seconds,
+                    slowest_seconds: measurement.seconds,
+                    members: vec![disk_id.clone()],
+                });
+                individual_rates.push((disk_id.clone(), root.clone(), rate));
+                writeln!(
+                    writer,
+                    "file {}/{}: HDD {} individual {}/s",
+                    file_index + 1,
+                    args.file_count(),
+                    disk_id,
+                    format_bytes(rate)
+                )?;
+            }
+            individual_rates.sort_by(|left, right| {
+                right
+                    .2
+                    .total_cmp(&left.2)
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+
+            for concurrency in 2..=max_concurrency {
+                let selected = &individual_rates[..concurrency];
+                let started = Instant::now();
+                let mut handles = Vec::new();
+                for (disk_id, root, _) in selected {
+                    let source = ssd_payload.clone();
+                    let destination = root.join(format!(
+                        "payload-{file_index:05}-c{concurrency}-{}.bin",
+                        disk_id.as_str()
+                    ));
+                    let disk_id = disk_id.clone();
+                    handles.push(thread::spawn(move || {
+                        let result = measure_copy(&source, &destination);
+                        let _ = fs::remove_file(&destination);
+                        result.map(|measurement| (disk_id, measurement))
+                    }));
+                }
+                let mut aggregate_bytes = 0_u64;
+                let mut slowest_seconds = 0.0_f64;
+                for handle in handles {
+                    let (disk_id, measurement) = handle.join().map_err(|_| {
+                        CliError::CommandFailed("performance-test HDD worker panicked".to_string())
+                    })??;
+                    aggregate_bytes = aggregate_bytes.saturating_add(measurement.bytes);
+                    slowest_seconds = slowest_seconds.max(measurement.seconds);
+                    disk_results.push(PerformanceDiskResult {
+                        file_index,
+                        concurrency,
+                        disk_id,
+                        write: measurement,
+                    });
+                }
+                let elapsed = started.elapsed().as_secs_f64().max(0.001);
+                concurrency_results.push(PerformanceConcurrencyResult {
+                    file_index,
+                    concurrency,
+                    aggregate_bytes,
+                    seconds: elapsed,
+                    slowest_seconds,
+                    members: selected
+                        .iter()
+                        .map(|(disk_id, _, _)| disk_id.clone())
+                        .collect(),
+                });
+                writeln!(
+                    writer,
+                    "file {}/{}: HDD concurrency {} aggregate {}/s",
+                    file_index + 1,
+                    args.file_count(),
+                    concurrency,
+                    format_bytes(aggregate_bytes as f64 / elapsed)
+                )?;
+            }
+
+            fs::remove_file(&ssd_payload)?;
+            fs::remove_file(&source_path)?;
+        }
+        Ok(())
+    })();
+
+    if !args.keep_temp() {
+        let _ = fs::remove_file(&source_path);
+        let _ = fs::remove_dir_all(&ssd_bench_root);
+        for (_, root) in &hdd_bench_roots {
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+    result?;
+
+    let qr_status = write_report_qr_svg(&qr_path, &reproduction_payload)?;
+    let report = render_performance_report(PerformanceReport {
+        run_id,
+        generated_at_utc,
+        repository_revision,
+        file_size,
+        file_count: args.file_count(),
+        ssd_root,
+        hdd_root,
+        disk_count: disks.len(),
+        max_concurrency,
+        elapsed_seconds: total_started.elapsed().as_secs_f64(),
+        file_results,
+        disk_results,
+        concurrency_results,
+        report_path: report_path.clone(),
+        qr_path: qr_path.clone(),
+        pdf_path: pdf_path.clone(),
+        reproduce_command,
+        reproduction_payload,
+        reproduction_payload_sha256,
+        qr_status,
+    });
+    if let Some(parent) = report_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&report_path, report)?;
+    write_pdf_report(&report_path, &pdf_path)?;
+    writeln!(writer, "Report: {}", report_path.display())?;
+    writeln!(writer, "PDF: {}", pdf_path.display())?;
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PerformanceMeasurement {
+    bytes: u64,
+    seconds: f64,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceFileResult {
+    file_index: u32,
+    generate: PerformanceMeasurement,
+    ssd_write: PerformanceMeasurement,
+    ssd_read: PerformanceMeasurement,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceDiskResult {
+    file_index: u32,
+    concurrency: usize,
+    disk_id: DiskId,
+    write: PerformanceMeasurement,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceConcurrencyResult {
+    file_index: u32,
+    concurrency: usize,
+    aggregate_bytes: u64,
+    seconds: f64,
+    slowest_seconds: f64,
+    members: Vec<DiskId>,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceReport {
+    run_id: String,
+    generated_at_utc: String,
+    repository_revision: String,
+    file_size: u64,
+    file_count: u32,
+    ssd_root: PathBuf,
+    hdd_root: PathBuf,
+    disk_count: usize,
+    max_concurrency: usize,
+    elapsed_seconds: f64,
+    file_results: Vec<PerformanceFileResult>,
+    disk_results: Vec<PerformanceDiskResult>,
+    concurrency_results: Vec<PerformanceConcurrencyResult>,
+    report_path: PathBuf,
+    qr_path: PathBuf,
+    pdf_path: PathBuf,
+    reproduce_command: String,
+    reproduction_payload: String,
+    reproduction_payload_sha256: String,
+    qr_status: String,
+}
+
+fn performance_test_reproduction_args(
+    args: &PerformanceTestArgs,
+    ssd_root: &Path,
+    hdd_root: &Path,
+    tmp_dir: &Path,
+    report_path: &Path,
+) -> Vec<String> {
+    let mut command = vec![
+        "dasobjectstore".to_string(),
+        "performance-test".to_string(),
+        "--file_size".to_string(),
+        args.file_size().to_string(),
+        "--file_count".to_string(),
+        args.file_count().to_string(),
+        "--max-hdd-concurrency".to_string(),
+        args.max_hdd_concurrency().to_string(),
+        "--ssd-root".to_string(),
+        ssd_root.display().to_string(),
+        "--hdd-root".to_string(),
+        hdd_root.display().to_string(),
+        "--tmp-dir".to_string(),
+        tmp_dir.display().to_string(),
+        "--report".to_string(),
+        report_path.display().to_string(),
+    ];
+    if args.keep_temp() {
+        command.push("--keep-temp".to_string());
+    }
+    command
+}
+
+fn shell_join(args: &[String]) -> String {
+    args.iter()
+        .map(|argument| shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_quote(argument: &str) -> String {
+    if argument
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || "-_./:=+".contains(character))
+    {
+        return argument.to_string();
+    }
+    format!("'{}'", argument.replace('\'', "'\\''"))
+}
+
+fn parse_binary_size(value: &str) -> Result<u64, CliError> {
+    let trimmed = value.trim();
+    let number_end = trimmed
+        .find(|character: char| !(character.is_ascii_digit() || character == '.'))
+        .unwrap_or(trimmed.len());
+    let (number, unit) = trimmed.split_at(number_end);
+    if number.is_empty() {
+        return Err(CliError::CommandFailed(format!(
+            "invalid size '{value}'; expected e.g. 100MiB, 1GiB, 1.1TiB"
+        )));
+    }
+    let number = number.parse::<f64>().map_err(|_| {
+        CliError::CommandFailed(format!(
+            "invalid size '{value}'; expected e.g. 100MiB, 1GiB, 1.1TiB"
+        ))
+    })?;
+    let multiplier = match unit.trim().to_ascii_lowercase().as_str() {
+        "" | "b" => 1_f64,
+        "kib" | "ki" => 1024_f64,
+        "mib" | "mi" => 1024_f64.powi(2),
+        "gib" | "gi" => 1024_f64.powi(3),
+        "tib" | "ti" => 1024_f64.powi(4),
+        "kb" | "k" => 1000_f64,
+        "mb" | "m" => 1000_f64.powi(2),
+        "gb" | "g" => 1000_f64.powi(3),
+        "tb" | "t" => 1000_f64.powi(4),
+        _ => {
+            return Err(CliError::CommandFailed(format!(
+                "invalid size unit '{unit}' in '{value}'"
+            )));
+        }
+    };
+    let bytes = number * multiplier;
+    if !bytes.is_finite() || bytes <= 0.0 || bytes > u64::MAX as f64 {
+        return Err(CliError::CommandFailed(format!(
+            "invalid size '{value}'; byte count is out of range"
+        )));
+    }
+    Ok(bytes.round() as u64)
+}
+
+fn measure_generate_random_file(
+    path: &Path,
+    size_bytes: u64,
+    seed: u32,
+) -> Result<PerformanceMeasurement, CliError> {
+    let started = Instant::now();
+    let mut file = File::create(path)?;
+    let mut remaining = size_bytes;
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64 ^ u64::from(seed);
+    while remaining > 0 {
+        fill_pseudorandom(&mut buffer, &mut state);
+        let write_len = remaining.min(buffer.len() as u64) as usize;
+        file.write_all(&buffer[..write_len])?;
+        remaining -= write_len as u64;
+    }
+    file.sync_all()?;
+    Ok(PerformanceMeasurement {
+        bytes: size_bytes,
+        seconds: started.elapsed().as_secs_f64().max(0.001),
+    })
+}
+
+fn fill_pseudorandom(buffer: &mut [u8], state: &mut u64) {
+    for chunk in buffer.chunks_mut(8) {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        let bytes = state.to_le_bytes();
+        chunk.copy_from_slice(&bytes[..chunk.len()]);
+    }
+}
+
+fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurement, CliError> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let started = Instant::now();
+    let mut reader = File::open(source)?;
+    let mut writer = File::create(destination)?;
+    let bytes = io::copy(&mut reader, &mut writer)?;
+    writer.sync_all()?;
+    Ok(PerformanceMeasurement {
+        bytes,
+        seconds: started.elapsed().as_secs_f64().max(0.001),
+    })
+}
+
+fn measure_read(source: &Path) -> Result<PerformanceMeasurement, CliError> {
+    let started = Instant::now();
+    let mut reader = File::open(source)?;
+    let bytes = io::copy(&mut reader, &mut io::sink())?;
+    Ok(PerformanceMeasurement {
+        bytes,
+        seconds: started.elapsed().as_secs_f64().max(0.001),
+    })
+}
+
+fn timestamped_run_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("dasobjectstore-performance-{nanos}-{}", std::process::id())
+}
+
+fn git_revision() -> String {
+    let revision = ProcessCommand::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let dirty = ProcessCommand::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                Some(!output.stdout.is_empty())
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false);
+    if dirty && revision != "unknown" {
+        format!("{revision}-dirty")
+    } else {
+        revision
+    }
+}
+
+fn write_report_qr_svg(path: &Path, payload: &str) -> Result<String, CliError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if ProcessCommand::new("qrencode")
+        .args(["-t", "SVG", "-o"])
+        .arg(path)
+        .arg(payload)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return Ok("qrencode SVG".to_string());
+    }
+    fs::write(path, fallback_qr_svg(payload))?;
+    Ok("fallback SVG; install qrencode for a scan-ready QR code".to_string())
+}
+
+fn fallback_qr_svg(payload: &str) -> String {
+    let mut state = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in payload.as_bytes() {
+        state ^= u64::from(*byte);
+        state = state.wrapping_mul(0x100_0000_01b3);
+    }
+    let cells = 29_usize;
+    let scale = 6_usize;
+    let size = cells * scale;
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}"><rect width="100%" height="100%" fill="white"/>"#
+    );
+    for y in 0..cells {
+        for x in 0..cells {
+            let finder = (x < 7 && (y < 7 || y >= cells - 7)) || (x >= cells - 7 && y < 7);
+            let on = if finder {
+                x == 0
+                    || x == 6
+                    || y == 0
+                    || y == 6
+                    || (x >= 2 && x <= 4 && y >= 2 && y <= 4)
+                    || (x >= cells - 5 && x <= cells - 3 && y >= 2 && y <= 4)
+                    || (x >= 2 && x <= 4 && y >= cells - 5 && y <= cells - 3)
+            } else {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((state >> 63) & 1) == 1
+            };
+            if on {
+                svg.push_str(&format!(
+                    r#"<rect x="{}" y="{}" width="{scale}" height="{scale}" fill="black"/>"#,
+                    x * scale,
+                    y * scale
+                ));
+            }
+        }
+    }
+    svg.push_str("</svg>\n");
+    svg
+}
+
+fn write_pdf_report(markdown_path: &Path, pdf_path: &Path) -> Result<(), CliError> {
+    if let Some(parent) = pdf_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if ProcessCommand::new("pandoc")
+        .arg(markdown_path)
+        .arg("-o")
+        .arg(pdf_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return Ok(());
+    }
+    let markdown = fs::read_to_string(markdown_path)?;
+    fs::write(pdf_path, render_simple_pdf(&markdown))?;
+    Ok(())
+}
+
+fn sha256_hex_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+}
+
+fn render_simple_pdf(markdown: &str) -> Vec<u8> {
+    let lines = markdown
+        .lines()
+        .map(strip_markdown_for_pdf)
+        .collect::<Vec<_>>();
+    let lines_per_page = 48_usize;
+    let page_count = lines.len().div_ceil(lines_per_page).max(1);
+    let font_id = 3 + page_count * 2;
+    let mut objects = Vec::<String>::new();
+    objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
+    let kids = (0..page_count)
+        .map(|index| format!("{} 0 R", 3 + index * 2))
+        .collect::<Vec<_>>()
+        .join(" ");
+    objects.push(format!(
+        "<< /Type /Pages /Kids [{kids}] /Count {page_count} >>"
+    ));
+    for page_index in 0..page_count {
+        let page_id = 3 + page_index * 2;
+        let content_id = page_id + 1;
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {content_id} 0 R >>"
+        ));
+        let page_lines = lines
+            .iter()
+            .skip(page_index * lines_per_page)
+            .take(lines_per_page)
+            .collect::<Vec<_>>();
+        let mut stream = String::from("BT /F1 9 Tf 36 756 Td 0 -14 Td\n");
+        for line in page_lines {
+            stream.push_str(&format!("({}) Tj 0 -14 Td\n", escape_pdf_text(line)));
+        }
+        stream.push_str("ET");
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            stream.len(),
+            stream
+        ));
+    }
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
+
+    let mut pdf = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj\n{}\nendobj\n", index + 1, object));
+    }
+    let xref_start = pdf.len();
+    pdf.push_str(&format!(
+        "xref\n0 {}\n0000000000 65535 f \n",
+        objects.len() + 1
+    ));
+    for offset in offsets {
+        pdf.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer << /Size {} /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF\n",
+        objects.len() + 1
+    ));
+    pdf.into_bytes()
+}
+
+fn strip_markdown_for_pdf(line: &str) -> String {
+    line.replace("**", "")
+        .replace('`', "")
+        .replace("<br>", " | ")
+        .chars()
+        .take(110)
+        .collect()
+}
+
+fn escape_pdf_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('(', "\\(")
+        .replace(')', "\\)")
+}
+
+fn throughput(measurement: PerformanceMeasurement) -> f64 {
+    measurement.bytes as f64 / measurement.seconds.max(0.001)
+}
+
+fn render_performance_report(report: PerformanceReport) -> String {
+    let mut output = String::new();
+    output.push_str("# DASObjectStore Performance Test Report\n\n");
+    output.push_str("| Field | Value |\n");
+    output.push_str("| --- | --- |\n");
+    output.push_str(&format!(
+        "| Brand | Mnemosyne Biosciences |\n\
+| Product | DASObjectStore |\n\
+| Report type | Performance test |\n\
+| Report status | final |\n\
+| Run ID | `{}` |\n\
+| Generated at (UTC) | `{}` |\n\
+| Repository revision | `{}` |\n\
+| CLI version | `{}` |\n\
+| Command | `{}` |\n\
+| Markdown artifact | `{}` |\n\
+| PDF artifact | `{}` |\n\
+| QR artifact | `{}` |\n\
+| QR status | `{}` |\n\
+| Reproduction payload SHA-256 | `{}` |\n\
+| Reproduction QR payload | See `Reproduction Payload` |\n\n",
+        report.run_id,
+        report.generated_at_utc,
+        report.repository_revision,
+        dasobjectstore_core::VERSION,
+        report.reproduce_command,
+        report.report_path.display(),
+        report.pdf_path.display(),
+        report.qr_path.display(),
+        report.qr_status,
+        report.reproduction_payload_sha256
+    ));
+    output.push_str(&format!(
+        "QR code image: ![Reproduce]({})\n\n",
+        report.qr_path.display()
+    ));
+    output.push_str(&format!(
+        "Scenario: {} files of {} each. SSD root `{}`; HDD root `{}`; disks {}; max HDD concurrency {}.\n\n",
+        report.file_count,
+        format_bytes(report.file_size as f64),
+        report.ssd_root.display(),
+        report.hdd_root.display(),
+        report.disk_count,
+        report.max_concurrency
+    ));
+    output.push_str("## Summary\n\n");
+    output.push_str(&format!("- Run id: `{}`\n", report.run_id));
+    output.push_str(&format!(
+        "- Reproduce with: `{}`\n",
+        report.reproduce_command
+    ));
+    output.push_str("\n## Reproduction Payload\n\n```json\n");
+    output.push_str(&report.reproduction_payload);
+    output.push_str("\n```\n\n");
+    output.push_str(&format!(
+        "- Total elapsed: {:.1} s\n",
+        report.elapsed_seconds
+    ));
+    output.push_str(&format!(
+        "- Median SSD write: {}/s\n",
+        format_bytes(median_rate(
+            report
+                .file_results
+                .iter()
+                .map(|row| throughput(row.ssd_write))
+        ))
+    ));
+    output.push_str(&format!(
+        "- Median SSD read: {}/s\n",
+        format_bytes(median_rate(
+            report
+                .file_results
+                .iter()
+                .map(|row| throughput(row.ssd_read))
+        ))
+    ));
+    if let Some(best) = report.concurrency_results.iter().max_by(|left, right| {
+        let left_rate = left.aggregate_bytes as f64 / left.seconds.max(0.001);
+        let right_rate = right.aggregate_bytes as f64 / right.seconds.max(0.001);
+        left_rate.total_cmp(&right_rate)
+    }) {
+        output.push_str(&format!(
+            "- Best observed HDD aggregate: concurrency {} at {}/s\n",
+            best.concurrency,
+            format_bytes(best.aggregate_bytes as f64 / best.seconds.max(0.001))
+        ));
+    }
+
+    output.push_str("\n## Per-file SSD Timings\n\n");
+    output.push_str("| File | Generate | SSD write | SSD read |\n");
+    output.push_str("| ---: | ---: | ---: | ---: |\n");
+    for row in &report.file_results {
+        output.push_str(&format!(
+            "| {} | {}/s | {}/s | {}/s |\n",
+            row.file_index + 1,
+            format_bytes(throughput(row.generate)),
+            format_bytes(throughput(row.ssd_write)),
+            format_bytes(throughput(row.ssd_read))
+        ));
+    }
+
+    output.push_str("\n## Per-disk HDD Writes\n\n");
+    output.push_str("| File | Concurrency | Disk | Write rate |\n");
+    output.push_str("| ---: | ---: | --- | ---: |\n");
+    for row in &report.disk_results {
+        output.push_str(&format!(
+            "| {} | {} | {} | {}/s |\n",
+            row.file_index + 1,
+            row.concurrency,
+            row.disk_id,
+            format_bytes(throughput(row.write))
+        ));
+    }
+
+    output.push_str("\n## Concurrency Model\n\n");
+    output.push_str("| File | HDD concurrency | Members | Aggregate write | Slowest member |\n");
+    output.push_str("| ---: | ---: | --- | ---: | ---: |\n");
+    for row in &report.concurrency_results {
+        let members = row
+            .members
+            .iter()
+            .map(DiskId::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.push_str(&format!(
+            "| {} | {} | {} | {}/s | {:.1} s |\n",
+            row.file_index + 1,
+            row.concurrency,
+            members,
+            format_bytes(row.aggregate_bytes as f64 / row.seconds.max(0.001)),
+            row.slowest_seconds
+        ));
+    }
+
+    output.push_str("\n## Recommendation\n\n");
+    output.push_str(&recommendation(&report));
+    output
+}
+
+fn median_rate(values: impl Iterator<Item = f64>) -> f64 {
+    let mut values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|left, right| left.total_cmp(right));
+    values[values.len() / 2]
+}
+
+fn recommendation(report: &PerformanceReport) -> String {
+    let ssd_read = median_rate(
+        report
+            .file_results
+            .iter()
+            .map(|row| throughput(row.ssd_read)),
+    );
+    let mut best_concurrency = 1_usize;
+    let mut best_rate = 0.0_f64;
+    for concurrency in 1..=report.max_concurrency {
+        let rate = median_rate(
+            report
+                .concurrency_results
+                .iter()
+                .filter(|row| row.concurrency == concurrency)
+                .map(|row| row.aggregate_bytes as f64 / row.seconds.max(0.001)),
+        );
+        if rate > best_rate {
+            best_rate = rate;
+            best_concurrency = concurrency;
+        }
+    }
+    let mut text = String::new();
+    if best_rate > ssd_read * 0.9 {
+        text.push_str("- SSD read bandwidth is close to the observed best HDD aggregate. Avoid increasing HDD write concurrency without re-testing because SSD read may become the limiter.\n");
+    } else {
+        text.push_str("- SSD read bandwidth exceeds the observed HDD aggregate. Additional HDD write concurrency is plausible if SSD pressure remains acceptable.\n");
+    }
+    text.push_str(&format!(
+        "- Recommended initial HDD settlement concurrency: {} concurrent write(s), based on median aggregate throughput of {}/s.\n",
+        best_concurrency,
+        format_bytes(best_rate)
+    ));
+    text.push_str("- Treat disks with persistently lower per-disk write rates as weak settlement targets for latency-sensitive ingest.\n");
+    text
 }
 
 fn run_store_contents(args: &StoreContentsArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -1755,11 +2631,26 @@ fn resolve_store_live_sqlite_path(
 }
 
 fn now_utc_string() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
-    format!("unix:{seconds}")
+    ProcessCommand::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if output.status.success() {
+                String::from_utf8(output.stdout).ok()
+            } else {
+                None
+            }
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            let seconds = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default();
+            format!("unix:{seconds}")
+        })
 }
 
 fn default_hdd_root() -> PathBuf {
@@ -3553,10 +4444,13 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_ingest_files, connection_status_from_probe, current_user_group_names, run,
+        collect_ingest_files, connection_status_from_probe, current_user_group_names,
+        parse_binary_size, render_performance_report, render_simple_pdf, run,
         validate_managed_hdds_on_supported_das, write_health_json, write_health_summary,
         write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
         ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
+        PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
+        PerformanceMeasurement, PerformanceReport,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -3632,6 +4526,138 @@ mod tests {
         assert!(output.contains("status"));
         assert!(output.contains("queue"));
         assert!(output.contains("direct-import"));
+    }
+
+    #[test]
+    fn performance_test_size_parser_accepts_binary_and_decimal_units() {
+        let cases = [
+            ("512", 512),
+            ("1KiB", 1024),
+            ("1.5MiB", 1_572_864),
+            ("2GB", 2_000_000_000),
+            (" 3 GiB ", 3_221_225_472),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                parse_binary_size(input).expect("size parses"),
+                expected,
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn performance_test_size_parser_rejects_invalid_sizes() {
+        for input in ["", "0", "-1MiB", "1XB", "nan", "inf"] {
+            let err = parse_binary_size(input).expect_err("invalid size is rejected");
+
+            assert!(
+                err.to_string().contains("invalid size")
+                    || err.to_string().contains("invalid size unit"),
+                "{input}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn performance_test_report_renders_summary_tables_and_recommendation() {
+        let report = render_performance_report(PerformanceReport {
+            run_id: "perf-test-run".to_string(),
+            generated_at_utc: "2026-01-02T03:04:05Z".to_string(),
+            repository_revision: "test-revision".to_string(),
+            file_size: 1_048_576,
+            file_count: 1,
+            ssd_root: PathBuf::from("/ssd"),
+            hdd_root: PathBuf::from("/hdd"),
+            disk_count: 2,
+            max_concurrency: 2,
+            elapsed_seconds: 3.2,
+            file_results: vec![PerformanceFileResult {
+                file_index: 0,
+                generate: PerformanceMeasurement {
+                    bytes: 1_048_576,
+                    seconds: 1.0,
+                },
+                ssd_write: PerformanceMeasurement {
+                    bytes: 1_048_576,
+                    seconds: 0.5,
+                },
+                ssd_read: PerformanceMeasurement {
+                    bytes: 1_048_576,
+                    seconds: 0.25,
+                },
+            }],
+            disk_results: vec![
+                PerformanceDiskResult {
+                    file_index: 0,
+                    concurrency: 1,
+                    disk_id: DiskId::new("disk-a").expect("disk id"),
+                    write: PerformanceMeasurement {
+                        bytes: 1_048_576,
+                        seconds: 1.0,
+                    },
+                },
+                PerformanceDiskResult {
+                    file_index: 0,
+                    concurrency: 2,
+                    disk_id: DiskId::new("disk-b").expect("disk id"),
+                    write: PerformanceMeasurement {
+                        bytes: 1_048_576,
+                        seconds: 2.0,
+                    },
+                },
+            ],
+            concurrency_results: vec![
+                PerformanceConcurrencyResult {
+                    file_index: 0,
+                    concurrency: 1,
+                    aggregate_bytes: 1_048_576,
+                    seconds: 1.0,
+                    slowest_seconds: 1.0,
+                    members: vec![DiskId::new("disk-a").expect("disk id")],
+                },
+                PerformanceConcurrencyResult {
+                    file_index: 0,
+                    concurrency: 2,
+                    aggregate_bytes: 2_097_152,
+                    seconds: 1.0,
+                    slowest_seconds: 2.0,
+                    members: vec![
+                        DiskId::new("disk-a").expect("disk id"),
+                        DiskId::new("disk-b").expect("disk id"),
+                    ],
+                },
+            ],
+            report_path: PathBuf::from("/tmp/perf-test-run.md"),
+            qr_path: PathBuf::from("/tmp/perf-test-run.qr.svg"),
+            pdf_path: PathBuf::from("/tmp/perf-test-run.pdf"),
+            reproduce_command: "dasobjectstore performance-test --file_size 1MiB --file_count 1"
+                .to_string(),
+            reproduction_payload: r#"{"run_id":"perf-test-run"}"#.to_string(),
+            reproduction_payload_sha256:
+                "623f8d191890968ec394ff02950710ecb9e5eed5a0b68c064e28e8ffa0876f58".to_string(),
+            qr_status: "qrencode SVG".to_string(),
+        });
+
+        assert!(report.contains("# DASObjectStore Performance Test Report"));
+        assert!(report.contains("| Brand | Mnemosyne Biosciences |"));
+        assert!(report.contains("| QR artifact | `/tmp/perf-test-run.qr.svg` |"));
+        assert!(report.contains("| QR status | `qrencode SVG` |"));
+        assert!(report.contains("Reproduction payload SHA-256"));
+        assert!(report.contains("Reproduction QR payload"));
+        assert!(report.contains("## Reproduction Payload"));
+        assert!(report.contains("Scenario: 1 files of 1.0 MiB each."));
+        assert!(report.contains("- Run id: `perf-test-run`"));
+        assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
+        assert!(report.contains("- Best observed HDD aggregate: concurrency 2 at 2.0 MiB/s"));
+        assert!(report.contains("| File | Generate | SSD write | SSD read |"));
+        assert!(report.contains("| File | Concurrency | Disk | Write rate |"));
+        assert!(report
+            .contains("| File | HDD concurrency | Members | Aggregate write | Slowest member |"));
+        assert!(report.contains("| 1 | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s |"));
+        assert!(report.contains("Recommended initial HDD settlement concurrency: 2"));
+        assert!(render_simple_pdf(&report).starts_with(b"%PDF-1.4"));
     }
 
     #[test]

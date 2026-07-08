@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.5 - 2026-07-08
+
+- Add `dasobjectstore performance-test` for generated-file SSD write/read and
+  concurrent HDD settlement benchmarking with Markdown, QR, and PDF report
+  artifacts.
+- Add report contracts and templates for Mnemosyne Biosciences branded,
+  reproducible ingest performance evidence.
+
 ## 0.3.4 - 2026-07-07
 
 - Pipeline folder ingest so source-to-SSD staging can run concurrently with
