@@ -1,3 +1,4 @@
+use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::StoreClass;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -164,6 +165,9 @@ pub struct GuiActionPlanRequest {
     pub subobject_name: Option<String>,
     pub parent_store_id: Option<String>,
     pub parent_subobject_name: Option<String>,
+    pub subobject_object_type: Option<String>,
+    pub subobject_inherits_object_type: Option<bool>,
+    pub subobject_s3_routing: Option<String>,
     pub ssd_device: Option<PathBuf>,
     #[serde(default)]
     pub hdd_devices: Vec<String>,
@@ -198,6 +202,9 @@ impl Default for GuiActionPlanRequest {
             subobject_name: None,
             parent_store_id: None,
             parent_subobject_name: None,
+            subobject_object_type: None,
+            subobject_inherits_object_type: None,
+            subobject_s3_routing: None,
             ssd_device: None,
             hdd_devices: Vec::new(),
             mount_root: None,
@@ -523,6 +530,7 @@ fn plan_subobject_create(
             missing_fields: missing,
         });
     }
+    validate_subobject_review_policy(&request)?;
 
     let mut argv = strings(["dasobjectstore", "subobject", "create"]);
     argv.push(request.subobject_name.expect("validated SubObject name"));
@@ -546,6 +554,50 @@ fn plan_subobject_create(
         writes_recovery_metadata: false,
         confirmation_required: true,
     })
+}
+
+fn validate_subobject_review_policy(
+    request: &GuiActionPlanRequest,
+) -> Result<(), GuiActionPlanError> {
+    let mut invalid = Vec::new();
+    if request
+        .subobject_inherits_object_type
+        .is_some_and(|inherits| !inherits)
+        && request
+            .subobject_object_type
+            .as_ref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        invalid.push("subobject_object_type".to_string());
+    }
+    if request
+        .subobject_object_type
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty() && ObjectType::from_str(value).is_err())
+    {
+        invalid.push("subobject_object_type".to_string());
+    }
+    if request
+        .subobject_s3_routing
+        .as_deref()
+        .is_some_and(|value| {
+            !matches!(
+                value,
+                "inherit_parent" | "dedicated_prefix" | "dedicated_bucket" | "disabled"
+            )
+        })
+    {
+        invalid.push("subobject_s3_routing".to_string());
+    }
+
+    if invalid.is_empty() {
+        Ok(())
+    } else {
+        Err(GuiActionPlanError {
+            action: request.action,
+            missing_fields: invalid,
+        })
+    }
 }
 
 fn plan_enclosure_prepare(
@@ -1000,6 +1052,36 @@ mod tests {
     }
 
     #[test]
+    fn plans_subobject_create_with_review_policy_fields() {
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("pod5-raw".to_string()),
+            parent_store_id: Some("generated-data".to_string()),
+            ssd_root: Some(PathBuf::from("/srv/dasobjectstore/ssd")),
+            subobject_inherits_object_type: Some(false),
+            subobject_object_type: Some("pod5".to_string()),
+            subobject_s3_routing: Some("dedicated_prefix".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("SubObject create plan");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "pod5-raw",
+                "--store",
+                "generated-data",
+                "--ssd-root",
+                "/srv/dasobjectstore/ssd"
+            ])
+        );
+        assert!(plan.confirmation_required);
+    }
+
+    #[test]
     fn plans_nested_subobject_create() {
         let plan = plan_action(GuiActionPlanRequest {
             action: GuiActionKind::SubobjectCreate,
@@ -1021,6 +1103,39 @@ mod tests {
             ])
         );
         assert!(plan.confirmation_required);
+    }
+
+    #[test]
+    fn rejects_subobject_create_with_invalid_review_policy_fields() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("pod5-raw".to_string()),
+            parent_store_id: Some("generated-data".to_string()),
+            subobject_inherits_object_type: Some(false),
+            subobject_object_type: Some("not_a_real_type".to_string()),
+            subobject_s3_routing: Some("ftp".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("invalid SubObject review policy rejected");
+
+        assert_eq!(
+            err.missing_fields,
+            ["subobject_object_type", "subobject_s3_routing"]
+        );
+    }
+
+    #[test]
+    fn rejects_subobject_create_without_required_object_type_override() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("pod5-raw".to_string()),
+            parent_store_id: Some("generated-data".to_string()),
+            subobject_inherits_object_type: Some(false),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("object type override is required when inheritance is disabled");
+
+        assert_eq!(err.missing_fields, ["subobject_object_type"]);
     }
 
     #[test]

@@ -822,6 +822,51 @@ impl ObjectStoreConfigureFormState {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SubObjectFormState {
+    open: bool,
+    subobject_name: String,
+    parent_kind: String,
+    parent_store_id: String,
+    parent_subobject_name: String,
+    object_type_mode: String,
+    object_type: String,
+    s3_routing: String,
+    ssd_root: String,
+    planning: bool,
+    plan: Option<GuiActionPlanResponse>,
+    error: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SubObjectFormState {
+    fn from_view(view: Option<&ObjectStoresPageResponse>) -> Self {
+        Self {
+            open: false,
+            subobject_name: String::new(),
+            parent_kind: "store".to_string(),
+            parent_store_id: view
+                .and_then(|view| view.stores.first())
+                .map(|store| store.store_id.clone())
+                .unwrap_or_default(),
+            parent_subobject_name: String::new(),
+            object_type_mode: "inherit".to_string(),
+            object_type: "naive".to_string(),
+            s3_routing: "inherit_parent".to_string(),
+            ssd_root: "/srv/dasobjectstore/ssd".to_string(),
+            planning: false,
+            plan: None,
+            error: None,
+        }
+    }
+
+    fn reset_plan(&mut self) {
+        self.plan = None;
+        self.error = None;
+    }
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn object_store_bucket_default(store_id: &str) -> String {
     store_id
@@ -892,6 +937,57 @@ fn object_store_configure_review(state: &ObjectStoreConfigureFormState) -> Strin
         &state.endpoint_export_mode,
         state.public,
         state.writeable,
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn subobject_registry_preview_from_values(
+    subobject_name: &str,
+    parent_kind: &str,
+    parent_store_id: &str,
+    parent_subobject_name: &str,
+    object_type_mode: &str,
+    object_type: &str,
+    s3_routing: &str,
+) -> String {
+    let name = if subobject_name.trim().is_empty() {
+        "unnamed-subobject"
+    } else {
+        subobject_name.trim()
+    };
+    let parent = if parent_kind == "subobject" {
+        if parent_subobject_name.trim().is_empty() {
+            "subobject:pending"
+        } else {
+            parent_subobject_name.trim()
+        }
+    } else if parent_store_id.trim().is_empty() {
+        "store:pending"
+    } else {
+        parent_store_id.trim()
+    };
+    let object_type_label = if object_type_mode == "override" {
+        format!("object type {object_type}")
+    } else {
+        "inherits object type".to_string()
+    };
+
+    format!(
+        "{} under {} · prefix {}/{} · {} · S3 routing {}",
+        name, parent, parent, name, object_type_label, s3_routing
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn subobject_registry_preview(state: &SubObjectFormState) -> String {
+    subobject_registry_preview_from_values(
+        &state.subobject_name,
+        &state.parent_kind,
+        &state.parent_store_id,
+        &state.parent_subobject_name,
+        &state.object_type_mode,
+        &state.object_type,
+        &state.s3_routing,
     )
 }
 
@@ -2122,6 +2218,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
     let object_stores_state = use_state(|| ApiLoadState::<ObjectStoresPageResponse>::Loading);
     let create_state = use_state(|| ObjectStoreCreateFormState::from_view(None));
     let configure_state = use_state(|| ObjectStoreConfigureFormState::from_view(None));
+    let subobject_state = use_state(|| SubObjectFormState::from_view(None));
 
     {
         let api_path = api_path.clone();
@@ -2152,7 +2249,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 title="ObjectStores"
                 summary="Operational view of store policies, capacity, and service state."
             />
-            { render_object_stores_state(&*object_stores_state, create_state, configure_state, props.api_base_path.clone()) }
+            { render_object_stores_state(&*object_stores_state, create_state, configure_state, subobject_state, props.api_base_path.clone()) }
         </section>
     }
 }
@@ -2162,6 +2259,7 @@ fn render_object_stores_state(
     state: &ApiLoadState<ObjectStoresPageResponse>,
     create_state: UseStateHandle<ObjectStoreCreateFormState>,
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
+    subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
 ) -> Html {
     match state {
@@ -2176,7 +2274,13 @@ fn render_object_stores_state(
             </div>
         },
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_object_store_inventory(view, create_state, configure_state, api_base_path)
+            render_object_store_inventory(
+                view,
+                create_state,
+                configure_state,
+                subobject_state,
+                api_base_path,
+            )
         }
         ApiLoadState::Empty(message) => html! {
             <div class="dos-store-grid">
@@ -2202,11 +2306,13 @@ fn render_object_store_inventory(
     view: &ObjectStoresPageResponse,
     create_state: UseStateHandle<ObjectStoreCreateFormState>,
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
+    subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
 ) -> Html {
     html! {
         <div class="dos-store-grid">
             { render_object_store_create_card(Some(view), create_state, api_base_path.clone()) }
+            { render_subobject_create_card(view, subobject_state, api_base_path.clone()) }
             { render_object_store_configure_card(view, configure_state, api_base_path) }
             { for object_store_card_summaries(view).into_iter().map(render_object_store_card) }
         </div>
@@ -2312,6 +2418,12 @@ fn render_object_store_create_card(
                     capacity_behavior: Some(pending.capacity_behavior.clone()),
                     retention: Some(pending.retention.clone()),
                     endpoint_export_mode: Some(pending.endpoint_export_mode.clone()),
+                    subobject_name: None,
+                    parent_store_id: None,
+                    parent_subobject_name: None,
+                    subobject_object_type: None,
+                    subobject_inherits_object_type: None,
+                    subobject_s3_routing: None,
                     ssd_device: None,
                     hdd_devices: Vec::new(),
                     mount_root: None,
@@ -2711,6 +2823,12 @@ fn render_object_store_configure_card(
                     capacity_behavior: Some(pending.capacity_behavior.clone()),
                     retention: Some(pending.retention.clone()),
                     endpoint_export_mode: Some(pending.endpoint_export_mode.clone()),
+                    subobject_name: None,
+                    parent_store_id: None,
+                    parent_subobject_name: None,
+                    subobject_object_type: None,
+                    subobject_inherits_object_type: None,
+                    subobject_s3_routing: None,
                     ssd_device: None,
                     hdd_devices: Vec::new(),
                     mount_root: None,
@@ -2927,6 +3045,274 @@ fn render_object_store_configure_card(
                         <p>{ object_store_configure_review(&state) }</p>
                         <button class="dos-secondary-action" type="button" disabled={!can_plan} onclick={plan}>
                             { if state.planning { "Planning..." } else { "Review configuration plan" } }
+                        </button>
+                        if let Some(error) = &state.error {
+                            <div class="dos-auth-error" role="alert">{ error.clone() }</div>
+                        }
+                        if let Some(plan) = &state.plan {
+                            <code>{ plan.argv.join(" ") }</code>
+                            <p class="dos-job-message">{ format!("{} · confirmation required: {}", plan.execution, plan.confirmation_required) }</p>
+                        }
+                    </section>
+                </div>
+            }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_subobject_create_card(
+    view: &ObjectStoresPageResponse,
+    subobject_state: UseStateHandle<SubObjectFormState>,
+    api_base_path: String,
+) -> Html {
+    let state = (*subobject_state).clone();
+    let enabled = view.create_object_store.enabled && !view.stores.is_empty();
+    let status = if enabled {
+        "Available"
+    } else if view.stores.is_empty() {
+        "No stores"
+    } else {
+        "Admin only"
+    };
+    let detail = if enabled {
+        "Create a named SubObject endpoint with parent selection, nested prefix preview, object-type policy, and S3 routing review."
+    } else if view.stores.is_empty() {
+        "SubObjects require an existing parent ObjectStore."
+    } else {
+        view.create_object_store
+            .blocked_reason
+            .as_deref()
+            .unwrap_or("Current user must be an administrator to create SubObjects.")
+    };
+    let can_plan = enabled
+        && !state.planning
+        && !state.subobject_name.trim().is_empty()
+        && ((state.parent_kind == "store" && !state.parent_store_id.trim().is_empty())
+            || (state.parent_kind == "subobject"
+                && !state.parent_subobject_name.trim().is_empty()))
+        && (state.object_type_mode == "inherit" || !state.object_type.trim().is_empty());
+
+    let open_form = {
+        let subobject_state = subobject_state.clone();
+        let initial = SubObjectFormState::from_view(Some(view));
+        Callback::from(move |_| {
+            let mut next = (*subobject_state).clone();
+            if !next.open {
+                let mut seeded = initial.clone();
+                seeded.open = true;
+                next = seeded;
+            } else {
+                next.open = false;
+            }
+            subobject_state.set(next);
+        })
+    };
+
+    let plan = {
+        let subobject_state = subobject_state.clone();
+        let api_base_path = api_base_path.clone();
+        Callback::from(move |_| {
+            let mut pending = (*subobject_state).clone();
+            pending.planning = true;
+            pending.plan = None;
+            pending.error = None;
+            subobject_state.set(pending.clone());
+
+            let subobject_state = subobject_state.clone();
+            let api_base_path = api_base_path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let request = GuiActionPlanRequest {
+                    action: "subobject_create".to_string(),
+                    store_id: None,
+                    store_class: None,
+                    store_copies: None,
+                    bucket: None,
+                    writer_group: None,
+                    ssd_root: (!pending.ssd_root.trim().is_empty())
+                        .then(|| pending.ssd_root.trim().to_string()),
+                    public: None,
+                    writeable: None,
+                    capacity_behavior: None,
+                    retention: None,
+                    endpoint_export_mode: None,
+                    subobject_name: Some(pending.subobject_name.trim().to_string()),
+                    parent_store_id: (pending.parent_kind == "store")
+                        .then(|| pending.parent_store_id.trim().to_string()),
+                    parent_subobject_name: (pending.parent_kind == "subobject")
+                        .then(|| pending.parent_subobject_name.trim().to_string()),
+                    subobject_object_type: (pending.object_type_mode == "override")
+                        .then(|| pending.object_type.clone()),
+                    subobject_inherits_object_type: Some(pending.object_type_mode == "inherit"),
+                    subobject_s3_routing: Some(pending.s3_routing.clone()),
+                    ssd_device: None,
+                    hdd_devices: Vec::new(),
+                    mount_root: None,
+                    filesystem: None,
+                    owner: None,
+                    allow_format: false,
+                    confirmation_phrase: None,
+                };
+                let result = crate::api::plan_gui_action(&api_base_path, &request).await;
+                let mut next = (*subobject_state).clone();
+                next.planning = false;
+                match result {
+                    Ok(plan) => {
+                        next.plan = Some(plan);
+                        next.error = None;
+                    }
+                    Err(error) => {
+                        next.plan = None;
+                        next.error = Some(error.message);
+                    }
+                }
+                subobject_state.set(next);
+            });
+        })
+    };
+
+    html! {
+        <section class="dos-card dos-create-card dos-subobject-create" data-action="subobject_create">
+            <span class="dos-create-mark">{ "/" }</span>
+            <h2>{ "Create SubObject" }</h2>
+            <p>{ detail }</p>
+            <span class="dos-status-pill">{ status }</span>
+            <button
+                class="dos-secondary-action"
+                type="button"
+                disabled={!enabled}
+                onclick={open_form}
+            >
+                { if state.open { "Close SubObject form" } else { "Define SubObject" } }
+            </button>
+            if state.open {
+                <div class="dos-objectstore-form">
+                    <div class="dos-form-grid">
+                        { object_store_text_field("SubObject name", state.subobject_name.clone(), {
+                            let subobject_state = subobject_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*subobject_state).clone();
+                                next.subobject_name = input.value();
+                                next.reset_plan();
+                                subobject_state.set(next);
+                            })
+                        }) }
+                        <label class="dos-form-field">
+                            <span>{ "Parent type" }</span>
+                            <select onchange={{
+                                let subobject_state = subobject_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*subobject_state).clone();
+                                    next.parent_kind = input.value();
+                                    next.reset_plan();
+                                    subobject_state.set(next);
+                                })
+                            }} value={state.parent_kind.clone()}>
+                                <option value="store">{ "ObjectStore" }</option>
+                                <option value="subobject">{ "SubObject" }</option>
+                            </select>
+                        </label>
+                        if state.parent_kind == "store" {
+                            <label class="dos-form-field">
+                                <span>{ "Parent ObjectStore" }</span>
+                                <select onchange={{
+                                    let subobject_state = subobject_state.clone();
+                                    Callback::from(move |event: Event| {
+                                        let input: HtmlSelectElement = event.target_unchecked_into();
+                                        let mut next = (*subobject_state).clone();
+                                        next.parent_store_id = input.value();
+                                        next.reset_plan();
+                                        subobject_state.set(next);
+                                    })
+                                }} value={state.parent_store_id.clone()}>
+                                    { for view.stores.iter().map(|store| html! {
+                                        <option value={store.store_id.clone()}>{ format!("{} ({})", store.display_name, store.store_id) }</option>
+                                    }) }
+                                </select>
+                            </label>
+                        } else {
+                            { object_store_text_field("Parent SubObject", state.parent_subobject_name.clone(), {
+                                let subobject_state = subobject_state.clone();
+                                Callback::from(move |event: InputEvent| {
+                                    let input: HtmlInputElement = event.target_unchecked_into();
+                                    let mut next = (*subobject_state).clone();
+                                    next.parent_subobject_name = input.value();
+                                    next.reset_plan();
+                                    subobject_state.set(next);
+                                })
+                            }) }
+                        }
+                        <label class="dos-form-field">
+                            <span>{ "Object type policy" }</span>
+                            <select onchange={{
+                                let subobject_state = subobject_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*subobject_state).clone();
+                                    next.object_type_mode = input.value();
+                                    next.reset_plan();
+                                    subobject_state.set(next);
+                                })
+                            }} value={state.object_type_mode.clone()}>
+                                <option value="inherit">{ "Inherit from parent/import" }</option>
+                                <option value="override">{ "Override for this SubObject" }</option>
+                            </select>
+                        </label>
+                        if state.object_type_mode == "override" {
+                            <label class="dos-form-field">
+                                <span>{ "Object type" }</span>
+                                <select onchange={{
+                                    let subobject_state = subobject_state.clone();
+                                    Callback::from(move |event: Event| {
+                                        let input: HtmlSelectElement = event.target_unchecked_into();
+                                        let mut next = (*subobject_state).clone();
+                                        next.object_type = input.value();
+                                        next.reset_plan();
+                                        subobject_state.set(next);
+                                    })
+                                }} value={state.object_type.clone()}>
+                                    { for ["naive", "bam", "cram", "pod5", "fastq", "fastq_gz", "fasta", "vcf", "bcf", "gff", "gtf", "ena_sra"].iter().map(|value| html! {
+                                        <option value={(*value).to_string()}>{ *value }</option>
+                                    }) }
+                                </select>
+                            </label>
+                        }
+                        <label class="dos-form-field">
+                            <span>{ "S3 routing" }</span>
+                            <select onchange={{
+                                let subobject_state = subobject_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*subobject_state).clone();
+                                    next.s3_routing = input.value();
+                                    next.reset_plan();
+                                    subobject_state.set(next);
+                                })
+                            }} value={state.s3_routing.clone()}>
+                                <option value="inherit_parent">{ "Inherit parent route" }</option>
+                                <option value="dedicated_prefix">{ "Dedicated S3 prefix" }</option>
+                                <option value="dedicated_bucket">{ "Dedicated bucket" }</option>
+                                <option value="disabled">{ "No S3 route" }</option>
+                            </select>
+                        </label>
+                        { object_store_text_field("SSD root", state.ssd_root.clone(), {
+                            let subobject_state = subobject_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*subobject_state).clone();
+                                next.ssd_root = input.value();
+                                next.reset_plan();
+                                subobject_state.set(next);
+                            })
+                        }) }
+                    </div>
+                    <section class="dos-plan-result">
+                        <span class="dos-card-label">{ "Registry preview" }</span>
+                        <p>{ subobject_registry_preview(&state) }</p>
+                        <button class="dos-secondary-action" type="button" disabled={!can_plan} onclick={plan}>
+                            { if state.planning { "Planning..." } else { "Review SubObject plan" } }
                         </button>
                         if let Some(error) = &state.error {
                             <div class="dos-auth-error" role="alert">{ error.clone() }</div>
@@ -3160,9 +3546,9 @@ mod tests {
         home_workspace_api_path, object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
-        objectstores_workspace_api_path, ApiLoadState, WorkspacePage,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        objectstores_workspace_api_path, subobject_registry_preview_from_values, ApiLoadState,
+        WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{
         AdminJobProgress, AdminJobSummary, EnclosuresPageResponse, HomeDashboardResponse,
@@ -3361,6 +3747,24 @@ mod tests {
         assert_eq!(
             review,
             "generated-data · 3 copy/copies · writer group bioinformatics · capacity backpressure_by_priority · retention tombstone_then_gc · export s3 · public · read-only"
+        );
+    }
+
+    #[test]
+    fn subobject_registry_preview_captures_parent_type_and_routing() {
+        let review = subobject_registry_preview_from_values(
+            "pod5-raw",
+            "store",
+            "generated-data",
+            "",
+            "override",
+            "pod5",
+            "dedicated_prefix",
+        );
+
+        assert_eq!(
+            review,
+            "pod5-raw under generated-data · prefix generated-data/pod5-raw · object type pod5 · S3 routing dedicated_prefix"
         );
     }
 

@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.39.0 - 2026-07-08
+
+- Add a Web SubObject creation workflow on the ObjectStores page with parent
+  ObjectStore selection, nested SubObject parent entry, SSD-root review,
+  object-type inheritance/override, S3 routing mode, and registry prefix
+  preview.
+- Extend the GUI action-plan request contract with SubObject review policy
+  fields and validate object type plus S3 routing before returning a
+  ``subobject_create`` plan.
+- Add GUI API and Web regression coverage for SubObject planning with review
+  policy fields, invalid policy rejection, and browser registry preview text.
+
 ## 0.38.0 - 2026-07-08
 
 - Add a Web ObjectStore configuration workflow for existing stores, including

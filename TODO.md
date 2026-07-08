@@ -617,7 +617,7 @@ older checklist claims.
 - [x] Add ObjectStore edit/configuration flows for redundancy, retention,
   writer group, public/writeable policy, export mode, and capacity behavior,
   using the same validation as CLI/domain policy code.
-- [ ] Implement SubObject creation/configuration UI for nested prefixes, parent
+- [x] Implement SubObject creation/configuration UI for nested prefixes, parent
   ObjectStore selection, object type inheritance/override, S3 routing, and
   registry preview before confirmation.
 - [ ] Add Web tests proving ObjectStore and SubObject creation produce the same

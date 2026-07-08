@@ -644,7 +644,10 @@ mod tests {
             json!({
                 "action": "subobject_create",
                 "subobject_name": "Vervet",
-                "parent_subobject_name": "Xenognostikon"
+                "parent_subobject_name": "Xenognostikon",
+                "subobject_inherits_object_type": false,
+                "subobject_object_type": "pod5",
+                "subobject_s3_routing": "dedicated_prefix"
             }),
         )
         .await;
@@ -664,6 +667,31 @@ mod tests {
                 "--parent",
                 "Xenognostikon"
             ])
+        );
+    }
+
+    #[tokio::test]
+    async fn action_plan_route_rejects_invalid_subobject_review_policy() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "subobject_create",
+                "subobject_name": "Vervet",
+                "parent_subobject_name": "Xenognostikon",
+                "subobject_inherits_object_type": false,
+                "subobject_object_type": "not_a_real_type",
+                "subobject_s3_routing": "ftp"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "subobject_create");
+        assert_eq!(
+            encoded["missing_fields"],
+            json!(["subobject_object_type", "subobject_s3_routing"])
         );
     }
 
