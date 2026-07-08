@@ -5,6 +5,7 @@ mod health;
 mod ingest;
 mod jobs;
 mod local_admin;
+mod object_store;
 mod service;
 mod stores;
 
@@ -46,6 +47,10 @@ pub use local_admin::{
     CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonLocalAdminAcceptedResponse,
     DaemonLocalAdminCommand, DaemonLocalAdminValidationError,
 };
+pub use object_store::{
+    CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
+    OBJECT_STORE_CREATE_CONFIRMATION,
+};
 pub use service::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
@@ -69,6 +74,7 @@ pub enum DaemonApiRequest {
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
+    CreateObjectStore(CreateObjectStoreRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
 }
@@ -84,6 +90,9 @@ impl DaemonApiRequest {
             Self::PrepareEnclosure(request) => request
                 .validate()
                 .map_err(prepare_enclosure_validation_error),
+            Self::CreateObjectStore(request) => request
+                .validate()
+                .map_err(create_object_store_validation_error),
             Self::CreateLocalGroup(request) => {
                 request.validate().map_err(local_admin_validation_error)
             }
@@ -113,10 +122,38 @@ pub enum DaemonApiResponse {
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
+    CreateObjectStore(CreateObjectStoreResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
+}
+
+fn create_object_store_validation_error(
+    err: CreateObjectStoreValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        CreateObjectStoreValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        CreateObjectStoreValidationError::UnsafeName { field, value } => {
+            DaemonRequestValidationError::UnsafeLocalName { field, value }
+        }
+        CreateObjectStoreValidationError::InvalidCopyCount { copies } => {
+            DaemonRequestValidationError::InvalidCopyCount { copies }
+        }
+        CreateObjectStoreValidationError::RelativePath { field, path } => {
+            DaemonRequestValidationError::RelativePath { field, path }
+        }
+        CreateObjectStoreValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+        CreateObjectStoreValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: OBJECT_STORE_CREATE_CONFIRMATION,
+            }
+        }
+    }
 }
 
 fn prepare_enclosure_validation_error(
@@ -211,12 +248,12 @@ impl DaemonApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, DaemonApiRequest,
-        DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobId, DaemonJobStatusRequest,
-        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceStatusRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
-        ENCLOSURE_PREPARE_CONFIRMATION,
+        AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonApiRequest, DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobId,
+        DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, StoreInventoryRequest,
+        SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -343,6 +380,35 @@ mod tests {
         assert_eq!(encoded["command"], "prepare_enclosure");
         assert_eq!(encoded["payload"]["filesystem"], "ext4");
         assert_eq!(encoded["payload"]["hdd_devices"][0]["disk_id"], "qnap-1057");
+    }
+
+    #[test]
+    fn create_object_store_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::CreateObjectStore(CreateObjectStoreRequest {
+            store_id: "generated-data".to_string(),
+            store_class: "generated_data".to_string(),
+            required_copies: 2,
+            bucket: Some("generated-data".to_string()),
+            writer_group: "bioinformatics".to_string(),
+            ssd_root: "/srv/dasobjectstore/ssd".into(),
+            object_type: "pod5".to_string(),
+            enclosure_id: Some("qnap-tl-d800c-01".to_string()),
+            public: false,
+            writeable: true,
+            capacity_behavior: "balanced".to_string(),
+            retention: "standard".to_string(),
+            endpoint_export_mode: "s3_bucket".to_string(),
+            dry_run: false,
+            client_request_id: Some("request-1".to_string()),
+            administrator_actor: Some("stephen".to_string()),
+            confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
+        });
+
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "create_object_store");
+        assert_eq!(encoded["payload"]["store_id"], "generated-data");
+        assert_eq!(encoded["payload"]["required_copies"], 2);
     }
 
     #[test]

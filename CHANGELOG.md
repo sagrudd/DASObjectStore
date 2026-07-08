@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.37.0 - 2026-07-08
+
+- Add a transport-neutral daemon ObjectStore creation command, validation
+  contract, typed client method, request-handler dispatch, and persisted
+  administrator job kind.
+- Convert the Web ObjectStore creation card from plan-only review to an
+  administrator-gated daemon submission workflow with exact confirmation
+  phrase, accepted job metadata, and audit context.
+- Add daemon, GUI API, and Web regression coverage for ObjectStore creation
+  validation, command routing, confirmation gating, request forwarding, and
+  browser route contracts.
+
 ## 0.36.0 - 2026-07-08
 
 - Add browser-side ObjectStore creation controls for store identity, writer

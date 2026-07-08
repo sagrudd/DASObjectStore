@@ -611,7 +611,7 @@ older checklist claims.
 - [x] Implement ObjectStore creation form controls for store name, writer group,
   enclosure, object type, redundancy, public/writeable state, store class,
   capacity behavior, retention, and S3/export mode.
-- [ ] Connect ObjectStore creation to the existing action-plan/daemon boundary
+- [x] Connect ObjectStore creation to the existing action-plan/daemon boundary
   and convert the current `store_create` holder into a confirmation and
   submission workflow with audit metadata.
 - [ ] Add ObjectStore edit/configuration flows for redundancy, retention,

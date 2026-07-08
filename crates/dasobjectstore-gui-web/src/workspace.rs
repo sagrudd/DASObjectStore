@@ -4,8 +4,9 @@ use crate::api::AdminJobSummary;
 use crate::api::{
     AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
     AdminJobStatusResponse, AdminJobSummary, BioinformaticsWorkspaceResponse,
-    DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosurePrepareHddDevice,
-    EnclosurePrepareRequest, EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, DasEnclosureCardResponse,
+    DasEnclosureDetailResponse, EnclosurePrepareHddDevice, EnclosurePrepareRequest,
+    EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse,
 };
 use crate::api::{
     EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
@@ -674,6 +675,9 @@ struct ObjectStoreCreateFormState {
     ssd_root: String,
     planning: bool,
     plan: Option<GuiActionPlanResponse>,
+    confirmation_phrase: String,
+    submitting: bool,
+    submitted: Option<CreateObjectStoreResponse>,
     error: Option<String>,
 }
 
@@ -716,12 +720,16 @@ impl ObjectStoreCreateFormState {
             ssd_root: "/srv/dasobjectstore/ssd".to_string(),
             planning: false,
             plan: None,
+            confirmation_phrase: String::new(),
+            submitting: false,
+            submitted: None,
             error: None,
         }
     }
 
     fn reset_plan(&mut self) {
         self.plan = None;
+        self.submitted = None;
         self.error = None;
     }
 }
@@ -746,6 +754,36 @@ fn object_store_bucket_default(store_id: &str) -> String {
 #[cfg(any(target_arch = "wasm32", test))]
 fn object_store_creation_fields_ready(store_id: &str, writer_group: &str, ssd_root: &str) -> bool {
     !store_id.trim().is_empty() && !writer_group.trim().is_empty() && !ssd_root.trim().is_empty()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_store_create_confirmation_matches(value: &str) -> bool {
+    value.trim() == "confirm create objectstore"
+}
+
+#[cfg(target_arch = "wasm32")]
+fn object_store_create_request_from_state(
+    state: &ObjectStoreCreateFormState,
+) -> CreateObjectStoreRequest {
+    CreateObjectStoreRequest {
+        store_id: state.store_id.trim().to_string(),
+        store_class: state.store_class.clone(),
+        required_copies: state.required_copies,
+        bucket: (!state.bucket.trim().is_empty()).then(|| state.bucket.trim().to_string()),
+        writer_group: state.writer_group.trim().to_string(),
+        ssd_root: state.ssd_root.trim().to_string(),
+        object_type: state.object_type.clone(),
+        enclosure_id: (!state.enclosure_id.trim().is_empty())
+            .then(|| state.enclosure_id.trim().to_string()),
+        public: state.public,
+        writeable: state.writeable,
+        capacity_behavior: state.capacity_behavior.clone(),
+        retention: state.retention.clone(),
+        endpoint_export_mode: state.endpoint_export_mode.clone(),
+        dry_run: false,
+        client_request_id: None,
+        confirmation_marker: Some("confirm create objectstore".to_string()),
+    }
 }
 
 pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<ObjectStoreCardSummary> {
@@ -2084,6 +2122,10 @@ fn render_object_store_create_card(
             &state.writer_group,
             &state.ssd_root,
         );
+    let can_submit = enabled
+        && state.plan.is_some()
+        && !state.submitting
+        && object_store_create_confirmation_matches(&state.confirmation_phrase);
 
     let open_form = {
         let create_state = create_state.clone();
@@ -2145,6 +2187,37 @@ fn render_object_store_create_card(
                     }
                     Err(error) => {
                         next.plan = None;
+                        next.error = Some(error.message);
+                    }
+                }
+                create_state.set(next);
+            });
+        })
+    };
+    let submit = {
+        let create_state = create_state.clone();
+        let api_base_path = api_base_path.clone();
+        Callback::from(move |_| {
+            let mut pending = (*create_state).clone();
+            pending.submitting = true;
+            pending.error = None;
+            pending.submitted = None;
+            create_state.set(pending.clone());
+
+            let create_state = create_state.clone();
+            let api_base_path = api_base_path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let request = object_store_create_request_from_state(&pending);
+                let result = crate::api::submit_object_store_create(&api_base_path, &request).await;
+                let mut next = (*create_state).clone();
+                next.submitting = false;
+                match result {
+                    Ok(response) => {
+                        next.submitted = Some(response);
+                        next.error = None;
+                    }
+                    Err(error) => {
+                        next.submitted = None;
                         next.error = Some(error.message);
                     }
                 }
@@ -2380,6 +2453,34 @@ fn render_object_store_create_card(
                             <code>{ plan.argv.join(" ") }</code>
                             <p class="dos-job-message">{ format!("{} · confirmation required: {}", plan.execution, plan.confirmation_required) }</p>
                         }
+                        <label class="dos-form-field">
+                            <span>{ "Confirmation phrase" }</span>
+                            <input
+                                placeholder="confirm create objectstore"
+                                value={state.confirmation_phrase.clone()}
+                                oninput={{
+                                    let create_state = create_state.clone();
+                                    Callback::from(move |event: InputEvent| {
+                                        let input: HtmlInputElement = event.target_unchecked_into();
+                                        let mut next = (*create_state).clone();
+                                        next.confirmation_phrase = input.value();
+                                        next.submitted = None;
+                                        create_state.set(next);
+                                    })
+                                }}
+                            />
+                        </label>
+                        <button class="dos-auth-submit" type="button" disabled={!can_submit} onclick={submit}>
+                            { if state.submitting { "Submitting..." } else { "Submit daemon job" } }
+                        </button>
+                        if let Some(submitted) = &state.submitted {
+                            <section class="dos-plan-result" data-job-state="accepted">
+                                <span class="dos-card-label">{ "Daemon job accepted" }</span>
+                                <h3>{ "ObjectStore creation submitted to dasobjectstored." }</h3>
+                                <p>{ format!("Job {} · {} · dry run {}", submitted.accepted.job_id, submitted.accepted.kind, submitted.accepted.dry_run) }</p>
+                                <code>{ format!("{} · class {} · {} copy/copies · writer group {} · actor {}", submitted.store_id, submitted.store_class, submitted.required_copies, submitted.writer_group, submitted.administrator_actor.as_deref().unwrap_or("unknown")) }</code>
+                            </section>
+                        }
                     </section>
                 </div>
             }
@@ -2603,10 +2704,10 @@ mod tests {
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosures_workspace_api_path, home_dashboard_attention, home_dashboard_metrics,
         home_workspace_api_path, object_store_bucket_default, object_store_card_summaries,
-        object_store_create_review_from_values, object_store_creation_fields_ready,
-        objectstores_workspace_api_path, ApiLoadState, WorkspacePage,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        object_store_create_confirmation_matches, object_store_create_review_from_values,
+        object_store_creation_fields_ready, objectstores_workspace_api_path, ApiLoadState,
+        WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{
         AdminJobProgress, AdminJobSummary, EnclosuresPageResponse, HomeDashboardResponse,
@@ -2787,6 +2888,22 @@ mod tests {
             review,
             "generated-data · type pod5 · 2 copy/copies · writer group bioinformatics · export s3_bucket · private · writeable"
         );
+    }
+
+    #[test]
+    fn object_store_create_confirmation_requires_exact_phrase() {
+        assert!(object_store_create_confirmation_matches(
+            "confirm create objectstore"
+        ));
+        assert!(object_store_create_confirmation_matches(
+            " confirm create objectstore "
+        ));
+        assert!(!object_store_create_confirmation_matches(
+            "confirm create object store"
+        ));
+        assert!(!object_store_create_confirmation_matches(
+            "CONFIRM CREATE OBJECTSTORE"
+        ));
     }
 
     #[test]

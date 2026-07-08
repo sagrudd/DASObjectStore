@@ -1,13 +1,13 @@
 use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-    CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest,
-    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
-    DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminAcceptedResponse,
-    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
-    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    PrepareEnclosureRequest, PrepareEnclosureResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
+    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobKind,
+    DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
+    DaemonJobSummary, DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 use crate::runtime::{
     provision_garage_store_registry, submit_ingest_files_to_local_store_with_progress,
@@ -100,6 +100,15 @@ where
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 self.record_admin_job(daemon_job_summary_from_prepare_enclosure(&response))?;
                 Ok(DaemonApiResponse::PrepareEnclosure(response))
+            }
+            DaemonApiRequest::CreateObjectStore(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .create_object_store(request, &now)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_create_object_store(&response))?;
+                Ok(DaemonApiResponse::CreateObjectStore(response))
             }
             DaemonApiRequest::CreateLocalGroup(request) => {
                 let now = self.clock.now_utc();
@@ -217,6 +226,17 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn create_object_store(
+        &self,
+        _request: CreateObjectStoreRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "create_object_store requires an ObjectStore administration orchestrator"
+                .to_string(),
+        })
+    }
+
     fn create_local_group(
         &self,
         _request: CreateLocalGroupRequest,
@@ -313,6 +333,22 @@ fn daemon_job_summary_from_prepare_enclosure(
             "prepared {} landing device and {} HDD device(s)",
             response.ssd_device.display(),
             response.hdd_devices.len()
+        ),
+    )
+}
+
+fn daemon_job_summary_from_create_object_store(
+    response: &CreateObjectStoreResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        DaemonJobKind::ObjectStoreCreation,
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "ObjectStore {} creation accepted for writer group {}",
+            response.store_id, response.writer_group
         ),
     )
 }
@@ -417,6 +453,33 @@ where
             summary.stores,
             summary.buckets,
             summary.commands,
+        ))
+    }
+
+    fn create_object_store(
+        &self,
+        request: CreateObjectStoreRequest,
+        accepted_at_utc: &str,
+    ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
+        let job_id_value = format!(
+            "objectstore-create-{}",
+            accepted_at_utc
+                .chars()
+                .map(|character| if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_ascii_lowercase()
+        );
+        let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
+            .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
+        Ok(CreateObjectStoreResponse::accepted(
+            job_id,
+            accepted_at_utc,
+            request,
         ))
     }
 
@@ -564,6 +627,7 @@ impl DaemonApiRequest {
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
+            Self::CreateObjectStore(_) => "create_object_store",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         }
@@ -578,15 +642,17 @@ mod tests {
     };
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-        CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
-        DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
-        DaemonJobSummary, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
+        CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonJobCancelRequest,
+        DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState,
+        DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+        DaemonRequestValidationError, DaemonServiceLifecycleRequest,
         DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
         DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         PrepareEnclosureResponse, StoreInventoryRequest, SubmitIngestFilesRequest,
         SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::runtime::{
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
@@ -883,6 +949,42 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_create_object_store_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T20:45:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::CreateObjectStore(
+                create_object_store_request(),
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::CreateObjectStore(CreateObjectStoreResponse {
+                accepted,
+                store_id,
+                ..
+            }) if accepted.job_id.as_str() == "objectstore-create-2026-07-08t20-45-00z"
+                && accepted.dry_run
+                && store_id == "generated-data"
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .create_object_store_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-08T20:45:00Z".to_string(),
+                "generated-data".to_string(),
+                true,
+            )]
+        );
+    }
+
+    #[test]
     fn records_accepted_prepare_enclosure_job_in_registry() {
         let root = temp_root("record-prepare");
         let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
@@ -911,6 +1013,45 @@ mod tests {
             DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
                 job: DaemonJobSummary {
                     kind: DaemonJobKind::EnclosurePreparation,
+                    state: DaemonJobState::Complete,
+                    ..
+                }
+            })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn records_accepted_create_object_store_job_in_registry() {
+        let root = temp_root("record-create-objectstore");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-08T20:45:00Z"),
+            registry,
+        );
+
+        handler
+            .handle(DaemonApiRequest::CreateObjectStore(
+                create_object_store_request(),
+            ))
+            .expect("create objectstore request handled");
+        let response = handler
+            .handle(DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("objectstore-create-2026-07-08t20-45-00z")
+                    .expect("job id"),
+            }))
+            .expect("status request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    kind: DaemonJobKind::ObjectStoreCreation,
                     state: DaemonJobState::Complete,
                     ..
                 }
@@ -1122,6 +1263,28 @@ mod tests {
         }
     }
 
+    fn create_object_store_request() -> CreateObjectStoreRequest {
+        CreateObjectStoreRequest {
+            store_id: "generated-data".to_string(),
+            store_class: "generated_data".to_string(),
+            required_copies: 2,
+            bucket: Some("generated-data".to_string()),
+            writer_group: "bioinformatics".to_string(),
+            ssd_root: "/srv/dasobjectstore/ssd".into(),
+            object_type: "pod5".to_string(),
+            enclosure_id: Some("qnap-tl-d800c-01".to_string()),
+            public: false,
+            writeable: true,
+            capacity_behavior: "balanced".to_string(),
+            retention: "standard".to_string(),
+            endpoint_export_mode: "s3_bucket".to_string(),
+            dry_run: true,
+            client_request_id: Some("request-store-1".to_string()),
+            administrator_actor: Some("operator".to_string()),
+            confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
+        }
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "dasobjectstore-request-handler-{label}-{}",
@@ -1149,6 +1312,7 @@ mod tests {
         >,
         ingest_calls: RefCell<Vec<(String, String, bool)>>,
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
+        create_object_store_calls: RefCell<Vec<(String, String, bool)>>,
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
@@ -1317,6 +1481,23 @@ mod tests {
                 request.filesystem,
                 request.owner,
                 request.administrator_actor,
+            ))
+        }
+
+        fn create_object_store(
+            &self,
+            request: CreateObjectStoreRequest,
+            accepted_at_utc: &str,
+        ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
+            self.create_object_store_calls.borrow_mut().push((
+                accepted_at_utc.to_string(),
+                request.store_id.clone(),
+                request.dry_run,
+            ));
+            Ok(CreateObjectStoreResponse::accepted(
+                DaemonJobId::new("objectstore-create-2026-07-08t20-45-00z").expect("job id"),
+                accepted_at_utc,
+                request,
             ))
         }
 

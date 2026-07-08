@@ -16,7 +16,9 @@ use dasobjectstore_daemon::{
     AssignLocalUserToLocalGroupRequest as DaemonAssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse as DaemonAssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest as DaemonCreateLocalGroupRequest,
-    CreateLocalGroupResponse as DaemonCreateLocalGroupResponse, DaemonClient,
+    CreateLocalGroupResponse as DaemonCreateLocalGroupResponse,
+    CreateObjectStoreRequest as DaemonCreateObjectStoreRequest,
+    CreateObjectStoreResponse as DaemonCreateObjectStoreResponse, DaemonClient,
     DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress,
     DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminCommand, DaemonRuntimeConfig,
@@ -24,7 +26,7 @@ use dasobjectstore_daemon::{
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, UnixSocketDaemonTransport,
-    ENCLOSURE_PREPARE_CONFIRMATION,
+    ENCLOSURE_PREPARE_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -102,6 +104,10 @@ fn standalone_enclosure_admin_router_with_state(
         .route(
             "/api/v1/workspaces/enclosures/prepare",
             post(prepare_enclosure),
+        )
+        .route(
+            "/api/v1/workspaces/object-stores/create",
+            post(create_object_store),
         )
         .route(
             "/api/v1/workspaces/admin/jobs/{job_id}",
@@ -214,6 +220,11 @@ trait StandaloneEnclosureAdminClient: Send + Sync {
         request: StandaloneEnclosurePrepareDaemonRequest,
     ) -> Result<StandaloneEnclosurePrepareResponse, StandaloneEnclosureAdminClientError>;
 
+    fn submit_create_object_store(
+        &self,
+        request: DaemonCreateObjectStoreRequest,
+    ) -> Result<StandaloneCreateObjectStoreResponse, StandaloneEnclosureAdminClientError>;
+
     fn job_status(
         &self,
         request: StandaloneAdminJobStatusDaemonRequest,
@@ -301,6 +312,33 @@ pub struct PrepareEnclosureHddDeviceRequest {
     pub device_path: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CreateObjectStoreRequest {
+    pub store_id: String,
+    pub store_class: String,
+    pub required_copies: u8,
+    pub bucket: Option<String>,
+    pub writer_group: String,
+    pub ssd_root: String,
+    pub object_type: String,
+    pub enclosure_id: Option<String>,
+    #[serde(default)]
+    pub public: bool,
+    #[serde(default = "default_true")]
+    pub writeable: bool,
+    pub capacity_behavior: String,
+    pub retention: String,
+    pub endpoint_export_mode: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub confirmation_marker: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StandaloneLocalGroupOperation {
@@ -339,6 +377,34 @@ pub struct StandaloneEnclosurePrepareResponse {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StandaloneEnclosurePrepareAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneCreateObjectStoreResponse {
+    pub accepted: StandaloneCreateObjectStoreAcceptedResponse,
+    pub store_id: String,
+    pub store_class: String,
+    pub required_copies: u8,
+    pub bucket: Option<String>,
+    pub writer_group: String,
+    pub ssd_root: String,
+    pub object_type: String,
+    pub enclosure_id: Option<String>,
+    pub public: bool,
+    pub writeable: bool,
+    pub capacity_behavior: String,
+    pub retention: String,
+    pub endpoint_export_mode: String,
+    pub administrator_actor: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneCreateObjectStoreAcceptedResponse {
     pub job_id: String,
     pub kind: String,
     pub accepted_at_utc: String,
@@ -525,6 +591,16 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
             .map_err(standalone_enclosure_admin_client_error)
     }
 
+    fn submit_create_object_store(
+        &self,
+        request: DaemonCreateObjectStoreRequest,
+    ) -> Result<StandaloneCreateObjectStoreResponse, StandaloneEnclosureAdminClientError> {
+        self.client
+            .create_object_store(request)
+            .map(create_object_store_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
     fn job_status(
         &self,
         request: StandaloneAdminJobStatusDaemonRequest,
@@ -673,6 +749,17 @@ async fn prepare_enclosure(
     submit_prepare_enclosure_request(&state, request).map(Json)
 }
 
+async fn create_object_store(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<CreateObjectStoreRequest>,
+) -> Result<Json<StandaloneCreateObjectStoreResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let mut request = validate_create_object_store_request(request)?;
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    request.administrator_actor = Some(current_user.username);
+    submit_create_object_store_request(&state, request).map(Json)
+}
+
 async fn admin_job_status(
     State(state): State<StandaloneEnclosureAdminRouteState>,
     actor: AuthenticatedGuiActor,
@@ -785,6 +872,51 @@ fn validate_prepare_enclosure_request(
     })
 }
 
+fn validate_create_object_store_request(
+    request: CreateObjectStoreRequest,
+) -> Result<DaemonCreateObjectStoreRequest, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = required_field("store_id", request.store_id)?;
+    let store_class = required_field("store_class", request.store_class)?;
+    let writer_group = required_field("writer_group", request.writer_group)?;
+    let ssd_root = required_field("ssd_root", request.ssd_root)?;
+    let object_type = required_field("object_type", request.object_type)?;
+    let capacity_behavior = required_field("capacity_behavior", request.capacity_behavior)?;
+    let retention = required_field("retention", request.retention)?;
+    let endpoint_export_mode =
+        required_field("endpoint_export_mode", request.endpoint_export_mode)?;
+    validate_client_request_id(request.client_request_id.as_deref())?;
+    let confirmation_marker = validate_object_store_create_confirmation_marker(
+        request.dry_run,
+        request.confirmation_marker.as_deref(),
+    )?;
+
+    Ok(DaemonCreateObjectStoreRequest {
+        store_id,
+        store_class,
+        required_copies: request.required_copies,
+        bucket: request
+            .bucket
+            .map(|value| required_field("bucket", value))
+            .transpose()?,
+        writer_group,
+        ssd_root: PathBuf::from(ssd_root),
+        object_type,
+        enclosure_id: request
+            .enclosure_id
+            .map(|value| required_field("enclosure_id", value))
+            .transpose()?,
+        public: request.public,
+        writeable: request.writeable,
+        capacity_behavior,
+        retention,
+        endpoint_export_mode,
+        dry_run: request.dry_run,
+        client_request_id: request.client_request_id,
+        administrator_actor: None,
+        confirmation_marker,
+    })
+}
+
 fn validate_cancel_admin_job_request(
     job_id: String,
     request: CancelAdminJobRequest,
@@ -864,6 +996,27 @@ fn submit_prepare_enclosure_request(
         route_error(
             StatusCode::BAD_GATEWAY,
             "daemon_enclosure_prepare_failed",
+            err.message,
+        )
+    })
+}
+
+fn submit_create_object_store_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: DaemonCreateObjectStoreRequest,
+) -> Result<StandaloneCreateObjectStoreResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_objectstore_admin_unavailable",
+            "daemon ObjectStore administration contract is not available",
+        )
+    })?;
+
+    client.submit_create_object_store(request).map_err(|err| {
+        route_error(
+            StatusCode::BAD_GATEWAY,
+            "daemon_objectstore_create_failed",
             err.message,
         )
     })
@@ -992,6 +1145,27 @@ fn validate_prepare_enclosure_confirmation_marker(
     ))
 }
 
+fn validate_object_store_create_confirmation_marker(
+    dry_run: bool,
+    confirmation_marker: Option<&str>,
+) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
+    let confirmation_marker = confirmation_marker
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if dry_run && confirmation_marker.is_none() {
+        return Ok(OBJECT_STORE_CREATE_CONFIRMATION.to_string());
+    }
+    if confirmation_marker == Some(OBJECT_STORE_CREATE_CONFIRMATION) {
+        return Ok(OBJECT_STORE_CREATE_CONFIRMATION.to_string());
+    }
+
+    Err(route_error(
+        StatusCode::BAD_REQUEST,
+        "confirmation_required",
+        format!("confirmation_marker must be `{OBJECT_STORE_CREATE_CONFIRMATION}`"),
+    ))
+}
+
 fn parse_prepare_enclosure_filesystem(
     value: Option<&str>,
 ) -> Result<DaemonPrepareEnclosureFilesystem, (StatusCode, Json<AuthRouteError>)> {
@@ -1059,6 +1233,34 @@ fn enclosure_prepare_response_from_daemon(
     }
 }
 
+fn create_object_store_response_from_daemon(
+    response: DaemonCreateObjectStoreResponse,
+) -> StandaloneCreateObjectStoreResponse {
+    StandaloneCreateObjectStoreResponse {
+        accepted: StandaloneCreateObjectStoreAcceptedResponse {
+            job_id: response.accepted.job_id.to_string(),
+            kind: "object_store_creation".to_string(),
+            accepted_at_utc: response.accepted.accepted_at_utc,
+            dry_run: response.accepted.dry_run,
+        },
+        store_id: response.store_id,
+        store_class: response.store_class,
+        required_copies: response.required_copies,
+        bucket: response.bucket,
+        writer_group: response.writer_group,
+        ssd_root: response.ssd_root.display().to_string(),
+        object_type: response.object_type,
+        enclosure_id: response.enclosure_id,
+        public: response.public,
+        writeable: response.writeable,
+        capacity_behavior: response.capacity_behavior,
+        retention: response.retention,
+        endpoint_export_mode: response.endpoint_export_mode,
+        administrator_actor: response.administrator_actor,
+        client_request_id: None,
+    }
+}
+
 fn admin_job_status_response_from_daemon(
     response: DaemonJobStatusResponse,
 ) -> StandaloneAdminJobStatusResponse {
@@ -1111,6 +1313,7 @@ fn admin_job_kind_label(kind: DaemonJobKind) -> &'static str {
         DaemonJobKind::DiskRetire => "disk_retire",
         DaemonJobKind::DiskReplace => "disk_replace",
         DaemonJobKind::EnclosurePreparation => "enclosure_preparation",
+        DaemonJobKind::ObjectStoreCreation => "object_store_creation",
         DaemonJobKind::Repair => "repair",
         DaemonJobKind::ServiceOperation => "service_operation",
         DaemonJobKind::SystemAdministration => "system_administration",
@@ -1231,19 +1434,22 @@ mod tests {
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
         standalone_enclosure_admin_router_with_state, standalone_users_groups_router_with_state,
         AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        GuiApiHostMode, LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest,
-        LogoutRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, GuiApiHostMode,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
         SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
         StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
         StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
-        StandaloneAdminJobSummary, StandaloneAuthRouteState, StandaloneEnclosureAdminClient,
-        StandaloneEnclosureAdminClientError, StandaloneEnclosureAdminRouteState,
-        StandaloneEnclosurePrepareAcceptedResponse, StandaloneEnclosurePrepareDaemonRequest,
-        StandaloneEnclosurePrepareResponse, StandaloneLocalGroupAdminAcceptedResponse,
-        StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
-        StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
-        StandaloneLocalGroupOperation, StandaloneUsersGroupsRouteState,
-        ENCLOSURE_PREPARE_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
+        StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
+        StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
+        StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
+        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
+        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
+        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
+        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
+        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -1956,6 +2162,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_object_store_requires_exact_confirmation() {
+        let root = temp_root("objectstore-create-confirm");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = CreateObjectStoreRequest {
+            confirmation_marker: Some("create it".to_string()),
+            ..create_object_store_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/object-stores/create",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "confirmation_required");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn create_object_store_forwards_confirmed_request_to_daemon_client() {
+        let root = temp_root("objectstore-create-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["wheel"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneCreateObjectStoreResponse>(
+            app,
+            "/api/v1/workspaces/object-stores/create",
+            "admin",
+            &login.session_token,
+            &create_object_store_request(),
+        )
+        .await;
+
+        assert_eq!(response.accepted.job_id, "objectstore-create-job-1");
+        assert_eq!(response.accepted.kind, "object_store_creation");
+        assert_eq!(response.store_id, "zymo-fecal-2025-05");
+        assert_eq!(response.administrator_actor.as_deref(), Some("operator"));
+        assert_eq!(
+            client.create_object_store_requests(),
+            vec![DaemonCreateObjectStoreRequest {
+                store_id: "zymo-fecal-2025-05".to_string(),
+                store_class: "sequence_data".to_string(),
+                required_copies: 2,
+                bucket: Some("zymo-fecal-2025-05".to_string()),
+                writer_group: "bioinformatics".to_string(),
+                ssd_root: PathBuf::from("/srv/dasobjectstore/ssd"),
+                object_type: "pod5".to_string(),
+                enclosure_id: Some("tl-d800c-01".to_string()),
+                public: false,
+                writeable: true,
+                capacity_behavior: "balanced".to_string(),
+                retention: "standard".to_string(),
+                endpoint_export_mode: "s3_bucket".to_string(),
+                dry_run: false,
+                client_request_id: Some("objectstore-create-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn admin_job_status_requires_local_admin() {
         let root = temp_root("admin-job-status-non-admin");
         let auth_store = registered_auth_store(&root);
@@ -2419,6 +2707,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingEnclosureClient {
         requests: Mutex<Vec<StandaloneEnclosurePrepareDaemonRequest>>,
+        create_object_store_requests: Mutex<Vec<DaemonCreateObjectStoreRequest>>,
         status_requests: Mutex<Vec<StandaloneAdminJobStatusDaemonRequest>>,
         cancel_requests: Mutex<Vec<StandaloneAdminJobCancelDaemonRequest>>,
         fail_message: Option<String>,
@@ -2427,6 +2716,13 @@ mod tests {
     impl RecordingEnclosureClient {
         fn requests(&self) -> Vec<StandaloneEnclosurePrepareDaemonRequest> {
             self.requests.lock().expect("requests lock").clone()
+        }
+
+        fn create_object_store_requests(&self) -> Vec<DaemonCreateObjectStoreRequest> {
+            self.create_object_store_requests
+                .lock()
+                .expect("create object store requests lock")
+                .clone()
         }
 
         fn status_requests(&self) -> Vec<StandaloneAdminJobStatusDaemonRequest> {
@@ -2471,6 +2767,45 @@ mod tests {
                 mount_root: request.mount_root,
                 filesystem: request.filesystem.to_string(),
                 owner: request.owner,
+                administrator_actor: request.administrator_actor,
+                client_request_id: request.client_request_id,
+            })
+        }
+
+        fn submit_create_object_store(
+            &self,
+            request: DaemonCreateObjectStoreRequest,
+        ) -> Result<StandaloneCreateObjectStoreResponse, StandaloneEnclosureAdminClientError>
+        {
+            if let Some(message) = &self.fail_message {
+                return Err(StandaloneEnclosureAdminClientError {
+                    message: message.clone(),
+                });
+            }
+            self.create_object_store_requests
+                .lock()
+                .expect("create object store requests lock")
+                .push(request.clone());
+            Ok(StandaloneCreateObjectStoreResponse {
+                accepted: StandaloneCreateObjectStoreAcceptedResponse {
+                    job_id: "objectstore-create-job-1".to_string(),
+                    kind: "object_store_creation".to_string(),
+                    accepted_at_utc: "2026-07-08T21:10:00Z".to_string(),
+                    dry_run: request.dry_run,
+                },
+                store_id: request.store_id,
+                store_class: request.store_class,
+                required_copies: request.required_copies,
+                bucket: request.bucket,
+                writer_group: request.writer_group,
+                ssd_root: request.ssd_root.display().to_string(),
+                object_type: request.object_type,
+                enclosure_id: request.enclosure_id,
+                public: request.public,
+                writeable: request.writeable,
+                capacity_behavior: request.capacity_behavior,
+                retention: request.retention,
+                endpoint_export_mode: request.endpoint_export_mode,
                 administrator_actor: request.administrator_actor,
                 client_request_id: request.client_request_id,
             })
@@ -2529,6 +2864,7 @@ mod tests {
     fn recording_enclosure_client_with_failure(message: &str) -> Arc<RecordingEnclosureClient> {
         Arc::new(RecordingEnclosureClient {
             requests: Mutex::new(Vec::new()),
+            create_object_store_requests: Mutex::new(Vec::new()),
             status_requests: Mutex::new(Vec::new()),
             cancel_requests: Mutex::new(Vec::new()),
             fail_message: Some(message.to_string()),
@@ -2549,6 +2885,27 @@ mod tests {
             client_request_id: Some("prepare-1".to_string()),
             allow_format: true,
             confirmation_marker: Some(ENCLOSURE_PREPARE_CONFIRMATION.to_string()),
+        }
+    }
+
+    fn create_object_store_request() -> CreateObjectStoreRequest {
+        CreateObjectStoreRequest {
+            store_id: "zymo-fecal-2025-05".to_string(),
+            store_class: "sequence_data".to_string(),
+            required_copies: 2,
+            bucket: Some("zymo-fecal-2025-05".to_string()),
+            writer_group: "bioinformatics".to_string(),
+            ssd_root: "/srv/dasobjectstore/ssd".to_string(),
+            object_type: "pod5".to_string(),
+            enclosure_id: Some("tl-d800c-01".to_string()),
+            public: false,
+            writeable: true,
+            capacity_behavior: "balanced".to_string(),
+            retention: "standard".to_string(),
+            endpoint_export_mode: "s3_bucket".to_string(),
+            dry_run: false,
+            client_request_id: Some("objectstore-create-1".to_string()),
+            confirmation_marker: Some(OBJECT_STORE_CREATE_CONFIRMATION.to_string()),
         }
     }
 

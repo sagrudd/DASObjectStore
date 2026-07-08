@@ -9,7 +9,8 @@ pub mod server;
 pub use api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
-    CreateLocalGroupResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
+    CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
+    CreateObjectStoreValidationError, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
     DaemonHealthSummaryResponse, DaemonIngestAdaptiveSchedulerInput,
     DaemonIngestAdaptiveSchedulingLimit, DaemonIngestAdaptiveWorkerSchedule,
@@ -38,7 +39,7 @@ pub use api::{
     IngestJobStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
     PrepareEnclosureRequest, PrepareEnclosureResponse, PrepareEnclosureValidationError,
     StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
+    SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 pub use auth::{
     authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,

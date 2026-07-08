@@ -102,6 +102,57 @@ pub struct GuiActionPlanRequest {
 
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct CreateObjectStoreResponse {
+    pub accepted: CreateObjectStoreAcceptedResponse,
+    pub store_id: String,
+    pub store_class: String,
+    pub required_copies: u8,
+    pub bucket: Option<String>,
+    pub writer_group: String,
+    pub ssd_root: String,
+    pub object_type: String,
+    pub enclosure_id: Option<String>,
+    pub public: bool,
+    pub writeable: bool,
+    pub capacity_behavior: String,
+    pub retention: String,
+    pub endpoint_export_mode: String,
+    pub administrator_actor: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct CreateObjectStoreAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CreateObjectStoreRequest {
+    pub store_id: String,
+    pub store_class: String,
+    pub required_copies: u8,
+    pub bucket: Option<String>,
+    pub writer_group: String,
+    pub ssd_root: String,
+    pub object_type: String,
+    pub enclosure_id: Option<String>,
+    pub public: bool,
+    pub writeable: bool,
+    pub capacity_behavior: String,
+    pub retention: String,
+    pub endpoint_export_mode: String,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub confirmation_marker: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct EnclosurePrepareResponse {
     pub accepted: EnclosurePrepareAcceptedResponse,
     pub ssd_device: String,
@@ -608,6 +659,23 @@ pub async fn submit_enclosure_prepare(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn submit_object_store_create(
+    api_base_path: &str,
+    request: &CreateObjectStoreRequest,
+) -> Result<CreateObjectStoreResponse, ApiError> {
+    post_json(&object_store_create_path(api_base_path), request).await
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+pub fn object_store_create_path(api_base_path: &str) -> String {
+    format!(
+        "{}/workspaces/object-stores/create",
+        api_base_path.trim_end_matches('/')
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
 #[allow(dead_code)]
 pub async fn get_admin_job_status(
     api_base_path: &str,
@@ -707,10 +775,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_job_cancel_path, admin_job_status_path, auth_path, AdminJobCancelResponse,
-        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, EnclosurePrepareResponse,
-        EnclosuresPageResponse, GuiActionPlanResponse, HomeDashboardResponse,
-        ObjectStoresPageResponse,
+        admin_job_cancel_path, admin_job_status_path, auth_path, object_store_create_path,
+        AdminJobCancelResponse, AdminJobStatusResponse, BioinformaticsWorkspaceResponse,
+        CreateObjectStoreResponse, EnclosurePrepareResponse, EnclosuresPageResponse,
+        GuiActionPlanResponse, HomeDashboardResponse, ObjectStoresPageResponse,
     };
 
     #[test]
@@ -925,6 +993,40 @@ mod tests {
     }
 
     #[test]
+    fn decodes_object_store_create_response_subset() {
+        let payload = serde_json::json!({
+            "accepted": {
+                "job_id": "objectstore-create-1",
+                "kind": "object_store_creation",
+                "accepted_at_utc": "2026-07-08T20:45:00Z",
+                "dry_run": false
+            },
+            "store_id": "generated-data",
+            "store_class": "generated_data",
+            "required_copies": 2,
+            "bucket": "generated-data",
+            "writer_group": "bioinformatics",
+            "ssd_root": "/srv/dasobjectstore/ssd",
+            "object_type": "pod5",
+            "enclosure_id": "qnap-tl-d800c-01",
+            "public": false,
+            "writeable": true,
+            "capacity_behavior": "balanced",
+            "retention": "standard",
+            "endpoint_export_mode": "s3_bucket",
+            "administrator_actor": "stephen",
+            "client_request_id": "request-1"
+        });
+
+        let decoded = serde_json::from_value::<CreateObjectStoreResponse>(payload)
+            .expect("ObjectStore create response decodes");
+
+        assert_eq!(decoded.accepted.kind, "object_store_creation");
+        assert_eq!(decoded.store_id, "generated-data");
+        assert_eq!(decoded.required_copies, 2);
+    }
+
+    #[test]
     fn builds_admin_job_routes_under_product_mount() {
         assert_eq!(
             admin_job_status_path("/products/dasobjectstore/api/v1/", "enclosure-prepare-1"),
@@ -933,6 +1035,14 @@ mod tests {
         assert_eq!(
             admin_job_cancel_path("/products/dasobjectstore/api/v1/", "enclosure-prepare-1"),
             "/products/dasobjectstore/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel"
+        );
+    }
+
+    #[test]
+    fn builds_object_store_create_route_under_product_mount() {
+        assert_eq!(
+            object_store_create_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/workspaces/object-stores/create"
         );
     }
 

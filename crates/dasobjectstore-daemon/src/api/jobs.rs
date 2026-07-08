@@ -70,6 +70,7 @@ pub enum DaemonJobKind {
     DiskRetire,
     DiskReplace,
     EnclosurePreparation,
+    ObjectStoreCreation,
     Repair,
     ServiceOperation,
     SystemAdministration,

@@ -353,14 +353,19 @@ currently available or blocked by administrator requirements.
 Creating or changing an object store is an admin-only workflow. The Web UI
 presents controls for store name, writer group, enclosure anchor, object type,
 redundancy, public/writeable state, store class, capacity behavior, retention,
-S3/export mode, bucket, and SSD root. The current workflow calls the GUI
+S3/export mode, bucket, and SSD root. The workflow first calls the GUI
 action-plan endpoint and renders the generated ``dasobjectstore store create``
-plan for administrator review. The next workflow slice will convert this review
-surface into daemon submission with audit metadata; the browser must still not
-edit store registry files directly. When a creation form includes a writer
-group, the daemon remains responsible for validating the group, applying ACL or
-policy changes, and recording the store in managed metadata. Non-admin users may
-inspect stores and submit writes only when store writer policy allows it.
+plan for administrator review. Submission then requires the exact phrase
+``confirm create objectstore`` and is forwarded to ``dasobjectstored`` through
+the daemon ObjectStore creation contract. The browser displays the accepted
+administrator job identifier, dry-run state, administrator actor, client request
+identifier, and policy summary after the daemon accepts the request.
+
+The browser must still not edit store registry files directly. When a creation
+form includes a writer group, the daemon remains responsible for validating the
+group, applying ACL or policy changes, and recording the store in managed
+metadata. Non-admin users may inspect stores and submit writes only when store
+writer policy allows it.
 
 Users/Groups Workspace
 ----------------------

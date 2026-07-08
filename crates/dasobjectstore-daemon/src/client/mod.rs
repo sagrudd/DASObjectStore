@@ -11,14 +11,15 @@ pub use unix_socket::UnixSocketDaemonTransport;
 use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
-    CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest,
-    DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest,
-    DaemonJobCancelResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
-    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
-    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    IngestJobStatusRequest, IngestJobStatusResponse, PrepareEnclosureRequest,
-    PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
+    DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest, DaemonHealthSummaryResponse,
+    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestJobStatusRequest,
+    IngestJobStatusResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -200,6 +201,16 @@ where
         }
     }
 
+    pub fn create_object_store(
+        &self,
+        request: CreateObjectStoreRequest,
+    ) -> Result<CreateObjectStoreResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CreateObjectStore(request))? {
+            DaemonApiResponse::CreateObjectStore(response) => Ok(response),
+            response => Err(unexpected("create_object_store", response)),
+        }
+    }
+
     pub fn create_local_group(
         &self,
         request: CreateLocalGroupRequest,
@@ -245,6 +256,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
+        DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
@@ -257,19 +269,21 @@ mod tests {
     use super::{DaemonClient, DaemonClientError, InProcessDaemonTransport};
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-        CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
-        DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
-        DaemonJobStatusResponse, DaemonJobSummary, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
-        SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonIngestConflictPolicy,
+        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
+        DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
+        DaemonJobSummary, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+        DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+        DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+        ENCLOSURE_PREPARE_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::cell::RefCell;
+    use std::path::PathBuf;
 
     #[test]
     fn in_process_transport_round_trips_typed_response() {
@@ -514,6 +528,70 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::PrepareEnclosure(_)]
+        ));
+    }
+
+    #[test]
+    fn create_object_store_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::CreateObjectStore(
+                CreateObjectStoreResponse::accepted(
+                    crate::api::DaemonJobId::new("objectstore-create-1").expect("job id"),
+                    "2026-07-08T21:15:00Z",
+                    CreateObjectStoreRequest {
+                        store_id: "generated-data".to_string(),
+                        store_class: "sequence_data".to_string(),
+                        required_copies: 2,
+                        bucket: Some("generated-data".to_string()),
+                        writer_group: "bioinformatics".to_string(),
+                        ssd_root: PathBuf::from("/srv/dasobjectstore/ssd"),
+                        object_type: "pod5".to_string(),
+                        enclosure_id: Some("tl-d800c-01".to_string()),
+                        public: false,
+                        writeable: true,
+                        capacity_behavior: "balanced".to_string(),
+                        retention: "standard".to_string(),
+                        endpoint_export_mode: "s3_bucket".to_string(),
+                        dry_run: true,
+                        client_request_id: Some("request-1".to_string()),
+                        administrator_actor: Some("operator".to_string()),
+                        confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
+                    },
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .create_object_store(CreateObjectStoreRequest {
+                store_id: "generated-data".to_string(),
+                store_class: "sequence_data".to_string(),
+                required_copies: 2,
+                bucket: Some("generated-data".to_string()),
+                writer_group: "bioinformatics".to_string(),
+                ssd_root: PathBuf::from("/srv/dasobjectstore/ssd"),
+                object_type: "pod5".to_string(),
+                enclosure_id: Some("tl-d800c-01".to_string()),
+                public: false,
+                writeable: true,
+                capacity_behavior: "balanced".to_string(),
+                retention: "standard".to_string(),
+                endpoint_export_mode: "s3_bucket".to_string(),
+                dry_run: true,
+                client_request_id: Some("request-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
+            })
+            .expect("create object store response");
+
+        assert!(response.accepted.dry_run);
+        assert_eq!(response.accepted.kind, DaemonJobKind::ObjectStoreCreation);
+        assert_eq!(response.writer_group, "bioinformatics");
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::CreateObjectStore(_)]
         ));
     }
 
