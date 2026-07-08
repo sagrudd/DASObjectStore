@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.21.0 - 2026-07-08
+
+- Replace the Web Home dashboard bootstrap fixture route with a live API
+  aggregator for managed SSD/HDD roots, capacity, drive counts, store registry
+  cards, Linux memory pressure, optional SMART warnings, and optional seven-day
+  throughput telemetry.
+- Add Web API regression coverage proving the Home dashboard no longer reports
+  the old bootstrap "Inventory pending" state.
+
 ## 0.20.1 - 2026-07-08
 
 - Require formal ``gnostikon-workflow-control``/Grammateus rendering for

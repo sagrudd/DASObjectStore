@@ -52,7 +52,7 @@ async fn actions() -> Json<GuiActionCatalog> {
 }
 
 async fn home_dashboard() -> Json<HomeDashboardView> {
-    Json(HomeDashboardView::bootstrap_fixture())
+    Json(crate::home_aggregator::live_home_dashboard())
 }
 
 async fn enclosures_dashboard() -> Json<EnclosuresPageView> {
@@ -140,12 +140,12 @@ mod tests {
         let encoded = response_json(response).await;
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
-        assert_eq!(encoded["health"]["state"], "watch");
-        assert_eq!(encoded["health"]["label"], "Inventory pending");
-        assert_eq!(encoded["drives"]["mounted"], 0);
-        assert_eq!(encoded["capacity"]["free_tib"], "0.0");
+        assert_ne!(encoded["health"]["label"], "Inventory pending");
+        assert!(encoded["health"]["last_checked_at_utc"].is_string());
+        assert!(encoded["drives"]["mounted"].is_number());
+        assert!(encoded["capacity"]["free_tib"].is_string());
         assert_eq!(encoded["throughput_7d"]["window_days"], 7);
-        assert_eq!(encoded["memory_stress"]["state"], "elevated");
+        assert!(encoded["memory_stress"]["state"].is_string());
         assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
             encoded["create_object_store"]["action_kind"],

@@ -528,7 +528,7 @@ older checklist claims.
 - [x] Replace Home "Live dashboard telemetry is being bootstrapped" copy with
   real attention cards sourced from daemon health, ingest, destage, SMART,
   capacity, and object-service warnings.
-- [ ] Implement the daemon/API aggregator that populates `HomeDashboardView` or
+- [x] Implement the daemon/API aggregator that populates `HomeDashboardView` or
   the product home workspace from probe, health, store registry, ingest queue,
   destage queue, SMART, throughput, and memory sources instead of
   `bootstrap_fixture`.

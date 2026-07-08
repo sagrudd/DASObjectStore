@@ -6,6 +6,7 @@ pub mod auth_guard;
 pub mod auth_routes;
 pub mod dashboard;
 pub mod endpoints;
+mod home_aggregator;
 pub mod routes;
 pub mod server_config;
 pub mod tls_assets;
