@@ -255,6 +255,22 @@ see the card disabled with an explicit reason. Administrator-capable sessions
 may see the card become ready only when a supported DAS enclosure is visible to
 the daemon and the inventory path is healthy enough to plan preparation.
 
+When the affordance is ready, the browser presents a preparation wizard for the
+selected enclosure. The wizard derives candidate SSD and HDD devices from the
+live enclosure detail payload, asks the administrator to choose SSD landing
+media and HDD settlement media, records mount-root, filesystem, and optional
+owner inputs, and shows a destructive data-loss review before any plan is
+accepted. The administrator must explicitly allow formatting and type the
+confirmation phrase ``confirm prepare das``. The Web API validates these same
+fields server-side and returns a planned daemon command for review; callers
+cannot receive an enclosure-preparation plan without SSD media, at least one
+HDD, format allowance, and the confirmation phrase.
+
+This Web workflow currently stops at the daemon-owned action-plan boundary. It
+does not format devices directly from the browser. The next administrator
+workflow slice will submit the confirmed plan as a daemon preparation job and
+render job progress, failure, cancellation, and retry state in the Web console.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the

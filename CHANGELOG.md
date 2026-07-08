@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.30.0 - 2026-07-08
+
+- Add a Web Enclosures preparation wizard that selects detected SSD/HDD media,
+  reviews destructive formatting risk, requires the ``confirm prepare das``
+  phrase, and requests a daemon-owned preparation plan.
+- Add the ``enclosure_prepare`` GUI action plan contract with server-side
+  validation for SSD device, HDD devices, explicit format allowance, and the
+  destructive confirmation phrase.
+- Document the current preparation-plan boundary while leaving daemon job
+  submission and progress rendering as the next administrator workflow slice.
+
 ## 0.29.1 - 2026-07-08
 
 - Clarify the Web interface documentation for live-data dashboard behavior,

@@ -575,6 +575,11 @@ older checklist claims.
   detect supported DAS hardware, select SSD landing media, select eligible HDD
   media, show data-loss/format plan, require administrator confirmation, submit
   a daemon preparation job, and render progress/results.
+  - [x] Add the browser-side preparation wizard and GUI action-plan handoff for
+    detected enclosure media, destructive review, format allowance, and
+    confirmation phrase validation.
+  - [ ] Submit the confirmed plan as a daemon preparation job and render
+    daemon job progress, result, failure, cancellation, and retry state.
 - [ ] Add API request/response DTOs and daemon client methods for Web-submitted
   enclosure preparation so the browser never mutates devices or managed roots
   directly.

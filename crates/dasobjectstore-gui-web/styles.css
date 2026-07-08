@@ -595,6 +595,137 @@ h2 {
   font-weight: 720;
 }
 
+.dos-secondary-action {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 14px;
+  border: 1px solid #b8cbd2;
+  border-radius: 6px;
+  color: #0d5360;
+  background: #eef7f8;
+  font-weight: 720;
+}
+
+.dos-secondary-action:disabled {
+  color: #7a858c;
+  background: #eef1f2;
+}
+
+.dos-enclosure-wizard {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #d9e3e7;
+}
+
+.dos-wizard-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: start;
+}
+
+.dos-wizard-header .dos-card-label {
+  grid-column: 1 / -1;
+}
+
+.dos-wizard-header h3,
+.dos-plan-result h3 {
+  margin: 0;
+  color: #182128;
+  font-size: 1rem;
+}
+
+.dos-wizard-header button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cdd8dd;
+  border-radius: 6px;
+  color: #41515a;
+  background: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.dos-wizard-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #47545d;
+  font-size: 0.84rem;
+}
+
+.dos-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dos-form-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #303b43;
+  font-size: 0.82rem;
+  font-weight: 680;
+}
+
+.dos-form-field input,
+.dos-form-field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #c9d2d7;
+  border-radius: 6px;
+  color: #182128;
+  background: #ffffff;
+}
+
+.dos-checkbox-list {
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.dos-checkbox-list label,
+.dos-risk-review label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: #41515a;
+  font-size: 0.82rem;
+}
+
+.dos-risk-review,
+.dos-plan-result {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e1b6ad;
+  border-radius: 8px;
+  background: #fff8f6;
+}
+
+.dos-plan-result {
+  border-color: #bfd9ca;
+  background: #f5fbf7;
+}
+
+.dos-plan-result code {
+  display: block;
+  max-width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  color: #0d3125;
+  background: #e6f4eb;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.76rem;
+}
+
 .dos-placeholder-card {
   max-width: 720px;
   min-height: 180px;
@@ -651,7 +782,8 @@ h2 {
   }
 
   .dos-metric-grid,
-  .dos-store-grid {
+  .dos-store-grid,
+  .dos-form-grid {
     grid-template-columns: 1fr;
   }
 

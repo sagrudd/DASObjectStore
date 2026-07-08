@@ -68,6 +68,30 @@ pub struct AddEnclosureAffordanceResponse {
     pub next_step: String,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct GuiActionPlanResponse {
+    pub action: String,
+    pub execution: String,
+    pub argv: Vec<String>,
+    pub mutates_pool: bool,
+    pub writes_recovery_metadata: bool,
+    pub confirmation_required: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct GuiActionPlanRequest {
+    pub action: String,
+    pub ssd_device: Option<String>,
+    pub hdd_devices: Vec<String>,
+    pub mount_root: Option<String>,
+    pub filesystem: Option<String>,
+    pub owner: Option<String>,
+    pub allow_format: bool,
+    pub confirmation_phrase: Option<String>,
+}
+
 impl AddEnclosureAffordanceResponse {
     pub fn checking() -> Self {
         Self {
@@ -454,6 +478,18 @@ pub async fn get_bioinformatics_workspace(
     get_json(path).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn plan_gui_action(
+    api_base_path: &str,
+    request: &GuiActionPlanRequest,
+) -> Result<GuiActionPlanResponse, ApiError> {
+    post_json(
+        &format!("{}/actions/plan", api_base_path.trim_end_matches('/')),
+        request,
+    )
+    .await
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn auth_path(auth_base_path: &str, route: &str) -> String {
     format!("{}/{}", auth_base_path.trim_end_matches('/'), route)
@@ -485,11 +521,14 @@ where
         message: format!("DASObjectStore request encoding failed: {err}"),
         status: None,
     })?;
-    let response = Request::post(path)
-        .header("content-type", "application/json")
-        .body(request_body)?
-        .send()
-        .await?;
+    let mut request = Request::post(path).header("content-type", "application/json");
+    if let Some((username, session_token)) = crate::storage::stored_session() {
+        request = request
+            .header("x-dasobjectstore-username", &username)
+            .header("x-dasobjectstore-session-token", &session_token)
+            .header("authorization", &format!("Bearer {session_token}"));
+    }
+    let response = request.body(request_body)?.send().await?;
     decode_response(response).await
 }
 
@@ -516,8 +555,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_path, BioinformaticsWorkspaceResponse, EnclosuresPageResponse, HomeDashboardResponse,
-        ObjectStoresPageResponse,
+        auth_path, BioinformaticsWorkspaceResponse, EnclosuresPageResponse, GuiActionPlanResponse,
+        HomeDashboardResponse, ObjectStoresPageResponse,
     };
 
     #[test]
@@ -681,6 +720,25 @@ mod tests {
             decoded.details.expect("detail").slots[0].drive_id,
             "qnap-1057"
         );
+    }
+
+    #[test]
+    fn decodes_gui_action_plan_response_subset() {
+        let payload = serde_json::json!({
+            "action": "enclosure_prepare",
+            "execution": "planned_cli",
+            "argv": ["dasobjectstore", "disk", "prepare-das"],
+            "mutates_pool": true,
+            "writes_recovery_metadata": false,
+            "confirmation_required": true
+        });
+
+        let decoded =
+            serde_json::from_value::<GuiActionPlanResponse>(payload).expect("plan decodes");
+
+        assert_eq!(decoded.action, "enclosure_prepare");
+        assert!(decoded.mutates_pool);
+        assert_eq!(decoded.argv[2], "prepare-das");
     }
 
     #[test]

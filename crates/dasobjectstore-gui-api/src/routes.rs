@@ -468,7 +468,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn actions_route_advertises_store_and_subobject_creation() {
+    async fn actions_route_advertises_store_subobject_and_enclosure_preparation() {
         let response = gui_api_router()
             .oneshot(
                 Request::builder()
@@ -491,6 +491,18 @@ mod tests {
         assert!(actions.iter().any(|action| {
             action["kind"] == "subobject_create"
                 && action["safety"] == "configuration_mutation"
+                && action["confirmation_required"] == true
+        }));
+        assert!(actions.iter().any(|action| {
+            action["kind"] == "enclosure_prepare"
+                && action["safety"] == "destructive_storage_preparation"
+                && action["required_fields"]
+                    == json!([
+                        "ssd_device",
+                        "hdd_devices",
+                        "allow_format",
+                        "confirmation_phrase"
+                    ])
                 && action["confirmation_required"] == true
         }));
     }
@@ -604,6 +616,54 @@ mod tests {
         assert_eq!(
             encoded["missing_fields"],
             json!(["parent_store_id_or_parent_subobject_name"])
+        );
+    }
+
+    #[tokio::test]
+    async fn action_plan_route_returns_enclosure_prepare_plan() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "enclosure_prepare",
+                "ssd_device": "/dev/disk/by-id/nvme-ssd",
+                "hdd_devices": [
+                    "qnap-1057=/dev/disk/by-id/usb-qnap-1057",
+                    "qnap-1058=/dev/disk/by-id/usb-qnap-1058"
+                ],
+                "mount_root": "/srv/dasobjectstore",
+                "filesystem": "ext4",
+                "allow_format": true,
+                "confirmation_phrase": "confirm prepare das"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "enclosure_prepare");
+        assert_eq!(encoded["mutates_pool"], true);
+        assert_eq!(encoded["confirmation_required"], true);
+        assert_eq!(
+            encoded["argv"],
+            json!([
+                "dasobjectstore",
+                "disk",
+                "prepare-das",
+                "--ssd-device",
+                "/dev/disk/by-id/nvme-ssd",
+                "--hdd-device",
+                "qnap-1057=/dev/disk/by-id/usb-qnap-1057",
+                "--hdd-device",
+                "qnap-1058=/dev/disk/by-id/usb-qnap-1058",
+                "--mount-root",
+                "/srv/dasobjectstore",
+                "--filesystem",
+                "ext4",
+                "--allow-format",
+                "--confirm",
+                "confirm prepare das"
+            ])
         );
     }
 

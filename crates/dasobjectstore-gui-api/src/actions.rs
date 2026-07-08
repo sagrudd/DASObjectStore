@@ -46,6 +46,17 @@ impl GuiActionCatalog {
                     GuiActionSafety::ConfigurationMutation,
                     &["subobject_name", "parent_store_id_or_parent_subobject_name"],
                 ),
+                GuiActionDescriptor::confirmation_required(
+                    GuiActionKind::EnclosurePrepare,
+                    "Prepare DAS enclosure",
+                    GuiActionSafety::DestructiveStoragePreparation,
+                    &[
+                        "ssd_device",
+                        "hdd_devices",
+                        "allow_format",
+                        "confirmation_phrase",
+                    ],
+                ),
             ],
         }
     }
@@ -101,6 +112,7 @@ pub enum GuiActionKind {
     PoolImportReadOnly,
     StoreCreate,
     SubobjectCreate,
+    EnclosurePrepare,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -110,6 +122,7 @@ pub enum GuiActionSafety {
     ServiceLifecycle,
     ReadOnlyImport,
     ConfigurationMutation,
+    DestructiveStoragePreparation,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -129,6 +142,15 @@ pub struct GuiActionPlanRequest {
     pub subobject_name: Option<String>,
     pub parent_store_id: Option<String>,
     pub parent_subobject_name: Option<String>,
+    pub ssd_device: Option<PathBuf>,
+    #[serde(default)]
+    pub hdd_devices: Vec<String>,
+    pub mount_root: Option<PathBuf>,
+    pub filesystem: Option<String>,
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub allow_format: bool,
+    pub confirmation_phrase: Option<String>,
 }
 
 impl Default for GuiActionPlanRequest {
@@ -149,6 +171,13 @@ impl Default for GuiActionPlanRequest {
             subobject_name: None,
             parent_store_id: None,
             parent_subobject_name: None,
+            ssd_device: None,
+            hdd_devices: Vec::new(),
+            mount_root: None,
+            filesystem: None,
+            owner: None,
+            allow_format: false,
+            confirmation_phrase: None,
         }
     }
 }
@@ -194,6 +223,7 @@ pub fn plan_action(request: GuiActionPlanRequest) -> Result<GuiActionPlan, GuiAc
         GuiActionKind::PoolImportReadOnly => plan_read_only_import(request),
         GuiActionKind::StoreCreate => plan_store_create(request),
         GuiActionKind::SubobjectCreate => plan_subobject_create(request),
+        GuiActionKind::EnclosurePrepare => plan_enclosure_prepare(request),
     }
 }
 
@@ -332,6 +362,71 @@ fn plan_subobject_create(
     })
 }
 
+fn plan_enclosure_prepare(
+    request: GuiActionPlanRequest,
+) -> Result<GuiActionPlan, GuiActionPlanError> {
+    let mut missing = Vec::new();
+    if request.ssd_device.is_none() {
+        missing.push("ssd_device".to_string());
+    }
+    if request.hdd_devices.is_empty() {
+        missing.push("hdd_devices".to_string());
+    }
+    if !request.allow_format {
+        missing.push("allow_format".to_string());
+    }
+    if request
+        .confirmation_phrase
+        .as_ref()
+        .is_none_or(|phrase| phrase.trim() != "confirm prepare das")
+    {
+        missing.push("confirmation_phrase".to_string());
+    }
+    if !missing.is_empty() {
+        return Err(GuiActionPlanError {
+            action: request.action,
+            missing_fields: missing,
+        });
+    }
+
+    let mut argv = strings(["dasobjectstore", "disk", "prepare-das", "--ssd-device"]);
+    argv.push(path_arg(request.ssd_device.expect("validated SSD device")));
+    for hdd_device in request.hdd_devices {
+        argv.push("--hdd-device".to_string());
+        argv.push(hdd_device);
+    }
+    if let Some(mount_root) = request.mount_root {
+        argv.push("--mount-root".to_string());
+        argv.push(path_arg(mount_root));
+    }
+    if let Some(filesystem) = request.filesystem {
+        argv.push("--filesystem".to_string());
+        argv.push(filesystem);
+    }
+    if let Some(owner) = request.owner {
+        argv.push("--owner".to_string());
+        argv.push(owner);
+    }
+    if request.allow_format {
+        argv.push("--allow-format".to_string());
+    }
+    argv.push("--confirm".to_string());
+    argv.push(
+        request
+            .confirmation_phrase
+            .expect("validated confirmation phrase"),
+    );
+
+    Ok(GuiActionPlan {
+        action: request.action,
+        execution: GuiActionExecution::PlannedCli,
+        argv,
+        mutates_pool: true,
+        writes_recovery_metadata: false,
+        confirmation_required: true,
+    })
+}
+
 fn plan_read_only_import(
     request: GuiActionPlanRequest,
 ) -> Result<GuiActionPlan, GuiActionPlanError> {
@@ -407,7 +502,7 @@ mod tests {
     fn catalog_lists_safe_web_actions() {
         let catalog = action_catalog();
 
-        assert_eq!(catalog.actions.len(), 6);
+        assert_eq!(catalog.actions.len(), 7);
         assert_eq!(catalog.actions[0].kind, GuiActionKind::HealthCheck);
         assert_eq!(catalog.actions[1].safety, GuiActionSafety::ServiceLifecycle);
         assert_eq!(
@@ -430,6 +525,21 @@ mod tests {
             ["subobject_name", "parent_store_id_or_parent_subobject_name"]
         );
         assert!(catalog.actions[5].confirmation_required);
+        assert_eq!(catalog.actions[6].kind, GuiActionKind::EnclosurePrepare);
+        assert_eq!(
+            catalog.actions[6].safety,
+            GuiActionSafety::DestructiveStoragePreparation
+        );
+        assert_eq!(
+            catalog.actions[6].required_fields,
+            [
+                "ssd_device",
+                "hdd_devices",
+                "allow_format",
+                "confirmation_phrase"
+            ]
+        );
+        assert!(catalog.actions[6].confirmation_required);
     }
 
     #[test]
@@ -643,5 +753,79 @@ mod tests {
             err.missing_fields,
             ["parent_store_id_or_parent_subobject_name"]
         );
+    }
+
+    #[test]
+    fn plans_enclosure_prepare_with_confirmed_devices() {
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::EnclosurePrepare,
+            ssd_device: Some(PathBuf::from("/dev/disk/by-id/nvme-Samsung_SSD_visual")),
+            hdd_devices: vec![
+                "qnap-1057=/dev/disk/by-id/usb-qnap-1057".to_string(),
+                "qnap-1058=/dev/disk/by-id/usb-qnap-1058".to_string(),
+            ],
+            mount_root: Some(PathBuf::from("/srv/dasobjectstore")),
+            filesystem: Some("xfs".to_string()),
+            owner: Some("stephen".to_string()),
+            allow_format: true,
+            confirmation_phrase: Some("confirm prepare das".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("enclosure prepare plan");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "disk",
+                "prepare-das",
+                "--ssd-device",
+                "/dev/disk/by-id/nvme-Samsung_SSD_visual",
+                "--hdd-device",
+                "qnap-1057=/dev/disk/by-id/usb-qnap-1057",
+                "--hdd-device",
+                "qnap-1058=/dev/disk/by-id/usb-qnap-1058",
+                "--mount-root",
+                "/srv/dasobjectstore",
+                "--filesystem",
+                "xfs",
+                "--owner",
+                "stephen",
+                "--allow-format",
+                "--confirm",
+                "confirm prepare das"
+            ])
+        );
+        assert!(plan.mutates_pool);
+        assert!(plan.confirmation_required);
+    }
+
+    #[test]
+    fn rejects_enclosure_prepare_without_confirmation_phrase() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::EnclosurePrepare,
+            ssd_device: Some(PathBuf::from("/dev/nvme0n1")),
+            hdd_devices: vec!["qnap-1057=/dev/sda".to_string()],
+            allow_format: true,
+            confirmation_phrase: Some("wrong".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("confirmation phrase is required");
+
+        assert_eq!(err.missing_fields, ["confirmation_phrase"]);
+    }
+
+    #[test]
+    fn rejects_enclosure_prepare_without_format_allowance() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::EnclosurePrepare,
+            ssd_device: Some(PathBuf::from("/dev/nvme0n1")),
+            hdd_devices: vec!["qnap-1057=/dev/sda".to_string()],
+            confirmation_phrase: Some("confirm prepare das".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("format allowance is required");
+
+        assert_eq!(err.missing_fields, ["allow_format"]);
     }
 }

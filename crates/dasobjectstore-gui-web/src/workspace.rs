@@ -1,11 +1,12 @@
 #[cfg(target_arch = "wasm32")]
-use crate::api::BioinformaticsWorkspaceResponse;
-#[cfg(target_arch = "wasm32")]
 use crate::api::{
-    AddEnclosureAffordanceResponse, DasEnclosureCardResponse, DasEnclosureDetailResponse,
-    EnclosureDriveSlotResponse,
+    AddEnclosureAffordanceResponse, BioinformaticsWorkspaceResponse, DasEnclosureCardResponse,
+    DasEnclosureDetailResponse, GuiActionPlanRequest, GuiActionPlanResponse,
 };
-use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
+use crate::api::{
+    EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
+    ObjectStoresPageResponse,
+};
 
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
@@ -507,6 +508,91 @@ pub struct EnclosureCardSummary {
     pub warning_count: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnclosurePrepareCandidate {
+    pub enclosure_id: String,
+    pub display_name: String,
+    pub ssd_devices: Vec<EnclosurePrepareDevice>,
+    pub hdd_devices: Vec<EnclosurePrepareDevice>,
+}
+
+impl EnclosurePrepareCandidate {
+    pub fn ready(&self) -> bool {
+        !self.ssd_devices.is_empty() && !self.hdd_devices.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnclosurePrepareDevice {
+    pub disk_id: String,
+    pub device_path: String,
+    pub label: String,
+}
+
+pub fn enclosure_prepare_candidate(
+    view: &EnclosuresPageResponse,
+    active_id: &str,
+) -> Option<EnclosurePrepareCandidate> {
+    let enclosure = view
+        .enclosures
+        .iter()
+        .find(|enclosure| enclosure.enclosure_id == active_id)
+        .or_else(|| view.enclosures.first())?;
+    let detail = view
+        .details
+        .as_ref()
+        .filter(|detail| detail.enclosure_id == enclosure.enclosure_id)?;
+    let mut ssd_devices = Vec::new();
+    let mut hdd_devices = Vec::new();
+
+    for slot in &detail.slots {
+        let Some(device) = prepare_device_from_slot(slot) else {
+            continue;
+        };
+        if slot_is_ssd(slot) {
+            ssd_devices.push(device);
+        } else if slot_is_hdd(slot) {
+            hdd_devices.push(device);
+        }
+    }
+
+    Some(EnclosurePrepareCandidate {
+        enclosure_id: enclosure.enclosure_id.clone(),
+        display_name: enclosure.display_name.clone(),
+        ssd_devices,
+        hdd_devices,
+    })
+}
+
+fn prepare_device_from_slot(slot: &EnclosureDriveSlotResponse) -> Option<EnclosurePrepareDevice> {
+    let device_path = slot
+        .device_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())?;
+    let role = slot.role.as_deref().unwrap_or("unassigned");
+    Some(EnclosurePrepareDevice {
+        disk_id: slot.drive_id.clone(),
+        device_path: device_path.to_string(),
+        label: format!(
+            "{} · {} · {} TiB · {}",
+            slot.drive_id, role, slot.size_tib, device_path
+        ),
+    })
+}
+
+fn slot_is_ssd(slot: &EnclosureDriveSlotResponse) -> bool {
+    slot.role
+        .as_deref()
+        .is_some_and(|role| role.eq_ignore_ascii_case("ssd"))
+        || slot.slot_number == 0
+}
+
+fn slot_is_hdd(slot: &EnclosureDriveSlotResponse) -> bool {
+    slot.role
+        .as_deref()
+        .is_some_and(|role| role.to_ascii_lowercase().starts_with("hdd"))
+}
+
 pub fn enclosure_card_summaries(view: &EnclosuresPageResponse) -> Vec<EnclosureCardSummary> {
     view.enclosures
         .iter()
@@ -642,6 +728,8 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
         .collect()
 }
 
+#[cfg(target_arch = "wasm32")]
+use web_sys::{HtmlInputElement, HtmlSelectElement};
 #[cfg(target_arch = "wasm32")]
 use yew::prelude::*;
 
@@ -798,6 +886,7 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
     let api_path = WorkspacePage::Enclosures.api_path(&props.api_base_path);
     let selected_id = use_state(String::new);
     let enclosures_state = use_state(|| ApiLoadState::<EnclosuresPageResponse>::Loading);
+    let wizard_state = use_state(EnclosureWizardState::default);
 
     {
         let api_path = api_path.clone();
@@ -830,7 +919,7 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
                 title="Enclosures"
                 summary="Physical shelves and landing media grouped for operator review."
             />
-            { render_enclosures_state(&*enclosures_state, selected_id) }
+            { render_enclosures_state(&*enclosures_state, selected_id, wizard_state, props.api_base_path.clone()) }
         </section>
     }
 }
@@ -839,12 +928,19 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
 fn render_enclosures_state(
     state: &ApiLoadState<EnclosuresPageResponse>,
     selected_id: UseStateHandle<String>,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    api_base_path: String,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
             <div class="dos-two-column">
                 <div class="dos-card-list">
-                    { render_add_enclosure_card(&AddEnclosureAffordanceResponse::checking()) }
+                    { render_add_enclosure_card(
+                        &AddEnclosureAffordanceResponse::checking(),
+                        None,
+                        wizard_state,
+                        api_base_path,
+                    ) }
                     { render_enclosures_state_message(
                         "Loading",
                         "Loading enclosure inventory",
@@ -859,7 +955,7 @@ fn render_enclosures_state(
             </div>
         },
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_enclosure_inventory(view, selected_id)
+            render_enclosure_inventory(view, selected_id, wizard_state, api_base_path)
         }
         ApiLoadState::Empty(message) => {
             render_enclosures_state_message("Inventory", "No live enclosures reported yet", message)
@@ -879,6 +975,8 @@ fn render_enclosures_state(
 fn render_enclosure_inventory(
     view: &EnclosuresPageResponse,
     selected_id: UseStateHandle<String>,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    api_base_path: String,
 ) -> Html {
     let active_id = if selected_id.is_empty() {
         view.selected_enclosure_id
@@ -897,7 +995,12 @@ fn render_enclosure_inventory(
     html! {
         <div class="dos-two-column">
             <div class="dos-card-list">
-                { render_add_enclosure_card(&view.add_enclosure) }
+                { render_add_enclosure_card(
+                    &view.add_enclosure,
+                    enclosure_prepare_candidate(view, &active_id),
+                    wizard_state,
+                    api_base_path,
+                ) }
                 { for enclosure_card_summaries(view).into_iter().map(|summary| {
                     render_enclosure_card(summary, &active_id, selected_id.clone())
                 }) }
@@ -908,7 +1011,47 @@ fn render_enclosure_inventory(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_add_enclosure_card(affordance: &AddEnclosureAffordanceResponse) -> Html {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct EnclosureWizardState {
+    open: bool,
+    selected_ssd: String,
+    selected_hdds: Vec<String>,
+    mount_root: String,
+    filesystem: String,
+    owner: String,
+    allow_format: bool,
+    confirmation_phrase: String,
+    submitting: bool,
+    plan: Option<GuiActionPlanResponse>,
+    error: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Default for EnclosureWizardState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            selected_ssd: String::new(),
+            selected_hdds: Vec::new(),
+            mount_root: "/srv/dasobjectstore".to_string(),
+            filesystem: "ext4".to_string(),
+            owner: String::new(),
+            allow_format: false,
+            confirmation_phrase: String::new(),
+            submitting: false,
+            plan: None,
+            error: None,
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_add_enclosure_card(
+    affordance: &AddEnclosureAffordanceResponse,
+    candidate: Option<EnclosurePrepareCandidate>,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    api_base_path: String,
+) -> Html {
     let state_label = match affordance.state.as_str() {
         "ready" => "Ready",
         "admin_required" => "Admin required",
@@ -921,6 +1064,20 @@ fn render_add_enclosure_card(affordance: &AddEnclosureAffordanceResponse) -> Htm
         .blocked_reason
         .as_deref()
         .unwrap_or("Administrator workflow: detect supported DAS hardware, identify SSD/HDD media, review format risk, then submit the daemon preparation job.");
+    let candidate_ready = candidate
+        .as_ref()
+        .is_some_and(EnclosurePrepareCandidate::ready);
+    let can_open = affordance.enabled && candidate_ready;
+    let open_wizard = {
+        let wizard_state = wizard_state.clone();
+        Callback::from(move |_| {
+            let mut next = (*wizard_state).clone();
+            next.open = true;
+            next.error = None;
+            next.plan = None;
+            wizard_state.set(next);
+        })
+    };
 
     html! {
         <section
@@ -938,14 +1095,298 @@ fn render_add_enclosure_card(affordance: &AddEnclosureAffordanceResponse) -> Htm
             <h2>{ affordance.label.clone() }</h2>
             <p>{ body }</p>
             <p class="dos-create-next-step">{ affordance.next_step.clone() }</p>
+            <button
+                class="dos-secondary-action"
+                type="button"
+                disabled={!can_open}
+                onclick={open_wizard}
+            >
+                { "Plan preparation" }
+            </button>
             <div class="dos-card-row dos-create-gates">
                 <span class="dos-status-pill">{ state_label }</span>
                 <span>{ if affordance.administrator { "admin verified" } else { "admin pending" } }</span>
                 <span>{ if affordance.supported_enclosure_detected { "supported DAS visible" } else { "DAS not detected" } }</span>
                 <span>{ if affordance.daemon_ready { "daemon ready" } else { "daemon pending" } }</span>
             </div>
+            { render_enclosure_wizard(candidate, wizard_state, api_base_path) }
         </section>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_wizard(
+    candidate: Option<EnclosurePrepareCandidate>,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    api_base_path: String,
+) -> Html {
+    let state = (*wizard_state).clone();
+    if !state.open {
+        return html! {};
+    }
+    let Some(candidate) = candidate else {
+        return html! {};
+    };
+
+    let selected_ssd = if state.selected_ssd.is_empty() {
+        candidate
+            .ssd_devices
+            .first()
+            .map(|device| device.device_path.clone())
+            .unwrap_or_default()
+    } else {
+        state.selected_ssd.clone()
+    };
+    let selected_hdds = if state.selected_hdds.is_empty() {
+        candidate
+            .hdd_devices
+            .iter()
+            .map(|device| device.device_path.clone())
+            .collect::<Vec<_>>()
+    } else {
+        state.selected_hdds.clone()
+    };
+    let hdd_argument_labels = selected_hdds
+        .iter()
+        .filter_map(|path| {
+            candidate
+                .hdd_devices
+                .iter()
+                .find(|device| &device.device_path == path)
+                .map(|device| format!("{}={}", device.disk_id, device.device_path))
+        })
+        .collect::<Vec<_>>();
+    let confirmed = state.allow_format && state.confirmation_phrase.trim() == "confirm prepare das";
+    let can_submit =
+        !state.submitting && !selected_ssd.is_empty() && !selected_hdds.is_empty() && confirmed;
+
+    let close = {
+        let wizard_state = wizard_state.clone();
+        Callback::from(move |_| {
+            let mut next = (*wizard_state).clone();
+            next.open = false;
+            wizard_state.set(next);
+        })
+    };
+    let on_ssd = {
+        let wizard_state = wizard_state.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlSelectElement = event.target_unchecked_into();
+            let mut next = (*wizard_state).clone();
+            next.selected_ssd = input.value();
+            next.plan = None;
+            wizard_state.set(next);
+        })
+    };
+    let on_mount_root = string_input_callback(wizard_state.clone(), |state, value| {
+        state.mount_root = value;
+    });
+    let on_filesystem = string_change_callback(wizard_state.clone(), |state, value| {
+        state.filesystem = value;
+    });
+    let on_owner = string_input_callback(wizard_state.clone(), |state, value| {
+        state.owner = value;
+    });
+    let on_confirmation = string_input_callback(wizard_state.clone(), |state, value| {
+        state.confirmation_phrase = value;
+    });
+    let on_allow_format = {
+        let wizard_state = wizard_state.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let mut next = (*wizard_state).clone();
+            next.allow_format = input.checked();
+            next.plan = None;
+            wizard_state.set(next);
+        })
+    };
+    let submit = {
+        let wizard_state = wizard_state.clone();
+        let api_base_path = api_base_path.clone();
+        let selected_ssd = selected_ssd.clone();
+        let selected_hdds = selected_hdds.clone();
+        let hdd_argument_labels = hdd_argument_labels.clone();
+        Callback::from(move |_| {
+            let mut pending = (*wizard_state).clone();
+            pending.submitting = true;
+            pending.error = None;
+            pending.plan = None;
+            wizard_state.set(pending.clone());
+
+            let wizard_state = wizard_state.clone();
+            let api_base_path = api_base_path.clone();
+            let selected_ssd = selected_ssd.clone();
+            let selected_hdds = selected_hdds.clone();
+            let hdd_argument_labels = hdd_argument_labels.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let request = GuiActionPlanRequest {
+                    action: "enclosure_prepare".to_string(),
+                    ssd_device: Some(selected_ssd),
+                    hdd_devices: hdd_argument_labels,
+                    mount_root: (!pending.mount_root.trim().is_empty())
+                        .then(|| pending.mount_root.clone()),
+                    filesystem: (!pending.filesystem.trim().is_empty())
+                        .then(|| pending.filesystem.clone()),
+                    owner: (!pending.owner.trim().is_empty()).then(|| pending.owner.clone()),
+                    allow_format: pending.allow_format,
+                    confirmation_phrase: Some(pending.confirmation_phrase.clone()),
+                };
+                let result = crate::api::plan_gui_action(&api_base_path, &request).await;
+                let mut next = (*wizard_state).clone();
+                next.submitting = false;
+                match result {
+                    Ok(plan) => {
+                        next.selected_ssd = request.ssd_device.unwrap_or_default();
+                        next.selected_hdds = selected_hdds;
+                        next.plan = Some(plan);
+                        next.error = None;
+                    }
+                    Err(error) => {
+                        next.error = Some(error.message);
+                        next.plan = None;
+                    }
+                }
+                wizard_state.set(next);
+            });
+        })
+    };
+
+    html! {
+        <section class="dos-enclosure-wizard" data-workflow="enclosure_add">
+            <header class="dos-wizard-header">
+                <span class="dos-card-label">{ "Preparation wizard" }</span>
+                <h3>{ format!("Prepare {}", candidate.display_name) }</h3>
+                <button type="button" onclick={close}>{ "Close" }</button>
+            </header>
+            <ol class="dos-wizard-steps">
+                <li>{ "Supported DAS detected from daemon inventory." }</li>
+                <li>{ "Select SSD landing media and HDD settlement media." }</li>
+                <li>{ "Review the destructive format plan." }</li>
+                <li>{ "Submit the daemon-owned preparation plan." }</li>
+            </ol>
+            <label class="dos-form-field">
+                <span>{ "SSD landing device" }</span>
+                <select onchange={on_ssd} value={selected_ssd.clone()}>
+                    { for candidate.ssd_devices.iter().map(|device| html! {
+                        <option value={device.device_path.clone()}>{ device.label.clone() }</option>
+                    }) }
+                </select>
+            </label>
+            <div class="dos-form-field">
+                <span>{ "HDD settlement devices" }</span>
+                <div class="dos-checkbox-list">
+                    { for candidate.hdd_devices.iter().map(|device| {
+                        let checked = selected_hdds.contains(&device.device_path);
+                        let device_path = device.device_path.clone();
+                        let wizard_state = wizard_state.clone();
+                        html! {
+                            <label>
+                                <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onchange={Callback::from(move |event: Event| {
+                                        let input: HtmlInputElement = event.target_unchecked_into();
+                                        let mut next = (*wizard_state).clone();
+                                        if input.checked() {
+                                            if !next.selected_hdds.contains(&device_path) {
+                                                next.selected_hdds.push(device_path.clone());
+                                            }
+                                        } else {
+                                            next.selected_hdds.retain(|path| path != &device_path);
+                                        }
+                                        next.plan = None;
+                                        wizard_state.set(next);
+                                    })}
+                                />
+                                <span>{ device.label.clone() }</span>
+                            </label>
+                        }
+                    }) }
+                </div>
+            </div>
+            <div class="dos-form-grid">
+                <label class="dos-form-field">
+                    <span>{ "Mount root" }</span>
+                    <input value={state.mount_root.clone()} oninput={on_mount_root} />
+                </label>
+                <label class="dos-form-field">
+                    <span>{ "Filesystem" }</span>
+                    <select onchange={on_filesystem} value={state.filesystem.clone()}>
+                        <option value="ext4">{ "ext4" }</option>
+                        <option value="xfs">{ "xfs" }</option>
+                    </select>
+                </label>
+                <label class="dos-form-field">
+                    <span>{ "Mounted-root owner" }</span>
+                    <input placeholder="optional local user" value={state.owner.clone()} oninput={on_owner} />
+                </label>
+            </div>
+            <section class="dos-risk-review">
+                <span class="dos-card-label">{ "Data-loss review" }</span>
+                <p>{ "Preparing this enclosure formats the selected SSD and HDD devices, creates DASObjectStore mount roots, and delegates execution to the daemon-side storage authority." }</p>
+                <label>
+                    <input type="checkbox" checked={state.allow_format} onchange={on_allow_format} />
+                    <span>{ "I allow formatting of the selected devices." }</span>
+                </label>
+                <label class="dos-form-field">
+                    <span>{ "Confirmation phrase" }</span>
+                    <input
+                        placeholder="confirm prepare das"
+                        value={state.confirmation_phrase.clone()}
+                        oninput={on_confirmation}
+                    />
+                </label>
+            </section>
+            if let Some(error) = &state.error {
+                <div class="dos-auth-error" role="alert">{ error.clone() }</div>
+            }
+            if let Some(plan) = &state.plan {
+                <section class="dos-plan-result">
+                    <span class="dos-card-label">{ "Daemon handoff plan" }</span>
+                    <h3>{ "Preparation plan accepted for review." }</h3>
+                    <p>{ format!("Mutates storage: {} · Confirmation required: {}", plan.mutates_pool, plan.confirmation_required) }</p>
+                    <code>{ plan.argv.join(" ") }</code>
+                </section>
+            }
+            <button class="dos-auth-submit" type="button" disabled={!can_submit} onclick={submit}>
+                { if state.submitting { "Planning..." } else { "Submit preparation plan" } }
+            </button>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn string_input_callback<F>(
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    update: F,
+) -> Callback<InputEvent>
+where
+    F: Fn(&mut EnclosureWizardState, String) + 'static,
+{
+    Callback::from(move |event: InputEvent| {
+        let input: HtmlInputElement = event.target_unchecked_into();
+        let mut next = (*wizard_state).clone();
+        update(&mut next, input.value());
+        next.plan = None;
+        wizard_state.set(next);
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn string_change_callback<F>(
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    update: F,
+) -> Callback<Event>
+where
+    F: Fn(&mut EnclosureWizardState, String) + 'static,
+{
+    Callback::from(move |event: Event| {
+        let input: HtmlSelectElement = event.target_unchecked_into();
+        let mut next = (*wizard_state).clone();
+        update(&mut next, input.value());
+        next.plan = None;
+        wizard_state.set(next);
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1386,11 +1827,11 @@ fn page_header(props: &PageHeaderProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::{
-        bioinformatics_workspace_api_path, enclosure_card_summaries, enclosures_workspace_api_path,
-        home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
-        object_store_card_summaries, objectstores_workspace_api_path, ApiLoadState, WorkspacePage,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
+        enclosures_workspace_api_path, home_dashboard_attention, home_dashboard_metrics,
+        home_workspace_api_path, object_store_card_summaries, objectstores_workspace_api_path,
+        ApiLoadState, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
     use crate::stores::STORES_WORKSPACE_ROUTE;
@@ -1628,6 +2069,89 @@ mod tests {
         assert!(summaries[0].drives.contains("7 mounted of 8"));
         assert_eq!(summaries[0].capacity, "87.5 TiB free of 100.0 TiB");
         assert_eq!(summaries[0].warning_count, 1);
+    }
+
+    #[test]
+    fn enclosure_prepare_candidate_separates_ssd_and_hdd_devices() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "add_enclosure": {
+                "enabled": true,
+                "action_kind": "enclosure_add",
+                "label": "Add enclosure",
+                "state": "ready",
+                "administrator": true,
+                "supported_enclosure_detected": true,
+                "daemon_ready": true,
+                "confirmation_required": true,
+                "blocked_reason": null,
+                "next_step": "Start supported DAS detection and preparation planning."
+            },
+            "enclosures": [{
+                "enclosure_id": "qnap-tl-d800c-01",
+                "display_name": "QNAP TL-D800C",
+                "mount_path": "/srv/dasobjectstore",
+                "connection": {"bus": "usb", "protocol": "uas", "link_speed": "10 Gb/s"},
+                "health": "healthy",
+                "drive_count": {"total": 3, "mounted": 3, "healthy": 3, "watch": 0, "suspect": 0, "failed": 0},
+                "capacity": {"total_tib": "32.0", "used_tib": "0.0", "free_tib": "32.0", "used_percent_basis_points": 0},
+                "last_seen_at_utc": "2026-07-08T08:00:00Z",
+                "warnings": []
+            }],
+            "selected_enclosure_id": "qnap-tl-d800c-01",
+            "details": {
+                "enclosure_id": "qnap-tl-d800c-01",
+                "vendor": "QNAP",
+                "model": "TL-D800C",
+                "serial": "TL-D800C-TEST",
+                "firmware": null,
+                "slots": [
+                    {
+                        "slot_number": 0,
+                        "drive_id": "nvme-landing",
+                        "role": "ssd",
+                        "device_path": "/dev/disk/by-id/nvme-landing",
+                        "size_tib": "3.6",
+                        "health": "healthy",
+                        "mounted": true
+                    },
+                    {
+                        "slot_number": 1,
+                        "drive_id": "qnap-1057",
+                        "role": "hdd",
+                        "device_path": "/dev/disk/by-id/usb-qnap-1057",
+                        "size_tib": "14.6",
+                        "health": "healthy",
+                        "mounted": true
+                    },
+                    {
+                        "slot_number": 2,
+                        "drive_id": "qnap-1058",
+                        "role": "hdd",
+                        "device_path": "/dev/disk/by-id/usb-qnap-1058",
+                        "size_tib": "14.6",
+                        "health": "healthy",
+                        "mounted": true
+                    }
+                ]
+            },
+            "warnings": []
+        });
+        let view = serde_json::from_value::<EnclosuresPageResponse>(payload)
+            .expect("enclosures payload decodes");
+
+        let candidate =
+            enclosure_prepare_candidate(&view, "qnap-tl-d800c-01").expect("prepare candidate");
+
+        assert!(candidate.ready());
+        assert_eq!(candidate.ssd_devices.len(), 1);
+        assert_eq!(candidate.hdd_devices.len(), 2);
+        assert_eq!(
+            candidate.ssd_devices[0].device_path,
+            "/dev/disk/by-id/nvme-landing"
+        );
+        assert_eq!(candidate.hdd_devices[0].disk_id, "qnap-1057");
     }
 
     #[test]
