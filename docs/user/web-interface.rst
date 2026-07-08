@@ -550,6 +550,21 @@ these states from ObjectStore/SubObject metadata and Mneion bindings; the Web
 page already consumes the card contract so that transition can happen behind
 the API boundary.
 
+The page also renders read-only Bioinformatics context views:
+
+* sequencing run provenance, covering run identifiers, sample/instrument
+  context, flowcell or lane state, kits, and acquisition metadata;
+* object lineage, covering raw signal, reads, alignments, variants, references,
+  and annotations as parent/child workflow concepts;
+* workflow handoff state for basecalling and genome/transcriptome analysis; and
+* Mnemosyne project/governance-domain binding state.
+
+These cards are deliberately informational. They describe the state required
+for orchestration and auditability, but they do not launch workflows or mutate
+storage from browser code. A later API slice will populate the cards from
+ObjectStore/SubObject metadata, object type assignments, and Mneion export
+bindings.
+
 Login and Footer Branding
 -------------------------
 

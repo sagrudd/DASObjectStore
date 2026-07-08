@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.52.0 - 2026-07-09
+
+- Add Bioinformatics context views for sequencing run provenance, object
+  lineage, basecalling readiness, genome/transcriptome workflow handoff, and
+  Mnemosyne governance binding state.
+- Extend the Bioinformatics Web/API contract with read-only context cards for
+  provenance, lineage, workflow handoffs, and project/governance bindings.
+- Document that Bioinformatics context cards are informational and API-owned
+  until ObjectStore/SubObject metadata and Mneion bindings drive live state.
+
 ## 0.51.0 - 2026-07-09
 
 - Replace the Bioinformatics Web placeholder with object-type readiness cards

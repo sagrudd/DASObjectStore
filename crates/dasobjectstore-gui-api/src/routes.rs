@@ -358,6 +358,23 @@ mod tests {
             .unwrap()
             .iter()
             .any(|card| card["label"] == json!("ENA / SRA")));
+        assert_eq!(
+            encoded["sequencing_runs"][0]["label"],
+            json!("Sequencing run provenance")
+        );
+        assert_eq!(
+            encoded["object_lineage"][0]["label"],
+            json!("Object lineage")
+        );
+        assert!(encoded["workflow_handoffs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|card| card["label"] == json!("Genome/transcriptome handoff")));
+        assert_eq!(
+            encoded["governance_bindings"][0]["state"],
+            json!("binding_required")
+        );
     }
 
     #[tokio::test]

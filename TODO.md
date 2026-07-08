@@ -655,7 +655,7 @@ older checklist claims.
 - [x] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.
-- [ ] Add Bioinformatics views for sequencing run provenance, object lineage,
+- [x] Add Bioinformatics views for sequencing run provenance, object lineage,
   basecalling readiness, genome/transcriptome workflow handoff, and Mnemosyne
   project/governance-domain binding state.
 - [ ] Add API contracts that allow Bioinformatics readiness to be derived from

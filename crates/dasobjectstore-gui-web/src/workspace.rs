@@ -4477,6 +4477,18 @@ pub struct BioinformaticsReadinessSummary {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BioinformaticsContextSummary {
+    pub section: String,
+    pub label: String,
+    pub state: String,
+    pub state_label: String,
+    pub summary: String,
+    pub detail: String,
+    pub evidence: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn bioinformatics_readiness_summaries(
     view: &BioinformaticsWorkspaceResponse,
 ) -> Vec<BioinformaticsReadinessSummary> {
@@ -4514,10 +4526,54 @@ pub fn bioinformatics_readiness_summaries(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+pub fn bioinformatics_context_summaries(
+    view: &BioinformaticsWorkspaceResponse,
+) -> Vec<BioinformaticsContextSummary> {
+    let mut summaries = Vec::new();
+    summaries.extend(bioinformatics_context_group(
+        "Sequencing Runs",
+        &view.sequencing_runs,
+    ));
+    summaries.extend(bioinformatics_context_group(
+        "Object Lineage",
+        &view.object_lineage,
+    ));
+    summaries.extend(bioinformatics_context_group(
+        "Workflow Handoff",
+        &view.workflow_handoffs,
+    ));
+    summaries.extend(bioinformatics_context_group(
+        "Governance",
+        &view.governance_bindings,
+    ));
+    summaries
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn bioinformatics_context_group(
+    section: &str,
+    cards: &[crate::api::BioinformaticsContextCardResponse],
+) -> Vec<BioinformaticsContextSummary> {
+    cards
+        .iter()
+        .map(|card| BioinformaticsContextSummary {
+            section: section.to_string(),
+            label: card.label.clone(),
+            state: card.state.clone(),
+            state_label: bioinformatics_readiness_state_label(&card.state).to_string(),
+            summary: card.summary.clone(),
+            detail: card.detail.clone(),
+            evidence: bioinformatics_metadata_summary(&card.evidence),
+        })
+        .collect()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn bioinformatics_summary_cards(
     view: &BioinformaticsWorkspaceResponse,
 ) -> Vec<(String, String, String)> {
     let cards = bioinformatics_readiness_summaries(view);
+    let context_cards = bioinformatics_context_summaries(view);
     let workflow_ready = cards
         .iter()
         .filter(|card| card.state == "workflow_ready")
@@ -4543,6 +4599,11 @@ pub fn bioinformatics_summary_cards(
             metadata_needed.to_string(),
             "Cards that require explicit reference or provenance binding".to_string(),
         ),
+        (
+            "Context views".to_string(),
+            context_cards.len().to_string(),
+            "Provenance, lineage, handoff, and governance cards".to_string(),
+        ),
     ]
 }
 
@@ -4552,6 +4613,8 @@ fn bioinformatics_readiness_state_label(state: &str) -> &'static str {
         "workflow_ready" => "Workflow ready",
         "metadata_required" => "Metadata needed",
         "catalogue_ready" => "Catalogue ready",
+        "planned" => "Planned",
+        "binding_required" => "Binding needed",
         "reserved" => "Reserved",
         _ => "Review",
     }
@@ -4645,6 +4708,7 @@ fn render_bioinformatics_state(state: &ApiLoadState<BioinformaticsWorkspaceRespo
 #[cfg(target_arch = "wasm32")]
 fn render_bioinformatics_workspace(view: &BioinformaticsWorkspaceResponse) -> Html {
     let summaries = bioinformatics_readiness_summaries(view);
+    let context_summaries = bioinformatics_context_summaries(view);
     html! {
         <>
             <div class="dos-metric-grid">
@@ -4663,6 +4727,16 @@ fn render_bioinformatics_workspace(view: &BioinformaticsWorkspaceResponse) -> Ht
             <div class="dos-store-grid">
                 { for summaries.into_iter().map(render_bioinformatics_readiness_card) }
             </div>
+            if !context_summaries.is_empty() {
+                <section class="dos-card dos-wide-card">
+                    <span class="dos-card-label">{ "Workflow context" }</span>
+                    <h2>{ "Provenance, lineage, handoff, and governance state" }</h2>
+                    <p>{ "These read-only cards describe the orchestration context that must be resolved before daemon-owned workflow dispatch." }</p>
+                </section>
+                <div class="dos-store-grid">
+                    { for context_summaries.into_iter().map(render_bioinformatics_context_card) }
+                </div>
+            }
         </>
     }
 }
@@ -4693,6 +4767,22 @@ fn render_bioinformatics_readiness_card(card: BioinformaticsReadinessSummary) ->
             <p>{ card.primary_workflow }</p>
             <p>{ format!("Handoff: {}", card.handoff) }</p>
             <p>{ format!("Metadata: {}", card.metadata) }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_context_card(card: BioinformaticsContextSummary) -> Html {
+    html! {
+        <section class="dos-card dos-store-card" data-state={card.state.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ card.section }</span>
+                <span class="dos-status-pill">{ card.state_label }</span>
+            </div>
+            <strong>{ card.label }</strong>
+            <p>{ card.summary }</p>
+            <p>{ card.detail }</p>
+            <p>{ format!("Evidence: {}", card.evidence) }</p>
         </section>
     }
 }
@@ -4755,12 +4845,13 @@ mod tests {
     use crate::api::{
         ActivityCategoryResponse, ActivityTaskResponse, ActivityWorkspaceResponse,
         AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
-        BioinformaticsReadinessCardResponse, BioinformaticsWorkspaceResponse,
-        DestageQueueSummaryResponse, EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice,
-        EnclosurePrepareResponse, EnclosuresPageResponse, HomeDashboardResponse,
-        IngestQueueSummaryResponse, LocalGroupMembershipResponse, LocalGroupOperationResponse,
-        LocalUserAuthorityResponse, ObjectStoresPageResponse, StandaloneUserAccountResponse,
-        StorageGroupResponse, UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
+        BioinformaticsContextCardResponse, BioinformaticsReadinessCardResponse,
+        BioinformaticsWorkspaceResponse, DestageQueueSummaryResponse,
+        EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice, EnclosurePrepareResponse,
+        EnclosuresPageResponse, HomeDashboardResponse, IngestQueueSummaryResponse,
+        LocalGroupMembershipResponse, LocalGroupOperationResponse, LocalUserAuthorityResponse,
+        ObjectStoresPageResponse, StandaloneUserAccountResponse, StorageGroupResponse,
+        UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
     };
     use crate::mount::FrontendHost;
     use crate::stores::STORES_WORKSPACE_ROUTE;
@@ -5055,10 +5146,39 @@ mod tests {
                     required_metadata: vec!["reference genome".to_string()],
                 },
             ],
+            sequencing_runs: vec![BioinformaticsContextCardResponse {
+                label: "Sequencing run provenance".to_string(),
+                state: "metadata_required".to_string(),
+                summary: "Run metadata required.".to_string(),
+                detail: "Bind flowcell, kit, and sample state.".to_string(),
+                evidence: vec!["POD5 basecalling readiness".to_string()],
+            }],
+            object_lineage: vec![BioinformaticsContextCardResponse {
+                label: "Object lineage".to_string(),
+                state: "planned".to_string(),
+                summary: "Lineage planned.".to_string(),
+                detail: "Connect signal, reads, alignment, and variants.".to_string(),
+                evidence: vec!["raw signal to reads".to_string()],
+            }],
+            workflow_handoffs: vec![BioinformaticsContextCardResponse {
+                label: "Basecalling handoff".to_string(),
+                state: "workflow_ready".to_string(),
+                summary: "Basecalling ready.".to_string(),
+                detail: "POD5 handoff state is available.".to_string(),
+                evidence: vec!["POD5 readiness cards".to_string()],
+            }],
+            governance_bindings: vec![BioinformaticsContextCardResponse {
+                label: "Mnemosyne governance binding".to_string(),
+                state: "binding_required".to_string(),
+                summary: "Binding required.".to_string(),
+                detail: "Project and governance-domain binding is required.".to_string(),
+                evidence: vec!["endpoint inventory bindings".to_string()],
+            }],
             message: "Readiness cards available.".to_string(),
         };
 
         let cards = bioinformatics_readiness_summaries(&view);
+        let context_cards = super::bioinformatics_context_summaries(&view);
         let metrics = bioinformatics_summary_cards(&view);
 
         assert_eq!(cards.len(), 2);
@@ -5070,6 +5190,10 @@ mod tests {
         assert_eq!(metrics[0].1, "2");
         assert_eq!(metrics[1].1, "1");
         assert_eq!(metrics[2].1, "1");
+        assert_eq!(metrics[3].1, "4");
+        assert_eq!(context_cards[0].section, "Sequencing Runs");
+        assert_eq!(context_cards[1].state_label, "Planned");
+        assert_eq!(context_cards[3].state_label, "Binding needed");
     }
 
     #[test]
@@ -5079,6 +5203,10 @@ mod tests {
             available: false,
             supported_object_types: vec!["FASTQ/FASTQ.GZ".to_string(), "ENA/SRA".to_string()],
             readiness_cards: Vec::new(),
+            sequencing_runs: Vec::new(),
+            object_lineage: Vec::new(),
+            workflow_handoffs: Vec::new(),
+            governance_bindings: Vec::new(),
             message: "Older payload.".to_string(),
         };
 

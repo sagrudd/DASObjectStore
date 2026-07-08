@@ -407,6 +407,14 @@ pub struct BioinformaticsWorkspaceResponse {
     pub supported_object_types: Vec<String>,
     #[serde(default)]
     pub readiness_cards: Vec<BioinformaticsReadinessCardResponse>,
+    #[serde(default)]
+    pub sequencing_runs: Vec<BioinformaticsContextCardResponse>,
+    #[serde(default)]
+    pub object_lineage: Vec<BioinformaticsContextCardResponse>,
+    #[serde(default)]
+    pub workflow_handoffs: Vec<BioinformaticsContextCardResponse>,
+    #[serde(default)]
+    pub governance_bindings: Vec<BioinformaticsContextCardResponse>,
     pub message: String,
 }
 
@@ -421,6 +429,17 @@ pub struct BioinformaticsReadinessCardResponse {
     pub handoff: String,
     #[serde(default)]
     pub required_metadata: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct BioinformaticsContextCardResponse {
+    pub label: String,
+    pub state: String,
+    pub summary: String,
+    pub detail: String,
+    #[serde(default)]
+    pub evidence: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -1600,6 +1619,34 @@ mod tests {
                     "required_metadata": ["flowcell/run identity", "sequencing kit"]
                 }
             ],
+            "sequencing_runs": [
+                {
+                    "label": "Sequencing run provenance",
+                    "state": "metadata_required",
+                    "summary": "Run metadata required.",
+                    "detail": "Bind flowcell and kit state.",
+                    "evidence": ["POD5 basecalling readiness"]
+                }
+            ],
+            "object_lineage": [],
+            "workflow_handoffs": [
+                {
+                    "label": "Basecalling handoff",
+                    "state": "workflow_ready",
+                    "summary": "Basecalling ready.",
+                    "detail": "POD5 handoff state is available.",
+                    "evidence": ["POD5 readiness cards"]
+                }
+            ],
+            "governance_bindings": [
+                {
+                    "label": "Mnemosyne governance binding",
+                    "state": "binding_required",
+                    "summary": "Binding required.",
+                    "detail": "Project and governance-domain binding is required.",
+                    "evidence": ["endpoint inventory bindings"]
+                }
+            ],
             "message": "Bioinformatics readiness cards classify supported object types."
         });
 
@@ -1613,6 +1660,12 @@ mod tests {
             .any(|object_type| object_type == "POD5"));
         assert_eq!(decoded.readiness_cards[0].label, "POD5");
         assert_eq!(decoded.readiness_cards[0].handoff, "Basecalling readiness");
+        assert_eq!(
+            decoded.sequencing_runs[0].label,
+            "Sequencing run provenance"
+        );
+        assert_eq!(decoded.workflow_handoffs[0].state, "workflow_ready");
+        assert_eq!(decoded.governance_bindings[0].state, "binding_required");
     }
 
     #[test]

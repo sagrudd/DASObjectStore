@@ -415,6 +415,10 @@ pub struct ProductBioinformaticsWorkspaceView {
     pub available: bool,
     pub supported_object_types: Vec<String>,
     pub readiness_cards: Vec<ProductBioinformaticsReadinessCardView>,
+    pub sequencing_runs: Vec<ProductBioinformaticsContextCardView>,
+    pub object_lineage: Vec<ProductBioinformaticsContextCardView>,
+    pub workflow_handoffs: Vec<ProductBioinformaticsContextCardView>,
+    pub governance_bindings: Vec<ProductBioinformaticsContextCardView>,
     pub message: String,
 }
 
@@ -427,6 +431,15 @@ pub struct ProductBioinformaticsReadinessCardView {
     pub primary_workflow: String,
     pub handoff: String,
     pub required_metadata: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductBioinformaticsContextCardView {
+    pub label: String,
+    pub state: String,
+    pub summary: String,
+    pub detail: String,
+    pub evidence: Vec<String>,
 }
 
 impl ProductBioinformaticsWorkspaceView {
@@ -551,6 +564,62 @@ impl ProductBioinformaticsWorkspaceView {
                 "ENA/SRA".to_string(),
             ],
             readiness_cards,
+            sequencing_runs: vec![ProductBioinformaticsContextCardView {
+                label: "Sequencing run provenance".to_string(),
+                state: "metadata_required".to_string(),
+                summary: "Run-level provenance is ready to bind once ObjectStore metadata exposes run identifiers.".to_string(),
+                detail: "POD5, FASTQ, Nanopore run, and Illumina run objects should provide sample, instrument, flowcell or lane, kit, and acquisition timestamps before workflow dispatch.".to_string(),
+                evidence: vec![
+                    "POD5 basecalling readiness".to_string(),
+                    "FASTQ sample/library metadata".to_string(),
+                    "Nanopore and Illumina run object types".to_string(),
+                ],
+            }],
+            object_lineage: vec![ProductBioinformaticsContextCardView {
+                label: "Object lineage".to_string(),
+                state: "planned".to_string(),
+                summary: "Lineage will connect raw signal, reads, alignments, variants, references, and annotations.".to_string(),
+                detail: "The Web console exposes the lineage surface now; the next API slice will derive parent/child state from ObjectStore and SubObject metadata rather than hard-coded workflow paths.".to_string(),
+                evidence: vec![
+                    "raw signal to basecalled reads".to_string(),
+                    "reads to alignments".to_string(),
+                    "references and annotations to downstream results".to_string(),
+                ],
+            }],
+            workflow_handoffs: vec![
+                ProductBioinformaticsContextCardView {
+                    label: "Basecalling handoff".to_string(),
+                    state: "workflow_ready".to_string(),
+                    summary: "POD5 objects can advertise basecalling readiness and required run metadata.".to_string(),
+                    detail: "Basecalling handoff should use daemon-owned ObjectStore metadata and Mnemosyne governance bindings before launching work.".to_string(),
+                    evidence: vec![
+                        "POD5 readiness cards".to_string(),
+                        "sequencing kit metadata".to_string(),
+                    ],
+                },
+                ProductBioinformaticsContextCardView {
+                    label: "Genome/transcriptome handoff".to_string(),
+                    state: "metadata_required".to_string(),
+                    summary: "FASTQ, BAM/CRAM, FASTA, GFF/GTF, and VCF/BCF cards expose the metadata needed for analysis handoff.".to_string(),
+                    detail: "Reference build, index, sample/cohort, library strategy, and annotation source bindings must be resolved before automatic orchestration.".to_string(),
+                    evidence: vec![
+                        "reference genome metadata".to_string(),
+                        "alignment and variant object families".to_string(),
+                        "annotation object families".to_string(),
+                    ],
+                },
+            ],
+            governance_bindings: vec![ProductBioinformaticsContextCardView {
+                label: "Mnemosyne governance binding".to_string(),
+                state: "binding_required".to_string(),
+                summary: "Project and governance-domain bindings are represented as a first-class Bioinformatics view.".to_string(),
+                detail: "Mneion/Mnemosyne project, governance domain, endpoint identity, and writer-policy membership must be attached before data orchestration is considered auditable.".to_string(),
+                evidence: vec![
+                    "endpoint inventory bindings".to_string(),
+                    "writer group policy".to_string(),
+                    "Mneion storage definitions".to_string(),
+                ],
+            }],
             message: "Bioinformatics readiness cards classify supported object types and the workflow handoff metadata needed for orchestration.".to_string(),
         }
     }
