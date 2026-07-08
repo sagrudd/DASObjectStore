@@ -65,8 +65,8 @@ pub use ingest::{
     IngestJobPaths, IngestJournalChecksumManifest, IngestJournalContentHash,
     IngestJournalFileRecord, IngestJournalFileState, IngestJournalFinalizationReadiness,
     IngestJournalHddWrite, IngestJournalPartialHddWrite, IngestJournalResumeAction,
-    IngestJournalResumePlan, IngestJournalTransitionError, IngestStagingLayout, INGEST_DIR_NAME,
-    INGEST_JOBS_DIR_NAME, INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
+    IngestJournalResumePlan, IngestJournalTransitionError, IngestStagingLayout, IngestWriteReport,
+    INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME, INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
 };
 pub use initialize::{
     initialize_pool, MetadataInitError, PoolInitOptions, PoolInitReport, LIVE_SQLITE_FILE_NAME,

@@ -131,10 +131,12 @@ fn write_verified_hdd_copy_inner(
         .map_err(hdd_copy_error_from_io)?;
     destination.sync_all()?;
 
-    let content_hash = verify_hdd_copy_hash(
-        &request.destination_path,
-        request.expected_content_hash.as_str(),
-    )?;
+    if write_report.content_hash != request.expected_content_hash {
+        return Err(HddCopyError::HashMismatch {
+            expected: request.expected_content_hash.clone(),
+            actual: write_report.content_hash,
+        });
+    }
 
     Ok(HddCopyReport {
         object_id: request.object_id.clone(),
@@ -143,7 +145,7 @@ fn write_verified_hdd_copy_inner(
         destination_path: request.destination_path.clone(),
         bytes_written: write_report.bytes_written,
         content_hash_algorithm: HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
-        content_hash,
+        content_hash: request.expected_content_hash.clone(),
     })
 }
 
@@ -209,7 +211,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn writes_hdd_copy_and_verifies_hash_from_destination_readback() {
+    fn writes_hdd_copy_and_verifies_hash_inline() {
         let root = temp_root("hdd-copy-ok");
         let source_path = root.join("ssd").join("payload");
         let destination_path = root.join("hdd-a").join("objects").join("object-a");

@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.1 - 2026-07-08
+
+- Capture SHA-256 checksums inline during normal source-to-SSD ingest instead
+  of re-reading the staged SSD payload in the flush worker.
+- Validate HDD settlement and direct-to-HDD copy checksums from the active copy
+  stream, avoiding an immediate full destination readback after writing.
+- Keep explicit destination rehash support available for audit and repair
+  workflows where a second read is intentionally requested.
+
 ## 0.10.0 - 2026-07-08
 
 - Add an authenticated standalone DASObjectStore Web UI landing page modeled on
