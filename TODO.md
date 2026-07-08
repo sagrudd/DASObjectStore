@@ -638,8 +638,13 @@ older checklist claims.
   repair-oriented job rows without browser-side storage mutation.
 - [x] Connect the Activity workspace API to live ingest queue metadata and
   queue-derived destage summaries without browser-side storage mutation.
-- [ ] Connect the Activity workspace API to live repair events and
-  endpoint-validation events without browser-side storage mutation.
+- [x] Connect the Activity workspace API to live repair events from pool
+  metadata without browser-side storage mutation.
+- [x] Add Activity task mapping for endpoint-validation events from the shared
+  endpoint inventory contract without browser-side storage mutation.
+- [ ] Add a persistent endpoint inventory/validation registry so Activity and
+  Endpoints workspaces consume live endpoint-validation events rather than an
+  empty inventory source.
 - [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.

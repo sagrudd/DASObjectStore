@@ -20,6 +20,7 @@ pub mod markers;
 pub mod object;
 pub mod placement_log;
 pub mod queue;
+pub mod repair_activity;
 pub mod schema;
 mod secure_fs;
 pub mod snapshot;
@@ -96,6 +97,10 @@ pub use queue::{
     IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueEntry, IngestQueueJob,
     IngestQueuePlan, IngestQueueReadError, IngestQueueSnapshot,
     DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY, DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
+};
+pub use repair_activity::{
+    read_pool_repair_activity, PoolRepairActivityEvent, PoolRepairActivityReadError,
+    PoolRepairActivitySnapshot,
 };
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{

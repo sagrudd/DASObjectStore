@@ -416,11 +416,16 @@ daemon activity model. The page requests the live daemon administrator job
 registry through the packaged daemon socket and maps recorded jobs into task
 rows. It also reads the daemon-owned live ingest queue metadata from the SSD
 metadata database and derives the current ingest and HDD settlement summaries
-from those rows. The page always shows the supported activity categories so
-operators can distinguish an idle appliance from an unimplemented browser
-holder. Categories currently include administrator jobs, enclosure preparation,
-ObjectStore creation, SubObject creation, ingest, destage, repair, and endpoint
-validation.
+from those rows. Repair activity is read from the same live metadata database:
+``Repairing`` and ``Degraded`` pool states are surfaced as repair task rows
+with explicit operator warnings. Endpoint-validation activity uses the shared
+endpoint inventory contract so pending, validated, degraded, rejected, and
+unknown endpoint validation states have the same task-row semantics once a
+live endpoint inventory source is present. The page always shows the supported
+activity categories so operators can distinguish an idle appliance from an
+unimplemented browser holder. Categories currently include administrator jobs,
+enclosure preparation, ObjectStore creation, SubObject creation, ingest,
+destage, repair, and endpoint validation.
 
 When daemon sources report work, the page shows active task rows with task ID,
 kind, state, label, and update timestamp. Ingest and destage queue summaries
@@ -433,6 +438,8 @@ warning instead of silently falling back to fixture data.
 If the live ingest queue database cannot be read, the API returns the category
 and task views with an explicit ``activity_ingest_queue_unavailable`` warning
 while leaving the page observational and usable.
+If live repair metadata cannot be read, the API returns
+``activity_repair_events_unavailable`` rather than hiding the source failure.
 
 The Activity page is observational. Operators may navigate from submitted
 administrator workflows to their daemon job status, but the page itself must not

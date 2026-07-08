@@ -2,18 +2,21 @@ use crate::dashboard::{
     DashboardWarning, DestageQueueObjectView, DestageQueueView, IngestJobStateView,
     IngestQueueJobView, IngestQueueView, QueuePressureView,
 };
+use crate::endpoints::{
+    EndpointInventoryItemView, EndpointInventoryView, EndpointValidationStateView,
+};
 use crate::workspaces::{
     default_activity_categories, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
     ActivityWorkspaceView,
 };
-use dasobjectstore_core::lifecycle::ObjectState;
+use dasobjectstore_core::lifecycle::{ObjectState, PoolState};
 use dasobjectstore_daemon::{
     DaemonClient, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobState,
     DaemonJobSummary, DaemonRuntimeConfig, UnixSocketDaemonTransport,
 };
 use dasobjectstore_metadata::{
-    read_ingest_queue, IngestQueueJob, IngestQueueSnapshot, LIVE_SQLITE_FILE_NAME,
-    METADATA_DIR_NAME,
+    read_ingest_queue, read_pool_repair_activity, IngestQueueJob, IngestQueueSnapshot,
+    PoolRepairActivityEvent, PoolRepairActivitySnapshot, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 use std::path::{Path, PathBuf};
 
@@ -23,8 +26,9 @@ const DEFAULT_SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
 const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 
 pub fn live_activity_workspace() -> ActivityWorkspaceView {
+    let live_sqlite_path = activity_live_sqlite_path();
     let (ingest, destage, mut warnings) =
-        match activity_queue_views_from_live_sqlite(&activity_live_sqlite_path()) {
+        match activity_queue_views_from_live_sqlite(&live_sqlite_path) {
             Ok((ingest, destage)) => (Some(ingest), Some(destage), Vec::new()),
             Err(warning) => (None, None, vec![warning]),
         };
@@ -32,7 +36,7 @@ pub fn live_activity_workspace() -> ActivityWorkspaceView {
     let client = DaemonClient::new(UnixSocketDaemonTransport::new(
         DaemonRuntimeConfig::default_packaged().socket_path,
     ));
-    let tasks = match client.list_jobs(DaemonJobListRequest {
+    let mut tasks = match client.list_jobs(DaemonJobListRequest {
         limit: Some(ACTIVITY_JOB_LIMIT),
     }) {
         Ok(response) => activity_tasks_from_daemon_jobs(&response),
@@ -44,11 +48,144 @@ pub fn live_activity_workspace() -> ActivityWorkspaceView {
             Vec::new()
         }
     };
+    match activity_repair_tasks_from_live_sqlite(&live_sqlite_path) {
+        Ok(repair_tasks) => tasks.extend(repair_tasks),
+        Err(warning) => warnings.push(warning),
+    }
+    tasks.extend(activity_tasks_from_endpoint_inventory(
+        &EndpointInventoryView::from_endpoints(Vec::new()),
+    ));
 
     let mut view = ActivityWorkspaceView::from_sections(ingest, destage, tasks)
         .with_categories(default_activity_categories());
     view.warnings.extend(warnings);
     view
+}
+
+fn activity_repair_tasks_from_live_sqlite(
+    live_sqlite_path: &Path,
+) -> Result<Vec<ActivityTaskView>, DashboardWarning> {
+    if !live_sqlite_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    read_pool_repair_activity(live_sqlite_path)
+        .map(|snapshot| activity_tasks_from_repair_snapshot(&snapshot))
+        .map_err(|err| {
+            DashboardWarning::new(
+                "activity_repair_events_unavailable",
+                format!("Live repair metadata cannot be read: {err}"),
+            )
+        })
+}
+
+pub fn activity_tasks_from_repair_snapshot(
+    snapshot: &PoolRepairActivitySnapshot,
+) -> Vec<ActivityTaskView> {
+    snapshot
+        .events
+        .iter()
+        .map(activity_task_from_repair_event)
+        .collect()
+}
+
+fn activity_task_from_repair_event(event: &PoolRepairActivityEvent) -> ActivityTaskView {
+    let state = match event.state {
+        PoolState::Repairing => ActivityTaskStateView::Running,
+        PoolState::Degraded => ActivityTaskStateView::Waiting,
+        PoolState::New | PoolState::Clean | PoolState::Dirty | PoolState::ReadOnly => {
+            ActivityTaskStateView::Complete
+        }
+    };
+    let label = event.reason.clone().unwrap_or_else(|| match event.state {
+        PoolState::Repairing => format!("Pool {} repair is in progress.", event.pool_id),
+        PoolState::Degraded => format!(
+            "Pool {} is degraded and needs repair review.",
+            event.pool_id
+        ),
+        PoolState::New | PoolState::Clean | PoolState::Dirty | PoolState::ReadOnly => {
+            format!("Pool {} does not report active repair work.", event.pool_id)
+        }
+    });
+
+    let warnings = match event.state {
+        PoolState::Repairing => vec![DashboardWarning::new(
+            "pool_repairing",
+            "Pool repair is in progress; write operations should remain blocked.",
+        )],
+        PoolState::Degraded => vec![DashboardWarning::new(
+            "pool_degraded",
+            "Pool is degraded; review repair or replacement plans before writes continue.",
+        )],
+        PoolState::New | PoolState::Clean | PoolState::Dirty | PoolState::ReadOnly => Vec::new(),
+    };
+
+    ActivityTaskView {
+        task_id: format!("pool-repair-{}", event.pool_id),
+        kind: ActivityTaskKindView::Repair,
+        state,
+        label,
+        updated_at_utc: event.updated_at_utc.clone(),
+        warnings,
+    }
+}
+
+pub fn activity_tasks_from_endpoint_inventory(
+    inventory: &EndpointInventoryView,
+) -> Vec<ActivityTaskView> {
+    inventory
+        .endpoints
+        .iter()
+        .map(activity_task_from_endpoint)
+        .collect()
+}
+
+fn activity_task_from_endpoint(endpoint: &EndpointInventoryItemView) -> ActivityTaskView {
+    let state = match endpoint.validation.state {
+        EndpointValidationStateView::Draft
+        | EndpointValidationStateView::PendingValidation
+        | EndpointValidationStateView::Unknown => ActivityTaskStateView::Waiting,
+        EndpointValidationStateView::Validated => ActivityTaskStateView::Complete,
+        EndpointValidationStateView::Degraded | EndpointValidationStateView::Rejected => {
+            ActivityTaskStateView::Failed
+        }
+    };
+    let warnings = endpoint
+        .warnings
+        .iter()
+        .map(|warning| DashboardWarning::new(warning.code.clone(), warning.message.clone()))
+        .collect();
+    let label = endpoint.validation.message.clone().unwrap_or_else(|| {
+        format!(
+            "Endpoint {} validation is {}.",
+            endpoint.display_name,
+            endpoint_validation_state_label(endpoint.validation.state)
+        )
+    });
+
+    ActivityTaskView {
+        task_id: format!("endpoint-validation-{}", endpoint.endpoint_id),
+        kind: ActivityTaskKindView::EndpointValidation,
+        state,
+        label,
+        updated_at_utc: endpoint
+            .validation
+            .checked_at_utc
+            .clone()
+            .unwrap_or_else(|| "not_checked".to_string()),
+        warnings,
+    }
+}
+
+fn endpoint_validation_state_label(state: EndpointValidationStateView) -> &'static str {
+    match state {
+        EndpointValidationStateView::Draft => "draft",
+        EndpointValidationStateView::PendingValidation => "pending validation",
+        EndpointValidationStateView::Validated => "validated",
+        EndpointValidationStateView::Degraded => "degraded",
+        EndpointValidationStateView::Rejected => "rejected",
+        EndpointValidationStateView::Unknown => "unknown",
+    }
 }
 
 #[cfg(test)]
@@ -257,14 +394,20 @@ fn activity_label_from_daemon_job(job: &DaemonJobSummary) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{activity_queue_views_from_snapshot, activity_workspace_from_daemon_jobs};
+    use super::{
+        activity_queue_views_from_snapshot, activity_tasks_from_endpoint_inventory,
+        activity_tasks_from_repair_snapshot, activity_workspace_from_daemon_jobs,
+    };
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
+    use dasobjectstore_core::lifecycle::PoolState;
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_daemon::{
         DaemonJobId, DaemonJobKind, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
         DaemonJobSummary,
     };
-    use dasobjectstore_metadata::{IngestQueueJob, IngestQueueSnapshot};
+    use dasobjectstore_metadata::{
+        IngestQueueJob, IngestQueueSnapshot, PoolRepairActivityEvent, PoolRepairActivitySnapshot,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -350,6 +493,76 @@ mod tests {
             destage.objects[2].warnings[0].code,
             "object_redownload_required"
         );
+    }
+
+    #[test]
+    fn maps_repair_pool_state_into_activity_tasks() {
+        let snapshot = PoolRepairActivitySnapshot {
+            live_sqlite_path: PathBuf::from("/tmp/live.sqlite"),
+            events: vec![
+                PoolRepairActivityEvent {
+                    pool_id: dasobjectstore_core::ids::PoolId::new("pool-repair").expect("pool id"),
+                    state: PoolState::Repairing,
+                    marker_kind: Some("repair_import".to_string()),
+                    reason: Some("checksum repair".to_string()),
+                    updated_at_utc: "2026-07-09T00:02:00Z".to_string(),
+                },
+                PoolRepairActivityEvent {
+                    pool_id: dasobjectstore_core::ids::PoolId::new("pool-degraded")
+                        .expect("pool id"),
+                    state: PoolState::Degraded,
+                    marker_kind: None,
+                    reason: None,
+                    updated_at_utc: "2026-07-09T00:03:00Z".to_string(),
+                },
+            ],
+        };
+
+        let tasks = activity_tasks_from_repair_snapshot(&snapshot);
+
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].kind, crate::ActivityTaskKindView::Repair);
+        assert_eq!(tasks[0].state, crate::ActivityTaskStateView::Running);
+        assert_eq!(tasks[0].label, "checksum repair");
+        assert_eq!(tasks[0].warnings[0].code, "pool_repairing");
+        assert_eq!(tasks[1].state, crate::ActivityTaskStateView::Waiting);
+        assert_eq!(tasks[1].warnings[0].code, "pool_degraded");
+    }
+
+    #[test]
+    fn maps_endpoint_validation_inventory_into_activity_tasks() {
+        let inventory = crate::EndpointInventoryView::from_endpoints(vec![
+            crate::EndpointInventoryItemView::new(
+                "endpoint-pending",
+                "NAS staging",
+                crate::EndpointKindView::DasobjectstoreNfs,
+                "https://nas.example.test:9443",
+                crate::EndpointValidationView::new(
+                    crate::EndpointValidationStateView::PendingValidation,
+                )
+                .with_check("2026-07-09T00:01:00Z", "Runtime probe queued."),
+            ),
+            crate::EndpointInventoryItemView::new(
+                "endpoint-rejected",
+                "Rejected endpoint",
+                crate::EndpointKindView::S3Compatible,
+                "https://s3.example.test",
+                crate::EndpointValidationView::new(crate::EndpointValidationStateView::Rejected)
+                    .with_check("2026-07-09T00:02:00Z", "Credential check failed."),
+            ),
+        ]);
+
+        let tasks = activity_tasks_from_endpoint_inventory(&inventory);
+
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(
+            tasks[0].kind,
+            crate::ActivityTaskKindView::EndpointValidation
+        );
+        assert_eq!(tasks[0].state, crate::ActivityTaskStateView::Waiting);
+        assert_eq!(tasks[0].label, "Runtime probe queued.");
+        assert_eq!(tasks[1].state, crate::ActivityTaskStateView::Failed);
+        assert_eq!(tasks[1].warnings[0].code, "endpoint_rejected");
     }
 
     fn daemon_job(

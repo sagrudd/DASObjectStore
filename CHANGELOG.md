@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.47.0 - 2026-07-09
+
+- Add a metadata reader for live pool repair Activity state from SSD
+  `live.sqlite`, including `Repairing` and `Degraded` pool events.
+- Render live repair metadata as Web Activity task rows with operator warnings
+  for blocked write/repair review states.
+- Add Activity task mapping for endpoint-validation states from the shared
+  endpoint inventory contract and document the remaining persistent endpoint
+  registry gap.
+
 ## 0.46.0 - 2026-07-09
 
 - Connect the Web Activity workspace API to live SSD ingest queue metadata,
