@@ -37,6 +37,8 @@ The following current CLI outputs are machine-readable compatibility surfaces:
 - `dasobjectstore disk drain --json`;
 - `dasobjectstore disk replace --json`;
 - `dasobjectstore service status --json`;
+- `dasobjectstore performance-test` recommendation artifact,
+  `dasobjectstore.performance_test.recommendation.v1`;
 - `dasobjectstore mnemosyne export`.
 
 Until dedicated schema identifiers are added to each payload, changes to field

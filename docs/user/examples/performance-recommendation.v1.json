@@ -1,0 +1,167 @@
+{
+  "schema": "dasobjectstore.performance_test.recommendation.v1",
+  "artifact_kind": "ingress_recommendation",
+  "run": {
+    "run_id": "dasobjectstore-performance-20260708T120000Z",
+    "generated_at_utc": "2026-07-08T12:00:00Z",
+    "repository_revision": "abc1234",
+    "cli_version": "0.1.1",
+    "command": [
+      "dasobjectstore",
+      "performance-test",
+      "--file_size",
+      "1GiB",
+      "--file_count",
+      "10",
+      "--max-hdd-concurrency",
+      "2"
+    ],
+    "parameters": {
+      "file_size_bytes": 1073741824,
+      "file_count": 10,
+      "max_hdd_concurrency": 2,
+      "keep_temp": false
+    },
+    "artifacts": {
+      "markdown_path": "/var/lib/dasobjectstore/reports/performance.md",
+      "pdf_path": "/var/lib/dasobjectstore/reports/performance.pdf",
+      "qr_path": "/var/lib/dasobjectstore/reports/performance.qr.svg",
+      "json_path": "/var/lib/dasobjectstore/reports/performance.json"
+    }
+  },
+  "hardware": {
+    "roots": {
+      "ssd_root": "/srv/dasobjectstore/ssd",
+      "hdd_root": "/srv/dasobjectstore/hdd",
+      "tmp_dir": "/srv/dasobjectstore/tmp"
+    },
+    "disks": [
+      {
+        "disk_id": "disk-a",
+        "role": "hdd_capacity",
+        "root_path": "/srv/dasobjectstore/hdd/disk-a"
+      },
+      {
+        "disk_id": "disk-b",
+        "role": "hdd_capacity",
+        "root_path": "/srv/dasobjectstore/hdd/disk-b"
+      }
+    ]
+  },
+  "scenarios": {
+    "ssd_only": {
+      "file_count": 10,
+      "file_size_bytes": 1073741824,
+      "total_bytes": 10737418240,
+      "median_generate_bytes_per_second": 734003200,
+      "median_ssd_write_bytes_per_second": 1258291200,
+      "median_ssd_read_bytes_per_second": 1468006400,
+      "files": [
+        {
+          "file_index": 0,
+          "generated_bytes": 1073741824,
+          "generate_bytes_per_second": 734003200,
+          "ssd_write_bytes_per_second": 1258291200,
+          "ssd_read_bytes_per_second": 1468006400
+        }
+      ]
+    },
+    "ssd_hdd_pipeline": {
+      "description": "Generated source is staged to SSD, read back from SSD, and settled to HDD members.",
+      "concurrency": [
+        {
+          "concurrency": 1,
+          "aggregate_assigned_bytes": 10737418240,
+          "aggregate_write_bytes_per_second": 209715200,
+          "slowest_member_seconds": 5.12,
+          "members": [
+            "disk-a"
+          ],
+          "per_disk": [
+            {
+              "disk_id": "disk-a",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 209715200
+            }
+          ]
+        },
+        {
+          "concurrency": 2,
+          "aggregate_assigned_bytes": 21474836480,
+          "aggregate_write_bytes_per_second": 367001600,
+          "slowest_member_seconds": 5.85,
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
+          "per_disk": [
+            {
+              "disk_id": "disk-a",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 209715200
+            },
+            {
+              "disk_id": "disk-b",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 157286400
+            }
+          ]
+        }
+      ]
+    },
+    "direct_hdd_pipeline": {
+      "description": "Generated source is written directly to selected HDD members without SSD staging.",
+      "concurrency": [
+        {
+          "concurrency": 1,
+          "aggregate_assigned_bytes": 10737418240,
+          "aggregate_write_bytes_per_second": 136314880,
+          "slowest_member_seconds": 7.88,
+          "members": [
+            "disk-a"
+          ],
+          "per_disk": [
+            {
+              "disk_id": "disk-a",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 136314880
+            }
+          ]
+        },
+        {
+          "concurrency": 2,
+          "aggregate_assigned_bytes": 21474836480,
+          "aggregate_write_bytes_per_second": 241172480,
+          "slowest_member_seconds": 8.9,
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
+          "per_disk": [
+            {
+              "disk_id": "disk-a",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 136314880
+            },
+            {
+              "disk_id": "disk-b",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 104857600
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "recommendation": {
+    "strategy": "ssd_hdd_pipeline",
+    "hdd_concurrency": 2,
+    "estimated_aggregate_bytes_per_second": 367001600,
+    "ssd_read_limited": false,
+    "rationale": [
+      "The SSD+HDD pipeline produced the best aggregate HDD settlement rate.",
+      "Median SSD read throughput remained above the selected HDD aggregate rate.",
+      "Direct-to-HDD writes were slower for the same disk population."
+    ]
+  }
+}
