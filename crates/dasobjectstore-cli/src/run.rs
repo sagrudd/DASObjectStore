@@ -99,12 +99,12 @@ use dasobjectstore_platform::{
 };
 use dasobjectstore_tui::{UploadTui, UploadTuiContext};
 use ratatui::{
-    backend::CrosstermBackend,
+    backend::TestBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph, Wrap},
-    Terminal, TerminalOptions, Viewport,
+    Terminal,
 };
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -1023,14 +1023,10 @@ fn render_performance_tui_snapshot(
     writer: &mut impl Write,
     snapshot: &PerformanceTuiSnapshot<'_>,
 ) -> Result<(), CliError> {
-    let backend = CrosstermBackend::new(writer);
-    let mut terminal = Terminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Fixed(performance_tui_area()),
-        },
-    )?;
-    terminal.clear()?;
+    let area = performance_tui_area();
+    let backend = TestBackend::new(area.width, area.height);
+    let mut terminal =
+        Terminal::new(backend).expect("test backend terminal creation is infallible");
     let current_fraction = if snapshot.file_count == 0 {
         0.0
     } else {
@@ -1131,7 +1127,19 @@ fn render_performance_tui_snapshot(
             .block(Block::default().borders(Borders::ALL).title("Artifacts")),
             chunks[4],
         );
-    })?;
+    })
+    .expect("test backend drawing is infallible");
+    write!(writer, "\x1b[2J\x1b[H")?;
+    let buffer = terminal.backend().buffer();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            write!(writer, "{}", buffer[(x, y)].symbol())?;
+        }
+        if y + 1 < buffer.area.height {
+            write!(writer, "\r\n")?;
+        }
+    }
+    writer.flush()?;
     Ok(())
 }
 

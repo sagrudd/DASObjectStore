@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.6 - 2026-07-08
+
+- Render performance-test TUI snapshots through ratatui's in-memory backend and
+  write the composed screen directly, avoiding crossterm cursor-position probes
+  in wrapped or scripted terminal sessions.
+
 ## 0.4.5 - 2026-07-08
 
 - Replace the performance-test TUI terminal-size fallback with direct Unix
