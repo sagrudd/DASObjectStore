@@ -80,11 +80,17 @@ pub struct GuiActionPlanResponse {
     pub confirmation_required: bool,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 #[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct GuiActionPlanRequest {
     pub action: String,
+    pub store_id: Option<String>,
+    pub store_class: Option<String>,
+    pub store_copies: Option<u8>,
+    pub bucket: Option<String>,
+    pub writer_group: Option<String>,
+    pub ssd_root: Option<String>,
     pub ssd_device: Option<String>,
     pub hdd_devices: Vec<String>,
     pub mount_root: Option<String>,

@@ -338,8 +338,8 @@ reports the missing group as an explicit readiness state.
 If live SQLite is unavailable, the card remains visible from the registry but
 reports an explicit usage warning rather than hiding the ObjectStore or
 presenting fixture data. The ``Create ObjectStore`` card remains disabled for
-non-admin users until the administrator workflow submits confirmed daemon action
-plans.
+non-admin users. Administrator sessions can open the browser-side creation form
+and prepare a reviewed action plan.
 
 The ObjectStores page is the Web counterpart to ``dasobjectstore store`` and
 managed store policy. It should list each store with class, writer group,
@@ -351,12 +351,16 @@ reflects the daemon/API create affordance, including whether creation is
 currently available or blocked by administrator requirements.
 
 Creating or changing an object store is an admin-only workflow. The Web UI
-should present class defaults before creation and submit the request to
-``dasobjectstored`` rather than editing store registry files directly. When a
-creation form includes a writer group, the daemon remains responsible for
-validating the group, applying ACL or policy changes, and recording the store in
-managed metadata. Non-admin users may inspect stores and submit writes only when
-store writer policy allows it.
+presents controls for store name, writer group, enclosure anchor, object type,
+redundancy, public/writeable state, store class, capacity behavior, retention,
+S3/export mode, bucket, and SSD root. The current workflow calls the GUI
+action-plan endpoint and renders the generated ``dasobjectstore store create``
+plan for administrator review. The next workflow slice will convert this review
+surface into daemon submission with audit metadata; the browser must still not
+edit store registry files directly. When a creation form includes a writer
+group, the daemon remains responsible for validating the group, applying ACL or
+policy changes, and recording the store in managed metadata. Non-admin users may
+inspect stores and submit writes only when store writer policy allows it.
 
 Users/Groups Workspace
 ----------------------

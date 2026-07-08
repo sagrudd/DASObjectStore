@@ -571,14 +571,14 @@ older checklist claims.
 
 ## Milestone 20: Web Administrator Workflows and Bioinformatics Readiness
 
-- [ ] Implement the Enclosures "Add enclosure" wizard as a real Web workflow:
+- [x] Implement the Enclosures "Add enclosure" wizard as a real Web workflow:
   detect supported DAS hardware, select SSD landing media, select eligible HDD
   media, show data-loss/format plan, require administrator confirmation, submit
   a daemon preparation job, and render progress/results.
   - [x] Add the browser-side preparation wizard and GUI action-plan handoff for
     detected enclosure media, destructive review, format allowance, and
     confirmation phrase validation.
-  - [ ] Submit the confirmed plan as a daemon preparation job and render
+  - [x] Submit the confirmed plan as a daemon preparation job and render
     daemon job progress, result, failure, cancellation, and retry state.
     - [x] Add authenticated standalone Web submission to the daemon
       ``prepare_enclosure`` client boundary and render accepted job/failure
@@ -608,7 +608,7 @@ older checklist claims.
     behavior, including completed-job cancellation rejection.
   - [ ] Cover existing-data preflight and cancellation/retry preservation when
     the daemon preparation runtime exposes those states.
-- [ ] Implement ObjectStore creation form controls for store name, writer group,
+- [x] Implement ObjectStore creation form controls for store name, writer group,
   enclosure, object type, redundancy, public/writeable state, store class,
   capacity behavior, retention, and S3/export mode.
 - [ ] Connect ObjectStore creation to the existing action-plan/daemon boundary

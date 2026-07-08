@@ -782,6 +782,16 @@ h2 {
   background: #edf2f3;
 }
 
+.dos-objectstore-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.dos-objectstore-flags {
+  max-height: none;
+}
+
 .dos-placeholder-card {
   max-width: 720px;
   min-height: 180px;

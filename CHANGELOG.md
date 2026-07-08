@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.36.0 - 2026-07-08
+
+- Add browser-side ObjectStore creation controls for store identity, writer
+  group, enclosure anchor, object type, redundancy, public/writeable flags,
+  store class, capacity behavior, retention, S3/export mode, bucket, and SSD
+  root.
+- Wire the ObjectStore creation form to the existing GUI action-plan endpoint
+  so administrators can review the generated `store create` plan before the
+  daemon submission workflow is added.
+- Add Web regression coverage for ObjectStore bucket normalization, required
+  planning fields, and policy-review summaries.
+
 ## 0.35.0 - 2026-07-08
 
 - Render live daemon administrator job status in the Enclosures preparation

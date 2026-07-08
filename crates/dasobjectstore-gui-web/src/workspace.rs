@@ -5,7 +5,7 @@ use crate::api::{
     AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
     AdminJobStatusResponse, AdminJobSummary, BioinformaticsWorkspaceResponse,
     DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosurePrepareHddDevice,
-    EnclosurePrepareRequest, EnclosurePrepareResponse,
+    EnclosurePrepareRequest, EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse,
 };
 use crate::api::{
     EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
@@ -653,6 +653,99 @@ pub struct ObjectStoreCardSummary {
     pub warning_count: usize,
     pub last_ingested: String,
     pub writer_policy: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ObjectStoreCreateFormState {
+    open: bool,
+    store_id: String,
+    writer_group: String,
+    enclosure_id: String,
+    object_type: String,
+    required_copies: u8,
+    public: bool,
+    writeable: bool,
+    store_class: String,
+    capacity_behavior: String,
+    retention: String,
+    endpoint_export_mode: String,
+    bucket: String,
+    ssd_root: String,
+    planning: bool,
+    plan: Option<GuiActionPlanResponse>,
+    error: Option<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl ObjectStoreCreateFormState {
+    fn from_view(view: Option<&ObjectStoresPageResponse>) -> Self {
+        let default_store_class = view
+            .map(|view| view.create_object_store.defaults.store_class.clone())
+            .unwrap_or_else(|| "generated_data".to_string());
+        let default_copies = view
+            .map(|view| view.create_object_store.defaults.required_copies)
+            .unwrap_or(1);
+        let endpoint_export_mode = view
+            .map(|view| {
+                view.create_object_store
+                    .defaults
+                    .endpoint_export_mode
+                    .clone()
+            })
+            .unwrap_or_else(|| "s3_bucket".to_string());
+        let writer_group = view
+            .and_then(|view| view.groups.first())
+            .map(|group| group.group_name.clone())
+            .unwrap_or_default();
+
+        Self {
+            open: false,
+            store_id: String::new(),
+            writer_group,
+            enclosure_id: String::new(),
+            object_type: "naive".to_string(),
+            required_copies: default_copies,
+            public: false,
+            writeable: true,
+            store_class: default_store_class,
+            capacity_behavior: "balanced".to_string(),
+            retention: "standard".to_string(),
+            endpoint_export_mode,
+            bucket: String::new(),
+            ssd_root: "/srv/dasobjectstore/ssd".to_string(),
+            planning: false,
+            plan: None,
+            error: None,
+        }
+    }
+
+    fn reset_plan(&mut self) {
+        self.plan = None;
+        self.error = None;
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_store_bucket_default(store_id: &str) -> String {
+    store_id
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_store_creation_fields_ready(store_id: &str, writer_group: &str, ssd_root: &str) -> bool {
+    !store_id.trim().is_empty() && !writer_group.trim().is_empty() && !ssd_root.trim().is_empty()
 }
 
 pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<ObjectStoreCardSummary> {
@@ -1855,6 +1948,7 @@ pub struct ObjectStoresPageProps {
 pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
     let api_path = WorkspacePage::ObjectStores.api_path(&props.api_base_path);
     let object_stores_state = use_state(|| ApiLoadState::<ObjectStoresPageResponse>::Loading);
+    let create_state = use_state(|| ObjectStoreCreateFormState::from_view(None));
 
     {
         let api_path = api_path.clone();
@@ -1885,17 +1979,21 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 title="ObjectStores"
                 summary="Operational view of store policies, capacity, and service state."
             />
-            { render_object_stores_state(&*object_stores_state) }
+            { render_object_stores_state(&*object_stores_state, create_state, props.api_base_path.clone()) }
         </section>
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_object_stores_state(state: &ApiLoadState<ObjectStoresPageResponse>) -> Html {
+fn render_object_stores_state(
+    state: &ApiLoadState<ObjectStoresPageResponse>,
+    create_state: UseStateHandle<ObjectStoreCreateFormState>,
+    api_base_path: String,
+) -> Html {
     match state {
         ApiLoadState::Loading => html! {
             <div class="dos-store-grid">
-                { render_object_store_create_card(None) }
+                { render_object_store_create_card(None, create_state, api_base_path) }
                 { render_object_stores_state_message(
                     "Loading",
                     "Loading object-store inventory",
@@ -1904,11 +2002,11 @@ fn render_object_stores_state(state: &ApiLoadState<ObjectStoresPageResponse>) ->
             </div>
         },
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_object_store_inventory(view)
+            render_object_store_inventory(view, create_state, api_base_path)
         }
         ApiLoadState::Empty(message) => html! {
             <div class="dos-store-grid">
-                { render_object_store_create_card(None) }
+                { render_object_store_create_card(None, create_state, api_base_path) }
                 { render_object_stores_state_message("Inventory", "No object stores reported yet", message) }
             </div>
         },
@@ -1926,17 +2024,25 @@ fn render_object_stores_state(state: &ApiLoadState<ObjectStoresPageResponse>) ->
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_object_store_inventory(view: &ObjectStoresPageResponse) -> Html {
+fn render_object_store_inventory(
+    view: &ObjectStoresPageResponse,
+    create_state: UseStateHandle<ObjectStoreCreateFormState>,
+    api_base_path: String,
+) -> Html {
     html! {
         <div class="dos-store-grid">
-            { render_object_store_create_card(Some(view)) }
+            { render_object_store_create_card(Some(view), create_state, api_base_path) }
             { for object_store_card_summaries(view).into_iter().map(render_object_store_card) }
         </div>
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_object_store_create_card(view: Option<&ObjectStoresPageResponse>) -> Html {
+fn render_object_store_create_card(
+    view: Option<&ObjectStoresPageResponse>,
+    create_state: UseStateHandle<ObjectStoreCreateFormState>,
+    api_base_path: String,
+) -> Html {
     let (status, detail) = match view {
         Some(view) if view.create_object_store.enabled => (
             "Available".to_string(),
@@ -1961,15 +2067,381 @@ fn render_object_store_create_card(view: Option<&ObjectStoresPageResponse>) -> H
             "Admin workflow: assign a writer group, choose enclosure, object type, and redundancy, then submit the daemon creation plan.".to_string(),
         ),
     };
+    let state = (*create_state).clone();
+    let enabled = view.is_some_and(|view| view.create_object_store.enabled);
+    let store_class_options = view
+        .map(|view| view.create_object_store.store_class_options.clone())
+        .unwrap_or_default();
+    let copy_count_options = view
+        .map(|view| view.create_object_store.copy_count_options.clone())
+        .filter(|options| !options.is_empty())
+        .unwrap_or_else(|| vec![1, 2, 3]);
+    let group_options = view.map(|view| view.groups.clone()).unwrap_or_default();
+    let can_plan = enabled
+        && !state.planning
+        && object_store_creation_fields_ready(
+            &state.store_id,
+            &state.writer_group,
+            &state.ssd_root,
+        );
+
+    let open_form = {
+        let create_state = create_state.clone();
+        let initial = ObjectStoreCreateFormState::from_view(view);
+        Callback::from(move |_| {
+            let mut next = (*create_state).clone();
+            if !next.open {
+                let mut seeded = initial.clone();
+                seeded.open = true;
+                next = seeded;
+            } else {
+                next.open = false;
+            }
+            create_state.set(next);
+        })
+    };
+    let plan = {
+        let create_state = create_state.clone();
+        let api_base_path = api_base_path.clone();
+        Callback::from(move |_| {
+            let mut pending = (*create_state).clone();
+            let bucket = if pending.bucket.trim().is_empty() {
+                object_store_bucket_default(&pending.store_id)
+            } else {
+                pending.bucket.trim().to_string()
+            };
+            pending.bucket = bucket.clone();
+            pending.planning = true;
+            pending.plan = None;
+            pending.error = None;
+            create_state.set(pending.clone());
+
+            let create_state = create_state.clone();
+            let api_base_path = api_base_path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let request = GuiActionPlanRequest {
+                    action: "store_create".to_string(),
+                    store_id: Some(pending.store_id.trim().to_string()),
+                    store_class: Some(pending.store_class.clone()),
+                    store_copies: Some(pending.required_copies),
+                    bucket: (!bucket.is_empty()).then_some(bucket),
+                    writer_group: Some(pending.writer_group.trim().to_string()),
+                    ssd_root: Some(pending.ssd_root.trim().to_string()),
+                    ssd_device: None,
+                    hdd_devices: Vec::new(),
+                    mount_root: None,
+                    filesystem: None,
+                    owner: None,
+                    allow_format: false,
+                    confirmation_phrase: None,
+                };
+                let result = crate::api::plan_gui_action(&api_base_path, &request).await;
+                let mut next = (*create_state).clone();
+                next.planning = false;
+                match result {
+                    Ok(plan) => {
+                        next.plan = Some(plan);
+                        next.error = None;
+                    }
+                    Err(error) => {
+                        next.plan = None;
+                        next.error = Some(error.message);
+                    }
+                }
+                create_state.set(next);
+            });
+        })
+    };
 
     html! {
-        <section class="dos-card dos-create-card" data-action="store_create">
+        <section class="dos-card dos-create-card dos-objectstore-create" data-action="store_create">
             <span class="dos-create-mark">{ "+" }</span>
             <h2>{ "Create ObjectStore" }</h2>
             <p>{ detail }</p>
             <span class="dos-status-pill">{ status }</span>
+            <button
+                class="dos-secondary-action"
+                type="button"
+                disabled={!enabled}
+                onclick={open_form}
+            >
+                { if state.open { "Close form" } else { "Configure store" } }
+            </button>
+            if state.open {
+                <div class="dos-objectstore-form">
+                    <div class="dos-form-grid">
+                        { object_store_text_field("Store name", state.store_id.clone(), {
+                            let create_state = create_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*create_state).clone();
+                                next.store_id = input.value();
+                                if next.bucket.trim().is_empty() {
+                                    next.bucket = object_store_bucket_default(&next.store_id);
+                                }
+                                next.reset_plan();
+                                create_state.set(next);
+                            })
+                        }) }
+                        { object_store_text_field("S3 bucket", state.bucket.clone(), {
+                            let create_state = create_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*create_state).clone();
+                                next.bucket = input.value();
+                                next.reset_plan();
+                                create_state.set(next);
+                            })
+                        }) }
+                        <label class="dos-form-field">
+                            <span>{ "Writer group" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.writer_group = input.value();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.writer_group.clone()}>
+                                <option value="">{ "Select writer group" }</option>
+                                { for group_options.iter().map(|group| html! {
+                                    <option value={group.group_name.clone()}>
+                                        { format!("{} ({})", group.display_name, group.group_name) }
+                                    </option>
+                                }) }
+                            </select>
+                        </label>
+                        { object_store_text_field("Enclosure anchor", state.enclosure_id.clone(), {
+                            let create_state = create_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*create_state).clone();
+                                next.enclosure_id = input.value();
+                                next.reset_plan();
+                                create_state.set(next);
+                            })
+                        }) }
+                        <label class="dos-form-field">
+                            <span>{ "Object type" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.object_type = input.value();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.object_type.clone()}>
+                                { for ["naive", "bam", "cram", "pod5", "fastq", "fastq_gz", "fasta", "vcf", "bcf", "gff", "gtf", "ena_sra"].iter().map(|value| html! {
+                                    <option value={(*value).to_string()}>{ *value }</option>
+                                }) }
+                            </select>
+                        </label>
+                        <label class="dos-form-field">
+                            <span>{ "Store class" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.store_class = input.value();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.store_class.clone()}>
+                                { for store_class_options.iter().map(|option| html! {
+                                    <option value={option.value.clone()}>{ option.label.clone() }</option>
+                                }) }
+                                if store_class_options.is_empty() {
+                                    <option value={state.store_class.clone()}>{ state.store_class.clone() }</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="dos-form-field">
+                            <span>{ "Redundancy" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.required_copies = input.value().parse::<u8>().unwrap_or(1);
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.required_copies.to_string()}>
+                                { for copy_count_options.iter().map(|copies| html! {
+                                    <option value={copies.to_string()}>{ format!("{copies} copy/copies") }</option>
+                                }) }
+                            </select>
+                        </label>
+                        { object_store_text_field("SSD root", state.ssd_root.clone(), {
+                            let create_state = create_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*create_state).clone();
+                                next.ssd_root = input.value();
+                                next.reset_plan();
+                                create_state.set(next);
+                            })
+                        }) }
+                        <label class="dos-form-field">
+                            <span>{ "Capacity behavior" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.capacity_behavior = input.value();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.capacity_behavior.clone()}>
+                                <option value="balanced">{ "Balanced" }</option>
+                                <option value="conservative">{ "Conservative" }</option>
+                                <option value="fill_lowest_fractional_usage">{ "Distribute by free fraction" }</option>
+                            </select>
+                        </label>
+                        <label class="dos-form-field">
+                            <span>{ "Retention" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.retention = input.value();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.retention.clone()}>
+                                <option value="standard">{ "Standard" }</option>
+                                <option value="retain_until_deleted">{ "Retain until deleted" }</option>
+                                <option value="reproducible_cache">{ "Reproducible cache" }</option>
+                            </select>
+                        </label>
+                        <label class="dos-form-field">
+                            <span>{ "Export mode" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.endpoint_export_mode = input.value();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.endpoint_export_mode.clone()}>
+                                <option value="s3_bucket">{ "S3 bucket" }</option>
+                                <option value="read_only_export">{ "Read-only export" }</option>
+                                <option value="internal_only">{ "Internal only" }</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="dos-checkbox-list dos-objectstore-flags">
+                        <label>
+                            <input type="checkbox" checked={state.public} onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlInputElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.public = input.checked();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} />
+                            <span>{ "Publicly visible within the appliance policy boundary" }</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" checked={state.writeable} onchange={{
+                                let create_state = create_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlInputElement = event.target_unchecked_into();
+                                    let mut next = (*create_state).clone();
+                                    next.writeable = input.checked();
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} />
+                            <span>{ "Writeable by the selected writer group" }</span>
+                        </label>
+                    </div>
+                    <section class="dos-plan-result">
+                        <span class="dos-card-label">{ "Creation review" }</span>
+                        <p>{ object_store_create_review(&state) }</p>
+                        <button class="dos-secondary-action" type="button" disabled={!can_plan} onclick={plan}>
+                            { if state.planning { "Planning..." } else { "Review daemon plan" } }
+                        </button>
+                        if let Some(error) = &state.error {
+                            <div class="dos-auth-error" role="alert">{ error.clone() }</div>
+                        }
+                        if let Some(plan) = &state.plan {
+                            <code>{ plan.argv.join(" ") }</code>
+                            <p class="dos-job-message">{ format!("{} · confirmation required: {}", plan.execution, plan.confirmation_required) }</p>
+                        }
+                    </section>
+                </div>
+            }
         </section>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn object_store_text_field(
+    label: &'static str,
+    value: String,
+    oninput: Callback<InputEvent>,
+) -> Html {
+    html! {
+        <label class="dos-form-field">
+            <span>{ label }</span>
+            <input value={value} oninput={oninput} />
+        </label>
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_store_create_review_from_values(
+    store_id: &str,
+    object_type: &str,
+    required_copies: u8,
+    writer_group: &str,
+    endpoint_export_mode: &str,
+    public: bool,
+    writeable: bool,
+) -> String {
+    format!(
+        "{} · type {} · {} copy/copies · writer group {} · export {} · {} · {}",
+        if store_id.trim().is_empty() {
+            "unnamed store"
+        } else {
+            store_id.trim()
+        },
+        object_type,
+        required_copies,
+        if writer_group.trim().is_empty() {
+            "pending"
+        } else {
+            writer_group.trim()
+        },
+        endpoint_export_mode,
+        if public { "public" } else { "private" },
+        if writeable { "writeable" } else { "read-only" }
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn object_store_create_review(state: &ObjectStoreCreateFormState) -> String {
+    object_store_create_review_from_values(
+        &state.store_id,
+        &state.object_type,
+        state.required_copies,
+        &state.writer_group,
+        &state.endpoint_export_mode,
+        state.public,
+        state.writeable,
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2130,9 +2602,11 @@ mod tests {
         admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosures_workspace_api_path, home_dashboard_attention, home_dashboard_metrics,
-        home_workspace_api_path, object_store_card_summaries, objectstores_workspace_api_path,
-        ApiLoadState, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        home_workspace_api_path, object_store_bucket_default, object_store_card_summaries,
+        object_store_create_review_from_values, object_store_creation_fields_ready,
+        objectstores_workspace_api_path, ApiLoadState, WorkspacePage,
+        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{
         AdminJobProgress, AdminJobSummary, EnclosuresPageResponse, HomeDashboardResponse,
@@ -2264,6 +2738,55 @@ mod tests {
         };
 
         assert_eq!(admin_job_progress_text(&job), "512 / 1024 byte(s)");
+    }
+
+    #[test]
+    fn object_store_bucket_default_normalizes_store_name_for_s3() {
+        assert_eq!(
+            object_store_bucket_default("Zymo Fecal 2025.05/raw"),
+            "zymo-fecal-2025-05-raw"
+        );
+        assert_eq!(
+            object_store_bucket_default("...Generated_Data..."),
+            "generated-data"
+        );
+    }
+
+    #[test]
+    fn object_store_creation_requires_identity_group_and_ssd_root() {
+        assert!(object_store_creation_fields_ready(
+            "generated-data",
+            "mnemosyne",
+            "/srv/dasobjectstore/ssd"
+        ));
+        assert!(!object_store_creation_fields_ready(
+            "",
+            "mnemosyne",
+            "/srv/dasobjectstore/ssd"
+        ));
+        assert!(!object_store_creation_fields_ready(
+            "generated-data",
+            "",
+            "/srv/dasobjectstore/ssd"
+        ));
+    }
+
+    #[test]
+    fn object_store_create_review_captures_policy_controls() {
+        let review = object_store_create_review_from_values(
+            "generated-data",
+            "pod5",
+            2,
+            "bioinformatics",
+            "s3_bucket",
+            false,
+            true,
+        );
+
+        assert_eq!(
+            review,
+            "generated-data · type pod5 · 2 copy/copies · writer group bioinformatics · export s3_bucket · private · writeable"
+        );
     }
 
     #[test]
