@@ -1,7 +1,8 @@
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
     AddEnclosureAffordanceResponse, BioinformaticsWorkspaceResponse, DasEnclosureCardResponse,
-    DasEnclosureDetailResponse, GuiActionPlanRequest, GuiActionPlanResponse,
+    DasEnclosureDetailResponse, EnclosurePrepareHddDevice, EnclosurePrepareRequest,
+    EnclosurePrepareResponse,
 };
 use crate::api::{
     EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
@@ -1022,7 +1023,7 @@ struct EnclosureWizardState {
     allow_format: bool,
     confirmation_phrase: String,
     submitting: bool,
-    plan: Option<GuiActionPlanResponse>,
+    job: Option<EnclosurePrepareResponse>,
     error: Option<String>,
 }
 
@@ -1039,7 +1040,7 @@ impl Default for EnclosureWizardState {
             allow_format: false,
             confirmation_phrase: String::new(),
             submitting: false,
-            plan: None,
+            job: None,
             error: None,
         }
     }
@@ -1074,7 +1075,7 @@ fn render_add_enclosure_card(
             let mut next = (*wizard_state).clone();
             next.open = true;
             next.error = None;
-            next.plan = None;
+            next.job = None;
             wizard_state.set(next);
         })
     };
@@ -1146,14 +1147,17 @@ fn render_enclosure_wizard(
     } else {
         state.selected_hdds.clone()
     };
-    let hdd_argument_labels = selected_hdds
+    let selected_hdd_devices = selected_hdds
         .iter()
         .filter_map(|path| {
             candidate
                 .hdd_devices
                 .iter()
                 .find(|device| &device.device_path == path)
-                .map(|device| format!("{}={}", device.disk_id, device.device_path))
+                .map(|device| EnclosurePrepareHddDevice {
+                    disk_id: device.disk_id.clone(),
+                    device_path: device.device_path.clone(),
+                })
         })
         .collect::<Vec<_>>();
     let confirmed = state.allow_format && state.confirmation_phrase.trim() == "confirm prepare das";
@@ -1174,7 +1178,7 @@ fn render_enclosure_wizard(
             let input: HtmlSelectElement = event.target_unchecked_into();
             let mut next = (*wizard_state).clone();
             next.selected_ssd = input.value();
-            next.plan = None;
+            next.job = None;
             wizard_state.set(next);
         })
     };
@@ -1196,7 +1200,7 @@ fn render_enclosure_wizard(
             let input: HtmlInputElement = event.target_unchecked_into();
             let mut next = (*wizard_state).clone();
             next.allow_format = input.checked();
-            next.plan = None;
+            next.job = None;
             wizard_state.set(next);
         })
     };
@@ -1205,45 +1209,47 @@ fn render_enclosure_wizard(
         let api_base_path = api_base_path.clone();
         let selected_ssd = selected_ssd.clone();
         let selected_hdds = selected_hdds.clone();
-        let hdd_argument_labels = hdd_argument_labels.clone();
+        let selected_hdd_devices = selected_hdd_devices.clone();
         Callback::from(move |_| {
             let mut pending = (*wizard_state).clone();
             pending.submitting = true;
             pending.error = None;
-            pending.plan = None;
+            pending.job = None;
             wizard_state.set(pending.clone());
 
             let wizard_state = wizard_state.clone();
             let api_base_path = api_base_path.clone();
             let selected_ssd = selected_ssd.clone();
             let selected_hdds = selected_hdds.clone();
-            let hdd_argument_labels = hdd_argument_labels.clone();
+            let selected_hdd_devices = selected_hdd_devices.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let request = GuiActionPlanRequest {
-                    action: "enclosure_prepare".to_string(),
-                    ssd_device: Some(selected_ssd),
-                    hdd_devices: hdd_argument_labels,
+                let request = EnclosurePrepareRequest {
+                    ssd_device: selected_ssd,
+                    hdd_devices: selected_hdd_devices,
                     mount_root: (!pending.mount_root.trim().is_empty())
                         .then(|| pending.mount_root.clone()),
                     filesystem: (!pending.filesystem.trim().is_empty())
                         .then(|| pending.filesystem.clone()),
                     owner: (!pending.owner.trim().is_empty()).then(|| pending.owner.clone()),
+                    dry_run: false,
+                    client_request_id: None,
                     allow_format: pending.allow_format,
-                    confirmation_phrase: Some(pending.confirmation_phrase.clone()),
+                    confirmation_marker: Some(pending.confirmation_phrase.clone()),
                 };
-                let result = crate::api::plan_gui_action(&api_base_path, &request).await;
+                let selected_ssd = request.ssd_device.clone();
+                let result = crate::api::submit_enclosure_prepare(&api_base_path, &request).await;
                 let mut next = (*wizard_state).clone();
                 next.submitting = false;
                 match result {
-                    Ok(plan) => {
-                        next.selected_ssd = request.ssd_device.unwrap_or_default();
+                    Ok(job) => {
+                        next.selected_ssd = selected_ssd;
                         next.selected_hdds = selected_hdds;
-                        next.plan = Some(plan);
+                        next.job = Some(job);
                         next.error = None;
                     }
                     Err(error) => {
                         next.error = Some(error.message);
-                        next.plan = None;
+                        next.job = None;
                     }
                 }
                 wizard_state.set(next);
@@ -1294,7 +1300,7 @@ fn render_enclosure_wizard(
                                         } else {
                                             next.selected_hdds.retain(|path| path != &device_path);
                                         }
-                                        next.plan = None;
+                                        next.job = None;
                                         wizard_state.set(next);
                                     })}
                                 />
@@ -1340,16 +1346,16 @@ fn render_enclosure_wizard(
             if let Some(error) = &state.error {
                 <div class="dos-auth-error" role="alert">{ error.clone() }</div>
             }
-            if let Some(plan) = &state.plan {
+            if let Some(job) = &state.job {
                 <section class="dos-plan-result">
-                    <span class="dos-card-label">{ "Daemon handoff plan" }</span>
-                    <h3>{ "Preparation plan accepted for review." }</h3>
-                    <p>{ format!("Mutates storage: {} · Confirmation required: {}", plan.mutates_pool, plan.confirmation_required) }</p>
-                    <code>{ plan.argv.join(" ") }</code>
+                    <span class="dos-card-label">{ "Daemon job accepted" }</span>
+                    <h3>{ "Preparation submitted to dasobjectstored." }</h3>
+                    <p>{ format!("Job {} · {} · dry run {}", job.accepted.job_id, job.accepted.kind, job.accepted.dry_run) }</p>
+                    <code>{ format!("{} -> {} HDD device(s)", job.ssd_device, job.hdd_devices.len()) }</code>
                 </section>
             }
             <button class="dos-auth-submit" type="button" disabled={!can_submit} onclick={submit}>
-                { if state.submitting { "Planning..." } else { "Submit preparation plan" } }
+                { if state.submitting { "Submitting..." } else { "Submit preparation job" } }
             </button>
         </section>
     }
@@ -1367,7 +1373,7 @@ where
         let input: HtmlInputElement = event.target_unchecked_into();
         let mut next = (*wizard_state).clone();
         update(&mut next, input.value());
-        next.plan = None;
+        next.job = None;
         wizard_state.set(next);
     })
 }
@@ -1384,7 +1390,7 @@ where
         let input: HtmlSelectElement = event.target_unchecked_into();
         let mut next = (*wizard_state).clone();
         update(&mut next, input.value());
-        next.plan = None;
+        next.job = None;
         wizard_state.set(next);
     })
 }

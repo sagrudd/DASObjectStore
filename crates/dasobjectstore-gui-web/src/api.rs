@@ -1,7 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
 use serde::Deserialize;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use serde::Serialize;
 
 #[cfg(target_arch = "wasm32")]
@@ -69,6 +69,7 @@ pub struct AddEnclosureAffordanceResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct GuiActionPlanResponse {
     pub action: String,
@@ -80,6 +81,7 @@ pub struct GuiActionPlanResponse {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct GuiActionPlanRequest {
     pub action: String,
@@ -90,6 +92,49 @@ pub struct GuiActionPlanRequest {
     pub owner: Option<String>,
     pub allow_format: bool,
     pub confirmation_phrase: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EnclosurePrepareResponse {
+    pub accepted: EnclosurePrepareAcceptedResponse,
+    pub ssd_device: String,
+    pub hdd_devices: Vec<EnclosurePrepareHddDevice>,
+    pub mount_root: String,
+    pub filesystem: String,
+    pub owner: Option<String>,
+    pub administrator_actor: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EnclosurePrepareAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EnclosurePrepareHddDevice {
+    pub disk_id: String,
+    pub device_path: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct EnclosurePrepareRequest {
+    pub ssd_device: String,
+    pub hdd_devices: Vec<EnclosurePrepareHddDevice>,
+    pub mount_root: Option<String>,
+    pub filesystem: Option<String>,
+    pub owner: Option<String>,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub allow_format: bool,
+    pub confirmation_marker: Option<String>,
 }
 
 impl AddEnclosureAffordanceResponse {
@@ -479,12 +524,28 @@ pub async fn get_bioinformatics_workspace(
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)]
 pub async fn plan_gui_action(
     api_base_path: &str,
     request: &GuiActionPlanRequest,
 ) -> Result<GuiActionPlanResponse, ApiError> {
     post_json(
         &format!("{}/actions/plan", api_base_path.trim_end_matches('/')),
+        request,
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn submit_enclosure_prepare(
+    api_base_path: &str,
+    request: &EnclosurePrepareRequest,
+) -> Result<EnclosurePrepareResponse, ApiError> {
+    post_json(
+        &format!(
+            "{}/workspaces/enclosures/prepare",
+            api_base_path.trim_end_matches('/')
+        ),
         request,
     )
     .await
@@ -555,8 +616,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_path, BioinformaticsWorkspaceResponse, EnclosuresPageResponse, GuiActionPlanResponse,
-        HomeDashboardResponse, ObjectStoresPageResponse,
+        auth_path, BioinformaticsWorkspaceResponse, EnclosurePrepareResponse,
+        EnclosuresPageResponse, GuiActionPlanResponse, HomeDashboardResponse,
+        ObjectStoresPageResponse,
     };
 
     #[test]
@@ -739,6 +801,35 @@ mod tests {
         assert_eq!(decoded.action, "enclosure_prepare");
         assert!(decoded.mutates_pool);
         assert_eq!(decoded.argv[2], "prepare-das");
+    }
+
+    #[test]
+    fn decodes_enclosure_prepare_response_subset() {
+        let payload = serde_json::json!({
+            "accepted": {
+                "job_id": "enclosure-prepare-job-1",
+                "kind": "enclosure_preparation",
+                "accepted_at_utc": "2026-07-08T19:50:00Z",
+                "dry_run": false
+            },
+            "ssd_device": "/dev/disk/by-id/nvme-ssd",
+            "hdd_devices": [{
+                "disk_id": "qnap-1057",
+                "device_path": "/dev/disk/by-id/usb-qnap-1057"
+            }],
+            "mount_root": "/srv/dasobjectstore",
+            "filesystem": "ext4",
+            "owner": "stephen",
+            "administrator_actor": "operator",
+            "client_request_id": "prepare-1"
+        });
+
+        let decoded = serde_json::from_value::<EnclosurePrepareResponse>(payload)
+            .expect("prepare response decodes");
+
+        assert_eq!(decoded.accepted.kind, "enclosure_preparation");
+        assert_eq!(decoded.hdd_devices[0].disk_id, "qnap-1057");
+        assert_eq!(decoded.administrator_actor.as_deref(), Some("operator"));
     }
 
     #[test]

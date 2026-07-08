@@ -280,6 +280,15 @@ transport submission, including absolute device paths and duplicate HDD
 rejection, so browser and API callers do not pass raw shell fragments or write
 directly to managed roots.
 
+Standalone Web deployments expose the authenticated submission route at
+``/api/v1/workspaces/enclosures/prepare``. The route requires a valid local Web
+session and a sudo-derived local administrator account before forwarding the
+request to ``dasobjectstored``. Missing sessions, non-admin users, empty HDD
+selections, missing destructive format allowance, and daemon submission errors
+are returned as explicit Web API errors. The browser wizard displays accepted
+daemon job metadata when submission succeeds and shows the daemon error message
+when submission fails.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the

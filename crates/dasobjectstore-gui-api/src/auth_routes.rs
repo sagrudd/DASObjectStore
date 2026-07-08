@@ -17,7 +17,12 @@ use dasobjectstore_daemon::{
     AssignLocalUserToLocalGroupResponse as DaemonAssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest as DaemonCreateLocalGroupRequest,
     CreateLocalGroupResponse as DaemonCreateLocalGroupResponse, DaemonClient,
-    DaemonLocalAdminCommand, DaemonRuntimeConfig, UnixSocketDaemonTransport,
+    DaemonLocalAdminCommand, DaemonRuntimeConfig,
+    PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
+    PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
+    PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
+    PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, UnixSocketDaemonTransport,
+    ENCLOSURE_PREPARE_CONFIRMATION,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -41,7 +46,8 @@ pub fn gui_api_router_for_host_mode(
     match host_mode {
         GuiApiHostMode::Standalone => crate::gui_api_router()
             .merge(standalone_auth_router(auth_store.clone()))
-            .merge(standalone_users_groups_router(auth_store)),
+            .merge(standalone_users_groups_router(auth_store.clone()))
+            .merge(standalone_enclosure_admin_router(auth_store)),
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
 }
@@ -81,12 +87,49 @@ fn standalone_users_groups_router_with_state(state: StandaloneUsersGroupsRouteSt
         .with_state(state)
 }
 
+pub fn standalone_enclosure_admin_router(auth_store: LocalAuthStore) -> Router {
+    standalone_enclosure_admin_router_with_state(StandaloneEnclosureAdminRouteState::system(
+        auth_store,
+    ))
+}
+
+fn standalone_enclosure_admin_router_with_state(
+    state: StandaloneEnclosureAdminRouteState,
+) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/workspaces/enclosures/prepare",
+            post(prepare_enclosure),
+        )
+        .layer(Extension(state.auth_store.clone()))
+        .with_state(state)
+}
+
 #[derive(Clone)]
 struct StandaloneUsersGroupsRouteState {
     auth_store: LocalAuthStore,
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
     local_group_admin_client: Option<Arc<dyn StandaloneLocalGroupAdminClient>>,
     groups_registry_path: PathBuf,
+}
+
+#[derive(Clone)]
+struct StandaloneEnclosureAdminRouteState {
+    auth_store: LocalAuthStore,
+    local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
+    enclosure_admin_client: Option<Arc<dyn StandaloneEnclosureAdminClient>>,
+}
+
+impl StandaloneEnclosureAdminRouteState {
+    fn system(auth_store: LocalAuthStore) -> Self {
+        Self {
+            auth_store,
+            local_user_provider: Arc::new(SystemLocalUserAuthorityProvider),
+            enclosure_admin_client: Some(Arc::new(
+                DaemonStandaloneEnclosureAdminClient::default_packaged(),
+            )),
+        }
+    }
 }
 
 impl StandaloneUsersGroupsRouteState {
@@ -155,6 +198,13 @@ trait StandaloneLocalGroupAdminClient: Send + Sync {
     ) -> Result<StandaloneLocalGroupAdminResponse, StandaloneLocalGroupAdminClientError>;
 }
 
+trait StandaloneEnclosureAdminClient: Send + Sync {
+    fn submit_prepare_enclosure(
+        &self,
+        request: StandaloneEnclosurePrepareDaemonRequest,
+    ) -> Result<StandaloneEnclosurePrepareResponse, StandaloneEnclosureAdminClientError>;
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RegisterRequest {
     pub username: String,
@@ -209,6 +259,28 @@ pub struct AssignLocalUserToGroupRequest {
     pub client_request_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PrepareEnclosureRequest {
+    pub ssd_device: String,
+    #[serde(default)]
+    pub hdd_devices: Vec<PrepareEnclosureHddDeviceRequest>,
+    pub mount_root: Option<String>,
+    pub filesystem: Option<String>,
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    #[serde(default)]
+    pub allow_format: bool,
+    pub confirmation_marker: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PrepareEnclosureHddDeviceRequest {
+    pub disk_id: String,
+    pub device_path: String,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StandaloneLocalGroupOperation {
@@ -233,6 +305,26 @@ pub struct StandaloneLocalGroupAdminAcceptedResponse {
     pub dry_run: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEnclosurePrepareResponse {
+    pub accepted: StandaloneEnclosurePrepareAcceptedResponse,
+    pub ssd_device: String,
+    pub hdd_devices: Vec<PrepareEnclosureHddDeviceRequest>,
+    pub mount_root: String,
+    pub filesystem: String,
+    pub owner: Option<String>,
+    pub administrator_actor: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEnclosurePrepareAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct StandaloneLocalGroupAdminDaemonRequest {
     operation: StandaloneLocalGroupOperation,
@@ -245,7 +337,26 @@ struct StandaloneLocalGroupAdminDaemonRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct StandaloneEnclosurePrepareDaemonRequest {
+    ssd_device: String,
+    hdd_devices: Vec<PrepareEnclosureHddDeviceRequest>,
+    mount_root: String,
+    filesystem: DaemonPrepareEnclosureFilesystem,
+    owner: Option<String>,
+    dry_run: bool,
+    client_request_id: Option<String>,
+    administrator_actor: Option<String>,
+    allow_format: bool,
+    confirmation_marker: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct StandaloneLocalGroupAdminClientError {
+    message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StandaloneEnclosureAdminClientError {
     message: String,
 }
 
@@ -297,6 +408,50 @@ impl StandaloneLocalGroupAdminClient for DaemonStandaloneLocalGroupAdminClient {
                 .map(assign_local_user_to_group_response_from_daemon)
                 .map_err(standalone_admin_client_error),
         }
+    }
+}
+
+struct DaemonStandaloneEnclosureAdminClient {
+    client: DaemonClient<UnixSocketDaemonTransport>,
+}
+
+impl DaemonStandaloneEnclosureAdminClient {
+    fn default_packaged() -> Self {
+        Self {
+            client: DaemonClient::new(UnixSocketDaemonTransport::new(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            )),
+        }
+    }
+}
+
+impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
+    fn submit_prepare_enclosure(
+        &self,
+        request: StandaloneEnclosurePrepareDaemonRequest,
+    ) -> Result<StandaloneEnclosurePrepareResponse, StandaloneEnclosureAdminClientError> {
+        self.client
+            .prepare_enclosure(DaemonPrepareEnclosureRequest {
+                ssd_device: request.ssd_device.into(),
+                hdd_devices: request
+                    .hdd_devices
+                    .into_iter()
+                    .map(|device| DaemonPrepareEnclosureHddDevice {
+                        disk_id: device.disk_id,
+                        device_path: device.device_path.into(),
+                    })
+                    .collect(),
+                mount_root: request.mount_root.into(),
+                filesystem: request.filesystem,
+                owner: request.owner,
+                dry_run: request.dry_run,
+                client_request_id: request.client_request_id,
+                administrator_actor: request.administrator_actor,
+                allow_format: request.allow_format,
+                confirmation_marker: request.confirmation_marker,
+            })
+            .map(enclosure_prepare_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
     }
 }
 
@@ -387,7 +542,7 @@ async fn create_local_group(
     Json(request): Json<CreateLocalGroupRequest>,
 ) -> Result<Json<StandaloneLocalGroupAdminResponse>, (StatusCode, Json<AuthRouteError>)> {
     let mut request = validate_create_local_group_request(request)?;
-    let current_user = require_local_administrator(&state, &actor)?;
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
     submit_local_group_admin_request(&state, request).map(Json)
 }
@@ -398,9 +553,20 @@ async fn assign_local_user_to_group(
     Json(request): Json<AssignLocalUserToGroupRequest>,
 ) -> Result<Json<StandaloneLocalGroupAdminResponse>, (StatusCode, Json<AuthRouteError>)> {
     let mut request = validate_assign_local_user_to_group_request(request)?;
-    let current_user = require_local_administrator(&state, &actor)?;
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
     submit_local_group_admin_request(&state, request).map(Json)
+}
+
+async fn prepare_enclosure(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<PrepareEnclosureRequest>,
+) -> Result<Json<StandaloneEnclosurePrepareResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let mut request = validate_prepare_enclosure_request(request)?;
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    request.administrator_actor = Some(current_user.username);
+    submit_prepare_enclosure_request(&state, request).map(Json)
 }
 
 fn validate_create_local_group_request(
@@ -442,8 +608,58 @@ fn validate_assign_local_user_to_group_request(
     })
 }
 
+fn validate_prepare_enclosure_request(
+    request: PrepareEnclosureRequest,
+) -> Result<StandaloneEnclosurePrepareDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
+    let ssd_device = required_field("ssd_device", request.ssd_device)?;
+    let mount_root = request
+        .mount_root
+        .map(|value| required_field("mount_root", value))
+        .transpose()?
+        .unwrap_or_else(|| "/srv/dasobjectstore".to_string());
+    let filesystem = parse_prepare_enclosure_filesystem(request.filesystem.as_deref())?;
+    validate_client_request_id(request.client_request_id.as_deref())?;
+    let owner = request
+        .owner
+        .map(|value| required_field("owner", value))
+        .transpose()?;
+    let confirmation_marker = validate_prepare_enclosure_confirmation_marker(
+        request.dry_run,
+        request.allow_format,
+        request.confirmation_marker.as_deref(),
+    )?;
+
+    let mut hdd_devices = Vec::new();
+    for hdd_device in request.hdd_devices {
+        hdd_devices.push(PrepareEnclosureHddDeviceRequest {
+            disk_id: required_field("hdd_devices.disk_id", hdd_device.disk_id)?,
+            device_path: required_field("hdd_devices.device_path", hdd_device.device_path)?,
+        });
+    }
+    if hdd_devices.is_empty() {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_das",
+            "at least one eligible HDD device is required before enclosure preparation can be submitted",
+        ));
+    }
+
+    Ok(StandaloneEnclosurePrepareDaemonRequest {
+        ssd_device,
+        hdd_devices,
+        mount_root,
+        filesystem,
+        owner,
+        dry_run: request.dry_run,
+        client_request_id: request.client_request_id,
+        administrator_actor: None,
+        allow_format: request.allow_format,
+        confirmation_marker,
+    })
+}
+
 fn require_local_administrator(
-    state: &StandaloneUsersGroupsRouteState,
+    local_user_provider: &dyn LocalUserAuthorityProvider,
     actor: &AuthenticatedGuiActor,
 ) -> Result<crate::LocalUserMetadata, (StatusCode, Json<AuthRouteError>)> {
     if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
@@ -454,16 +670,13 @@ fn require_local_administrator(
         ));
     }
 
-    let current_user = state
-        .local_user_provider
-        .current_local_user()
-        .map_err(|err| {
-            route_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "local_user_discovery_failed",
-                err.to_string(),
-            )
-        })?;
+    let current_user = local_user_provider.current_local_user().map_err(|err| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "local_user_discovery_failed",
+            err.to_string(),
+        )
+    })?;
 
     if !current_user.sudo_administrator {
         return Err(route_error(
@@ -491,6 +704,27 @@ fn submit_local_group_admin_request(
     client
         .submit_local_group_operation(request)
         .map_err(|err| route_error(StatusCode::BAD_GATEWAY, "daemon_client_error", err.message))
+}
+
+fn submit_prepare_enclosure_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: StandaloneEnclosurePrepareDaemonRequest,
+) -> Result<StandaloneEnclosurePrepareResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_enclosure_admin_unavailable",
+            "daemon enclosure preparation contract is not available",
+        )
+    })?;
+
+    client.submit_prepare_enclosure(request).map_err(|err| {
+        route_error(
+            StatusCode::BAD_GATEWAY,
+            "daemon_enclosure_prepare_failed",
+            err.message,
+        )
+    })
 }
 
 fn required_field(
@@ -545,6 +779,49 @@ fn validate_confirmation_marker(
     ))
 }
 
+fn validate_prepare_enclosure_confirmation_marker(
+    dry_run: bool,
+    allow_format: bool,
+    confirmation_marker: Option<&str>,
+) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
+    let confirmation_marker = confirmation_marker
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if dry_run && confirmation_marker.is_none() {
+        return Ok(ENCLOSURE_PREPARE_CONFIRMATION.to_string());
+    }
+    if !allow_format {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "format_allowance_required",
+            "allow_format must be true before enclosure preparation can be submitted",
+        ));
+    }
+    if confirmation_marker == Some(ENCLOSURE_PREPARE_CONFIRMATION) {
+        return Ok(ENCLOSURE_PREPARE_CONFIRMATION.to_string());
+    }
+
+    Err(route_error(
+        StatusCode::BAD_REQUEST,
+        "confirmation_required",
+        format!("confirmation_marker must be `{ENCLOSURE_PREPARE_CONFIRMATION}`"),
+    ))
+}
+
+fn parse_prepare_enclosure_filesystem(
+    value: Option<&str>,
+) -> Result<DaemonPrepareEnclosureFilesystem, (StatusCode, Json<AuthRouteError>)> {
+    match value.unwrap_or("ext4").trim().to_ascii_lowercase().as_str() {
+        "ext4" => Ok(DaemonPrepareEnclosureFilesystem::Ext4),
+        "xfs" => Ok(DaemonPrepareEnclosureFilesystem::Xfs),
+        other => Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("filesystem must be ext4 or xfs: {other}"),
+        )),
+    }
+}
+
 fn create_local_group_response_from_daemon(
     response: DaemonCreateLocalGroupResponse,
 ) -> StandaloneLocalGroupAdminResponse {
@@ -571,6 +848,33 @@ fn assign_local_user_to_group_response_from_daemon(
     }
 }
 
+fn enclosure_prepare_response_from_daemon(
+    response: DaemonPrepareEnclosureResponse,
+) -> StandaloneEnclosurePrepareResponse {
+    StandaloneEnclosurePrepareResponse {
+        accepted: StandaloneEnclosurePrepareAcceptedResponse {
+            job_id: response.accepted.job_id.to_string(),
+            kind: "enclosure_preparation".to_string(),
+            accepted_at_utc: response.accepted.accepted_at_utc,
+            dry_run: response.accepted.dry_run,
+        },
+        ssd_device: response.ssd_device.display().to_string(),
+        hdd_devices: response
+            .hdd_devices
+            .into_iter()
+            .map(|device| PrepareEnclosureHddDeviceRequest {
+                disk_id: device.disk_id,
+                device_path: device.device_path.display().to_string(),
+            })
+            .collect(),
+        mount_root: response.mount_root.display().to_string(),
+        filesystem: response.filesystem.to_string(),
+        owner: response.owner,
+        administrator_actor: response.administrator_actor,
+        client_request_id: None,
+    }
+}
+
 fn standalone_accepted_response_from_daemon(
     accepted: dasobjectstore_daemon::DaemonLocalAdminAcceptedResponse,
 ) -> StandaloneLocalGroupAdminAcceptedResponse {
@@ -593,6 +897,14 @@ fn standalone_admin_client_error(
     err: dasobjectstore_daemon::DaemonClientError,
 ) -> StandaloneLocalGroupAdminClientError {
     StandaloneLocalGroupAdminClientError {
+        message: err.to_string(),
+    }
+}
+
+fn standalone_enclosure_admin_client_error(
+    err: dasobjectstore_daemon::DaemonClientError,
+) -> StandaloneEnclosureAdminClientError {
+    StandaloneEnclosureAdminClientError {
         message: err.to_string(),
     }
 }
@@ -664,14 +976,18 @@ fn route_error(
 mod tests {
     use super::{
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
-        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
-        CreateLocalGroupRequest, GuiApiHostMode, LocalPasswordAuthenticator,
-        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, RegisterRequest,
-        SessionCheckRequest, StandaloneAuthRouteState, StandaloneLocalGroupAdminAcceptedResponse,
+        standalone_enclosure_admin_router_with_state, standalone_users_groups_router_with_state,
+        AssignLocalUserToGroupRequest, CreateLocalGroupRequest, GuiApiHostMode,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        SessionCheckRequest, StandaloneAuthRouteState, StandaloneEnclosureAdminClient,
+        StandaloneEnclosureAdminClientError, StandaloneEnclosureAdminRouteState,
+        StandaloneEnclosurePrepareAcceptedResponse, StandaloneEnclosurePrepareDaemonRequest,
+        StandaloneEnclosurePrepareResponse, StandaloneLocalGroupAdminAcceptedResponse,
         StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
         StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
         StandaloneLocalGroupOperation, StandaloneUsersGroupsRouteState,
-        LOCAL_ADMIN_CONFIRMATION_MARKER,
+        ENCLOSURE_PREPARE_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -1196,6 +1512,194 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_enclosure_requires_session() {
+        let root = temp_root("prepare-enclosure-auth");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+
+        let response = post_json_response(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            &prepare_enclosure_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn prepare_enclosure_rejects_non_admin_os_user() {
+        let root = temp_root("prepare-enclosure-non-admin");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["users"]),
+            Some(recording_enclosure_client()),
+        ));
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &prepare_enclosure_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn prepare_enclosure_rejects_unsupported_empty_hdd_set() {
+        let root = temp_root("prepare-enclosure-no-hdd");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = PrepareEnclosureRequest {
+            hdd_devices: Vec::new(),
+            ..prepare_enclosure_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "unsupported_das");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn prepare_enclosure_requires_format_allowance_and_confirmation() {
+        let root = temp_root("prepare-enclosure-confirm");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = PrepareEnclosureRequest {
+            allow_format: false,
+            confirmation_marker: None,
+            ..prepare_enclosure_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "format_allowance_required");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn prepare_enclosure_forwards_confirmed_request_to_daemon_client() {
+        let root = temp_root("prepare-enclosure-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["wheel"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneEnclosurePrepareResponse>(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &prepare_enclosure_request(),
+        )
+        .await;
+
+        assert_eq!(response.accepted.job_id, "enclosure-prepare-job-1");
+        assert_eq!(response.accepted.kind, "enclosure_preparation");
+        assert_eq!(response.hdd_devices.len(), 1);
+        assert_eq!(
+            client.requests(),
+            vec![StandaloneEnclosurePrepareDaemonRequest {
+                ssd_device: "/dev/disk/by-id/nvme-ssd".to_string(),
+                hdd_devices: vec![PrepareEnclosureHddDeviceRequest {
+                    disk_id: "qnap-1057".to_string(),
+                    device_path: "/dev/disk/by-id/usb-qnap-1057".to_string(),
+                }],
+                mount_root: "/srv/dasobjectstore".to_string(),
+                filesystem: dasobjectstore_daemon::PrepareEnclosureFilesystem::Ext4,
+                owner: Some("stephen".to_string()),
+                dry_run: false,
+                client_request_id: Some("prepare-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                allow_format: true,
+                confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn prepare_enclosure_surfaces_daemon_failure() {
+        let root = temp_root("prepare-enclosure-daemon-failure");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client_with_failure("daemon refused preparation");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client),
+        ));
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &prepare_enclosure_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "daemon_enclosure_prepare_failed");
+        assert!(encoded["message"]
+            .as_str()
+            .expect("message")
+            .contains("daemon refused preparation"));
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn synoptikon_integrated_host_mode_omits_local_auth_routes() {
         let root = temp_root("integrated-host-mode");
         let auth_store = LocalAuthStore::new(&root);
@@ -1339,6 +1843,13 @@ mod tests {
         .expect("request completes")
     }
 
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        serde_json::from_slice(&bytes).expect("response decodes")
+    }
+
     fn test_users_groups_state(
         auth_store: LocalAuthStore,
         current_user: LocalUserMetadata,
@@ -1364,6 +1875,19 @@ mod tests {
             local_group_admin_client: local_group_admin_client
                 .map(|client| client as Arc<dyn StandaloneLocalGroupAdminClient>),
             groups_registry_path,
+        }
+    }
+
+    fn test_enclosure_admin_state(
+        auth_store: LocalAuthStore,
+        current_user: LocalUserMetadata,
+        enclosure_admin_client: Option<Arc<RecordingEnclosureClient>>,
+    ) -> StandaloneEnclosureAdminRouteState {
+        StandaloneEnclosureAdminRouteState {
+            auth_store,
+            local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
+            enclosure_admin_client: enclosure_admin_client
+                .map(|client| client as Arc<dyn StandaloneEnclosureAdminClient>),
         }
     }
 
@@ -1473,6 +1997,79 @@ mod tests {
 
     fn recording_admin_client() -> Arc<RecordingAdminClient> {
         Arc::new(RecordingAdminClient::default())
+    }
+
+    #[derive(Default)]
+    struct RecordingEnclosureClient {
+        requests: Mutex<Vec<StandaloneEnclosurePrepareDaemonRequest>>,
+        fail_message: Option<String>,
+    }
+
+    impl RecordingEnclosureClient {
+        fn requests(&self) -> Vec<StandaloneEnclosurePrepareDaemonRequest> {
+            self.requests.lock().expect("requests lock").clone()
+        }
+    }
+
+    impl StandaloneEnclosureAdminClient for RecordingEnclosureClient {
+        fn submit_prepare_enclosure(
+            &self,
+            request: StandaloneEnclosurePrepareDaemonRequest,
+        ) -> Result<StandaloneEnclosurePrepareResponse, StandaloneEnclosureAdminClientError>
+        {
+            if let Some(message) = &self.fail_message {
+                return Err(StandaloneEnclosureAdminClientError {
+                    message: message.clone(),
+                });
+            }
+            self.requests
+                .lock()
+                .expect("requests lock")
+                .push(request.clone());
+            Ok(StandaloneEnclosurePrepareResponse {
+                accepted: StandaloneEnclosurePrepareAcceptedResponse {
+                    job_id: "enclosure-prepare-job-1".to_string(),
+                    kind: "enclosure_preparation".to_string(),
+                    accepted_at_utc: "2026-07-08T19:50:00Z".to_string(),
+                    dry_run: request.dry_run,
+                },
+                ssd_device: request.ssd_device,
+                hdd_devices: request.hdd_devices,
+                mount_root: request.mount_root,
+                filesystem: request.filesystem.to_string(),
+                owner: request.owner,
+                administrator_actor: request.administrator_actor,
+                client_request_id: request.client_request_id,
+            })
+        }
+    }
+
+    fn recording_enclosure_client() -> Arc<RecordingEnclosureClient> {
+        Arc::new(RecordingEnclosureClient::default())
+    }
+
+    fn recording_enclosure_client_with_failure(message: &str) -> Arc<RecordingEnclosureClient> {
+        Arc::new(RecordingEnclosureClient {
+            requests: Mutex::new(Vec::new()),
+            fail_message: Some(message.to_string()),
+        })
+    }
+
+    fn prepare_enclosure_request() -> PrepareEnclosureRequest {
+        PrepareEnclosureRequest {
+            ssd_device: "/dev/disk/by-id/nvme-ssd".to_string(),
+            hdd_devices: vec![PrepareEnclosureHddDeviceRequest {
+                disk_id: "qnap-1057".to_string(),
+                device_path: "/dev/disk/by-id/usb-qnap-1057".to_string(),
+            }],
+            mount_root: Some("/srv/dasobjectstore".to_string()),
+            filesystem: Some("ext4".to_string()),
+            owner: Some("stephen".to_string()),
+            dry_run: false,
+            client_request_id: Some("prepare-1".to_string()),
+            allow_format: true,
+            confirmation_marker: Some(ENCLOSURE_PREPARE_CONFIRMATION.to_string()),
+        }
     }
 
     fn registered_auth_store(root: &Path) -> LocalAuthStore {

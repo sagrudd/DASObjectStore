@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.32.0 - 2026-07-08
+
+- Add authenticated standalone Web submission for Enclosures preparation at
+  ``/api/v1/workspaces/enclosures/prepare``, gated by local session and
+  sudo-derived administrator authority.
+- Wire the Enclosures preparation wizard to submit confirmed daemon jobs and
+  display accepted job metadata or clear daemon failure messages.
+- Add Web risk-gate coverage for missing sessions, non-admin users, unsupported
+  empty HDD selections, missing destructive format allowance, daemon submission
+  failures, and successful daemon-client forwarding.
+
 ## 0.31.0 - 2026-07-08
 
 - Add transport-neutral daemon DTOs for Web-submitted enclosure preparation,

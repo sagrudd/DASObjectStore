@@ -580,12 +580,22 @@ older checklist claims.
     confirmation phrase validation.
   - [ ] Submit the confirmed plan as a daemon preparation job and render
     daemon job progress, result, failure, cancellation, and retry state.
+    - [x] Add authenticated standalone Web submission to the daemon
+      ``prepare_enclosure`` client boundary and render accepted job/failure
+      state in the Enclosures wizard.
+    - [ ] Render live daemon job progress, cancellation, retry, and completed
+      result state once persistent administrator job status is available.
 - [x] Add API request/response DTOs and daemon client methods for Web-submitted
   enclosure preparation so the browser never mutates devices or managed roots
   directly.
 - [ ] Add risk-gate tests for enclosure preparation: non-admin denied,
   unsupported DAS denied, existing data requires explicit confirmation, daemon
   job failure shown clearly, and cancellation/retry state preserved.
+  - [x] Cover missing session, non-admin, unsupported empty HDD set, missing
+    destructive format allowance, daemon failure, and successful daemon-client
+    forwarding on the standalone Web submission route.
+  - [ ] Cover existing-data preflight and cancellation/retry preservation when
+    the daemon preparation runtime exposes those states.
 - [ ] Implement ObjectStore creation form controls for store name, writer group,
   enclosure, object type, redundancy, public/writeable state, store class,
   capacity behavior, retention, and S3/export mode.

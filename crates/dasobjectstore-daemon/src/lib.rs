@@ -35,8 +35,10 @@ pub use api::{
     DaemonSourceReadBackpressureInput, DaemonSourceReadBackpressurePolicy,
     DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy,
     DaemonSourceToSsdQueueUsage, DaemonSsdPressure, IngestJobStatusRequest,
-    IngestJobStatusResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    IngestJobStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+    PrepareEnclosureRequest, PrepareEnclosureResponse, PrepareEnclosureValidationError,
+    StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
 };
 pub use auth::{
     authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,
