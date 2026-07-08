@@ -119,4 +119,7 @@ require_text "$build_remote_rpm" '/usr/bin/dasobjectstore-remote'
 require_text "$build_remote_rpm" 'Recommends:      awscli'
 
 require_text "$prepare_web_dist" "trunk build --release"
+require_text "$prepare_web_dist" "wasm32-unknown-unknown"
+require_text "$prepare_web_dist" "*.wasm"
+require_text "$prepare_web_dist" "--allow-fallback"
 require_text "$prepare_web_dist" "target/web-fallback/dist"

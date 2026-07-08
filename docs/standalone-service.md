@@ -115,9 +115,19 @@ make web
 ```
 
 `make deb` and `make rpm` depend on `make web`, and the package scripts also
-prepare the assets defensively when called directly. If an existing Trunk
-`dist/` directory is present it is reused; otherwise the package build runs
-`trunk build --release` when Trunk is available.
+prepare the assets defensively when called directly. Production package builds
+always run `trunk build --release` and validate that the resulting `dist/`
+contains the WebAssembly and JavaScript bundles for the operator interface.
+Install the required build tools before packaging:
+
+```text
+rustup target add wasm32-unknown-unknown
+cargo install trunk
+```
+
+The developer fallback page is available only through the explicit
+`packaging/web/prepare-web-dist.sh --allow-fallback` escape hatch and must not
+be used for `make deb` or `make rpm` artifacts.
 
 ## TLS Assets
 

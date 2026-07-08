@@ -23,6 +23,23 @@ The default packaged bind address is ``0.0.0.0`` so the Web UI is reachable from
 other hosts on the appliance network. Local development without the package may
 still use the compiled fallback of ``127.0.0.1``.
 
+Package Builds
+--------------
+
+``make deb`` and ``make rpm`` must include the full Trunk-built WebAssembly
+operator interface. A package build should fail if the Trunk toolchain or
+``wasm32-unknown-unknown`` Rust target is missing; it must not silently install
+the developer placeholder page. Prepare a packaging host with:
+
+.. code-block:: console
+
+   rustup target add wasm32-unknown-unknown
+   cargo install trunk
+
+If the Web page says to install the Trunk WebAssembly toolchain, the installed
+package contains the developer fallback page and should be rebuilt from a
+toolchain-complete checkout.
+
 The packaged standalone configuration also declares the authentication
 authority. The DAS appliance default is local user authentication:
 

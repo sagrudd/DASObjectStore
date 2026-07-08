@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.4 - 2026-07-08
+
+- Make packaged Web UI asset preparation fail loudly when Trunk or the
+  `wasm32-unknown-unknown` target is missing instead of silently installing the
+  developer placeholder page.
+- Force `make web`, `make deb`, and `make rpm` to build and validate real
+  WebAssembly, JavaScript, and HTML assets for the operator interface.
+- Keep the placeholder Web page behind an explicit
+  `prepare-web-dist.sh --allow-fallback` developer escape hatch only.
+
 ## 0.10.3 - 2026-07-08
 
 - Move performance-test SSD file settlement onto a bounded background

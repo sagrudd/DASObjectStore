@@ -4,19 +4,62 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/dasobjectstore-gui-web"
 dist="$web_root/dist"
+allow_fallback=0
 
-if [[ -f "$dist/index.html" ]]; then
+if [[ "${1:-}" == "--allow-fallback" ]]; then
+  allow_fallback=1
+fi
+
+build_web_dist() {
+  if ! command -v trunk >/dev/null 2>&1; then
+    cat >&2 <<'ERROR'
+trunk is required to package the DASObjectStore web interface.
+Install it with: cargo install trunk
+ERROR
+    return 1
+  fi
+
+  if ! rustup target list --installed 2>/dev/null | grep -qx 'wasm32-unknown-unknown'; then
+    cat >&2 <<'ERROR'
+The wasm32-unknown-unknown Rust target is required to package the DASObjectStore web interface.
+Install it with: rustup target add wasm32-unknown-unknown
+ERROR
+    return 1
+  fi
+
+  rm -rf "$dist"
+  (
+    cd "$web_root"
+    env -u NO_COLOR trunk build --release
+  )
+}
+
+validate_web_dist() {
+  if [[ ! -f "$dist/index.html" ]]; then
+    printf 'DASObjectStore web build did not produce %s\n' "$dist/index.html" >&2
+    return 1
+  fi
+  if ! find "$dist" -maxdepth 1 -type f -name '*.wasm' | grep -q .; then
+    printf 'DASObjectStore web build did not produce a WebAssembly bundle in %s\n' "$dist" >&2
+    return 1
+  fi
+  if ! find "$dist" -maxdepth 1 -type f -name '*.js' | grep -q .; then
+    printf 'DASObjectStore web build did not produce a JavaScript bundle in %s\n' "$dist" >&2
+    return 1
+  fi
+  if grep -q 'Install the Trunk WebAssembly toolchain before packaging' "$dist/index.html"; then
+    printf 'DASObjectStore web dist contains the developer fallback page, not the operator interface\n' >&2
+    return 1
+  fi
+}
+
+if build_web_dist && validate_web_dist; then
   printf '%s\n' "$dist"
   exit 0
 fi
 
-if command -v trunk >/dev/null 2>&1; then
-  (
-    cd "$web_root"
-    trunk build --release
-  )
-  printf '%s\n' "$dist"
-  exit 0
+if [[ "$allow_fallback" != "1" ]]; then
+  exit 1
 fi
 
 fallback="$repo_root/target/web-fallback/dist"
