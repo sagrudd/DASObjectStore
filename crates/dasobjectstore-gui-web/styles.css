@@ -726,6 +726,62 @@ h2 {
   font-size: 0.76rem;
 }
 
+.dos-job-progress {
+  display: grid;
+  gap: 8px;
+}
+
+.dos-job-progress p,
+.dos-job-message {
+  margin: 0;
+  color: #41515a;
+  font-size: 0.82rem;
+}
+
+.dos-job-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #d9e8df;
+}
+
+.dos-job-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #0d5360;
+}
+
+.dos-job-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  color: #4d5b64;
+  font-size: 0.78rem;
+}
+
+.dos-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dos-job-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #bdd1d7;
+  border-radius: 6px;
+  color: #0d5360;
+  background: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+.dos-job-actions button:disabled {
+  color: #7a858c;
+  background: #edf2f3;
+}
+
 .dos-placeholder-card {
   max-width: 720px;
   min-height: 180px;

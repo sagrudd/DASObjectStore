@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.35.0 - 2026-07-08
+
+- Render live daemon administrator job status in the Enclosures preparation
+  wizard after a confirmed enclosure-preparation submission.
+- Add Web wizard controls for manual status refresh, cancellation requests, and
+  retry reset while preserving selected enclosure media.
+- Add progress-state helpers and regression tests for daemon job terminal
+  states, percentage display, and byte/unit progress text.
+
 ## 0.34.0 - 2026-07-08
 
 - Add a daemon-owned file-backed administrator job registry under the daemon

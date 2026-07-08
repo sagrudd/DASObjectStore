@@ -14,6 +14,7 @@ serde_json.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-net.workspace = true
+gloo-timers.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["HtmlInputElement", "HtmlSelectElement", "Storage", "Window"] }
 yew.workspace = true

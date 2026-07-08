@@ -589,7 +589,7 @@ older checklist claims.
     - [x] Add a daemon-owned persistent administrator job registry so accepted
       admin jobs can be queried after submission and cancellation requests have
       stable terminal-state semantics.
-    - [ ] Render live daemon job progress, cancellation, retry, and completed
+    - [x] Render live daemon job progress, cancellation, retry, and completed
       result state in the Enclosures wizard using the persistent administrator
       job status route.
 - [x] Add API request/response DTOs and daemon client methods for Web-submitted

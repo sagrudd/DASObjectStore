@@ -262,14 +262,9 @@ media and HDD settlement media, records mount-root, filesystem, and optional
 owner inputs, and shows a destructive data-loss review before any plan is
 accepted. The administrator must explicitly allow formatting and type the
 confirmation phrase ``confirm prepare das``. The Web API validates these same
-fields server-side and returns a planned daemon command for review; callers
-cannot receive an enclosure-preparation plan without SSD media, at least one
-HDD, format allowance, and the confirmation phrase.
-
-This Web workflow currently stops at the daemon-owned action-plan boundary. It
-does not format devices directly from the browser. The next administrator
-workflow slice will submit the confirmed plan as a daemon preparation job and
-render job progress, failure, cancellation, and retry state in the Web console.
+fields server-side before forwarding the confirmed request to the daemon;
+callers cannot submit an enclosure-preparation job without SSD media, at least
+one HDD, format allowance, and the confirmation phrase.
 
 The daemon API now exposes a typed enclosure-preparation request and response
 contract for that handoff. The request includes SSD media, HDD media, mount
@@ -287,7 +282,12 @@ request to ``dasobjectstored``. Missing sessions, non-admin users, empty HDD
 selections, missing destructive format allowance, and daemon submission errors
 are returned as explicit Web API errors. The browser wizard displays accepted
 daemon job metadata when submission succeeds and shows the daemon error message
-when submission fails.
+when submission fails. After submission, the wizard polls the daemon-owned job
+status route and renders the latest state, stage, byte or unit progress,
+daemon message, failure text, submitted and updated timestamps, and cancellation
+result. Operators can refresh status manually, request cancellation with a
+recorded reason, or reset the wizard for another attempt after terminal
+completion, failure, cancellation, or a status-refresh error.
 
 Administrator jobs accepted by the daemon are also exposed through the
 standalone Web API at ``/api/v1/workspaces/admin/jobs/<job_id>``. This status

@@ -1,13 +1,18 @@
+#[cfg(test)]
+use crate::api::AdminJobSummary;
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
-    AddEnclosureAffordanceResponse, BioinformaticsWorkspaceResponse, DasEnclosureCardResponse,
-    DasEnclosureDetailResponse, EnclosurePrepareHddDevice, EnclosurePrepareRequest,
-    EnclosurePrepareResponse,
+    AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
+    AdminJobStatusResponse, AdminJobSummary, BioinformaticsWorkspaceResponse,
+    DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosurePrepareHddDevice,
+    EnclosurePrepareRequest, EnclosurePrepareResponse,
 };
 use crate::api::{
     EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
     ObjectStoresPageResponse,
 };
+#[cfg(target_arch = "wasm32")]
+use gloo_timers::callback::Timeout;
 
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
@@ -1024,6 +1029,12 @@ struct EnclosureWizardState {
     confirmation_phrase: String,
     submitting: bool,
     job: Option<EnclosurePrepareResponse>,
+    job_status: Option<AdminJobStatusResponse>,
+    job_polling: bool,
+    job_status_error: Option<String>,
+    cancelling: bool,
+    cancellation: Option<AdminJobCancelResponse>,
+    cancel_error: Option<String>,
     error: Option<String>,
 }
 
@@ -1041,9 +1052,105 @@ impl Default for EnclosureWizardState {
             confirmation_phrase: String::new(),
             submitting: false,
             job: None,
+            job_status: None,
+            job_polling: false,
+            job_status_error: None,
+            cancelling: false,
+            cancellation: None,
+            cancel_error: None,
             error: None,
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_enclosure_job_monitor(state: &mut EnclosureWizardState) {
+    state.job = None;
+    state.job_status = None;
+    state.job_polling = false;
+    state.job_status_error = None;
+    state.cancelling = false;
+    state.cancellation = None;
+    state.cancel_error = None;
+    state.error = None;
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn admin_job_state_is_terminal(state: &str) -> bool {
+    matches!(state, "complete" | "failed" | "cancelled")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn admin_job_percent(job: &AdminJobSummary) -> Option<u8> {
+    job.percent_complete.or_else(|| {
+        (job.progress.work_units_total > 0).then(|| {
+            ((job.progress.work_units_done.saturating_mul(100) / job.progress.work_units_total)
+                .min(100)) as u8
+        })
+    })
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn admin_job_progress_text(job: &AdminJobSummary) -> String {
+    if job.progress.work_bytes_total > 0 {
+        return format!(
+            "{} / {} byte(s)",
+            job.progress.work_bytes_done, job.progress.work_bytes_total
+        );
+    }
+    if job.progress.work_units_total > 0 {
+        return format!(
+            "{} / {} step(s)",
+            job.progress.work_units_done, job.progress.work_units_total
+        );
+    }
+    "Progress pending".to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn enclosure_wizard_job_id(state: &EnclosureWizardState) -> Option<String> {
+    state.job.as_ref().map(|job| job.accepted.job_id.clone())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn schedule_enclosure_job_status_poll(
+    api_base_path: String,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    job_id: String,
+    delay_ms: u32,
+) {
+    Timeout::new(delay_ms, move || {
+        let api_base_path = api_base_path.clone();
+        let wizard_state = wizard_state.clone();
+        let job_id = job_id.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = crate::api::get_admin_job_status(&api_base_path, &job_id).await;
+            let mut should_continue = false;
+            let mut next = (*wizard_state).clone();
+            if enclosure_wizard_job_id(&next).as_deref() != Some(job_id.as_str()) {
+                return;
+            }
+            next.job_polling = false;
+            match result {
+                Ok(status) => {
+                    should_continue = !admin_job_state_is_terminal(&status.job.state);
+                    next.job_status = Some(status);
+                    next.job_status_error = None;
+                    if should_continue {
+                        next.job_polling = true;
+                    }
+                }
+                Err(error) => {
+                    next.job_status_error = Some(error.message);
+                }
+            }
+            wizard_state.set(next);
+            if should_continue {
+                schedule_enclosure_job_status_poll(api_base_path, wizard_state, job_id, 2_000);
+            }
+        });
+    })
+    .forget();
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1075,7 +1182,7 @@ fn render_add_enclosure_card(
             let mut next = (*wizard_state).clone();
             next.open = true;
             next.error = None;
-            next.job = None;
+            clear_enclosure_job_monitor(&mut next);
             wizard_state.set(next);
         })
     };
@@ -1161,8 +1268,11 @@ fn render_enclosure_wizard(
         })
         .collect::<Vec<_>>();
     let confirmed = state.allow_format && state.confirmation_phrase.trim() == "confirm prepare das";
-    let can_submit =
-        !state.submitting && !selected_ssd.is_empty() && !selected_hdds.is_empty() && confirmed;
+    let can_submit = !state.submitting
+        && state.job.is_none()
+        && !selected_ssd.is_empty()
+        && !selected_hdds.is_empty()
+        && confirmed;
 
     let close = {
         let wizard_state = wizard_state.clone();
@@ -1178,7 +1288,7 @@ fn render_enclosure_wizard(
             let input: HtmlSelectElement = event.target_unchecked_into();
             let mut next = (*wizard_state).clone();
             next.selected_ssd = input.value();
-            next.job = None;
+            clear_enclosure_job_monitor(&mut next);
             wizard_state.set(next);
         })
     };
@@ -1200,7 +1310,7 @@ fn render_enclosure_wizard(
             let input: HtmlInputElement = event.target_unchecked_into();
             let mut next = (*wizard_state).clone();
             next.allow_format = input.checked();
-            next.job = None;
+            clear_enclosure_job_monitor(&mut next);
             wizard_state.set(next);
         })
     };
@@ -1214,7 +1324,7 @@ fn render_enclosure_wizard(
             let mut pending = (*wizard_state).clone();
             pending.submitting = true;
             pending.error = None;
-            pending.job = None;
+            clear_enclosure_job_monitor(&mut pending);
             wizard_state.set(pending.clone());
 
             let wizard_state = wizard_state.clone();
@@ -1242,14 +1352,28 @@ fn render_enclosure_wizard(
                 next.submitting = false;
                 match result {
                     Ok(job) => {
+                        let job_id = job.accepted.job_id.clone();
                         next.selected_ssd = selected_ssd;
                         next.selected_hdds = selected_hdds;
                         next.job = Some(job);
+                        next.job_status = None;
+                        next.job_polling = true;
+                        next.job_status_error = None;
+                        next.cancellation = None;
+                        next.cancel_error = None;
                         next.error = None;
+                        wizard_state.set(next);
+                        schedule_enclosure_job_status_poll(
+                            api_base_path.clone(),
+                            wizard_state.clone(),
+                            job_id,
+                            0,
+                        );
+                        return;
                     }
                     Err(error) => {
+                        clear_enclosure_job_monitor(&mut next);
                         next.error = Some(error.message);
-                        next.job = None;
                     }
                 }
                 wizard_state.set(next);
@@ -1300,7 +1424,7 @@ fn render_enclosure_wizard(
                                         } else {
                                             next.selected_hdds.retain(|path| path != &device_path);
                                         }
-                                        next.job = None;
+                                        clear_enclosure_job_monitor(&mut next);
                                         wizard_state.set(next);
                                     })}
                                 />
@@ -1346,18 +1470,188 @@ fn render_enclosure_wizard(
             if let Some(error) = &state.error {
                 <div class="dos-auth-error" role="alert">{ error.clone() }</div>
             }
-            if let Some(job) = &state.job {
-                <section class="dos-plan-result">
-                    <span class="dos-card-label">{ "Daemon job accepted" }</span>
-                    <h3>{ "Preparation submitted to dasobjectstored." }</h3>
-                    <p>{ format!("Job {} · {} · dry run {}", job.accepted.job_id, job.accepted.kind, job.accepted.dry_run) }</p>
-                    <code>{ format!("{} -> {} HDD device(s)", job.ssd_device, job.hdd_devices.len()) }</code>
-                </section>
-            }
+            { render_enclosure_job_monitor(&state, wizard_state.clone(), api_base_path.clone()) }
             <button class="dos-auth-submit" type="button" disabled={!can_submit} onclick={submit}>
                 { if state.submitting { "Submitting..." } else { "Submit preparation job" } }
             </button>
         </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_job_monitor(
+    state: &EnclosureWizardState,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    api_base_path: String,
+) -> Html {
+    let Some(job) = &state.job else {
+        return html! {};
+    };
+    let job_id = job.accepted.job_id.clone();
+    let latest = state.job_status.as_ref().map(|status| &status.job);
+    let status_label = latest
+        .map(|job| job.state.clone())
+        .unwrap_or_else(|| "accepted".to_string());
+    let terminal = latest.is_some_and(|job| admin_job_state_is_terminal(&job.state));
+    let can_cancel = !terminal && !state.cancelling;
+    let can_refresh = !state.job_polling && !state.cancelling;
+    let refresh = {
+        let wizard_state = wizard_state.clone();
+        let api_base_path = api_base_path.clone();
+        let job_id = job_id.clone();
+        Callback::from(move |_| {
+            let mut next = (*wizard_state).clone();
+            if enclosure_wizard_job_id(&next).as_deref() != Some(job_id.as_str()) {
+                return;
+            }
+            next.job_polling = true;
+            next.job_status_error = None;
+            wizard_state.set(next);
+            schedule_enclosure_job_status_poll(
+                api_base_path.clone(),
+                wizard_state.clone(),
+                job_id.clone(),
+                0,
+            );
+        })
+    };
+    let cancel = {
+        let wizard_state = wizard_state.clone();
+        let api_base_path = api_base_path.clone();
+        let job_id = job_id.clone();
+        Callback::from(move |_| {
+            let mut pending = (*wizard_state).clone();
+            if enclosure_wizard_job_id(&pending).as_deref() != Some(job_id.as_str()) {
+                return;
+            }
+            pending.cancelling = true;
+            pending.cancel_error = None;
+            wizard_state.set(pending);
+
+            let wizard_state = wizard_state.clone();
+            let api_base_path = api_base_path.clone();
+            let job_id = job_id.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let request = AdminJobCancelRequest {
+                    reason: Some("cancelled from Enclosures Web preparation wizard".to_string()),
+                };
+                let result = crate::api::cancel_admin_job(&api_base_path, &job_id, &request).await;
+                let mut next = (*wizard_state).clone();
+                if enclosure_wizard_job_id(&next).as_deref() != Some(job_id.as_str()) {
+                    return;
+                }
+                next.cancelling = false;
+                match result {
+                    Ok(cancelled) => {
+                        next.cancellation = Some(cancelled);
+                        next.cancel_error = None;
+                        next.job_polling = true;
+                        wizard_state.set(next);
+                        schedule_enclosure_job_status_poll(api_base_path, wizard_state, job_id, 0);
+                    }
+                    Err(error) => {
+                        next.cancel_error = Some(error.message);
+                        wizard_state.set(next);
+                    }
+                }
+            });
+        })
+    };
+    let retry = {
+        let wizard_state = wizard_state.clone();
+        Callback::from(move |_| {
+            let mut next = (*wizard_state).clone();
+            clear_enclosure_job_monitor(&mut next);
+            wizard_state.set(next);
+        })
+    };
+
+    html! {
+        <section class="dos-plan-result" data-job-state={status_label.clone()}>
+            <span class="dos-card-label">{ "Daemon job" }</span>
+            <h3>{ admin_job_monitor_title(latest, state.job_status_error.as_deref()) }</h3>
+            <p>{ format!("Job {} · {} · dry run {}", job.accepted.job_id, job.accepted.kind, job.accepted.dry_run) }</p>
+            <code>{ format!("{} -> {} HDD device(s)", job.ssd_device, job.hdd_devices.len()) }</code>
+            { render_admin_job_progress(latest) }
+            <div class="dos-job-meta">
+                <span>{ format!("State: {status_label}") }</span>
+                <span>{ format!("Submitted: {}", latest.map(|job| job.submitted_at_utc.as_str()).unwrap_or(job.accepted.accepted_at_utc.as_str())) }</span>
+                <span>{ format!("Updated: {}", latest.map(|job| job.updated_at_utc.as_str()).unwrap_or("pending")) }</span>
+                <span>{ if state.job_polling { "Status: polling daemon" } else { "Status: current" } }</span>
+            </div>
+            if let Some(message) = &state.job_status_error {
+                <div class="dos-auth-error" role="alert">{ format!("Status refresh failed: {message}") }</div>
+            }
+            if let Some(message) = &state.cancel_error {
+                <div class="dos-auth-error" role="alert">{ format!("Cancellation failed: {message}") }</div>
+            }
+            if let Some(cancelled) = &state.cancellation {
+                <p class="dos-job-message">{ format!("Cancellation request {} with daemon state {}.", if cancelled.accepted { "accepted" } else { "not accepted" }, cancelled.state) }</p>
+            }
+            <div class="dos-job-actions">
+                <button type="button" onclick={refresh} disabled={!can_refresh}>
+                    { if state.job_polling { "Refreshing..." } else { "Refresh status" } }
+                </button>
+                <button type="button" onclick={cancel} disabled={!can_cancel}>
+                    { if state.cancelling { "Cancelling..." } else { "Cancel job" } }
+                </button>
+                <button type="button" onclick={retry} disabled={!terminal && state.job_status_error.is_none()}>
+                    { "Retry preparation" }
+                </button>
+            </div>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn admin_job_monitor_title(job: Option<&AdminJobSummary>, status_error: Option<&str>) -> String {
+    if status_error.is_some() {
+        return "Preparation status needs attention.".to_string();
+    }
+    match job.map(|job| job.state.as_str()) {
+        Some("complete") => "Preparation completed by dasobjectstored.".to_string(),
+        Some("failed") => "Preparation failed in dasobjectstored.".to_string(),
+        Some("cancelled") => "Preparation cancelled.".to_string(),
+        Some("running") => "Preparation is running.".to_string(),
+        Some("waiting") => "Preparation is waiting.".to_string(),
+        Some("queued") => "Preparation is queued.".to_string(),
+        Some(_) => "Preparation state reported by dasobjectstored.".to_string(),
+        None => "Preparation submitted to dasobjectstored.".to_string(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_admin_job_progress(job: Option<&AdminJobSummary>) -> Html {
+    let Some(job) = job else {
+        return html! {
+            <div class="dos-job-progress">
+                <div class="dos-job-progress-bar"><span style="width: 0%"></span></div>
+                <p>{ "Waiting for daemon progress." }</p>
+            </div>
+        };
+    };
+    let percent = admin_job_percent(job);
+    let width = format!("width: {}%", percent.unwrap_or(0));
+    html! {
+        <div class="dos-job-progress">
+            <div class="dos-job-progress-bar" aria-label="Administrator job progress">
+                <span style={width}></span>
+            </div>
+            <p>
+                { format!(
+                    "{} · {} · {}",
+                    percent.map(|value| format!("{value}%")).unwrap_or_else(|| "Percent pending".to_string()),
+                    job.progress.stage,
+                    admin_job_progress_text(job)
+                ) }
+            </p>
+            if let Some(message) = &job.progress.message {
+                <p class="dos-job-message">{ message.clone() }</p>
+            }
+            if let Some(message) = &job.failure_message {
+                <div class="dos-auth-error" role="alert">{ message.clone() }</div>
+            }
+        </div>
     }
 }
 
@@ -1373,7 +1667,7 @@ where
         let input: HtmlInputElement = event.target_unchecked_into();
         let mut next = (*wizard_state).clone();
         update(&mut next, input.value());
-        next.job = None;
+        clear_enclosure_job_monitor(&mut next);
         wizard_state.set(next);
     })
 }
@@ -1390,7 +1684,7 @@ where
         let input: HtmlSelectElement = event.target_unchecked_into();
         let mut next = (*wizard_state).clone();
         update(&mut next, input.value());
-        next.job = None;
+        clear_enclosure_job_monitor(&mut next);
         wizard_state.set(next);
     })
 }
@@ -1833,13 +2127,17 @@ fn page_header(props: &PageHeaderProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::{
+        admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosures_workspace_api_path, home_dashboard_attention, home_dashboard_metrics,
         home_workspace_api_path, object_store_card_summaries, objectstores_workspace_api_path,
         ApiLoadState, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
         HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
-    use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
+    use crate::api::{
+        AdminJobProgress, AdminJobSummary, EnclosuresPageResponse, HomeDashboardResponse,
+        ObjectStoresPageResponse,
+    };
     use crate::stores::STORES_WORKSPACE_ROUTE;
     use crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
@@ -1920,6 +2218,55 @@ mod tests {
     }
 
     #[test]
+    fn admin_job_terminal_states_are_stable_for_wizard_actions() {
+        assert!(admin_job_state_is_terminal("complete"));
+        assert!(admin_job_state_is_terminal("failed"));
+        assert!(admin_job_state_is_terminal("cancelled"));
+        assert!(!admin_job_state_is_terminal("queued"));
+        assert!(!admin_job_state_is_terminal("running"));
+        assert!(!admin_job_state_is_terminal("waiting"));
+    }
+
+    #[test]
+    fn admin_job_percent_prefers_daemon_percent_then_unit_progress() {
+        let with_percent = AdminJobSummary {
+            percent_complete: Some(42),
+            ..admin_job_summary_fixture()
+        };
+        assert_eq!(admin_job_percent(&with_percent), Some(42));
+
+        let by_units = AdminJobSummary {
+            percent_complete: None,
+            progress: AdminJobProgress {
+                stage: "formatting".to_string(),
+                work_units_done: 3,
+                work_units_total: 4,
+                ..AdminJobProgress::default()
+            },
+            ..admin_job_summary_fixture()
+        };
+        assert_eq!(admin_job_percent(&by_units), Some(75));
+        assert_eq!(admin_job_progress_text(&by_units), "3 / 4 step(s)");
+    }
+
+    #[test]
+    fn admin_job_progress_text_prefers_byte_progress_when_available() {
+        let job = AdminJobSummary {
+            progress: AdminJobProgress {
+                stage: "copying".to_string(),
+                work_bytes_done: 512,
+                work_bytes_total: 1024,
+                work_units_done: 1,
+                work_units_total: 4,
+                message: None,
+            },
+            ..admin_job_summary_fixture()
+        };
+
+        assert_eq!(admin_job_progress_text(&job), "512 / 1024 byte(s)");
+    }
+
+    #[test]
     fn shared_api_load_state_names_cover_page_contract() {
         let success = ApiLoadState::success("payload");
         let empty = ApiLoadState::<&str>::empty("empty");
@@ -1955,6 +2302,20 @@ mod tests {
         assert!(!source.contains(&format!("{}{}", "fallback_", "dashboard_metrics")));
         assert!(!source.contains(&format!("{}{}", "fallback_", "enclosures")));
         assert!(!source.contains(&format!("{}{}", "fallback_", "object_stores")));
+    }
+
+    fn admin_job_summary_fixture() -> AdminJobSummary {
+        AdminJobSummary {
+            job_id: "enclosure-prepare-1".to_string(),
+            kind: "enclosure_preparation".to_string(),
+            state: "running".to_string(),
+            progress: AdminJobProgress::default(),
+            percent_complete: None,
+            submitted_at_utc: "2026-07-08T20:00:00Z".to_string(),
+            updated_at_utc: "2026-07-08T20:00:01Z".to_string(),
+            actor: Some("stephen".to_string()),
+            failure_message: None,
+        }
     }
 
     #[test]

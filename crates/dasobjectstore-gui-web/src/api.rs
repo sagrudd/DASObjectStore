@@ -140,7 +140,7 @@ pub struct AdminJobSummary {
 
 #[cfg(any(target_arch = "wasm32", test))]
 #[allow(dead_code)]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct AdminJobProgress {
     pub stage: String,
     pub work_bytes_done: u64,

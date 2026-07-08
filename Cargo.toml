@@ -15,7 +15,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.34.0"
+version = "0.35.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -37,6 +37,7 @@ dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
 dasobjectstore-remote = { path = "crates/dasobjectstore-remote" }
 dasobjectstore-tui = { path = "crates/dasobjectstore-tui" }
 gloo-net = "0.5.0"
+gloo-timers = "0.3.0"
 plist = "1"
 pam-client = { version = "0.5.0", default-features = false }
 rcgen = "0.14.8"
