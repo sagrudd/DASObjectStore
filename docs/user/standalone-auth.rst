@@ -47,5 +47,11 @@ Storage mutation must still go through the daemon:
 * service start, stop, and configuration;
 * ingest, destage, repair, and migration jobs.
 
+The Web UI follows the same boundary. Admin-only actions such as enclosure or
+disk lifecycle changes, object store creation, writer-group assignment, and
+store policy changes may be initiated from Web forms, but the frontend only
+submits requests. ``dasobjectstored`` validates authority and policy, prepares
+the mutation plan, and performs confirmed host or storage changes.
+
 Synoptikon-integrated deployments are different: Synoptikon supplies account,
 entitlement, audit, correlation, and governance-domain context.

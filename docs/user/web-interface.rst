@@ -92,6 +92,106 @@ The server can also be started manually with explicit overrides:
 The S3-compatible upload endpoint is separate. Its default local endpoint is
 ``http://127.0.0.1:3900`` and it is not the Web UI.
 
+Operator Navigation
+-------------------
+
+The redesigned Web UI is intended to be the normal operator console for a
+standalone appliance and the embedded DASObjectStore surface when mounted behind
+Synoptikon. After login, the first screen is the Home dashboard rather than a
+marketing or setup page.
+
+The primary navigation is:
+
+``Home``
+   Operational dashboard for appliance health, usable capacity, ingest and
+   destage pressure, current service state, object-service status, and actions
+   that need operator attention.
+
+``Enclosures``
+   Hardware and media view. It groups disks by enclosure when that information
+   is available and shows role, health, mount, preparation, placement
+   eligibility, SMART or USB warnings, and disk lifecycle actions.
+
+``ObjectStores``
+   Store policy and capacity view. It lists managed object stores, writer
+   policy, class defaults, redundancy, ingest behavior, endpoint/export state,
+   and store lifecycle actions.
+
+``Bioinformatics``
+   Placeholder workspace for the first bioinformatics-oriented workflow. Until
+   the workflow is implemented, this page should clearly present itself as a
+   future integration surface rather than a place where storage mutations are
+   already available.
+
+``Activity`` or equivalent status surfaces may also expose daemon jobs, ingest
+queues, repair work, and audit/provenance events as the implementation expands.
+Regardless of labels, storage mutation must still be submitted to
+``dasobjectstored`` and must use the same job model as CLI and API operations.
+
+Home Dashboard
+--------------
+
+The Home dashboard should answer the operator's first questions without
+requiring JSON inspection:
+
+* whether the appliance is healthy enough to accept writes;
+* how much protected and usable capacity is available;
+* whether ingest, destage, repair, or object-service work is backlogged;
+* which disks, enclosures, stores, or services require action; and
+* whether the current user can administer storage or only inspect it.
+
+The dashboard is informational by default. Risky actions should lead to the
+specific Enclosures or ObjectStores workflow where the plan, policy allowance,
+and confirmation can be shown next to the affected resource.
+
+Enclosures Page
+---------------
+
+The Enclosures page is the Web counterpart to disk inspection and preparation
+workflows. It should show stable device identities, enclosure or bay grouping
+when known, DAS role, mounted path, filesystem, capacity, health state, and
+warnings that affect placement eligibility.
+
+Administrative disk actions, such as preparing media, locking down managed
+roots, drain, replacement, retirement, or repair, are admin-only workflows. The
+Web UI may collect parameters and present plans, but it must submit the
+operation to ``dasobjectstored`` for policy checks and execution. Destructive
+or data-moving operations require an explicit plan review and confirmation.
+
+ObjectStores Page
+-----------------
+
+The ObjectStores page is the Web counterpart to ``dasobjectstore store`` and
+managed store policy. It should list each store with class, writer group,
+copy/redundancy policy, ingest mode, bucket or endpoint identity, capacity
+behavior, and current health.
+
+Creating or changing an object store is an admin-only workflow. The Web UI
+should present class defaults before creation and submit the request to
+``dasobjectstored`` rather than editing store registry files directly. When a
+creation form includes a writer group, the daemon remains responsible for
+validating the group, applying ACL or policy changes, and recording the store in
+managed metadata. Non-admin users may inspect stores and submit writes only when
+store writer policy allows it.
+
+Bioinformatics Workspace
+------------------------
+
+The Bioinformatics navigation item is reserved for product workflows that bind
+DASObjectStore to reproducible reference data, generated pipeline outputs, and
+Mnemosyne/Mneion storage definitions. Until those workflows are implemented, it
+should behave as a placeholder and must not imply that unimplemented data
+management actions have run.
+
+Login and Footer Branding
+-------------------------
+
+The standalone login screen and application footer should make the product
+identity clear while preserving the Mnemosyne family branding used by sibling
+surfaces. Operators should see that they are signing in to DASObjectStore, that
+local appliance authentication is being used in standalone mode, and that the
+surface belongs to the Mnemosyne Biosciences product family.
+
 Checking the Web Server
 -----------------------
 
