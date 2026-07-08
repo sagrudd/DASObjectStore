@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.53.1 - 2026-07-09
+
+- Document administrator Web workflow operation, permission boundaries, daemon
+  audit expectations, failed-job recovery, and Bioinformatics readiness
+  semantics for operators.
+
 ## 0.53.0 - 2026-07-09
 
 - Add Bioinformatics derivation-source API records for ObjectStore metadata,

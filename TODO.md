@@ -661,7 +661,7 @@ older checklist claims.
 - [x] Add API contracts that allow Bioinformatics readiness to be derived from
   ObjectStore/SubObject metadata, object type assignments, and Mneion export
   bindings without hard-coding workflow-specific paths in Yew.
-- [ ] Add documentation for administrator Web workflows, Bioinformatics
+- [x] Add documentation for administrator Web workflows, Bioinformatics
   readiness semantics, permission boundaries, audit expectations, and recovery
   from failed Web-submitted jobs.
 - [ ] Add end-to-end Web workflow tests for administrator and non-administrator

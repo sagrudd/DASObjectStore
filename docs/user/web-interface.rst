@@ -582,6 +582,169 @@ metadata exposes ObjectStore/SubObject object-type assignments and Mneion
 bindings, the API can populate these source records without changing the Yew
 page.
 
+Administrator Workflow Operations
+---------------------------------
+
+Administrator Web workflows follow the same operational pattern regardless of
+page:
+
+#. the browser loads authenticated inventory from the Web API;
+#. the operator enters workflow parameters in the page that owns the resource;
+#. the Web API validates required fields and policy vocabulary;
+#. destructive or persistent changes require an explicit review and exact
+   confirmation phrase;
+#. the Web API forwards the accepted request to ``dasobjectstored``; and
+#. the browser renders the daemon job identifier, dry-run/live state, actor,
+   progress, terminal state, and failure text reported by the daemon.
+
+The browser never edits managed roots, registry JSON, groups files, endpoint
+inventory, or object metadata directly. It also must not construct shell
+procedures for mutations that have a formal daemon-backed command path.
+
+The currently documented Web administrator workflows are:
+
+``Enclosure preparation``
+   Select supported DAS media, choose SSD and HDD roles, review destructive
+   format risk, acknowledge existing data loss, type ``confirm prepare das``,
+   and submit the preparation job to ``dasobjectstored``.
+
+``ObjectStore creation``
+   Enter store policy, writer group, object type, redundancy, public/writeable
+   state, export mode, bucket, class, retention, and SSD root. Review the
+   generated plan, type ``confirm create objectstore``, and submit to the
+   daemon ObjectStore creation contract.
+
+``ObjectStore configuration``
+   Select an existing store and review policy edits for redundancy, writer
+   group, public/writeable state, retention, capacity behavior, export mode,
+   class, and SSD root. The current surface is a review/action-plan workflow
+   until the matching daemon execution endpoint is introduced.
+
+``SubObject creation``
+   Define a named prefix under an ObjectStore or existing SubObject, review
+   parentage, object-type inheritance or override, S3 routing, registry prefix,
+   and SSD mirror path. The browser requests a ``subobject_create`` action plan;
+   daemon execution remains the required mutation boundary.
+
+``Users/Groups administration``
+   Create local writer/admin groups or assign local users to managed writer
+   groups. Dry-run review is available first; live submission requires
+   ``confirm local group administration`` and sudo-derived authority.
+
+``Endpoint inventory``
+   Create or update DAS, NAS/NFS, S3-compatible, or Mnemosyne-governed endpoint
+   records. Live submission requires ``record endpoint inventory`` and records
+   endpoint-validation activity through the daemon.
+
+Permission Boundaries
+---------------------
+
+Standalone appliances authenticate Web sessions through local OS users and PAM.
+The Web session proves who is using the browser; it does not by itself grant
+storage mutation authority. Administrator workflows additionally require
+sudo-derived local administrator status as reported by the server-side
+authority check.
+
+Non-administrator users should still receive useful inventory. The UI should
+show unavailable administrator controls with explicit blocked reasons rather
+than hiding all operational context. API routes that mutate state must reject
+missing sessions, expired sessions, non-admin users, missing confirmation
+phrases, unsupported hardware, invalid policy vocabulary, and daemon transport
+failures with clear messages that the browser can display.
+
+Integrated Synoptikon or Monas deployments should not expose standalone local
+login as the authority surface. In those modes, account identity, entitlement,
+audit correlation, and governance context are supplied by the host product and
+DASObjectStore remains an embedded storage surface.
+
+Audit Expectations
+------------------
+
+Every accepted Web administrator mutation should be auditable through daemon
+job state. Operators should be able to identify:
+
+* the daemon job ID;
+* job kind and dry-run/live state;
+* submitted and updated timestamps;
+* administrator actor where the host mode provides one;
+* client request ID when supplied;
+* requested policy or resource summary;
+* current stage, progress, daemon message, terminal state, and failure message;
+  and
+* related Activity row or endpoint-validation state when the workflow affects
+  shared activity.
+
+The daemon job registry under
+``/var/lib/dasobjectstore/admin-jobs/jobs.json`` is the packaged source of
+truth for administrator job status. Browser status cards and Activity task rows
+must reflect daemon state rather than reconstructing success from local form
+state.
+
+Recovery from Failed Web Jobs
+-----------------------------
+
+When a Web-submitted job fails, treat the daemon response as authoritative and
+recover through the owning workflow:
+
+#. Open ``Activity`` or the originating page and inspect the job state, stage,
+   daemon message, and failure text.
+#. If the job is still running or waiting, refresh status before retrying. A
+   stale browser card is not evidence that the daemon is idle.
+#. If the job supports cancellation, submit a cancellation reason through the
+   job cancellation route and wait for the daemon terminal state.
+#. For enclosure preparation failures, keep the selected media and risk-review
+   inputs visible, correct the failed precondition, and use the wizard retry
+   state rather than retyping unsafe shell commands.
+#. For ObjectStore, SubObject, Users/Groups, and endpoint failures, correct the
+   rejected policy, confirmation, or authority condition and submit a fresh
+   reviewed request.
+#. If the daemon socket, registry, live SQLite database, or endpoint inventory
+   cannot be read, resolve that service or metadata source first. The Web UI
+   should report unavailable-source warnings rather than treating missing data
+   as success.
+
+Do not manually edit ``/opt/dasobjectstore/groups.json``,
+``/opt/dasobjectstore/endpoints.json``, the store registry, or live metadata to
+recover from a failed Web operation unless a documented emergency repair
+procedure explicitly instructs you to do so.
+
+Bioinformatics Readiness Semantics
+----------------------------------
+
+The Bioinformatics page is read-only orchestration context. It identifies
+object families and metadata requirements so downstream workflow systems can
+decide whether data is ready for basecalling, genome analysis, transcriptome
+analysis, variant analysis, annotation work, or public repository ingestion.
+
+Readiness states are advisory and API-owned:
+
+``workflow_ready``
+   The object family has enough default metadata semantics for the named
+   workflow handoff, subject to project/governance policy.
+
+``metadata_required``
+   The object family is recognised, but reference, sample, run, index,
+   accession, or provenance metadata must be attached before automatic
+   orchestration.
+
+``catalogue_ready``
+   Repository-style datasets can be catalogued and tracked, but download
+   manifests, accessions, and study/project identity remain part of the
+   evidence contract.
+
+``binding_required``
+   Mneion/Mnemosyne project or governance-domain binding is required before the
+   data can be treated as auditable workflow input.
+
+``planned``
+   The product has a stable surface for the state, but live metadata derivation
+   is not yet connected.
+
+Bioinformatics cards must not imply that analysis has run. They describe
+classification, evidence, provenance, lineage, and governance readiness only.
+Workflow execution remains outside the browser and must use daemon-owned or
+host-product-owned orchestration paths.
+
 Login and Footer Branding
 -------------------------
 
