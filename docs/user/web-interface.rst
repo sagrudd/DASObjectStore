@@ -317,6 +317,12 @@ surfaces. Operators should see that they are signing in to DASObjectStore, that
 local appliance authentication is being used in standalone mode, and that the
 surface belongs to the Mnemosyne Biosciences product family.
 
+The Web application uses the shared ``DasObjectStoreFooter`` component on both
+the login page and authenticated console pages. The footer follows the compact
+dark Mnemosyne product style used by sibling Web surfaces: monospace text,
+``DASObjectStore v<version>``, "Developed by", a ``https://mnemosyne.co.uk``
+Mnemosyne link, and 2026 Mnemosyne Biosciences attribution.
+
 Checking the Web Server
 -----------------------
 

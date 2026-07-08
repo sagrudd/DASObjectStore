@@ -1,4 +1,8 @@
 :root {
+  --dos-mnemosyne-footer-bg: rgba(1, 14, 12, 0.94);
+  --dos-mnemosyne-footer-border: rgba(138, 255, 105, 0.18);
+  --dos-mnemosyne-footer-text: rgba(238, 246, 230, 0.66);
+  --dos-mnemosyne-accent: rgba(138, 255, 105, 0.9);
   color: #1e252b;
   background: #f5f7f8;
   font-family:
@@ -31,18 +35,43 @@ button:disabled {
 }
 
 main[data-host] {
-  min-height: 100vh;
+  flex: 1 0 auto;
+  min-height: 0;
   padding: 24px;
 }
 
 .dos-app-shell {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
-.dos-app-footer {
-  padding: 0 24px 20px;
-  color: #66717a;
-  font-size: 0.78rem;
+.dos-product-footer {
+  flex: 0 0 auto;
+  padding: 10px 24px 12px;
+  border-top: 1px solid var(--dos-mnemosyne-footer-border);
+  color: var(--dos-mnemosyne-footer-text);
+  background: var(--dos-mnemosyne-footer-bg);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.dos-product-footer a {
+  color: var(--dos-mnemosyne-accent);
+  text-decoration: none;
+}
+
+.dos-product-footer a:hover {
+  color: #8aff69;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dos-product-footer__version {
+  color: var(--dos-mnemosyne-accent);
+  font-weight: 800;
 }
 
 h1,
@@ -148,7 +177,6 @@ h2 {
 
 .dos-auth-summary span,
 .dos-page-header span,
-.dos-auth-brand-footer,
 .dos-card p,
 .dos-detail-list dd {
   color: #5b6770;
@@ -158,10 +186,6 @@ h2 {
 .dos-auth-summary span {
   display: block;
   margin-top: 14px;
-}
-
-.dos-auth-brand-footer {
-  padding-top: 24px;
 }
 
 .dos-auth-panel {
@@ -608,8 +632,8 @@ h2 {
     padding: 14px;
   }
 
-  .dos-app-footer {
-    padding: 0 14px 14px;
+  .dos-product-footer {
+    padding: 10px 14px 12px;
   }
 
   .dos-auth-brand,

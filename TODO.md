@@ -552,16 +552,16 @@ older checklist claims.
 - [x] Reconcile the legacy `workspaces/stores`, `workspaces/users-groups`, and
   operations workspace modules with the redesigned top navigation so there is
   one coherent Web console rather than parallel holder surfaces.
-- [ ] Implement a reusable `MnemosyneFooter`/`DasObjectStoreFooter` Yew component
+- [x] Implement a reusable `MnemosyneFooter`/`DasObjectStoreFooter` Yew component
   that mirrors the Mnemosyne Biosciences Grammateus/Mnematikon footer style:
   dark compact band, monospaced typography, product version, "Developed by"
   wording, `https://mnemosyne.co.uk` link, and 2026 attribution.
-- [ ] Apply the shared footer to the login page and every authenticated page,
+- [x] Apply the shared footer to the login page and every authenticated page,
   replacing the current plain `dos-app-footer` text footer and the separate
   `dos-auth-brand-footer` wording where needed.
-- [ ] Add CSS tokens for the footer and Mnemosyne report palette so page-level
+- [x] Add CSS tokens for the footer and Mnemosyne report palette so page-level
   styling does not drift from Grammateus report conventions.
-- [ ] Add Yew/component tests proving the footer renders on disconnected,
+- [x] Add Yew/component tests proving the footer renders on disconnected,
   checking-session, connected, busy, and error states.
 - [ ] Add Playwright or trunk-driven screenshot regression coverage for login,
   Home, Enclosures, ObjectStores, and Bioinformatics at desktop and mobile

@@ -1,3 +1,4 @@
+use crate::components::DasObjectStoreFooter;
 use crate::mount::{FrontendHost, FrontendMount};
 use crate::session::{AppState, StableState};
 use crate::workspace::{
@@ -153,10 +154,7 @@ pub fn app() -> Html {
                     },
                 }}
             </main>
-            <footer class="dos-app-footer">
-                {format!("DASObjectStore v{DASOBJECTSTORE_VERSION}")}
-                {" · Mnemosyne Biosciences Ltd"}
-            </footer>
+            <DasObjectStoreFooter product_version={DASOBJECTSTORE_VERSION.to_string()} />
         </div>
     }
 }
@@ -189,9 +187,6 @@ fn landing_page(props: &LandingPageProps) -> Html {
                     <h1>{ "Sign in to manage directly attached object storage." }</h1>
                     <span>{ "Storage, ingest, and service controls for the DASObjectStore appliance." }</span>
                 </div>
-                <footer class="dos-auth-brand-footer">
-                    { "Mnemosyne Biosciences Ltd · Local operator console" }
-                </footer>
             </aside>
             <section class="dos-auth-panel">
                 <div class="dos-auth-panel-header">

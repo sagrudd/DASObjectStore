@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.28.0 - 2026-07-08
+
+- Add a reusable Web `DasObjectStoreFooter` component with Mnemosyne product
+  footer wording, version display, monospaced dark styling, 2026 attribution,
+  and `https://mnemosyne.co.uk` link.
+- Apply the shared footer to the login and authenticated Web console surfaces,
+  replacing separate hard-coded footer fragments.
+- Add footer CSS tokens and regression coverage for the required app states.
+
 ## 0.27.0 - 2026-07-08
 
 - Reconcile the Web console navigation boundary so legacy Stores and

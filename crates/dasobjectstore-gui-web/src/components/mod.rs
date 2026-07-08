@@ -1,5 +1,13 @@
+mod footer;
 #[cfg(target_arch = "wasm32")]
 mod widgets;
+
+pub use footer::{
+    footer_required_for_state, DasObjectStoreFooterContent, FooterAvailabilityState,
+    MNEMOSYNE_FOOTER_YEAR, MNEMOSYNE_HOME_URL,
+};
+#[cfg(target_arch = "wasm32")]
+pub use footer::{DasObjectStoreFooter, DasObjectStoreFooterProps};
 
 #[cfg(target_arch = "wasm32")]
 pub use widgets::{
