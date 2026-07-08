@@ -1,4 +1,6 @@
 #[cfg(target_arch = "wasm32")]
+use crate::api::BioinformaticsWorkspaceResponse;
+#[cfg(target_arch = "wasm32")]
 use crate::api::{DasEnclosureCardResponse, DasEnclosureDetailResponse};
 use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
 
@@ -95,16 +97,66 @@ pub fn bioinformatics_workspace_api_path(api_base_path: &str) -> String {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApiLoadState<T> {
     Loading,
-    Loaded(T),
+    Success(T),
     Empty(String),
     PermissionDenied(String),
-    Error(String),
-    Stale { value: T, message: String },
+    TransportError(String),
+    StaleData { value: T, message: String },
 }
 
 impl<T> ApiLoadState<T> {
-    pub fn loaded(value: T) -> Self {
-        Self::Loaded(value)
+    pub fn success(value: T) -> Self {
+        Self::Success(value)
+    }
+
+    pub fn empty(message: impl Into<String>) -> Self {
+        Self::Empty(message.into())
+    }
+
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self::PermissionDenied(message.into())
+    }
+
+    pub fn transport_error(message: impl Into<String>) -> Self {
+        Self::TransportError(message.into())
+    }
+
+    pub fn stale_data(value: T, message: impl Into<String>) -> Self {
+        Self::StaleData {
+            value,
+            message: message.into(),
+        }
+    }
+
+    pub const fn state_name(&self) -> &'static str {
+        match self {
+            Self::Loading => "loading",
+            Self::Success(_) => "success",
+            Self::Empty(_) => "empty",
+            Self::PermissionDenied(_) => "permission-denied",
+            Self::TransportError(_) => "transport-error",
+            Self::StaleData { .. } => "stale-data",
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn page_load_state_from_result<T, F>(
+    result: Result<T, crate::api::ApiError>,
+    empty_message: F,
+) -> ApiLoadState<T>
+where
+    F: FnOnce(&T) -> Option<String>,
+{
+    match result {
+        Ok(view) => match empty_message(&view) {
+            Some(message) => ApiLoadState::empty(message),
+            None => ApiLoadState::success(view),
+        },
+        Err(error) if error.is_permission_denied() => {
+            ApiLoadState::permission_denied(error.message)
+        }
+        Err(error) => ApiLoadState::transport_error(error.message),
     }
 }
 
@@ -418,13 +470,10 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
         use_effect_with(api_path.clone(), move |path| {
             let path = path.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::get_home_dashboard(&path).await {
-                    Ok(view) => dashboard_state.set(ApiLoadState::loaded(view)),
-                    Err(error) if error.is_permission_denied() => {
-                        dashboard_state.set(ApiLoadState::PermissionDenied(error.message))
-                    }
-                    Err(error) => dashboard_state.set(ApiLoadState::Error(error.message)),
-                }
+                dashboard_state.set(page_load_state_from_result(
+                    crate::api::get_home_dashboard(&path).await,
+                    |_| None,
+                ));
             });
             || ()
         });
@@ -457,7 +506,7 @@ fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> H
                 </section>
             </>
         },
-        ApiLoadState::Loaded(view) | ApiLoadState::Stale { value: view, .. } => html! {
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => html! {
             <>
                 <div class="dos-metric-grid">
                     { for home_dashboard_metrics(view).into_iter().map(render_metric_card) }
@@ -475,7 +524,7 @@ fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> H
             "Home dashboard requires an authenticated session",
             message,
         ),
-        ApiLoadState::Error(message) => {
+        ApiLoadState::TransportError(message) => {
             render_home_state_message("Error", "Unable to load Home dashboard", message)
         }
     }
@@ -563,21 +612,19 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
         use_effect_with(api_path.clone(), move |path| {
             let path = path.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::get_enclosures_dashboard(&path).await {
-                    Ok(view) if view.enclosures.is_empty() => {
-                        let message = view
-                            .warnings
-                            .first()
-                            .map(|warning| warning.message.clone())
-                            .unwrap_or_else(|| "No supported DAS enclosures reported.".to_string());
-                        enclosures_state.set(ApiLoadState::Empty(message));
-                    }
-                    Ok(view) => enclosures_state.set(ApiLoadState::loaded(view)),
-                    Err(error) if error.is_permission_denied() => {
-                        enclosures_state.set(ApiLoadState::PermissionDenied(error.message))
-                    }
-                    Err(error) => enclosures_state.set(ApiLoadState::Error(error.message)),
-                }
+                enclosures_state.set(page_load_state_from_result(
+                    crate::api::get_enclosures_dashboard(&path).await,
+                    |view| {
+                        view.enclosures.is_empty().then(|| {
+                            view.warnings
+                                .first()
+                                .map(|warning| warning.message.clone())
+                                .unwrap_or_else(|| {
+                                    "No supported DAS enclosures reported.".to_string()
+                                })
+                        })
+                    },
+                ));
             });
             || ()
         });
@@ -618,7 +665,7 @@ fn render_enclosures_state(
                 </section>
             </div>
         },
-        ApiLoadState::Loaded(view) | ApiLoadState::Stale { value: view, .. } => {
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
             render_enclosure_inventory(view, selected_id)
         }
         ApiLoadState::Empty(message) => {
@@ -629,7 +676,7 @@ fn render_enclosures_state(
             "Enclosure inventory requires an authenticated session",
             message,
         ),
-        ApiLoadState::Error(message) => {
+        ApiLoadState::TransportError(message) => {
             render_enclosures_state_message("Error", "Unable to load enclosure inventory", message)
         }
     }
@@ -815,21 +862,17 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
         use_effect_with(api_path.clone(), move |path| {
             let path = path.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::get_object_stores_dashboard(&path).await {
-                    Ok(view) if view.stores.is_empty() => {
-                        let message = view
-                            .warnings
-                            .first()
-                            .map(|warning| warning.message.clone())
-                            .unwrap_or_else(|| "No object stores reported.".to_string());
-                        object_stores_state.set(ApiLoadState::Empty(message));
-                    }
-                    Ok(view) => object_stores_state.set(ApiLoadState::loaded(view)),
-                    Err(error) if error.is_permission_denied() => {
-                        object_stores_state.set(ApiLoadState::PermissionDenied(error.message))
-                    }
-                    Err(error) => object_stores_state.set(ApiLoadState::Error(error.message)),
-                }
+                object_stores_state.set(page_load_state_from_result(
+                    crate::api::get_object_stores_dashboard(&path).await,
+                    |view| {
+                        view.stores.is_empty().then(|| {
+                            view.warnings
+                                .first()
+                                .map(|warning| warning.message.clone())
+                                .unwrap_or_else(|| "No object stores reported.".to_string())
+                        })
+                    },
+                ));
             });
             || ()
         });
@@ -860,7 +903,7 @@ fn render_object_stores_state(state: &ApiLoadState<ObjectStoresPageResponse>) ->
                 ) }
             </div>
         },
-        ApiLoadState::Loaded(view) | ApiLoadState::Stale { value: view, .. } => {
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
             render_object_store_inventory(view)
         }
         ApiLoadState::Empty(message) => html! {
@@ -874,7 +917,7 @@ fn render_object_stores_state(state: &ApiLoadState<ObjectStoresPageResponse>) ->
             "ObjectStore inventory requires an authenticated session",
             message,
         ),
-        ApiLoadState::Error(message) => render_object_stores_state_message(
+        ApiLoadState::TransportError(message) => render_object_stores_state_message(
             "Error",
             "Unable to load ObjectStore inventory",
             message,
@@ -969,19 +1012,93 @@ pub struct BioinformaticsPageProps {
 #[function_component(BioinformaticsPage)]
 pub fn bioinformatics_page(props: &BioinformaticsPageProps) -> Html {
     let api_path = WorkspacePage::Bioinformatics.api_path(&props.api_base_path);
+    let bioinformatics_state =
+        use_state(|| ApiLoadState::<BioinformaticsWorkspaceResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let bioinformatics_state = bioinformatics_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                bioinformatics_state.set(page_load_state_from_result(
+                    crate::api::get_bioinformatics_workspace(&path).await,
+                    |view| {
+                        view.supported_object_types.is_empty().then(|| {
+                            "No bioinformatics object types were reported by the daemon workspace API."
+                                .to_string()
+                        })
+                    },
+                ));
+            });
+            || ()
+        });
+    }
 
     html! {
         <section class="dos-page" data-page="bioinformatics" data-api-route={api_path}>
             <PageHeader
                 eyebrow="Workflow integration"
                 title="Bioinformatics"
-                summary="Placeholder for run provenance, analysis handoff, and Mnemosyne integration state."
+                summary="Sequencing data readiness, workflow handoff, and Mnemosyne integration state."
             />
-            <section class="dos-card dos-placeholder-card">
-                <span class="dos-card-label">{ "Reserved workflow" }</span>
-                <h2>{ "Bioinformatics workspace is reserved." }</h2>
-                <p>{ "This page will surface sequencing run context, object lineage, and downstream analysis readiness." }</p>
-            </section>
+            { render_bioinformatics_state(&*bioinformatics_state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_state(state: &ApiLoadState<BioinformaticsWorkspaceResponse>) -> Html {
+    match state {
+        ApiLoadState::Loading => render_bioinformatics_state_message(
+            "Loading",
+            "Loading bioinformatics readiness",
+            "The Web console is requesting daemon-backed object type and workflow readiness state.",
+        ),
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
+            render_bioinformatics_workspace(view)
+        }
+        ApiLoadState::Empty(message) => render_bioinformatics_state_message(
+            "Inventory",
+            "No bioinformatics readiness data",
+            message,
+        ),
+        ApiLoadState::PermissionDenied(message) => render_bioinformatics_state_message(
+            "Permission denied",
+            "Bioinformatics readiness requires an authenticated session",
+            message,
+        ),
+        ApiLoadState::TransportError(message) => render_bioinformatics_state_message(
+            "Error",
+            "Unable to load bioinformatics readiness",
+            message,
+        ),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_workspace(view: &BioinformaticsWorkspaceResponse) -> Html {
+    html! {
+        <section class="dos-card dos-placeholder-card" data-state={if view.available { "available" } else { "reserved" }}>
+            <span class="dos-card-label">{ if view.available { "Workflow ready" } else { "Reserved workflow" } }</span>
+            <h2>{ if view.available { "Bioinformatics readiness is available." } else { "Bioinformatics workspace is reserved." } }</h2>
+            <p>{ &view.message }</p>
+            <div class="dos-chip-row">
+                { for view.supported_object_types.iter().map(|object_type| html! {
+                    <span class="dos-status-pill">{ object_type }</span>
+                }) }
+            </div>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_bioinformatics_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label }</span>
+            <h2>{ title }</h2>
+            <p>{ message }</p>
         </section>
     }
 }
@@ -1011,7 +1128,7 @@ mod tests {
     use super::{
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosures_workspace_api_path,
         home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
-        object_store_card_summaries, objectstores_workspace_api_path, WorkspacePage,
+        object_store_card_summaries, objectstores_workspace_api_path, ApiLoadState, WorkspacePage,
         BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
         OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
@@ -1071,6 +1188,35 @@ mod tests {
         assert_eq!(
             bioinformatics_workspace_api_path("/api/"),
             "/api/workspaces/bioinformatics"
+        );
+    }
+
+    #[test]
+    fn shared_api_load_state_names_cover_page_contract() {
+        let success = ApiLoadState::success("payload");
+        let empty = ApiLoadState::<&str>::empty("empty");
+        let permission_denied = ApiLoadState::<&str>::permission_denied("denied");
+        let transport_error = ApiLoadState::<&str>::transport_error("offline");
+        let stale = ApiLoadState::stale_data("payload", "stale");
+        let states = [
+            ApiLoadState::<&str>::Loading.state_name(),
+            success.state_name(),
+            empty.state_name(),
+            permission_denied.state_name(),
+            transport_error.state_name(),
+            stale.state_name(),
+        ];
+
+        assert_eq!(
+            states,
+            [
+                "loading",
+                "success",
+                "empty",
+                "permission-denied",
+                "transport-error",
+                "stale-data",
+            ]
         );
     }
 

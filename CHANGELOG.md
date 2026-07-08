@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.19.0 - 2026-07-08
+
+- Add a shared Yew API page loading model for the redesigned Web console
+  covering loading, success, empty, permission-denied, transport-error, and
+  stale-data states.
+- Wire the Bioinformatics page to fetch the daemon-backed product workspace
+  payload instead of rendering a static placeholder card.
+- Add Web tests for the shared loading-state contract and Bioinformatics
+  workspace response decoding.
+
 ## 0.18.2 - 2026-07-08
 
 - Remove fixture fallback helper APIs from the redesigned Yew Web console and

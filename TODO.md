@@ -518,7 +518,7 @@ older checklist claims.
   `fallback_dashboard_metrics`, `fallback_enclosures`, and
   `fallback_object_stores` for authenticated pages once live payload loading is
   in place.
-- [ ] Add a shared Yew API loading model for the Home, Enclosures, ObjectStores,
+- [x] Add a shared Yew API loading model for the Home, Enclosures, ObjectStores,
   and Bioinformatics pages: loading, success, empty, permission-denied,
   transport-error, and stale-data states.
 - [x] Wire `HomeDashboard` to fetch `/products/dasobjectstore/api/v1/dashboard/home`

@@ -58,6 +58,15 @@ pub struct ObjectStoresPageResponse {
     pub warnings: Vec<DashboardWarning>,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct BioinformaticsWorkspaceResponse {
+    pub schema_version: String,
+    pub available: bool,
+    pub supported_object_types: Vec<String>,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct HealthSummaryResponse {
     pub state: String,
@@ -338,6 +347,13 @@ pub async fn get_object_stores_dashboard(path: &str) -> Result<ObjectStoresPageR
     get_json(path).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn get_bioinformatics_workspace(
+    path: &str,
+) -> Result<BioinformaticsWorkspaceResponse, ApiError> {
+    get_json(path).await
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn auth_path(auth_base_path: &str, route: &str) -> String {
     format!("{}/{}", auth_base_path.trim_end_matches('/'), route)
@@ -400,7 +416,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_path, EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse,
+        auth_path, BioinformaticsWorkspaceResponse, EnclosuresPageResponse, HomeDashboardResponse,
+        ObjectStoresPageResponse,
     };
 
     #[test]
@@ -612,5 +629,24 @@ mod tests {
             decoded.create_object_store.defaults.endpoint_export_mode,
             "s3_bucket"
         );
+    }
+
+    #[test]
+    fn decodes_bioinformatics_workspace_response_subset() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.product_workspaces.v1",
+            "available": false,
+            "supported_object_types": ["BAM", "POD5", "FASTQ", "ENA/SRA"],
+            "message": "Bioinformatics orchestration will surface workflow-ready data sets once pipeline adapters are connected."
+        });
+
+        let decoded = serde_json::from_value::<BioinformaticsWorkspaceResponse>(payload)
+            .expect("bioinformatics workspace decodes");
+
+        assert!(!decoded.available);
+        assert!(decoded
+            .supported_object_types
+            .iter()
+            .any(|object_type| object_type == "POD5"));
     }
 }

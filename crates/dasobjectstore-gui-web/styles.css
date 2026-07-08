@@ -362,6 +362,13 @@ h2 {
   font-weight: 720;
 }
 
+.dos-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .dos-metric-card strong,
 .dos-enclosure-card strong,
 .dos-store-card strong {

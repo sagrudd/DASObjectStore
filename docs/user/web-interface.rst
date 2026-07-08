@@ -153,6 +153,12 @@ count, usable capacity, seven-day throughput, memory pressure, SMART warnings,
 visible ObjectStores, and operator attention items from the daemon health
 payload.
 
+The redesigned Home, Enclosures, ObjectStores, and Bioinformatics pages share a
+single Yew API loading contract. Each page renders explicit loading, success,
+empty, permission-denied, transport-error, and stale-data states so operators
+can distinguish an empty appliance from an authentication problem or a transport
+failure.
+
 Enclosures Page
 ---------------
 
@@ -211,6 +217,13 @@ DASObjectStore to reproducible reference data, generated pipeline outputs, and
 Mnemosyne/Mneion storage definitions. Until those workflows are implemented, it
 should behave as a placeholder and must not imply that unimplemented data
 management actions have run.
+
+The redesigned Bioinformatics page now requests
+``/products/dasobjectstore/api/v1/workspaces/bioinformatics`` through the same
+authenticated browser session as the other operator pages. The daemon-backed
+payload controls whether the page is presented as workflow-ready or reserved
+and lists the object types currently understood by the product workspace, such
+as BAM, POD5, FASTQ, and ENA/SRA-oriented data.
 
 Login and Footer Branding
 -------------------------
