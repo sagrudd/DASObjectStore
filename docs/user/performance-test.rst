@@ -165,10 +165,12 @@ still writes a fallback SVG artifact and records that fallback in the report's
 ``QR status`` field; install ``qrencode`` before formal commissioning runs that
 require a scannable QR code.
 
-When ``pandoc`` and its PDF engine are available, the PDF is rendered from the
-Markdown report with ``pandoc``. If those tools are unavailable, DASObjectStore
-still writes a fallback PDF artifact so that the benchmark run has a complete
-local evidence bundle.
+When ``grammateus_markdown_pdf`` is available, the PDF is rendered with the
+standard ``dasobjectstore-performance`` Mnemosyne report template, including
+the title-panel metadata table, provenance QR payload, and signature fields. If
+Grammateus is unavailable, DASObjectStore tries ``pandoc`` and then writes a
+built-in fallback PDF artifact so that the benchmark run has a complete local
+evidence bundle.
 
 Reproducibility Notes
 ---------------------

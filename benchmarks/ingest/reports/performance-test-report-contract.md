@@ -63,9 +63,10 @@ PDF is a distribution artifact derived from the Markdown report. Generate it
 after the Markdown is finalized and place it beside the Markdown with the same
 basename and a `.pdf` extension.
 
-Do not make an external PDF renderer a prerequisite for benchmark execution. If
-a host lacks the preferred PDF renderer, leave the Markdown report complete and
-write a local fallback PDF artifact.
+Prefer `grammateus_markdown_pdf` with the `dasobjectstore-performance` report
+template for formal PDFs. Do not make an external PDF renderer a prerequisite
+for benchmark execution. If a host lacks the preferred PDF renderer, leave the
+Markdown report complete and write a local fallback PDF artifact.
 
 Raw metrics remain outside the PDF under `benchmarks/output/ingest/` or the
 operator-selected output root. Reports should link those paths rather than

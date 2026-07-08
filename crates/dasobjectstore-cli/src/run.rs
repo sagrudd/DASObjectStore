@@ -422,7 +422,7 @@ fn run_performance_test(
     result?;
 
     let qr_status = write_report_qr_svg(&qr_path, &reproduction_payload)?;
-    let report = render_performance_report(PerformanceReport {
+    let performance_report = PerformanceReport {
         run_id,
         generated_at_utc,
         repository_revision,
@@ -443,12 +443,13 @@ fn run_performance_test(
         reproduction_payload,
         reproduction_payload_sha256,
         qr_status,
-    });
+    };
+    let report = render_performance_report(performance_report.clone());
     if let Some(parent) = report_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&report_path, report)?;
-    write_pdf_report(&report_path, &pdf_path)?;
+    fs::write(&report_path, &report)?;
+    write_pdf_report(&report_path, &pdf_path, &performance_report)?;
     writeln!(writer, "Report: {}", report_path.display())?;
     writeln!(writer, "PDF: {}", pdf_path.display())?;
     Ok(())
@@ -760,9 +761,16 @@ fn fallback_qr_svg(payload: &str) -> String {
     svg
 }
 
-fn write_pdf_report(markdown_path: &Path, pdf_path: &Path) -> Result<(), CliError> {
+fn write_pdf_report(
+    markdown_path: &Path,
+    pdf_path: &Path,
+    report: &PerformanceReport,
+) -> Result<(), CliError> {
     if let Some(parent) = pdf_path.parent() {
         fs::create_dir_all(parent)?;
+    }
+    if write_grammateus_pdf_report(markdown_path, pdf_path, report) {
+        return Ok(());
     }
     if ProcessCommand::new("pandoc")
         .arg(markdown_path)
@@ -778,6 +786,60 @@ fn write_pdf_report(markdown_path: &Path, pdf_path: &Path) -> Result<(), CliErro
     let markdown = fs::read_to_string(markdown_path)?;
     fs::write(pdf_path, render_simple_pdf(&markdown))?;
     Ok(())
+}
+
+fn write_grammateus_pdf_report(
+    markdown_path: &Path,
+    pdf_path: &Path,
+    report: &PerformanceReport,
+) -> bool {
+    ProcessCommand::new("grammateus_markdown_pdf")
+        .arg("--input")
+        .arg(markdown_path)
+        .arg("--output")
+        .arg(pdf_path)
+        .arg("--title")
+        .arg("DASObjectStore Performance Test Report")
+        .arg("--title-explanation")
+        .arg("Reproducible DAS performance evidence for SSD staging, SSD readback, and concurrent HDD settlement planning.")
+        .arg("--metadata-json")
+        .arg(performance_report_metadata_json(report))
+        .arg("--provenance-qr-payload")
+        .arg(&report.reproduction_payload)
+        .arg("--report-template")
+        .arg("dasobjectstore-performance")
+        .arg("--footer-label")
+        .arg("DASObjectStore performance")
+        .arg("--generated-at-utc")
+        .arg(&report.generated_at_utc)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn performance_report_metadata_json(report: &PerformanceReport) -> String {
+    serde_json::json!({
+        "header": "DASObjectStore performance report",
+        "rows": [
+            [
+                {"label": "Run ID", "value": report.run_id},
+            ],
+            [
+                {"label": "Report state", "value": "final"},
+                {"label": "Generated at (UTC)", "value": report.generated_at_utc},
+            ],
+            [
+                {"label": "Repository revision", "value": report.repository_revision},
+                {"label": "CLI version", "value": dasobjectstore_core::VERSION},
+            ],
+            [
+                {"label": "Signature of operator", "value": "Pending operator signature"},
+                {"label": "Cryptographic signature", "value": report.reproduction_payload_sha256},
+            ],
+        ],
+    })
+    .to_string()
 }
 
 fn sha256_hex_bytes(bytes: &[u8]) -> String {
@@ -4445,12 +4507,12 @@ impl From<ProbeError> for CliError {
 mod tests {
     use super::{
         collect_ingest_files, connection_status_from_probe, current_user_group_names,
-        parse_binary_size, render_performance_report, render_simple_pdf, run,
-        validate_managed_hdds_on_supported_das, write_health_json, write_health_summary,
-        write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
-        ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
-        PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
-        PerformanceMeasurement, PerformanceReport,
+        parse_binary_size, performance_report_metadata_json, render_performance_report,
+        render_simple_pdf, run, validate_managed_hdds_on_supported_das, write_health_json,
+        write_health_summary, write_health_verbose, write_host_connection_status,
+        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
+        ManagedHddDevice, PerformanceConcurrencyResult, PerformanceDiskResult,
+        PerformanceFileResult, PerformanceMeasurement, PerformanceReport,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -4562,7 +4624,60 @@ mod tests {
 
     #[test]
     fn performance_test_report_renders_summary_tables_and_recommendation() {
-        let report = render_performance_report(PerformanceReport {
+        let report = render_performance_report(example_performance_report());
+
+        assert!(report.contains("# DASObjectStore Performance Test Report"));
+        assert!(report.contains("| Brand | Mnemosyne Biosciences |"));
+        assert!(report.contains("| QR artifact | `/tmp/perf-test-run.qr.svg` |"));
+        assert!(report.contains("| QR status | `qrencode SVG` |"));
+        assert!(report.contains("Reproduction payload SHA-256"));
+        assert!(report.contains("Reproduction QR payload"));
+        assert!(report.contains("## Reproduction Payload"));
+        assert!(report.contains("Scenario: 1 files of 1.0 MiB each."));
+        assert!(report.contains("- Run id: `perf-test-run`"));
+        assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
+        assert!(report.contains("- Best observed HDD aggregate: concurrency 2 at 2.0 MiB/s"));
+        assert!(report.contains("| File | Generate | SSD write | SSD read |"));
+        assert!(report.contains("| File | Concurrency | Disk | Write rate |"));
+        assert!(report
+            .contains("| File | HDD concurrency | Members | Aggregate write | Slowest member |"));
+        assert!(report.contains("| 1 | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s |"));
+        assert!(report.contains("Recommended initial HDD settlement concurrency: 2"));
+        assert!(render_simple_pdf(&report).starts_with(b"%PDF-1.4"));
+    }
+
+    #[test]
+    fn performance_report_metadata_json_satisfies_standard_template() {
+        let metadata = performance_report_metadata_json(&example_performance_report());
+        let metadata = serde_json::from_str::<serde_json::Value>(&metadata).unwrap();
+        let labels = metadata["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|row| row.as_array().unwrap())
+            .map(|field| field["label"].as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(metadata["header"], "DASObjectStore performance report");
+        assert_eq!(labels[0], "Run ID");
+        for required in [
+            "Run ID",
+            "Report state",
+            "Generated at (UTC)",
+            "Repository revision",
+            "Signature of operator",
+            "Cryptographic signature",
+        ] {
+            assert!(labels.contains(&required), "{required}");
+        }
+        assert_eq!(
+            metadata["rows"][3][1]["value"],
+            "623f8d191890968ec394ff02950710ecb9e5eed5a0b68c064e28e8ffa0876f58"
+        );
+    }
+
+    fn example_performance_report() -> PerformanceReport {
+        PerformanceReport {
             run_id: "perf-test-run".to_string(),
             generated_at_utc: "2026-01-02T03:04:05Z".to_string(),
             repository_revision: "test-revision".to_string(),
@@ -4638,26 +4753,7 @@ mod tests {
             reproduction_payload_sha256:
                 "623f8d191890968ec394ff02950710ecb9e5eed5a0b68c064e28e8ffa0876f58".to_string(),
             qr_status: "qrencode SVG".to_string(),
-        });
-
-        assert!(report.contains("# DASObjectStore Performance Test Report"));
-        assert!(report.contains("| Brand | Mnemosyne Biosciences |"));
-        assert!(report.contains("| QR artifact | `/tmp/perf-test-run.qr.svg` |"));
-        assert!(report.contains("| QR status | `qrencode SVG` |"));
-        assert!(report.contains("Reproduction payload SHA-256"));
-        assert!(report.contains("Reproduction QR payload"));
-        assert!(report.contains("## Reproduction Payload"));
-        assert!(report.contains("Scenario: 1 files of 1.0 MiB each."));
-        assert!(report.contains("- Run id: `perf-test-run`"));
-        assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
-        assert!(report.contains("- Best observed HDD aggregate: concurrency 2 at 2.0 MiB/s"));
-        assert!(report.contains("| File | Generate | SSD write | SSD read |"));
-        assert!(report.contains("| File | Concurrency | Disk | Write rate |"));
-        assert!(report
-            .contains("| File | HDD concurrency | Members | Aggregate write | Slowest member |"));
-        assert!(report.contains("| 1 | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s |"));
-        assert!(report.contains("Recommended initial HDD settlement concurrency: 2"));
-        assert!(render_simple_pdf(&report).starts_with(b"%PDF-1.4"));
+        }
     }
 
     #[test]

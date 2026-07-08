@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.3.6 - 2026-07-08
+
+- Prefer `grammateus_markdown_pdf` for `dasobjectstore performance-test` PDF
+  artifacts when it is available, using the standardized
+  `dasobjectstore-performance` report template with mandatory Mnemosyne
+  metadata, QR provenance payload, and signature fields.
+- Retain `pandoc` and the built-in fallback PDF renderer so benchmark execution
+  still completes on hosts without an external report renderer.
+
 ## 0.3.5 - 2026-07-08
 
 - Add `dasobjectstore performance-test` for generated-file SSD write/read and
