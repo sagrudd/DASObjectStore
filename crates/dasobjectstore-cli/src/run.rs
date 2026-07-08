@@ -126,7 +126,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{collections::hash_map::DefaultHasher, collections::BTreeMap, collections::BTreeSet};
+use std::{
+    collections::hash_map::DefaultHasher, collections::BTreeMap, collections::BTreeSet,
+    collections::VecDeque,
+};
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -3177,6 +3180,7 @@ fn benchmark_ssd_pipeline_with_options(
     let mut producer_error = None;
     let total_hdd_jobs = workload.file_count() as usize * redundancy;
     let mut submitted_hdd_jobs = 0_usize;
+    let mut pending_hdd_jobs = VecDeque::<SsdPipelineJob>::new();
     for payload in &workload.payloads {
         if let Err(err) = check_performance_cancelled() {
             producer_error = Some(err);
@@ -3186,6 +3190,17 @@ fn benchmark_ssd_pipeline_with_options(
             producer_error = Some(err);
             break;
         }
+        match try_submit_pending_ssd_pipeline_jobs(
+            &sender,
+            &mut pending_hdd_jobs,
+            &mut submitted_hdd_jobs,
+        ) {
+            Ok(_) => {}
+            Err(err) => {
+                producer_error = Some(err);
+                break;
+            }
+        }
         while !performance_ssd_can_admit_payload(
             resident_ssd_bytes.load(Ordering::SeqCst),
             payload.size_bytes,
@@ -3194,6 +3209,17 @@ fn benchmark_ssd_pipeline_with_options(
             if let Err(err) = check_performance_cancelled() {
                 producer_error = Some(err);
                 break;
+            }
+            match try_submit_pending_ssd_pipeline_jobs(
+                &sender,
+                &mut pending_hdd_jobs,
+                &mut submitted_hdd_jobs,
+            ) {
+                Ok(_) => {}
+                Err(err) => {
+                    producer_error = Some(err);
+                    break;
+                }
             }
             if let Some(context) = tui_context {
                 let rate_snapshot = live_rates.snapshot()?;
@@ -3364,62 +3390,22 @@ fn benchmark_ssd_pipeline_with_options(
             ssd_read: zero_measurement(),
         });
         for copy_index in 0..redundancy {
-            let mut pending_job = Some(SsdPipelineJob {
+            pending_hdd_jobs.push_back(SsdPipelineJob {
                 file_index: payload.file_index,
                 copy_index,
                 relative_path: payload.relative_path.clone(),
                 ssd_path: ssd_path.clone(),
                 size_bytes: payload.size_bytes,
             });
-            loop {
-                if let Err(err) = check_performance_cancelled() {
-                    producer_error = Some(err);
-                    break;
-                }
-                let job = pending_job.take().expect("pending SSD pipeline HDD job");
-                match sender.try_send(job) {
-                    Ok(()) => {
-                        submitted_hdd_jobs += 1;
-                        break;
-                    }
-                    Err(mpsc::TrySendError::Full(job)) => {
-                        pending_job = Some(job);
-                        if let Some(context) = tui_context {
-                            let rate_snapshot = live_rates.snapshot()?;
-                            render_hdd_drain_tui_snapshot(
-                                writer,
-                                HddDrainTuiState {
-                                    context,
-                                    workload,
-                                    kind: PerformanceScenarioKind::SsdPipeline,
-                                    concurrency,
-                                    submitted_jobs: submitted_hdd_jobs,
-                                    total_jobs: total_hdd_jobs,
-                                    started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
-                                    completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst)
-                                        as usize,
-                                    transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
-                                    ssd_read_rate: rate_snapshot.ssd_read_rate,
-                                    hdd_write_rate: rate_snapshot.hdd_write_rate,
-                                    hdd_disk_rates: active_hdd_disk_rates(&active_hdd_writes)?,
-                                    active_hdd_landing: active_hdd_landing_lines(
-                                        &active_hdd_writes,
-                                        workload.file_count(),
-                                    )?,
-                                },
-                            )?;
-                        }
-                        thread::sleep(std::time::Duration::from_millis(250));
-                    }
-                    Err(mpsc::TrySendError::Disconnected(_)) => {
-                        producer_error = Some(CliError::CommandFailed(
-                            "performance-test HDD workers stopped early".to_string(),
-                        ));
-                        break;
-                    }
-                }
-            }
-            if producer_error.is_some() {
+        }
+        match try_submit_pending_ssd_pipeline_jobs(
+            &sender,
+            &mut pending_hdd_jobs,
+            &mut submitted_hdd_jobs,
+        ) {
+            Ok(_) => {}
+            Err(err) => {
+                producer_error = Some(err);
                 break;
             }
         }
@@ -3501,6 +3487,50 @@ fn benchmark_ssd_pipeline_with_options(
         }
     }
     staging_complete.store(true, Ordering::SeqCst);
+    while producer_error.is_none() && !pending_hdd_jobs.is_empty() {
+        if let Err(err) = check_performance_cancelled() {
+            producer_error = Some(err);
+            break;
+        }
+        match try_submit_pending_ssd_pipeline_jobs(
+            &sender,
+            &mut pending_hdd_jobs,
+            &mut submitted_hdd_jobs,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                if let Some(context) = tui_context {
+                    let rate_snapshot = live_rates.snapshot()?;
+                    render_hdd_drain_tui_snapshot(
+                        writer,
+                        HddDrainTuiState {
+                            context,
+                            workload,
+                            kind: PerformanceScenarioKind::SsdPipeline,
+                            concurrency,
+                            submitted_jobs: submitted_hdd_jobs,
+                            total_jobs: total_hdd_jobs,
+                            started_jobs: hdd_jobs_started.load(Ordering::SeqCst) as usize,
+                            completed_jobs: hdd_jobs_completed.load(Ordering::SeqCst) as usize,
+                            transferred_bytes: hdd_bytes_transferred.load(Ordering::SeqCst),
+                            ssd_read_rate: rate_snapshot.ssd_read_rate,
+                            hdd_write_rate: rate_snapshot.hdd_write_rate,
+                            hdd_disk_rates: active_hdd_disk_rates(&active_hdd_writes)?,
+                            active_hdd_landing: active_hdd_landing_lines(
+                                &active_hdd_writes,
+                                workload.file_count(),
+                            )?,
+                        },
+                    )?;
+                }
+                thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(err) => {
+                producer_error = Some(err);
+                break;
+            }
+        }
+    }
     drop(sender);
     if let Some(context) = tui_context {
         while (hdd_jobs_completed.load(Ordering::SeqCst) as usize) < total_hdd_jobs {
@@ -3808,6 +3838,32 @@ struct SsdPipelineJob {
     relative_path: PathBuf,
     ssd_path: PathBuf,
     size_bytes: u64,
+}
+
+fn try_submit_pending_ssd_pipeline_jobs(
+    sender: &mpsc::SyncSender<SsdPipelineJob>,
+    pending_jobs: &mut VecDeque<SsdPipelineJob>,
+    submitted_hdd_jobs: &mut usize,
+) -> Result<bool, CliError> {
+    let mut submitted_any = false;
+    while let Some(job) = pending_jobs.pop_front() {
+        match sender.try_send(job) {
+            Ok(()) => {
+                *submitted_hdd_jobs += 1;
+                submitted_any = true;
+            }
+            Err(mpsc::TrySendError::Full(job)) => {
+                pending_jobs.push_front(job);
+                return Ok(submitted_any);
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                return Err(CliError::CommandFailed(
+                    "performance-test HDD workers stopped early".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(submitted_any)
 }
 
 #[derive(Debug)]
@@ -9340,17 +9396,17 @@ mod tests {
         plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
         render_performance_report, render_performance_tui_snapshot, render_simple_pdf,
         reset_performance_sync_all_calls, run, source_performance_workload, throughput,
-        update_file_read_measurements_from_disk_results, validate_managed_hdds_on_supported_das,
-        validate_pdf_report_path, write_health_json, write_health_summary, write_health_verbose,
-        write_host_connection_status, write_pretty_report, zero_measurement, ActiveHddWrite,
-        ActiveHddWriteMap, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
-        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
-        PerformanceDiskResult, PerformanceFileResult, PerformanceLiveRateCounters,
-        PerformanceMeasurement, PerformancePayload, PerformanceRecommendation, PerformanceReport,
-        PerformanceScenarioKind, PerformanceScenarioResult, PerformanceSsdResidencyBudget,
-        PerformanceSsdSettler, PerformanceTuiSnapshot, PerformanceWorkload,
-        PerformanceWorkloadKind, SsdPipelineBenchmarkOptions,
-        PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
+        try_submit_pending_ssd_pipeline_jobs, update_file_read_measurements_from_disk_results,
+        validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
+        write_health_summary, write_health_verbose, write_host_connection_status,
+        write_pretty_report, zero_measurement, ActiveHddWrite, ActiveHddWriteMap, CliError,
+        ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
+        PerformanceBenchmarkResults, PerformanceConcurrencyResult, PerformanceDiskResult,
+        PerformanceFileResult, PerformanceLiveRateCounters, PerformanceMeasurement,
+        PerformancePayload, PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
+        PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceSsdSettler,
+        PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
+        SsdPipelineBenchmarkOptions, SsdPipelineJob, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -9377,12 +9433,12 @@ mod tests {
         EnclosureIdentity, HostPlatform, ObservedDisk, ObservedEnclosure, ProbeReport, Transport,
     };
     use rusqlite::Connection;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::fs::{self, File};
     #[cfg(target_os = "linux")]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -10198,6 +10254,47 @@ mod tests {
     }
 
     #[test]
+    fn ssd_pipeline_pending_hdd_jobs_preserve_fifo_when_worker_channel_is_full() {
+        let (sender, receiver) = mpsc::sync_channel::<SsdPipelineJob>(1);
+        let mut pending = VecDeque::from([
+            test_ssd_pipeline_job(0),
+            test_ssd_pipeline_job(1),
+            test_ssd_pipeline_job(2),
+        ]);
+        let mut submitted = 0_usize;
+
+        assert!(
+            try_submit_pending_ssd_pipeline_jobs(&sender, &mut pending, &mut submitted)
+                .expect("first submit")
+        );
+        assert_eq!(submitted, 1);
+        assert_eq!(pending.front().map(|job| job.file_index), Some(1));
+        assert!(
+            !try_submit_pending_ssd_pipeline_jobs(&sender, &mut pending, &mut submitted)
+                .expect("full channel reports no progress")
+        );
+        assert_eq!(submitted, 1);
+        assert_eq!(pending.front().map(|job| job.file_index), Some(1));
+
+        assert_eq!(receiver.recv().expect("first job").file_index, 0);
+        assert!(
+            try_submit_pending_ssd_pipeline_jobs(&sender, &mut pending, &mut submitted)
+                .expect("second submit")
+        );
+        assert_eq!(submitted, 2);
+        assert_eq!(pending.front().map(|job| job.file_index), Some(2));
+
+        assert_eq!(receiver.recv().expect("second job").file_index, 1);
+        assert!(
+            try_submit_pending_ssd_pipeline_jobs(&sender, &mut pending, &mut submitted)
+                .expect("third submit")
+        );
+        assert_eq!(submitted, 3);
+        assert!(pending.is_empty());
+        assert_eq!(receiver.recv().expect("third job").file_index, 2);
+    }
+
+    #[test]
     fn performance_scenario_matrix_selects_requested_classes_and_concurrency() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
@@ -10276,6 +10373,16 @@ mod tests {
         assert!(err
             .to_string()
             .contains("--hdd-concurrency 4 requires at least 4 managed HDD roots"));
+    }
+
+    fn test_ssd_pipeline_job(file_index: u32) -> SsdPipelineJob {
+        SsdPipelineJob {
+            file_index,
+            copy_index: 0,
+            relative_path: PathBuf::from(format!("{file_index}.bin")),
+            ssd_path: PathBuf::from(format!("/ssd/{file_index}.bin")),
+            size_bytes: 1,
+        }
     }
 
     #[test]

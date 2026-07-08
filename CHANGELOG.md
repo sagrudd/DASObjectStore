@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.12.1 - 2026-07-08
+
+- Fix ``ssd-overlap-drain`` performance benchmarking so a full HDD worker
+  channel no longer blocks staging the next source file to SSD when the SSD
+  residency budget still has capacity.
+- Preserve FIFO HDD settlement order with an explicit pending staged-file queue
+  while allowing SSD staging and HDD drain to proceed concurrently within the
+  safe SSD backlog window.
+
 ## 0.12.0 - 2026-07-08
 
 - Add selectable ``dasobjectstore performance-test --scenario`` values so large
