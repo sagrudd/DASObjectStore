@@ -127,42 +127,6 @@ impl DashboardMetric {
     }
 }
 
-pub fn fallback_dashboard_metrics() -> Vec<DashboardMetric> {
-    vec![
-        DashboardMetric::new("Drives", "0", "Live daemon inventory pending", "Pending"),
-        DashboardMetric::new(
-            "DAS enclosures",
-            "0 mounted",
-            "Supported enclosure mapping pending",
-            "Pending",
-        ),
-        DashboardMetric::new(
-            "Capacity",
-            "0 B",
-            "Used and available TiB will appear after inventory",
-            "Pending",
-        ),
-        DashboardMetric::new(
-            "7-day throughput",
-            "Pending",
-            "Ingress and destage rates require daemon metrics",
-            "Pending",
-        ),
-        DashboardMetric::new(
-            "Memory stress",
-            "Unknown",
-            "Host memory telemetry pending",
-            "Pending",
-        ),
-        DashboardMetric::new(
-            "SMART warnings",
-            "0",
-            "No live SMART feed attached to this page yet",
-            "Pending",
-        ),
-    ]
-}
-
 pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetric> {
     vec![
         DashboardMetric::new(
@@ -292,22 +256,6 @@ pub fn home_dashboard_attention(view: &HomeDashboardResponse) -> Vec<DashboardAt
     items
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct EnclosureSummary {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub role: &'static str,
-    pub health: &'static str,
-    pub bays_used: u8,
-    pub bays_total: u8,
-    pub capacity: &'static str,
-    pub note: &'static str,
-}
-
-pub fn fallback_enclosures() -> Vec<EnclosureSummary> {
-    Vec::new()
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EnclosureCardSummary {
     pub id: String,
@@ -356,20 +304,6 @@ pub fn enclosure_card_summaries(view: &EnclosuresPageResponse) -> Vec<EnclosureC
             }
         })
         .collect()
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ObjectStoreSummary {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub policy: &'static str,
-    pub capacity: &'static str,
-    pub objects: &'static str,
-    pub state: &'static str,
-}
-
-pub fn fallback_object_stores() -> Vec<ObjectStoreSummary> {
-    Vec::new()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -514,7 +448,7 @@ fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> H
         ApiLoadState::Loading => html! {
             <>
                 <div class="dos-metric-grid">
-                    { for fallback_dashboard_metrics().into_iter().map(render_metric_card) }
+                    { for home_dashboard_loading_cards().into_iter().map(render_loading_metric_card) }
                 </div>
                 <section class="dos-card dos-wide-card dos-loading-card">
                     <span class="dos-card-label">{ "Loading" }</span>
@@ -544,6 +478,33 @@ fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> H
         ApiLoadState::Error(message) => {
             render_home_state_message("Error", "Unable to load Home dashboard", message)
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn home_dashboard_loading_cards() -> Vec<&'static str> {
+    vec![
+        "Drive inventory",
+        "DAS enclosures",
+        "Capacity",
+        "7-day throughput",
+        "Memory stress",
+        "SMART warnings",
+        "ObjectStores",
+    ]
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_loading_metric_card(label: &'static str) -> Html {
+    html! {
+        <section class="dos-card dos-metric-card dos-loading-card" data-state="loading">
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ label }</span>
+                <span class="dos-status-pill">{ "Loading" }</span>
+            </div>
+            <strong>{ "..." }</strong>
+            <p>{ "Awaiting live daemon payload." }</p>
+        </section>
     }
 }
 
@@ -1049,11 +1010,10 @@ fn page_header(props: &PageHeaderProps) -> Html {
 mod tests {
     use super::{
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosures_workspace_api_path,
-        fallback_enclosures, fallback_object_stores, home_dashboard_attention,
-        home_dashboard_metrics, home_workspace_api_path, object_store_card_summaries,
-        objectstores_workspace_api_path, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE,
-        ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
-        PRIMARY_NAVIGATION,
+        home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
+        object_store_card_summaries, objectstores_workspace_api_path, WorkspacePage,
+        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
 
@@ -1115,22 +1075,12 @@ mod tests {
     }
 
     #[test]
-    fn fallback_enclosures_support_card_and_detail_views() {
-        let enclosures = fallback_enclosures();
+    fn authenticated_pages_do_not_expose_fixture_fallback_helpers() {
+        let source = include_str!("workspace.rs");
 
-        assert!(enclosures.is_empty());
-        assert!(enclosures
-            .iter()
-            .all(|enclosure| enclosure.bays_used <= enclosure.bays_total));
-    }
-
-    #[test]
-    fn fallback_object_stores_leave_room_for_create_card() {
-        let stores = fallback_object_stores();
-
-        assert!(stores.is_empty());
-        assert!(stores.iter().all(|store| !store.id.is_empty()));
-        assert!(stores.iter().all(|store| !store.policy.is_empty()));
+        assert!(!source.contains(&format!("{}{}", "fallback_", "dashboard_metrics")));
+        assert!(!source.contains(&format!("{}{}", "fallback_", "enclosures")));
+        assert!(!source.contains(&format!("{}{}", "fallback_", "object_stores")));
     }
 
     #[test]

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.18.2 - 2026-07-08
+
+- Remove fixture fallback helper APIs from the redesigned Yew Web console and
+  stop rendering synthetic zero-valued Home metrics while authenticated pages
+  wait for live daemon dashboard payloads.
+
 ## 0.18.1 - 2026-07-08
 
 - Fix ``dasobjectstore performance-test`` direct-to-HDD scenarios so TUI runs

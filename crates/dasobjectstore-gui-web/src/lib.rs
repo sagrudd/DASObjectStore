@@ -42,9 +42,8 @@ pub use users_groups::{
     CREATE_LOCAL_GROUP_OPERATION, USERS_GROUPS_WORKSPACE_ROUTE,
 };
 pub use workspace::{
-    bioinformatics_workspace_api_path, enclosures_workspace_api_path, fallback_dashboard_metrics,
-    fallback_enclosures, fallback_object_stores, home_workspace_api_path,
-    objectstores_workspace_api_path, DashboardMetric, EnclosureSummary, ObjectStoreSummary,
+    bioinformatics_workspace_api_path, enclosures_workspace_api_path, home_workspace_api_path,
+    objectstores_workspace_api_path, DashboardMetric, EnclosureCardSummary, ObjectStoreCardSummary,
     WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
     HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
 };

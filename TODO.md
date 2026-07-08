@@ -514,7 +514,7 @@ older checklist claims.
 
 ## Milestone 19: Web Console Live Data and Grammateus-Aligned Design
 
-- [ ] Audit the Yew redesign surface and remove reliance on
+- [x] Audit the Yew redesign surface and remove reliance on
   `fallback_dashboard_metrics`, `fallback_enclosures`, and
   `fallback_object_stores` for authenticated pages once live payload loading is
   in place.
