@@ -2960,6 +2960,7 @@ fn benchmark_ssd_stage_then_drain(
                                 size_bytes: job.size_bytes,
                                 bytes_written: 0,
                                 started: Instant::now(),
+                                phase: PerformanceCopyProgressPhase::Copying,
                             },
                         );
                     let mut last_progress_bytes = 0_u64;
@@ -2996,6 +2997,7 @@ fn benchmark_ssd_stage_then_drain(
                                 .get_mut(&active_key)
                             {
                                 active.bytes_written = copy_progress.bytes;
+                                active.phase = copy_progress.phase;
                             }
                             Ok(())
                         };
@@ -3340,6 +3342,7 @@ fn benchmark_ssd_pipeline_with_options(
                             size_bytes: job.size_bytes,
                             bytes_written: 0,
                             started: Instant::now(),
+                            phase: PerformanceCopyProgressPhase::Copying,
                         },
                     );
                 let mut last_progress_bytes = 0_u64;
@@ -3374,6 +3377,7 @@ fn benchmark_ssd_pipeline_with_options(
                             .get_mut(&active_key)
                         {
                             active.bytes_written = copy_progress.bytes;
+                            active.phase = copy_progress.phase;
                         }
                         Ok(())
                     };
@@ -3987,11 +3991,15 @@ fn benchmark_direct_hdd(
                             size_bytes: job.payload.size_bytes,
                             bytes_written: 0,
                             started: Instant::now(),
+                            phase: PerformanceCopyProgressPhase::Copying,
                         },
                     );
                 let mut last_progress_bytes = 0_u64;
                 let mut last_write_seconds = 0.0_f64;
-                let mut progress = |bytes: u64, write_seconds: f64| -> Result<(), CliError> {
+                let mut progress = |bytes: u64,
+                                    write_seconds: f64,
+                                    phase: PerformanceCopyProgressPhase|
+                 -> Result<(), CliError> {
                     let delta = bytes.saturating_sub(last_progress_bytes);
                     last_progress_bytes = bytes;
                     let delta_write_seconds = (write_seconds - last_write_seconds).max(0.0);
@@ -4012,13 +4020,18 @@ fn benchmark_direct_hdd(
                         .get_mut(&active_key)
                     {
                         active.bytes_written = bytes;
+                        active.phase = phase;
                     }
                     Ok(())
                 };
                 let measurement = if let Some(source) = &job.payload.source_path {
                     let mut split_progress =
                         |copy_progress: PerformanceSplitCopyProgress| -> Result<(), CliError> {
-                            progress(copy_progress.bytes, copy_progress.destination_write_seconds)
+                            progress(
+                                copy_progress.bytes,
+                                copy_progress.destination_write_seconds,
+                                copy_progress.phase,
+                            )
                         };
                     measure_copy_with_split_progress(
                         source,
@@ -4029,7 +4042,7 @@ fn benchmark_direct_hdd(
                 } else {
                     let mut generated_progress =
                         |bytes: u64, seconds: f64| -> Result<(), CliError> {
-                            progress(bytes, seconds)
+                            progress(bytes, seconds, PerformanceCopyProgressPhase::Copying)
                         };
                     measure_land_payload_with_progress_and_sync_policy(
                         &job.payload,
@@ -4399,6 +4412,7 @@ struct ActiveHddWrite {
     size_bytes: u64,
     bytes_written: u64,
     started: Instant,
+    phase: PerformanceCopyProgressPhase,
 }
 
 #[derive(Clone, Debug)]
@@ -4779,12 +4793,19 @@ struct PerformanceSplitCopyProgress {
     bytes: u64,
     source_read_seconds: f64,
     destination_write_seconds: f64,
+    phase: PerformanceCopyProgressPhase,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct PerformanceSplitCopyMeasurement {
     source_read: PerformanceMeasurement,
     destination_write: PerformanceMeasurement,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PerformanceCopyProgressPhase {
+    Copying,
+    Syncing,
 }
 
 fn measure_copy_with_split_progress(
@@ -4806,7 +4827,16 @@ fn measure_copy_with_split_progress(
         .unwrap_or(0);
     let progress_step = performance_progress_step(total_bytes);
     let mut next_progress = progress_step.min(total_bytes);
+    let mut last_progress_emit = Instant::now();
     let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+    if let Some(callback) = progress.as_deref_mut() {
+        callback(PerformanceSplitCopyProgress {
+            bytes,
+            source_read_seconds,
+            destination_write_seconds,
+            phase: PerformanceCopyProgressPhase::Copying,
+        })?;
+    }
     loop {
         check_performance_cancelled()?;
         let read_started = Instant::now();
@@ -4820,25 +4850,51 @@ fn measure_copy_with_split_progress(
         destination_write_seconds += write_started.elapsed().as_secs_f64();
         bytes = bytes.saturating_add(read as u64);
         if let Some(callback) = progress.as_deref_mut() {
-            if bytes >= next_progress || bytes == total_bytes {
+            if bytes >= next_progress
+                || bytes == total_bytes
+                || last_progress_emit.elapsed() >= Duration::from_secs(1)
+            {
                 callback(PerformanceSplitCopyProgress {
                     bytes,
                     source_read_seconds,
                     destination_write_seconds,
+                    phase: PerformanceCopyProgressPhase::Copying,
                 })?;
-                next_progress = bytes.saturating_add(progress_step).min(total_bytes);
+                last_progress_emit = Instant::now();
+                if bytes >= next_progress {
+                    next_progress = bytes.saturating_add(progress_step).min(total_bytes);
+                }
             }
         }
     }
     check_performance_cancelled()?;
     let sync_started = Instant::now();
-    performance_sync_all(&writer)?;
+    if let Some(callback) = progress.as_deref_mut() {
+        callback(PerformanceSplitCopyProgress {
+            bytes,
+            source_read_seconds,
+            destination_write_seconds,
+            phase: PerformanceCopyProgressPhase::Syncing,
+        })?;
+        performance_sync_all_with_heartbeat(&writer, || {
+            callback(PerformanceSplitCopyProgress {
+                bytes,
+                source_read_seconds,
+                destination_write_seconds: destination_write_seconds
+                    + sync_started.elapsed().as_secs_f64(),
+                phase: PerformanceCopyProgressPhase::Syncing,
+            })
+        })?;
+    } else {
+        performance_sync_all(&writer)?;
+    }
     destination_write_seconds += sync_started.elapsed().as_secs_f64();
     if let Some(callback) = progress.as_deref_mut() {
         callback(PerformanceSplitCopyProgress {
             bytes,
             source_read_seconds,
             destination_write_seconds,
+            phase: PerformanceCopyProgressPhase::Syncing,
         })?;
     }
     Ok(PerformanceSplitCopyMeasurement {
@@ -4912,6 +4968,41 @@ fn performance_sync_all(file: &File) -> io::Result<()> {
         *calls.borrow_mut() += 1;
     });
     file.sync_all()
+}
+
+#[cfg(not(test))]
+fn performance_sync_all_with_heartbeat(
+    file: &File,
+    mut heartbeat: impl FnMut() -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    let sync_file = file.try_clone()?;
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sender.send(performance_sync_all(&sync_file));
+    });
+
+    loop {
+        match receiver.recv_timeout(Duration::from_secs(1)) {
+            Ok(result) => return result.map_err(CliError::from),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                heartbeat()?;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(CliError::CommandFailed(
+                    "performance-test sync worker stopped before reporting completion".to_string(),
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn performance_sync_all_with_heartbeat(
+    file: &File,
+    mut heartbeat: impl FnMut() -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    heartbeat()?;
+    performance_sync_all(file).map_err(CliError::from)
 }
 
 #[cfg(test)]
@@ -5363,11 +5454,18 @@ fn active_hdd_landing_lines(
 }
 
 fn active_hdd_write_rate(write: &ActiveHddWrite, now: Instant) -> String {
-    if write.bytes_written == 0 {
-        return "pending".to_string();
+    match (write.phase, write.bytes_written) {
+        (PerformanceCopyProgressPhase::Copying, 0) => "copying".to_string(),
+        (PerformanceCopyProgressPhase::Syncing, 0) => "settling".to_string(),
+        (PerformanceCopyProgressPhase::Syncing, bytes) => {
+            let elapsed = now.duration_since(write.started).as_secs_f64().max(0.001);
+            format!("settling; avg {}/s", format_bytes(bytes as f64 / elapsed))
+        }
+        (PerformanceCopyProgressPhase::Copying, bytes) => {
+            let elapsed = now.duration_since(write.started).as_secs_f64().max(0.001);
+            format!("{}/s", format_bytes(bytes as f64 / elapsed))
+        }
     }
-    let elapsed = now.duration_since(write.started).as_secs_f64().max(0.001);
-    format!("{}/s", format_bytes(write.bytes_written as f64 / elapsed))
 }
 
 fn render_performance_json(report: &PerformanceReport) -> String {
@@ -10121,9 +10219,9 @@ mod tests {
         write_pretty_report, zero_measurement, ActiveHddWrite, ActiveHddWriteMap, CliError,
         ConnectionAssessment, DiskHealthSummary, DiskPlacementScheduler, HealthReport,
         ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
-        PerformanceDiskResult, PerformanceFileResult, PerformanceIoSample,
-        PerformanceLiveRateCounters, PerformanceMeasurement, PerformancePayload,
-        PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
+        PerformanceCopyProgressPhase, PerformanceDiskResult, PerformanceFileResult,
+        PerformanceIoSample, PerformanceLiveRateCounters, PerformanceMeasurement,
+        PerformancePayload, PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
         PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceSsdSettler,
         PerformanceTuiContext, PerformanceTuiSnapshot, PerformanceWorkload,
         PerformanceWorkloadKind, SsdPipelineBenchmarkOptions, SsdPipelineJob,
@@ -10731,6 +10829,16 @@ mod tests {
             after_sync.destination_write_seconds >= before_sync.destination_write_seconds,
             "final sync should be charged to the destination/HDD metric"
         );
+        assert_eq!(
+            progress_events.first().expect("initial progress").phase,
+            PerformanceCopyProgressPhase::Copying
+        );
+        assert!(
+            progress_events
+                .iter()
+                .any(|event| event.phase == PerformanceCopyProgressPhase::Syncing),
+            "copy should report the final media settling phase"
+        );
         fs::remove_dir_all(root).expect("cleanup benchmark fixture");
     }
 
@@ -11007,6 +11115,7 @@ mod tests {
                     size_bytes: 2 * 1024 * 1024 * 1024,
                     bytes_written: 512 * 1024 * 1024,
                     started,
+                    phase: PerformanceCopyProgressPhase::Copying,
                 },
             );
         }
@@ -11050,6 +11159,52 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("file 5/31"));
         assert!(output.contains("MiB/s"));
+    }
+
+    #[test]
+    fn performance_tui_active_hdd_landing_lines_explain_zero_byte_and_sync_states() {
+        let active_writes: ActiveHddWriteMap = Arc::new(Mutex::new(BTreeMap::new()));
+        active_writes.lock().expect("active write lock").insert(
+            (0, 0),
+            ActiveHddWrite {
+                file_index: 0,
+                copy_index: 0,
+                relative_path: PathBuf::from("raw/large-file.pod5"),
+                disk_id: DiskId::new("qnap-1061").expect("disk id"),
+                size_bytes: 21 * 1024 * 1024 * 1024,
+                bytes_written: 0,
+                started: Instant::now() - Duration::from_secs(30),
+                phase: PerformanceCopyProgressPhase::Copying,
+            },
+        );
+        active_writes.lock().expect("active write lock").insert(
+            (1, 0),
+            ActiveHddWrite {
+                file_index: 1,
+                copy_index: 0,
+                relative_path: PathBuf::from("raw/settling-file.pod5"),
+                disk_id: DiskId::new("qnap-1062").expect("disk id"),
+                size_bytes: 24 * 1024 * 1024 * 1024,
+                bytes_written: 24 * 1024 * 1024 * 1024,
+                started: Instant::now() - Duration::from_secs(120),
+                phase: PerformanceCopyProgressPhase::Syncing,
+            },
+        );
+
+        let lines = active_hdd_landing_lines(&active_writes, 2).expect("landing lines");
+
+        assert!(
+            lines.iter().any(|line| line.contains("@ copying")),
+            "zero-byte active writes should show that copy setup is active"
+        );
+        assert!(
+            lines.iter().any(|line| line.contains("@ settling; avg")),
+            "sync settlement should be explicit for large files"
+        );
+        assert!(
+            !lines.iter().any(|line| line.contains("@ pending")),
+            "large-file rows should not appear frozen at pending"
+        );
     }
 
     #[test]

@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.19.2 - 2026-07-08
+
+- Keep ``performance-test --tui`` responsive during large HDD landing by
+  emitting time-cadenced copy progress and heartbeat updates while final
+  ``sync_all()`` settlement is in progress.
+- Label active HDD landing rows as copying or settling instead of leaving
+  large-file transfers at ``pending`` until the next byte threshold is reached.
+- Add CLI regression coverage for active HDD landing state text and split-copy
+  settling progress events.
+
 ## 0.19.1 - 2026-07-08
 
 - Replace generic Home attention copy with operator cards derived from the

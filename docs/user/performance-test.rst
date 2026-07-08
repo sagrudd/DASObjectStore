@@ -489,6 +489,13 @@ write/read averages, aggregate HDD average, and per-disk HDD write rates only
 for disks that are actively writing at that moment. Completed per-disk
 performance remains available in the PDF and JSON report artifacts.
 
+For large files, the HDD landing row reports the operation phase as well as byte
+progress. Rows show ``copying`` before the first byte threshold is reached and
+``settling`` while the final media ``sync_all()`` is flushing the completed
+file. This means a multi-tens-of-GiB POD5 or BAM file should not appear stuck at
+``pending`` simply because durability settlement is taking longer than ordinary
+copy progress.
+
 Scenario completion snapshots show aggregate scenario rates; detailed completed
 per-disk rates are reserved for the report artifacts so they are not confused
 with live active-write rates.
