@@ -176,6 +176,8 @@ pub struct GuiActionPlanRequest {
     pub owner: Option<String>,
     #[serde(default)]
     pub allow_format: bool,
+    #[serde(default)]
+    pub existing_data_acknowledged: bool,
     pub confirmation_phrase: Option<String>,
 }
 
@@ -211,6 +213,7 @@ impl Default for GuiActionPlanRequest {
             filesystem: None,
             owner: None,
             allow_format: false,
+            existing_data_acknowledged: false,
             confirmation_phrase: None,
         }
     }
@@ -613,6 +616,9 @@ fn plan_enclosure_prepare(
     if !request.allow_format {
         missing.push("allow_format".to_string());
     }
+    if !request.existing_data_acknowledged {
+        missing.push("existing_data_acknowledged".to_string());
+    }
     if request
         .confirmation_phrase
         .as_ref()
@@ -647,6 +653,9 @@ fn plan_enclosure_prepare(
     }
     if request.allow_format {
         argv.push("--allow-format".to_string());
+    }
+    if request.existing_data_acknowledged {
+        argv.push("--acknowledge-existing-data".to_string());
     }
     argv.push("--confirm".to_string());
     argv.push(
@@ -1182,6 +1191,7 @@ mod tests {
             filesystem: Some("xfs".to_string()),
             owner: Some("stephen".to_string()),
             allow_format: true,
+            existing_data_acknowledged: true,
             confirmation_phrase: Some("confirm prepare das".to_string()),
             ..GuiActionPlanRequest::default()
         })
@@ -1206,6 +1216,7 @@ mod tests {
                 "--owner",
                 "stephen",
                 "--allow-format",
+                "--acknowledge-existing-data",
                 "--confirm",
                 "confirm prepare das"
             ])
@@ -1221,6 +1232,7 @@ mod tests {
             ssd_device: Some(PathBuf::from("/dev/nvme0n1")),
             hdd_devices: vec!["qnap-1057=/dev/sda".to_string()],
             allow_format: true,
+            existing_data_acknowledged: true,
             confirmation_phrase: Some("wrong".to_string()),
             ..GuiActionPlanRequest::default()
         })
@@ -1230,11 +1242,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_enclosure_prepare_without_existing_data_acknowledgement() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::EnclosurePrepare,
+            ssd_device: Some(PathBuf::from("/dev/nvme0n1")),
+            hdd_devices: vec!["qnap-1057=/dev/sda".to_string()],
+            allow_format: true,
+            confirmation_phrase: Some("confirm prepare das".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("existing data acknowledgement is required");
+
+        assert_eq!(err.missing_fields, ["existing_data_acknowledged"]);
+    }
+
+    #[test]
     fn rejects_enclosure_prepare_without_format_allowance() {
         let err = plan_action(GuiActionPlanRequest {
             action: GuiActionKind::EnclosurePrepare,
             ssd_device: Some(PathBuf::from("/dev/nvme0n1")),
             hdd_devices: vec!["qnap-1057=/dev/sda".to_string()],
+            existing_data_acknowledged: true,
             confirmation_phrase: Some("confirm prepare das".to_string()),
             ..GuiActionPlanRequest::default()
         })

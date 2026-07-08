@@ -187,6 +187,9 @@ fn prepare_enclosure_validation_error(
         PrepareEnclosureValidationError::FormatNotAllowed => {
             DaemonRequestValidationError::FormatNotAllowed
         }
+        PrepareEnclosureValidationError::ExistingDataNotAcknowledged => {
+            DaemonRequestValidationError::ExistingDataNotAcknowledged
+        }
         PrepareEnclosureValidationError::ConfirmationMismatch => {
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: ENCLOSURE_PREPARE_CONFIRMATION,
@@ -372,6 +375,7 @@ mod tests {
             client_request_id: Some("request-1".to_string()),
             administrator_actor: Some("operator".to_string()),
             allow_format: true,
+            existing_data_acknowledged: true,
             confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
         });
 
@@ -459,6 +463,7 @@ mod tests {
             client_request_id: None,
             administrator_actor: None,
             allow_format: false,
+            existing_data_acknowledged: false,
             confirmation_marker: "wrong".to_string(),
         });
 

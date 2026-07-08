@@ -303,6 +303,8 @@ pub struct PrepareEnclosureRequest {
     pub client_request_id: Option<String>,
     #[serde(default)]
     pub allow_format: bool,
+    #[serde(default)]
+    pub existing_data_acknowledged: bool,
     pub confirmation_marker: Option<String>,
 }
 
@@ -473,6 +475,7 @@ struct StandaloneEnclosurePrepareDaemonRequest {
     client_request_id: Option<String>,
     administrator_actor: Option<String>,
     allow_format: bool,
+    existing_data_acknowledged: bool,
     confirmation_marker: String,
 }
 
@@ -585,6 +588,7 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
                 client_request_id: request.client_request_id,
                 administrator_actor: request.administrator_actor,
                 allow_format: request.allow_format,
+                existing_data_acknowledged: request.existing_data_acknowledged,
                 confirmation_marker: request.confirmation_marker,
             })
             .map(enclosure_prepare_response_from_daemon)
@@ -840,6 +844,7 @@ fn validate_prepare_enclosure_request(
     let confirmation_marker = validate_prepare_enclosure_confirmation_marker(
         request.dry_run,
         request.allow_format,
+        request.existing_data_acknowledged,
         request.confirmation_marker.as_deref(),
     )?;
 
@@ -868,6 +873,7 @@ fn validate_prepare_enclosure_request(
         client_request_id: request.client_request_id,
         administrator_actor: None,
         allow_format: request.allow_format,
+        existing_data_acknowledged: request.existing_data_acknowledged,
         confirmation_marker,
     })
 }
@@ -1119,6 +1125,7 @@ fn validate_confirmation_marker(
 fn validate_prepare_enclosure_confirmation_marker(
     dry_run: bool,
     allow_format: bool,
+    existing_data_acknowledged: bool,
     confirmation_marker: Option<&str>,
 ) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
     let confirmation_marker = confirmation_marker
@@ -1132,6 +1139,13 @@ fn validate_prepare_enclosure_confirmation_marker(
             StatusCode::BAD_REQUEST,
             "format_allowance_required",
             "allow_format must be true before enclosure preparation can be submitted",
+        ));
+    }
+    if !existing_data_acknowledged {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "existing_data_acknowledgement_required",
+            "existing_data_acknowledged must be true before enclosure preparation can be submitted",
         ));
     }
     if confirmation_marker == Some(ENCLOSURE_PREPARE_CONFIRMATION) {
@@ -2084,6 +2098,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_enclosure_requires_existing_data_acknowledgement() {
+        let root = temp_root("prepare-enclosure-existing-data");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = PrepareEnclosureRequest {
+            existing_data_acknowledged: false,
+            ..prepare_enclosure_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "existing_data_acknowledgement_required");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn prepare_enclosure_forwards_confirmed_request_to_daemon_client() {
         let root = temp_root("prepare-enclosure-forward");
         let auth_store = registered_auth_store(&root);
@@ -2122,6 +2167,7 @@ mod tests {
                 client_request_id: Some("prepare-1".to_string()),
                 administrator_actor: Some("operator".to_string()),
                 allow_format: true,
+                existing_data_acknowledged: true,
                 confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
             }]
         );
@@ -2884,6 +2930,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("prepare-1".to_string()),
             allow_format: true,
+            existing_data_acknowledged: true,
             confirmation_marker: Some(ENCLOSURE_PREPARE_CONFIRMATION.to_string()),
         }
     }

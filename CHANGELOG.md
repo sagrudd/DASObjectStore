@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.40.0 - 2026-07-08
+
+- Add an explicit existing-data acknowledgement gate to enclosure preparation
+  requests so destructive DAS preparation cannot be submitted through the Web,
+  daemon API, or CLI action-plan path without acknowledging that selected media
+  may already contain data.
+- Add ``disk prepare-das --acknowledge-existing-data`` and include it in Web
+  action-plan output for confirmed enclosure preparation.
+- Add regression tests for daemon validation, standalone Web risk gates, GUI
+  action planning, and Enclosures wizard retry/cancellation state preservation.
+
 ## 0.39.0 - 2026-07-08
 
 - Add a Web SubObject creation workflow on the ObjectStores page with parent

@@ -261,15 +261,18 @@ live enclosure detail payload, asks the administrator to choose SSD landing
 media and HDD settlement media, records mount-root, filesystem, and optional
 owner inputs, and shows a destructive data-loss review before any plan is
 accepted. The administrator must explicitly allow formatting and type the
-confirmation phrase ``confirm prepare das``. The Web API validates these same
-fields server-side before forwarding the confirmed request to the daemon;
-callers cannot submit an enclosure-preparation job without SSD media, at least
-one HDD, format allowance, and the confirmation phrase.
+confirmation phrase ``confirm prepare das``. The administrator must also
+acknowledge that existing data on selected devices may be destroyed. The Web API
+validates these same fields server-side before forwarding the confirmed request
+to the daemon; callers cannot submit an enclosure-preparation job without SSD
+media, at least one HDD, format allowance, existing-data acknowledgement, and
+the confirmation phrase.
 
 The daemon API now exposes a typed enclosure-preparation request and response
 contract for that handoff. The request includes SSD media, HDD media, mount
 root, filesystem, optional mounted-root owner, optional administrator actor,
-destructive format allowance, and the confirmation marker
+destructive format allowance, existing-data acknowledgement, and the
+confirmation marker
 ``confirm prepare das``. The daemon client validates the request before
 transport submission, including absolute device paths and duplicate HDD
 rejection, so browser and API callers do not pass raw shell fragments or write
@@ -279,15 +282,17 @@ Standalone Web deployments expose the authenticated submission route at
 ``/api/v1/workspaces/enclosures/prepare``. The route requires a valid local Web
 session and a sudo-derived local administrator account before forwarding the
 request to ``dasobjectstored``. Missing sessions, non-admin users, empty HDD
-selections, missing destructive format allowance, and daemon submission errors
-are returned as explicit Web API errors. The browser wizard displays accepted
-daemon job metadata when submission succeeds and shows the daemon error message
-when submission fails. After submission, the wizard polls the daemon-owned job
-status route and renders the latest state, stage, byte or unit progress,
-daemon message, failure text, submitted and updated timestamps, and cancellation
-result. Operators can refresh status manually, request cancellation with a
-recorded reason, or reset the wizard for another attempt after terminal
-completion, failure, cancellation, or a status-refresh error.
+selections, missing destructive format allowance, missing existing-data
+acknowledgement, and daemon submission errors are returned as explicit Web API
+errors. The browser wizard displays accepted daemon job metadata when submission
+succeeds and shows the daemon error message when submission fails. After
+submission, the wizard polls the daemon-owned job status route and renders the
+latest state, stage, byte or unit progress, daemon message, failure text,
+submitted and updated timestamps, and cancellation result. Operators can refresh
+status manually, request cancellation with a recorded reason, or reset the
+wizard for another attempt after terminal completion, failure, cancellation, or
+a status-refresh error without losing their selected media and risk-review
+inputs.
 
 Administrator jobs accepted by the daemon are also exposed through the
 standalone Web API at ``/api/v1/workspaces/admin/jobs/<job_id>``. This status

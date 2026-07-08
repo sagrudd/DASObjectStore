@@ -732,6 +732,7 @@ mod tests {
                 "mount_root": "/srv/dasobjectstore",
                 "filesystem": "ext4",
                 "allow_format": true,
+                "existing_data_acknowledged": true,
                 "confirmation_phrase": "confirm prepare das"
             }),
         )
@@ -760,6 +761,7 @@ mod tests {
                 "--filesystem",
                 "ext4",
                 "--allow-format",
+                "--acknowledge-existing-data",
                 "--confirm",
                 "confirm prepare das"
             ])

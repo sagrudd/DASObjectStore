@@ -595,7 +595,7 @@ older checklist claims.
 - [x] Add API request/response DTOs and daemon client methods for Web-submitted
   enclosure preparation so the browser never mutates devices or managed roots
   directly.
-- [ ] Add risk-gate tests for enclosure preparation: non-admin denied,
+- [x] Add risk-gate tests for enclosure preparation: non-admin denied,
   unsupported DAS denied, existing data requires explicit confirmation, daemon
   job failure shown clearly, and cancellation/retry state preserved.
   - [x] Cover missing session, non-admin, unsupported empty HDD set, missing
@@ -606,7 +606,7 @@ older checklist claims.
     and cancellation forwarding.
   - [x] Cover daemon administrator job registry persistence and cancellation
     behavior, including completed-job cancellation rejection.
-  - [ ] Cover existing-data preflight and cancellation/retry preservation when
+  - [x] Cover existing-data preflight and cancellation/retry preservation when
     the daemon preparation runtime exposes those states.
 - [x] Implement ObjectStore creation form controls for store name, writer group,
   enclosure, object type, redundancy, public/writeable state, store class,

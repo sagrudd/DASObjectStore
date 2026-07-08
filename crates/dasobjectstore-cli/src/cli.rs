@@ -648,6 +648,9 @@ pub(crate) struct DiskPrepareDasArgs {
     /// Policy allowance for destructive DAS preparation.
     #[arg(long)]
     allow_format: bool,
+    /// Acknowledge that existing data on selected devices may be destroyed.
+    #[arg(long)]
+    acknowledge_existing_data: bool,
     /// Action-time confirmation phrase: "confirm prepare das".
     #[arg(long, default_value = "")]
     confirm: String,
@@ -680,6 +683,10 @@ impl DiskPrepareDasArgs {
 
     pub(crate) fn allow_format(&self) -> bool {
         self.allow_format
+    }
+
+    pub(crate) fn acknowledge_existing_data(&self) -> bool {
+        self.acknowledge_existing_data
     }
 
     pub(crate) fn confirm(&self) -> &str {
@@ -2461,6 +2468,7 @@ mod tests {
             "stephen",
             "--dry-run",
             "--allow-format",
+            "--acknowledge-existing-data",
             "--confirm",
             "confirm prepare das",
         ])
@@ -2487,6 +2495,7 @@ mod tests {
                 assert_eq!(prepare.owner(), Some("stephen"));
                 assert!(prepare.dry_run());
                 assert!(prepare.allow_format());
+                assert!(prepare.acknowledge_existing_data());
                 assert_eq!(prepare.confirm(), "confirm prepare das");
             }
             _ => panic!("expected prepare-das command"),

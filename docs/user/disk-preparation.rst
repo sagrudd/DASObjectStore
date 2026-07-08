@@ -52,11 +52,16 @@ Only run the destructive command once the device mapping is correct:
      --filesystem ext4 \
      --owner dasobjectstore \
      --allow-format \
+     --acknowledge-existing-data \
      --confirm "confirm prepare das"
 
 The default mount root is ``/srv/dasobjectstore``. The SSD root is normally
 ``/srv/dasobjectstore/ssd`` and HDD members are mounted under the same managed
 tree.
+
+``--allow-format`` permits the destructive preparation policy. The separate
+``--acknowledge-existing-data`` flag records that the operator understands the
+selected media may already contain data that will be destroyed by preparation.
 
 Lock Down Managed Media
 -----------------------
@@ -76,4 +81,3 @@ files directly onto member disks:
 Direct writes to individual disks bypass object metadata and can corrupt the
 store contract. Users should interact through DASObjectStore commands and, later,
 the object service or Web UI.
-

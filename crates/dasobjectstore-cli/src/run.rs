@@ -8143,6 +8143,12 @@ fn run_disk_prepare_das(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     if !args.dry_run() {
+        if !args.acknowledge_existing_data() {
+            return Err(CliError::CommandFailed(
+                "existing data acknowledgement is required; pass `--acknowledge-existing-data`"
+                    .to_string(),
+            ));
+        }
         RiskGate::new(RiskPolicy {
             allow_prepare_das: args.allow_format(),
             ..RiskPolicy::default()

@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::api::AdminJobSummary;
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
     AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
@@ -7,6 +5,10 @@ use crate::api::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, DasEnclosureCardResponse,
     DasEnclosureDetailResponse, EnclosurePrepareHddDevice, EnclosurePrepareRequest,
     EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse, ObjectStoreCardResponse,
+};
+#[cfg(test)]
+use crate::api::{
+    AdminJobCancelResponse, AdminJobStatusResponse, AdminJobSummary, EnclosurePrepareResponse,
 };
 use crate::api::{
     EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
@@ -1377,7 +1379,7 @@ fn render_enclosure_inventory(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct EnclosureWizardState {
     open: bool,
@@ -1387,6 +1389,7 @@ struct EnclosureWizardState {
     filesystem: String,
     owner: String,
     allow_format: bool,
+    existing_data_acknowledged: bool,
     confirmation_phrase: String,
     submitting: bool,
     job: Option<EnclosurePrepareResponse>,
@@ -1399,7 +1402,7 @@ struct EnclosureWizardState {
     error: Option<String>,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 impl Default for EnclosureWizardState {
     fn default() -> Self {
         Self {
@@ -1410,6 +1413,7 @@ impl Default for EnclosureWizardState {
             filesystem: "ext4".to_string(),
             owner: String::new(),
             allow_format: false,
+            existing_data_acknowledged: false,
             confirmation_phrase: String::new(),
             submitting: false,
             job: None,
@@ -1424,7 +1428,7 @@ impl Default for EnclosureWizardState {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 fn clear_enclosure_job_monitor(state: &mut EnclosureWizardState) {
     state.job = None;
     state.job_status = None;
@@ -1466,6 +1470,22 @@ fn admin_job_progress_text(job: &AdminJobSummary) -> String {
         );
     }
     "Progress pending".to_string()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn enclosure_prepare_confirmed(
+    allow_format: bool,
+    existing_data_acknowledged: bool,
+    confirmation_phrase: &str,
+) -> bool {
+    allow_format
+        && existing_data_acknowledged
+        && confirmation_phrase.trim() == "confirm prepare das"
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn enclosure_retry_clears_job_state(state: &mut EnclosureWizardState) {
+    clear_enclosure_job_monitor(state);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1628,7 +1648,11 @@ fn render_enclosure_wizard(
                 })
         })
         .collect::<Vec<_>>();
-    let confirmed = state.allow_format && state.confirmation_phrase.trim() == "confirm prepare das";
+    let confirmed = enclosure_prepare_confirmed(
+        state.allow_format,
+        state.existing_data_acknowledged,
+        &state.confirmation_phrase,
+    );
     let can_submit = !state.submitting
         && state.job.is_none()
         && !selected_ssd.is_empty()
@@ -1675,6 +1699,16 @@ fn render_enclosure_wizard(
             wizard_state.set(next);
         })
     };
+    let on_existing_data_acknowledged = {
+        let wizard_state = wizard_state.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let mut next = (*wizard_state).clone();
+            next.existing_data_acknowledged = input.checked();
+            clear_enclosure_job_monitor(&mut next);
+            wizard_state.set(next);
+        })
+    };
     let submit = {
         let wizard_state = wizard_state.clone();
         let api_base_path = api_base_path.clone();
@@ -1705,6 +1739,7 @@ fn render_enclosure_wizard(
                     dry_run: false,
                     client_request_id: None,
                     allow_format: pending.allow_format,
+                    existing_data_acknowledged: pending.existing_data_acknowledged,
                     confirmation_marker: Some(pending.confirmation_phrase.clone()),
                 };
                 let selected_ssd = request.ssd_device.clone();
@@ -1819,6 +1854,10 @@ fn render_enclosure_wizard(
                     <input type="checkbox" checked={state.allow_format} onchange={on_allow_format} />
                     <span>{ "I allow formatting of the selected devices." }</span>
                 </label>
+                <label>
+                    <input type="checkbox" checked={state.existing_data_acknowledged} onchange={on_existing_data_acknowledged} />
+                    <span>{ "I acknowledge existing data on selected devices may be destroyed." }</span>
+                </label>
                 <label class="dos-form-field">
                     <span>{ "Confirmation phrase" }</span>
                     <input
@@ -1922,7 +1961,7 @@ fn render_enclosure_job_monitor(
         let wizard_state = wizard_state.clone();
         Callback::from(move |_| {
             let mut next = (*wizard_state).clone();
-            clear_enclosure_job_monitor(&mut next);
+            enclosure_retry_clears_job_state(&mut next);
             wizard_state.set(next);
         })
     };
@@ -2430,6 +2469,7 @@ fn render_object_store_create_card(
                     filesystem: None,
                     owner: None,
                     allow_format: false,
+                    existing_data_acknowledged: false,
                     confirmation_phrase: None,
                 };
                 let result = crate::api::plan_gui_action(&api_base_path, &request).await;
@@ -2835,6 +2875,7 @@ fn render_object_store_configure_card(
                     filesystem: None,
                     owner: None,
                     allow_format: false,
+                    existing_data_acknowledged: false,
                     confirmation_phrase: None,
                 };
                 let result = crate::api::plan_gui_action(&api_base_path, &request).await;
@@ -3151,6 +3192,7 @@ fn render_subobject_create_card(
                     filesystem: None,
                     owner: None,
                     allow_format: false,
+                    existing_data_acknowledged: false,
                     confirmation_phrase: None,
                 };
                 let result = crate::api::plan_gui_action(&api_base_path, &request).await;
@@ -3542,17 +3584,20 @@ mod tests {
     use super::{
         admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
+        enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
         enclosures_workspace_api_path, home_dashboard_attention, home_dashboard_metrics,
         home_workspace_api_path, object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
         objectstores_workspace_api_path, subobject_registry_preview_from_values, ApiLoadState,
-        WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        EnclosureWizardState, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE,
+        ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
+        PRIMARY_NAVIGATION,
     };
     use crate::api::{
-        AdminJobProgress, AdminJobSummary, EnclosuresPageResponse, HomeDashboardResponse,
-        ObjectStoresPageResponse,
+        AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
+        EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice, EnclosurePrepareResponse,
+        EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse,
     };
     use crate::stores::STORES_WORKSPACE_ROUTE;
     use crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
@@ -3680,6 +3725,74 @@ mod tests {
         };
 
         assert_eq!(admin_job_progress_text(&job), "512 / 1024 byte(s)");
+    }
+
+    #[test]
+    fn enclosure_prepare_confirmation_requires_existing_data_acknowledgement() {
+        assert!(enclosure_prepare_confirmed(
+            true,
+            true,
+            " confirm prepare das "
+        ));
+        assert!(!enclosure_prepare_confirmed(
+            true,
+            false,
+            "confirm prepare das"
+        ));
+        assert!(!enclosure_prepare_confirmed(
+            false,
+            true,
+            "confirm prepare das"
+        ));
+    }
+
+    #[test]
+    fn enclosure_retry_preserves_selection_but_clears_job_and_cancel_state() {
+        let mut state = EnclosureWizardState {
+            open: true,
+            selected_ssd: "/dev/disk/by-id/nvme-ssd".to_string(),
+            selected_hdds: vec!["/dev/disk/by-id/usb-qnap-1057".to_string()],
+            mount_root: "/srv/dasobjectstore".to_string(),
+            filesystem: "ext4".to_string(),
+            owner: "stephen".to_string(),
+            allow_format: true,
+            existing_data_acknowledged: true,
+            confirmation_phrase: "confirm prepare das".to_string(),
+            submitting: false,
+            job: Some(enclosure_prepare_response_fixture()),
+            job_status: Some(AdminJobStatusResponse {
+                job: AdminJobSummary {
+                    state: "failed".to_string(),
+                    failure_message: Some("existing data preflight failed".to_string()),
+                    ..admin_job_summary_fixture()
+                },
+            }),
+            job_polling: true,
+            job_status_error: Some("stale failure".to_string()),
+            cancelling: true,
+            cancellation: Some(AdminJobCancelResponse {
+                job_id: "enclosure-prepare-1".to_string(),
+                accepted: true,
+                state: "cancelled".to_string(),
+            }),
+            cancel_error: Some("cancel failed".to_string()),
+            error: Some("daemon failed".to_string()),
+        };
+
+        enclosure_retry_clears_job_state(&mut state);
+
+        assert!(state.open);
+        assert_eq!(state.selected_ssd, "/dev/disk/by-id/nvme-ssd");
+        assert_eq!(state.selected_hdds.len(), 1);
+        assert!(state.allow_format);
+        assert!(state.existing_data_acknowledged);
+        assert_eq!(state.confirmation_phrase, "confirm prepare das");
+        assert!(state.job.is_none());
+        assert!(state.job_status.is_none());
+        assert!(!state.job_polling);
+        assert!(state.cancellation.is_none());
+        assert!(state.cancel_error.is_none());
+        assert!(state.error.is_none());
     }
 
     #[test]
@@ -3833,6 +3946,27 @@ mod tests {
             updated_at_utc: "2026-07-08T20:00:01Z".to_string(),
             actor: Some("stephen".to_string()),
             failure_message: None,
+        }
+    }
+
+    fn enclosure_prepare_response_fixture() -> EnclosurePrepareResponse {
+        EnclosurePrepareResponse {
+            accepted: EnclosurePrepareAcceptedResponse {
+                job_id: "enclosure-prepare-1".to_string(),
+                kind: "enclosure_preparation".to_string(),
+                accepted_at_utc: "2026-07-08T20:00:00Z".to_string(),
+                dry_run: false,
+            },
+            ssd_device: "/dev/disk/by-id/nvme-ssd".to_string(),
+            hdd_devices: vec![EnclosurePrepareHddDevice {
+                disk_id: "qnap-1057".to_string(),
+                device_path: "/dev/disk/by-id/usb-qnap-1057".to_string(),
+            }],
+            mount_root: "/srv/dasobjectstore".to_string(),
+            filesystem: "ext4".to_string(),
+            owner: Some("stephen".to_string()),
+            administrator_actor: Some("stephen".to_string()),
+            client_request_id: Some("prepare-1".to_string()),
         }
     }
 

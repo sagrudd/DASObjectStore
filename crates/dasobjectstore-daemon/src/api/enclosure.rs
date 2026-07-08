@@ -18,6 +18,8 @@ pub struct PrepareEnclosureRequest {
     pub client_request_id: Option<String>,
     pub administrator_actor: Option<String>,
     pub allow_format: bool,
+    #[serde(default)]
+    pub existing_data_acknowledged: bool,
     pub confirmation_marker: String,
 }
 
@@ -30,6 +32,9 @@ impl PrepareEnclosureRequest {
         }
         if !self.allow_format {
             return Err(PrepareEnclosureValidationError::FormatNotAllowed);
+        }
+        if !self.existing_data_acknowledged {
+            return Err(PrepareEnclosureValidationError::ExistingDataNotAcknowledged);
         }
         if self.confirmation_marker.trim() != ENCLOSURE_PREPARE_CONFIRMATION {
             return Err(PrepareEnclosureValidationError::ConfirmationMismatch);
@@ -136,6 +141,7 @@ pub enum PrepareEnclosureValidationError {
     DuplicateHddDiskId { disk_id: String },
     DuplicateHddDevicePath { device_path: PathBuf },
     FormatNotAllowed,
+    ExistingDataNotAcknowledged,
     ConfirmationMismatch,
     BlankClientRequestId,
 }
@@ -169,6 +175,8 @@ impl Display for PrepareEnclosureValidationError {
             Self::FormatNotAllowed => {
                 formatter.write_str("allow_format must be true for enclosure preparation")
             }
+            Self::ExistingDataNotAcknowledged => formatter
+                .write_str("existing_data_acknowledged must be true for enclosure preparation"),
             Self::ConfirmationMismatch => write!(
                 formatter,
                 "confirmation_marker must exactly match \"{ENCLOSURE_PREPARE_CONFIRMATION}\""
@@ -260,6 +268,7 @@ mod tests {
             client_request_id: Some("request-1".to_string()),
             administrator_actor: Some("operator".to_string()),
             allow_format: true,
+            existing_data_acknowledged: true,
             confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
         }
     }
@@ -303,6 +312,19 @@ mod tests {
         assert_eq!(
             request.validate(),
             Err(PrepareEnclosureValidationError::FormatNotAllowed)
+        );
+    }
+
+    #[test]
+    fn rejects_missing_existing_data_acknowledgement() {
+        let request = PrepareEnclosureRequest {
+            existing_data_acknowledged: false,
+            ..valid_request()
+        };
+
+        assert_eq!(
+            request.validate(),
+            Err(PrepareEnclosureValidationError::ExistingDataNotAcknowledged)
         );
     }
 

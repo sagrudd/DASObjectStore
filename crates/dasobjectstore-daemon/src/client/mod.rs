@@ -519,6 +519,7 @@ mod tests {
                 client_request_id: Some("request-1".to_string()),
                 administrator_actor: Some("operator".to_string()),
                 allow_format: true,
+                existing_data_acknowledged: true,
                 confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
             })
             .expect("prepare enclosure response");
@@ -773,6 +774,7 @@ mod tests {
                 client_request_id: None,
                 administrator_actor: None,
                 allow_format: false,
+                existing_data_acknowledged: false,
                 confirmation_marker: "wrong".to_string(),
             })
             .expect_err("invalid prepare request rejected");

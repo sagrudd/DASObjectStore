@@ -108,6 +108,7 @@ pub struct GuiActionPlanRequest {
     pub filesystem: Option<String>,
     pub owner: Option<String>,
     pub allow_format: bool,
+    pub existing_data_acknowledged: bool,
     pub confirmation_phrase: Option<String>,
 }
 
@@ -252,6 +253,7 @@ pub struct EnclosurePrepareRequest {
     pub dry_run: bool,
     pub client_request_id: Option<String>,
     pub allow_format: bool,
+    pub existing_data_acknowledged: bool,
     pub confirmation_marker: Option<String>,
 }
 
