@@ -17,7 +17,7 @@ For either generated files or an existing source folder, the command records:
 
 * SSD-only landing throughput directly into the DASObjectStore SSD benchmark
   area;
-* SSD read throughput from staged SSD payloads;
+* SSD read throughput from staged SSD payloads during real HDD drain work;
 * ``ssd-stage-then-drain`` throughput where all selected files are landed on
   SSD first and FIFO HDD drain workers start only after staging completes;
 * ``ssd-overlap-drain`` throughput where source files continue landing on SSD
@@ -362,7 +362,8 @@ The artifact records:
   elapsed time, physical HDD write volume, HDD write operations, and per-disk
   HDD write rates;
 * the recommended ingress strategy, HDD concurrency, estimated aggregate rate,
-  whether SSD readback appears limiting, and short rationale strings;
+  whether SSD drain-read throughput appears limiting, and short rationale
+  strings;
 * a ``daemon_policy`` block that records whether the artifact is authoritative,
   when it becomes effective, the fixed SSD-first route for remote and external
   disk ingress, the recommended route for NVMe/local-source ingest, and the
@@ -378,10 +379,10 @@ During ``--tui`` runs the dashboard shows the active scenario objective and
 SSD residency bounds. ``ssd-only`` writes and reads back one file at a time and
 removes it, so SSD residency is bounded by the largest selected file.
 ``ssd-stage-then-drain`` stages every selected file to SSD before HDD drain
-begins, so SSD residency intentionally grows to the selected workload size.
-``ssd-overlap-drain`` stages to SSD while FIFO HDD drain workers consume the
-queue; if HDD drain lags, SSD backlog can grow toward the selected workload
-size.
+begins, then measures SSD reads only as the drain workers copy those staged
+files to HDD. ``ssd-overlap-drain`` stages to SSD while FIFO HDD drain workers
+consume the queue and measures SSD reads from that same drain work; if HDD
+drain lags, SSD backlog can grow toward the selected workload size.
 ``direct-hdd`` bypasses SSD for the benchmark scenario.
 
 The TUI workload panel separates current SSD write rate, SSD read rate,

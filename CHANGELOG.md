@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.9.1 - 2026-07-08
+
+- Remove wasteful per-file SSD readback from ``ssd-stage-then-drain`` and
+  ``ssd-overlap-drain`` performance-test staging. SSD read throughput for
+  SSD-to-HDD routes is now derived from actual drain copy work instead of a
+  synthetic read immediately after each SSD write.
+
 ## 0.9.0 - 2026-07-08
 
 - Add packaged standalone Web UI/API service startup with
