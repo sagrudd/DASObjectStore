@@ -388,10 +388,16 @@ queue, but source staging pauses when the measured safe SSD residency budget is
 full and resumes as drained files are removed. ``direct-hdd`` bypasses SSD for
 the benchmark scenario.
 
-The TUI workload panel separates current SSD write rate, SSD read rate,
-aggregate HDD write rate, and per-disk HDD write rates. HDD rates are reported
-from completed disk writes as soon as they are available and are always shown
-in scenario completion snapshots.
+The TUI separates active operation state from averages. The HDD landing panel
+lists active file-copy writes with the file number, copy number, target disk,
+landed bytes, total file size, and relative path. The rates panel reports SSD
+write/read averages, aggregate HDD average, and per-disk HDD write rates only
+for disks that are actively writing at that moment. Completed per-disk
+performance remains available in the PDF and JSON report artifacts.
+
+Scenario completion snapshots show aggregate scenario rates; detailed completed
+per-disk rates are reserved for the report artifacts so they are not confused
+with live active-write rates.
 
 Daemon file ingest uses a bounded split SSD pipeline by default. Source reads
 write staged payload bytes to SSD first; a bounded side worker then syncs the

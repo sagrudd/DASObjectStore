@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.9.4 - 2026-07-08
+
+- Improve the performance-test TUI by separating workload, active HDD landing,
+  rates, scenario details, and artifacts into distinct panels.
+- Show active HDD landing file/copy details, including target disk, landed
+  bytes, total file size, and relative path.
+- Report per-disk HDD write rates only for disks with active writes; completed
+  historical per-disk averages remain in the PDF/JSON report rather than the
+  live TUI active-rate row.
+
 ## 0.9.3 - 2026-07-08
 
 - Make SSD-backed performance-test scenarios capacity-aware. ``ssd-only`` now
