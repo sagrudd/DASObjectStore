@@ -645,9 +645,13 @@ older checklist claims.
 - [x] Add a persistent endpoint inventory/validation registry so Activity and
   Endpoints workspaces consume registry-backed endpoint-validation events rather
   than an empty inventory source.
-- [ ] Add administrator Web and daemon workflows to create/update endpoint
+- [x] Add administrator Web and daemon workflows to create/update endpoint
   inventory records from validated NAS/NFS, S3-compatible, and Mnemosyne
   endpoint definitions.
+- [ ] Add Yew endpoint-administration forms for creating and updating
+  registry-backed endpoint records through the authenticated daemon-backed Web
+  route, including validation-state review, active binding controls,
+  dry-run/live confirmation, result display, and permission-denied states.
 - [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.

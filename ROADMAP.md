@@ -587,6 +587,9 @@ Scope:
 - expose Users/Groups as a first-class navigation surface when host mode allows
   local administration, with current OS authority, group creation, local
   user-to-group assignment, and writer-policy readiness;
+- expose administrator endpoint-inventory workflows for validated DAS,
+  NAS/NFS, S3-compatible, and Mnemosyne-governed storage endpoints through the
+  same daemon-owned registry and audit boundary used by Activity;
 - implement authenticated action planning, confirmation, submission, progress,
   failure, and audit review for all risky Web administrator workflows;
 - replace the Bioinformatics placeholder with workflow-readiness cards for BAM,
@@ -603,6 +606,9 @@ Exit criteria:
   states without seeing unsafe controls as available actions;
 - ObjectStore and SubObject workflows create the same registry/domain records
   as the CLI paths and are covered by API/Yew tests;
+- endpoint inventory records can be created or updated through authenticated
+  administrator Web workflows without browser-side mutation of
+  `/opt/dasobjectstore/endpoints.json`;
 - Bioinformatics pages identify workflow-ready datasets and expose clear
   handoff state for basecalling and genome/transcriptome analysis workflows;
 - all risky operations are gated, auditable, daemon-owned, and recoverable.

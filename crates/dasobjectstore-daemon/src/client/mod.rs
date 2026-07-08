@@ -19,7 +19,8 @@ use crate::api::{
     DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
     IngestJobStatusRequest, IngestJobStatusResponse, PrepareEnclosureRequest,
     PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -221,6 +222,16 @@ where
         }
     }
 
+    pub fn upsert_endpoint_inventory(
+        &self,
+        request: UpsertEndpointInventoryRequest,
+    ) -> Result<UpsertEndpointInventoryResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::UpsertEndpointInventory(request))? {
+            DaemonApiResponse::UpsertEndpointInventory(response) => Ok(response),
+            response => Err(unexpected("upsert_endpoint_inventory", response)),
+        }
+    }
+
     pub fn create_local_group(
         &self,
         request: CreateLocalGroupRequest,
@@ -268,6 +279,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
+        DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
@@ -281,7 +293,8 @@ mod tests {
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonIngestConflictPolicy,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestConflictPolicy,
         DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
         DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
         DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
@@ -289,8 +302,9 @@ mod tests {
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
-        StoreInventoryResponse, SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        StoreInventoryResponse, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
+        UpsertEndpointInventoryResponse, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -609,6 +623,35 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_inventory_upsert_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::UpsertEndpointInventory(
+                UpsertEndpointInventoryResponse::accepted(
+                    crate::api::DaemonJobId::new("endpoint-upsert-1").expect("job id"),
+                    "2026-07-09T00:00:00Z",
+                    "/opt/dasobjectstore/endpoints.json",
+                    endpoint_inventory_request(),
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .upsert_endpoint_inventory(endpoint_inventory_request())
+            .expect("endpoint inventory response");
+
+        assert!(response.accepted.dry_run);
+        assert_eq!(response.accepted.kind, DaemonJobKind::EndpointValidation);
+        assert_eq!(response.endpoint_id, "nas-staging");
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::UpsertEndpointInventory(_)]
+        ));
+    }
+
+    #[test]
     fn job_status_uses_typed_request_and_response() {
         let seen = RefCell::new(Vec::new());
         let transport = InProcessDaemonTransport::new(|request| {
@@ -824,5 +867,25 @@ mod tests {
             .expect_err("invalid prepare request rejected");
 
         assert!(matches!(err, DaemonClientError::RequestValidation(_)));
+    }
+
+    fn endpoint_inventory_request() -> UpsertEndpointInventoryRequest {
+        UpsertEndpointInventoryRequest {
+            endpoint_id: "nas-staging".to_string(),
+            display_name: "NAS staging".to_string(),
+            kind: DaemonEndpointKind::DasobjectstoreNfs,
+            object_service_url: "https://nas.example.test:9443".to_string(),
+            validation: DaemonEndpointValidation {
+                state: DaemonEndpointValidationState::Validated,
+                checked_at_utc: Some("2026-07-09T00:00:00Z".to_string()),
+                message: None,
+            },
+            manager_product_id: "dasobjectstore".to_string(),
+            active_bindings: Vec::new(),
+            dry_run: true,
+            client_request_id: Some("endpoint-upsert-1".to_string()),
+            administrator_actor: Some("operator".to_string()),
+            confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
+        }
     }
 }

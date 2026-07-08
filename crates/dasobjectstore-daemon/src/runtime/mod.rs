@@ -2,6 +2,7 @@
 
 mod admin_jobs;
 mod config;
+mod endpoint_registry;
 mod ingest_files;
 mod local_admin;
 mod performance_policy;
@@ -17,6 +18,11 @@ pub use config::{
     DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
     LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
     LINUX_DAEMON_STATE_DIR,
+};
+pub use endpoint_registry::{
+    default_endpoint_registry_path, upsert_endpoint_inventory_record,
+    EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,
+    ENDPOINT_REGISTRY_SCHEMA,
 };
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,

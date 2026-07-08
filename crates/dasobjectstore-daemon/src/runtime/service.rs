@@ -247,6 +247,14 @@ pub enum DaemonServiceRuntimeError {
         path: PathBuf,
         message: String,
     },
+    EndpointRegistryIo {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidEndpointRegistryJson {
+        path: PathBuf,
+        message: String,
+    },
     UnsupportedOperation {
         operation: String,
     },
@@ -296,6 +304,16 @@ impl Display for DaemonServiceRuntimeError {
             Self::InvalidJobRegistryJson { path, message } => write!(
                 formatter,
                 "invalid daemon job registry JSON at {}: {message}",
+                path.display()
+            ),
+            Self::EndpointRegistryIo { path, message } => write!(
+                formatter,
+                "failed to access endpoint inventory registry {}: {message}",
+                path.display()
+            ),
+            Self::InvalidEndpointRegistryJson { path, message } => write!(
+                formatter,
+                "invalid endpoint inventory registry JSON at {}: {message}",
                 path.display()
             ),
             Self::UnsupportedOperation { operation } => {

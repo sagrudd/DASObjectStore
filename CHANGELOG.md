@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.49.0 - 2026-07-09
+
+- Add a daemon `upsert_endpoint_inventory` request/response for administrator
+  endpoint inventory creation and updates, including registry persistence and
+  endpoint-validation administrator job recording.
+- Add a standalone authenticated Web API route for sudo-authorized local
+  administrators to submit endpoint inventory upserts with dry-run/live
+  confirmation gating.
+- Map endpoint-validation daemon jobs into Activity and document the daemon-owned
+  endpoint inventory administration workflow.
+
 ## 0.48.0 - 2026-07-09
 
 - Add a JSON-backed endpoint inventory registry at

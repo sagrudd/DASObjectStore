@@ -19,14 +19,17 @@ use dasobjectstore_daemon::{
     CreateLocalGroupResponse as DaemonCreateLocalGroupResponse,
     CreateObjectStoreRequest as DaemonCreateObjectStoreRequest,
     CreateObjectStoreResponse as DaemonCreateObjectStoreResponse, DaemonClient,
-    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress,
-    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
-    DaemonLocalAdminCommand, DaemonRuntimeConfig,
-    PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
+    DaemonEndpointBinding, DaemonEndpointBindingReadiness, DaemonEndpointKind,
+    DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
+    DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminCommand,
+    DaemonRuntimeConfig, PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, UnixSocketDaemonTransport,
-    ENCLOSURE_PREPARE_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+    UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
+    ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -108,6 +111,10 @@ fn standalone_enclosure_admin_router_with_state(
         .route(
             "/api/v1/workspaces/object-stores/create",
             post(create_object_store),
+        )
+        .route(
+            "/api/v1/workspaces/endpoints/upsert",
+            post(upsert_endpoint_inventory),
         )
         .route(
             "/api/v1/workspaces/admin/jobs/{job_id}",
@@ -225,6 +232,11 @@ trait StandaloneEnclosureAdminClient: Send + Sync {
         request: DaemonCreateObjectStoreRequest,
     ) -> Result<StandaloneCreateObjectStoreResponse, StandaloneEnclosureAdminClientError>;
 
+    fn submit_endpoint_inventory_upsert(
+        &self,
+        request: DaemonUpsertEndpointInventoryRequest,
+    ) -> Result<StandaloneEndpointInventoryUpsertResponse, StandaloneEnclosureAdminClientError>;
+
     fn job_status(
         &self,
         request: StandaloneAdminJobStatusDaemonRequest,
@@ -337,8 +349,44 @@ pub struct CreateObjectStoreRequest {
     pub confirmation_marker: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EndpointInventoryUpsertRequest {
+    pub endpoint_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub object_service_url: String,
+    pub validation: EndpointValidationUpsertRequest,
+    #[serde(default = "default_manager_product_id")]
+    pub manager_product_id: String,
+    #[serde(default)]
+    pub active_bindings: Vec<EndpointBindingUpsertRequest>,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub confirmation_marker: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EndpointValidationUpsertRequest {
+    pub state: String,
+    pub checked_at_utc: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EndpointBindingUpsertRequest {
+    pub binding_id: String,
+    pub governance_domain: String,
+    pub store_id: String,
+    pub readiness: String,
+}
+
 fn default_true() -> bool {
     true
+}
+
+fn default_manager_product_id() -> String {
+    "dasobjectstore".to_string()
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -407,6 +455,26 @@ pub struct StandaloneCreateObjectStoreResponse {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StandaloneCreateObjectStoreAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEndpointInventoryUpsertResponse {
+    pub accepted: StandaloneEndpointInventoryAcceptedResponse,
+    pub endpoint_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub validation_state: String,
+    pub registry_path: String,
+    pub administrator_actor: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEndpointInventoryAcceptedResponse {
     pub job_id: String,
     pub kind: String,
     pub accepted_at_utc: String,
@@ -605,6 +673,17 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
             .map_err(standalone_enclosure_admin_client_error)
     }
 
+    fn submit_endpoint_inventory_upsert(
+        &self,
+        request: DaemonUpsertEndpointInventoryRequest,
+    ) -> Result<StandaloneEndpointInventoryUpsertResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .upsert_endpoint_inventory(request)
+            .map(endpoint_inventory_upsert_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
     fn job_status(
         &self,
         request: StandaloneAdminJobStatusDaemonRequest,
@@ -762,6 +841,17 @@ async fn create_object_store(
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
     submit_create_object_store_request(&state, request).map(Json)
+}
+
+async fn upsert_endpoint_inventory(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<EndpointInventoryUpsertRequest>,
+) -> Result<Json<StandaloneEndpointInventoryUpsertResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let mut request = validate_endpoint_inventory_upsert_request(request)?;
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    request.administrator_actor = Some(current_user.username);
+    submit_endpoint_inventory_upsert_request(&state, request).map(Json)
 }
 
 async fn admin_job_status(
@@ -931,6 +1021,67 @@ fn validate_create_object_store_request(
     Ok(request)
 }
 
+fn validate_endpoint_inventory_upsert_request(
+    request: EndpointInventoryUpsertRequest,
+) -> Result<DaemonUpsertEndpointInventoryRequest, (StatusCode, Json<AuthRouteError>)> {
+    let endpoint_id = required_field("endpoint_id", request.endpoint_id)?;
+    let display_name = required_field("display_name", request.display_name)?;
+    let object_service_url = required_field("object_service_url", request.object_service_url)?;
+    let manager_product_id = required_field("manager_product_id", request.manager_product_id)?;
+    validate_client_request_id(request.client_request_id.as_deref())?;
+    let confirmation_marker = validate_endpoint_inventory_confirmation_marker(
+        request.dry_run,
+        request.confirmation_marker.as_deref(),
+    )?;
+
+    let mut active_bindings = Vec::new();
+    for binding in request.active_bindings {
+        active_bindings.push(DaemonEndpointBinding {
+            binding_id: required_field("active_bindings.binding_id", binding.binding_id)?,
+            governance_domain: required_field(
+                "active_bindings.governance_domain",
+                binding.governance_domain,
+            )?,
+            store_id: required_field("active_bindings.store_id", binding.store_id)?,
+            readiness: parse_endpoint_binding_readiness(&binding.readiness)?,
+        });
+    }
+
+    let request = DaemonUpsertEndpointInventoryRequest {
+        endpoint_id,
+        display_name,
+        kind: parse_endpoint_kind(&request.kind)?,
+        object_service_url,
+        validation: DaemonEndpointValidation {
+            state: parse_endpoint_validation_state(&request.validation.state)?,
+            checked_at_utc: request
+                .validation
+                .checked_at_utc
+                .map(|value| required_field("validation.checked_at_utc", value))
+                .transpose()?,
+            message: request
+                .validation
+                .message
+                .map(|value| required_field("validation.message", value))
+                .transpose()?,
+        },
+        manager_product_id,
+        active_bindings,
+        dry_run: request.dry_run,
+        client_request_id: request.client_request_id,
+        administrator_actor: None,
+        confirmation_marker: Some(confirmation_marker),
+    };
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_endpoint_inventory",
+            err.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
 fn validate_cancel_admin_job_request(
     job_id: String,
     request: CancelAdminJobRequest,
@@ -1034,6 +1185,29 @@ fn submit_create_object_store_request(
             err.message,
         )
     })
+}
+
+fn submit_endpoint_inventory_upsert_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: DaemonUpsertEndpointInventoryRequest,
+) -> Result<StandaloneEndpointInventoryUpsertResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_endpoint_admin_unavailable",
+            "daemon endpoint inventory administration contract is not available",
+        )
+    })?;
+
+    client
+        .submit_endpoint_inventory_upsert(request)
+        .map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "daemon_endpoint_inventory_upsert_failed",
+                err.message,
+            )
+        })
 }
 
 fn submit_admin_job_status_request(
@@ -1188,6 +1362,27 @@ fn validate_object_store_create_confirmation_marker(
     ))
 }
 
+fn validate_endpoint_inventory_confirmation_marker(
+    dry_run: bool,
+    confirmation_marker: Option<&str>,
+) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
+    let confirmation_marker = confirmation_marker
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if dry_run && confirmation_marker.is_none() {
+        return Ok(ENDPOINT_RECORD_CONFIRMATION.to_string());
+    }
+    if confirmation_marker == Some(ENDPOINT_RECORD_CONFIRMATION) {
+        return Ok(ENDPOINT_RECORD_CONFIRMATION.to_string());
+    }
+
+    Err(route_error(
+        StatusCode::BAD_REQUEST,
+        "confirmation_required",
+        format!("confirmation_marker must be `{ENDPOINT_RECORD_CONFIRMATION}`"),
+    ))
+}
+
 fn parse_prepare_enclosure_filesystem(
     value: Option<&str>,
 ) -> Result<DaemonPrepareEnclosureFilesystem, (StatusCode, Json<AuthRouteError>)> {
@@ -1198,6 +1393,58 @@ fn parse_prepare_enclosure_filesystem(
             StatusCode::BAD_REQUEST,
             "invalid_request",
             format!("filesystem must be ext4 or xfs: {other}"),
+        )),
+    }
+}
+
+fn parse_endpoint_kind(
+    value: &str,
+) -> Result<DaemonEndpointKind, (StatusCode, Json<AuthRouteError>)> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "dasobjectstore_das" => Ok(DaemonEndpointKind::DasobjectstoreDas),
+        "dasobjectstore_nfs" => Ok(DaemonEndpointKind::DasobjectstoreNfs),
+        "s3_compatible" => Ok(DaemonEndpointKind::S3Compatible),
+        other => Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!(
+                "kind must be dasobjectstore_das, dasobjectstore_nfs, or s3_compatible: {other}"
+            ),
+        )),
+    }
+}
+
+fn parse_endpoint_validation_state(
+    value: &str,
+) -> Result<DaemonEndpointValidationState, (StatusCode, Json<AuthRouteError>)> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "draft" => Ok(DaemonEndpointValidationState::Draft),
+        "pending_validation" => Ok(DaemonEndpointValidationState::PendingValidation),
+        "validated" => Ok(DaemonEndpointValidationState::Validated),
+        "degraded" => Ok(DaemonEndpointValidationState::Degraded),
+        "rejected" => Ok(DaemonEndpointValidationState::Rejected),
+        "unknown" => Ok(DaemonEndpointValidationState::Unknown),
+        other => Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!(
+                "validation.state must be draft, pending_validation, validated, degraded, rejected, or unknown: {other}"
+            ),
+        )),
+    }
+}
+
+fn parse_endpoint_binding_readiness(
+    value: &str,
+) -> Result<DaemonEndpointBindingReadiness, (StatusCode, Json<AuthRouteError>)> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "ready" => Ok(DaemonEndpointBindingReadiness::Ready),
+        "degraded" => Ok(DaemonEndpointBindingReadiness::Degraded),
+        "blocked" => Ok(DaemonEndpointBindingReadiness::Blocked),
+        other => Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("active_bindings.readiness must be ready, degraded, or blocked: {other}"),
         )),
     }
 }
@@ -1283,6 +1530,45 @@ fn create_object_store_response_from_daemon(
     }
 }
 
+fn endpoint_inventory_upsert_response_from_daemon(
+    response: DaemonUpsertEndpointInventoryResponse,
+) -> StandaloneEndpointInventoryUpsertResponse {
+    StandaloneEndpointInventoryUpsertResponse {
+        accepted: StandaloneEndpointInventoryAcceptedResponse {
+            job_id: response.accepted.job_id.to_string(),
+            kind: "endpoint_validation".to_string(),
+            accepted_at_utc: response.accepted.accepted_at_utc,
+            dry_run: response.accepted.dry_run,
+        },
+        endpoint_id: response.endpoint_id,
+        display_name: response.display_name,
+        kind: endpoint_kind_label(response.kind).to_string(),
+        validation_state: endpoint_validation_state_label(response.validation_state).to_string(),
+        registry_path: response.registry_path,
+        administrator_actor: response.administrator_actor,
+        client_request_id: None,
+    }
+}
+
+fn endpoint_kind_label(kind: DaemonEndpointKind) -> &'static str {
+    match kind {
+        DaemonEndpointKind::DasobjectstoreDas => "dasobjectstore_das",
+        DaemonEndpointKind::DasobjectstoreNfs => "dasobjectstore_nfs",
+        DaemonEndpointKind::S3Compatible => "s3_compatible",
+    }
+}
+
+fn endpoint_validation_state_label(state: DaemonEndpointValidationState) -> &'static str {
+    match state {
+        DaemonEndpointValidationState::Draft => "draft",
+        DaemonEndpointValidationState::PendingValidation => "pending_validation",
+        DaemonEndpointValidationState::Validated => "validated",
+        DaemonEndpointValidationState::Degraded => "degraded",
+        DaemonEndpointValidationState::Rejected => "rejected",
+        DaemonEndpointValidationState::Unknown => "unknown",
+    }
+}
+
 fn admin_job_status_response_from_daemon(
     response: DaemonJobStatusResponse,
 ) -> StandaloneAdminJobStatusResponse {
@@ -1335,6 +1621,7 @@ fn admin_job_kind_label(kind: DaemonJobKind) -> &'static str {
         DaemonJobKind::DiskRetire => "disk_retire",
         DaemonJobKind::DiskReplace => "disk_replace",
         DaemonJobKind::EnclosurePreparation => "enclosure_preparation",
+        DaemonJobKind::EndpointValidation => "endpoint_validation",
         DaemonJobKind::ObjectStoreCreation => "object_store_creation",
         DaemonJobKind::Repair => "repair",
         DaemonJobKind::ServiceOperation => "service_operation",
@@ -1456,22 +1743,27 @@ mod tests {
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
         standalone_enclosure_admin_router_with_state, standalone_users_groups_router_with_state,
         AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, GuiApiHostMode,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
-        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
-        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
-        StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
+        DaemonEndpointBindingReadiness, DaemonEndpointKind, DaemonEndpointValidation,
+        DaemonEndpointValidationState, DaemonUpsertEndpointInventoryRequest,
+        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
+        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, PrepareEnclosureHddDeviceRequest,
+        PrepareEnclosureRequest, RegisterRequest, SessionCheckRequest,
+        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
+        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
+        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
         StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
         StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
+        StandaloneEndpointInventoryAcceptedResponse, StandaloneEndpointInventoryUpsertResponse,
         StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
         StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
         StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
         StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
-        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -2357,6 +2649,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn endpoint_inventory_upsert_requires_session() {
+        let root = temp_root("endpoint-upsert-auth");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+
+        let response = post_json_response(
+            app,
+            "/api/v1/workspaces/endpoints/upsert",
+            &endpoint_inventory_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn endpoint_inventory_upsert_requires_exact_confirmation() {
+        let root = temp_root("endpoint-upsert-confirm");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = EndpointInventoryUpsertRequest {
+            confirmation_marker: Some("record it".to_string()),
+            ..endpoint_inventory_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/endpoints/upsert",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "confirmation_required");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn endpoint_inventory_upsert_forwards_confirmed_request_to_daemon_client() {
+        let root = temp_root("endpoint-upsert-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["wheel"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneEndpointInventoryUpsertResponse>(
+            app,
+            "/api/v1/workspaces/endpoints/upsert",
+            "admin",
+            &login.session_token,
+            &endpoint_inventory_request(),
+        )
+        .await;
+
+        assert_eq!(response.accepted.job_id, "endpoint-upsert-job-1");
+        assert_eq!(response.accepted.kind, "endpoint_validation");
+        assert_eq!(response.endpoint_id, "nas-staging");
+        assert_eq!(response.kind, "dasobjectstore_nfs");
+        assert_eq!(
+            client.endpoint_inventory_requests(),
+            vec![DaemonUpsertEndpointInventoryRequest {
+                endpoint_id: "nas-staging".to_string(),
+                display_name: "NAS staging".to_string(),
+                kind: DaemonEndpointKind::DasobjectstoreNfs,
+                object_service_url: "https://nas.example.test:9443".to_string(),
+                validation: DaemonEndpointValidation {
+                    state: DaemonEndpointValidationState::Validated,
+                    checked_at_utc: Some("2026-07-09T00:00:00Z".to_string()),
+                    message: Some("validated from Web admin workflow".to_string()),
+                },
+                manager_product_id: "dasobjectstore".to_string(),
+                active_bindings: vec![DaemonEndpointBinding {
+                    binding_id: "binding-1".to_string(),
+                    governance_domain: "local".to_string(),
+                    store_id: "zymo-fecal-2025-05".to_string(),
+                    readiness: DaemonEndpointBindingReadiness::Ready,
+                }],
+                dry_run: false,
+                client_request_id: Some("endpoint-upsert-1".to_string()),
+                administrator_actor: Some("operator".to_string()),
+                confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn endpoint_inventory_upsert_rejects_invalid_endpoint_kind() {
+        let root = temp_root("endpoint-upsert-invalid-kind");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = EndpointInventoryUpsertRequest {
+            kind: "nfs".to_string(),
+            ..endpoint_inventory_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/endpoints/upsert",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "invalid_request");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn admin_job_status_requires_local_admin() {
         let root = temp_root("admin-job-status-non-admin");
         let auth_store = registered_auth_store(&root);
@@ -2821,6 +3251,7 @@ mod tests {
     struct RecordingEnclosureClient {
         requests: Mutex<Vec<StandaloneEnclosurePrepareDaemonRequest>>,
         create_object_store_requests: Mutex<Vec<DaemonCreateObjectStoreRequest>>,
+        endpoint_inventory_requests: Mutex<Vec<DaemonUpsertEndpointInventoryRequest>>,
         status_requests: Mutex<Vec<StandaloneAdminJobStatusDaemonRequest>>,
         cancel_requests: Mutex<Vec<StandaloneAdminJobCancelDaemonRequest>>,
         fail_message: Option<String>,
@@ -2835,6 +3266,13 @@ mod tests {
             self.create_object_store_requests
                 .lock()
                 .expect("create object store requests lock")
+                .clone()
+        }
+
+        fn endpoint_inventory_requests(&self) -> Vec<DaemonUpsertEndpointInventoryRequest> {
+            self.endpoint_inventory_requests
+                .lock()
+                .expect("endpoint inventory requests lock")
                 .clone()
         }
 
@@ -2924,6 +3362,37 @@ mod tests {
             })
         }
 
+        fn submit_endpoint_inventory_upsert(
+            &self,
+            request: DaemonUpsertEndpointInventoryRequest,
+        ) -> Result<StandaloneEndpointInventoryUpsertResponse, StandaloneEnclosureAdminClientError>
+        {
+            if let Some(message) = &self.fail_message {
+                return Err(StandaloneEnclosureAdminClientError {
+                    message: message.clone(),
+                });
+            }
+            self.endpoint_inventory_requests
+                .lock()
+                .expect("endpoint inventory requests lock")
+                .push(request.clone());
+            Ok(StandaloneEndpointInventoryUpsertResponse {
+                accepted: StandaloneEndpointInventoryAcceptedResponse {
+                    job_id: "endpoint-upsert-job-1".to_string(),
+                    kind: "endpoint_validation".to_string(),
+                    accepted_at_utc: "2026-07-09T00:00:00Z".to_string(),
+                    dry_run: request.dry_run,
+                },
+                endpoint_id: request.endpoint_id,
+                display_name: request.display_name,
+                kind: "dasobjectstore_nfs".to_string(),
+                validation_state: "validated".to_string(),
+                registry_path: "/opt/dasobjectstore/endpoints.json".to_string(),
+                administrator_actor: request.administrator_actor,
+                client_request_id: request.client_request_id,
+            })
+        }
+
         fn job_status(
             &self,
             request: StandaloneAdminJobStatusDaemonRequest,
@@ -2978,6 +3447,7 @@ mod tests {
         Arc::new(RecordingEnclosureClient {
             requests: Mutex::new(Vec::new()),
             create_object_store_requests: Mutex::new(Vec::new()),
+            endpoint_inventory_requests: Mutex::new(Vec::new()),
             status_requests: Mutex::new(Vec::new()),
             cancel_requests: Mutex::new(Vec::new()),
             fail_message: Some(message.to_string()),
@@ -3020,6 +3490,30 @@ mod tests {
             dry_run: false,
             client_request_id: Some("objectstore-create-1".to_string()),
             confirmation_marker: Some(OBJECT_STORE_CREATE_CONFIRMATION.to_string()),
+        }
+    }
+
+    fn endpoint_inventory_request() -> EndpointInventoryUpsertRequest {
+        EndpointInventoryUpsertRequest {
+            endpoint_id: "nas-staging".to_string(),
+            display_name: "NAS staging".to_string(),
+            kind: "dasobjectstore_nfs".to_string(),
+            object_service_url: "https://nas.example.test:9443".to_string(),
+            validation: EndpointValidationUpsertRequest {
+                state: "validated".to_string(),
+                checked_at_utc: Some("2026-07-09T00:00:00Z".to_string()),
+                message: Some("validated from Web admin workflow".to_string()),
+            },
+            manager_product_id: "dasobjectstore".to_string(),
+            active_bindings: vec![EndpointBindingUpsertRequest {
+                binding_id: "binding-1".to_string(),
+                governance_domain: "local".to_string(),
+                store_id: "zymo-fecal-2025-05".to_string(),
+                readiness: "ready".to_string(),
+            }],
+            dry_run: false,
+            client_request_id: Some("endpoint-upsert-1".to_string()),
+            confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
         }
     }
 

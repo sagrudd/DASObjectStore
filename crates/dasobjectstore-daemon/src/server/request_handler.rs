@@ -9,9 +9,11 @@ use crate::api::{
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
     PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::runtime::{
-    provision_garage_store_registry, submit_ingest_files_to_local_store_with_progress,
+    default_endpoint_registry_path, provision_garage_store_registry,
+    submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
     AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ServiceCommandRunner,
@@ -110,6 +112,15 @@ where
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 self.record_admin_job(daemon_job_summary_from_create_object_store(&response))?;
                 Ok(DaemonApiResponse::CreateObjectStore(response))
+            }
+            DaemonApiRequest::UpsertEndpointInventory(request) => {
+                let now = self.clock.now_utc();
+                let response = self
+                    .service_orchestrator
+                    .upsert_endpoint_inventory(request, &now)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                self.record_admin_job(daemon_job_summary_from_endpoint_inventory(&response))?;
+                Ok(DaemonApiResponse::UpsertEndpointInventory(response))
             }
             DaemonApiRequest::CreateLocalGroup(request) => {
                 let now = self.clock.now_utc();
@@ -252,6 +263,17 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn upsert_endpoint_inventory(
+        &self,
+        _request: UpsertEndpointInventoryRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<UpsertEndpointInventoryResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "upsert_endpoint_inventory requires an endpoint registry orchestrator"
+                .to_string(),
+        })
+    }
+
     fn create_local_group(
         &self,
         _request: CreateLocalGroupRequest,
@@ -373,6 +395,22 @@ fn daemon_job_summary_from_create_object_store(
         format!(
             "ObjectStore {} creation accepted for writer group {}",
             response.store_id, response.writer_group
+        ),
+    )
+}
+
+fn daemon_job_summary_from_endpoint_inventory(
+    response: &UpsertEndpointInventoryResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        DaemonJobKind::EndpointValidation,
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "endpoint {} inventory recorded with validation state {:?}",
+            response.endpoint_id, response.validation_state
         ),
     )
 }
@@ -503,6 +541,35 @@ where
         Ok(CreateObjectStoreResponse::accepted(
             job_id,
             accepted_at_utc,
+            request,
+        ))
+    }
+
+    fn upsert_endpoint_inventory(
+        &self,
+        request: UpsertEndpointInventoryRequest,
+        accepted_at_utc: &str,
+    ) -> Result<UpsertEndpointInventoryResponse, DaemonServiceRuntimeError> {
+        let job_id_value = format!(
+            "endpoint-upsert-{}",
+            accepted_at_utc
+                .chars()
+                .map(|character| if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_ascii_lowercase()
+        );
+        let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
+            .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
+        let summary = upsert_endpoint_inventory_record(default_endpoint_registry_path(), &request)?;
+        Ok(UpsertEndpointInventoryResponse::accepted(
+            job_id,
+            accepted_at_utc,
+            summary.registry_path.to_string_lossy().to_string(),
             request,
         ))
     }
@@ -653,6 +720,7 @@ impl DaemonApiRequest {
             Self::ServiceProvision(_) => "service_provision",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
+            Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         }
@@ -668,7 +736,8 @@ mod tests {
     use crate::api::{
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonJobCancelRequest,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
         DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
         DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
         DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
@@ -676,8 +745,9 @@ mod tests {
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, ENCLOSURE_PREPARE_CONFIRMATION,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
+        UpsertEndpointInventoryResponse, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::runtime::{
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
@@ -1011,6 +1081,42 @@ mod tests {
     }
 
     #[test]
+    fn dispatches_endpoint_inventory_upsert_with_clock_timestamp() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T00:05:00Z"));
+
+        let response = handler
+            .handle(DaemonApiRequest::UpsertEndpointInventory(
+                endpoint_inventory_request(),
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::UpsertEndpointInventory(UpsertEndpointInventoryResponse {
+                accepted,
+                endpoint_id,
+                ..
+            }) if accepted.job_id.as_str() == "endpoint-upsert-2026-07-09t00-05-00z"
+                && accepted.dry_run
+                && endpoint_id == "nas-staging"
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .endpoint_inventory_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-09T00:05:00Z".to_string(),
+                "nas-staging".to_string(),
+                true,
+            )]
+        );
+    }
+
+    #[test]
     fn records_accepted_prepare_enclosure_job_in_registry() {
         let root = temp_root("record-prepare");
         let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
@@ -1078,6 +1184,44 @@ mod tests {
             DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
                 job: DaemonJobSummary {
                     kind: DaemonJobKind::ObjectStoreCreation,
+                    state: DaemonJobState::Complete,
+                    ..
+                }
+            })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn records_accepted_endpoint_inventory_job_in_registry() {
+        let root = temp_root("record-endpoint-inventory");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-09T00:05:00Z"),
+            registry,
+        );
+
+        handler
+            .handle(DaemonApiRequest::UpsertEndpointInventory(
+                endpoint_inventory_request(),
+            ))
+            .expect("endpoint inventory request handled");
+        let response = handler
+            .handle(DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("endpoint-upsert-2026-07-09t00-05-00z").expect("job id"),
+            }))
+            .expect("status request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    kind: DaemonJobKind::EndpointValidation,
                     state: DaemonJobState::Complete,
                     ..
                 }
@@ -1347,6 +1491,26 @@ mod tests {
         }
     }
 
+    fn endpoint_inventory_request() -> UpsertEndpointInventoryRequest {
+        UpsertEndpointInventoryRequest {
+            endpoint_id: "nas-staging".to_string(),
+            display_name: "NAS staging".to_string(),
+            kind: DaemonEndpointKind::DasobjectstoreNfs,
+            object_service_url: "https://nas.example.test:9443".to_string(),
+            validation: DaemonEndpointValidation {
+                state: DaemonEndpointValidationState::Validated,
+                checked_at_utc: Some("2026-07-09T00:00:00Z".to_string()),
+                message: Some("validated from Web admin workflow".to_string()),
+            },
+            manager_product_id: "dasobjectstore".to_string(),
+            active_bindings: Vec::new(),
+            dry_run: true,
+            client_request_id: Some("endpoint-upsert-1".to_string()),
+            administrator_actor: Some("operator".to_string()),
+            confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
+        }
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "dasobjectstore-request-handler-{label}-{}",
@@ -1375,6 +1539,7 @@ mod tests {
         ingest_calls: RefCell<Vec<(String, String, bool)>>,
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         create_object_store_calls: RefCell<Vec<(String, String, bool)>>,
+        endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
@@ -1559,6 +1724,24 @@ mod tests {
             Ok(CreateObjectStoreResponse::accepted(
                 DaemonJobId::new("objectstore-create-2026-07-08t20-45-00z").expect("job id"),
                 accepted_at_utc,
+                request,
+            ))
+        }
+
+        fn upsert_endpoint_inventory(
+            &self,
+            request: UpsertEndpointInventoryRequest,
+            accepted_at_utc: &str,
+        ) -> Result<UpsertEndpointInventoryResponse, DaemonServiceRuntimeError> {
+            self.endpoint_inventory_calls.borrow_mut().push((
+                accepted_at_utc.to_string(),
+                request.endpoint_id.clone(),
+                request.dry_run,
+            ));
+            Ok(UpsertEndpointInventoryResponse::accepted(
+                DaemonJobId::new("endpoint-upsert-2026-07-09t00-05-00z").expect("job id"),
+                accepted_at_utc,
+                "/opt/dasobjectstore/endpoints.json",
                 request,
             ))
         }

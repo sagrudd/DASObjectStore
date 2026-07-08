@@ -371,6 +371,7 @@ fn activity_kind_from_daemon_job(kind: &DaemonJobKind) -> ActivityTaskKindView {
         | DaemonJobKind::DiskReplace
         | DaemonJobKind::Repair => ActivityTaskKindView::Repair,
         DaemonJobKind::EnclosurePreparation => ActivityTaskKindView::EnclosurePreparation,
+        DaemonJobKind::EndpointValidation => ActivityTaskKindView::EndpointValidation,
         DaemonJobKind::ObjectStoreCreation => ActivityTaskKindView::ObjectStoreCreation,
         DaemonJobKind::ServiceOperation | DaemonJobKind::SystemAdministration => {
             ActivityTaskKindView::SystemAdministration

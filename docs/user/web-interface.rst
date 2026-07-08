@@ -468,10 +468,23 @@ bare list of endpoint records. Each endpoint record includes:
 
 Endpoint validation states are ``draft``, ``pending_validation``,
 ``validated``, ``degraded``, ``rejected``, and ``unknown``. Degraded, rejected,
-unknown, draft, and pending states generate visible warnings. Administrator
-workflows for creating and updating endpoint records from validated NAS/NFS,
-S3-compatible, and Mnemosyne definitions remain daemon-owned work rather than
-browser-side file mutation.
+unknown, draft, and pending states generate visible warnings.
+
+Standalone administrator sessions can submit endpoint inventory creation or
+updates through ``POST /api/v1/workspaces/endpoints/upsert``. The route requires
+the same standalone session headers as other Web administrator routes and the
+current OS user must have sudo-derived administrator authority. Live submissions
+must include the exact confirmation marker ``record endpoint inventory``; dry
+runs may omit it. The request body carries the endpoint identity, kind,
+object-service URL, validation state, optional validation timestamp/message,
+manager product ID, optional active bindings, dry-run flag, and optional client
+request ID.
+
+The Web route validates the request and forwards it to ``dasobjectstored`` as an
+``upsert_endpoint_inventory`` daemon request. The daemon writes the shared
+registry and records an ``endpoint_validation`` administrator job so Activity
+can show the accepted work. Browser code must not edit
+``/opt/dasobjectstore/endpoints.json`` directly.
 
 Users/Groups Workspace
 ----------------------

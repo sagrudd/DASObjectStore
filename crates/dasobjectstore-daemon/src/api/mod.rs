@@ -1,6 +1,7 @@
 //! Transport-neutral daemon API contracts.
 
 mod enclosure;
+mod endpoint;
 mod health;
 mod ingest;
 mod jobs;
@@ -12,6 +13,11 @@ mod stores;
 pub use enclosure::{
     PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
     PrepareEnclosureResponse, PrepareEnclosureValidationError, ENCLOSURE_PREPARE_CONFIRMATION,
+};
+pub use endpoint::{
+    DaemonEndpointBinding, DaemonEndpointBindingReadiness, DaemonEndpointKind,
+    DaemonEndpointValidation, DaemonEndpointValidationState, EndpointInventoryValidationError,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse, ENDPOINT_RECORD_CONFIRMATION,
 };
 pub use health::{
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
@@ -77,6 +83,7 @@ pub enum DaemonApiRequest {
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
+    UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
 }
@@ -95,6 +102,9 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(request) => request
                 .validate()
                 .map_err(create_object_store_validation_error),
+            Self::UpsertEndpointInventory(request) => request
+                .validate()
+                .map_err(endpoint_inventory_validation_error),
             Self::CreateLocalGroup(request) => {
                 request.validate().map_err(local_admin_validation_error)
             }
@@ -127,10 +137,35 @@ pub enum DaemonApiResponse {
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
+    UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
+}
+
+fn endpoint_inventory_validation_error(
+    err: EndpointInventoryValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        EndpointInventoryValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        EndpointInventoryValidationError::UnsafeLocalName { field, value } => {
+            DaemonRequestValidationError::UnsafeLocalName { field, value }
+        }
+        EndpointInventoryValidationError::InvalidUrl { field, value } => {
+            DaemonRequestValidationError::UnsupportedFieldValue { field, value }
+        }
+        EndpointInventoryValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+        EndpointInventoryValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: ENDPOINT_RECORD_CONFIRMATION,
+            }
+        }
+    }
 }
 
 fn create_object_store_validation_error(
@@ -262,11 +297,13 @@ impl DaemonApiErrorResponse {
 mod tests {
     use super::{
         AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonApiRequest, DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobId,
-        DaemonJobListRequest, DaemonJobStatusRequest, DaemonServiceLifecycleRequest,
+        DaemonApiRequest, DaemonEndpointKind, DaemonEndpointValidation,
+        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonJobCancelRequest,
+        DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest, DaemonServiceLifecycleRequest,
         DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceStatusRequest,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        StoreInventoryRequest, SubmitIngestFilesRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
@@ -428,6 +465,33 @@ mod tests {
         assert_eq!(encoded["command"], "create_object_store");
         assert_eq!(encoded["payload"]["store_id"], "generated-data");
         assert_eq!(encoded["payload"]["required_copies"], 2);
+    }
+
+    #[test]
+    fn endpoint_inventory_upsert_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::UpsertEndpointInventory(UpsertEndpointInventoryRequest {
+            endpoint_id: "nas-staging".to_string(),
+            display_name: "NAS staging".to_string(),
+            kind: DaemonEndpointKind::DasobjectstoreNfs,
+            object_service_url: "https://nas.example.test:9443".to_string(),
+            validation: DaemonEndpointValidation {
+                state: DaemonEndpointValidationState::Validated,
+                checked_at_utc: Some("2026-07-09T00:00:00Z".to_string()),
+                message: None,
+            },
+            manager_product_id: "dasobjectstore".to_string(),
+            active_bindings: Vec::new(),
+            dry_run: false,
+            client_request_id: Some("request-1".to_string()),
+            administrator_actor: Some("stephen".to_string()),
+            confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
+        });
+
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "upsert_endpoint_inventory");
+        assert_eq!(encoded["payload"]["endpoint_id"], "nas-staging");
+        assert_eq!(encoded["payload"]["kind"], "dasobjectstore_nfs");
     }
 
     #[test]
