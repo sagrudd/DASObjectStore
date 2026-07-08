@@ -24,6 +24,7 @@ dasobjectstore-object-service.workspace = true
 dasobjectstore-platform.workspace = true
 dasobjectstore-tui.workspace = true
 libc.workspace = true
+ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -32,5 +33,4 @@ sha2.workspace = true
 debug-commands = []
 
 [dev-dependencies]
-ratatui.workspace = true
 rusqlite.workspace = true

@@ -98,6 +98,14 @@ use dasobjectstore_platform::{
     ObservedDisk, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
 use dasobjectstore_tui::{UploadTui, UploadTuiContext};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Gauge, Paragraph},
+    Terminal,
+};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt::{self, Display};
@@ -114,6 +122,7 @@ use std::{collections::hash_map::DefaultHasher, collections::BTreeMap, collectio
 
 #[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 
 #[cfg(unix)]
 static UPLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -186,6 +195,7 @@ fn run_performance_test(
     args: &PerformanceTestArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
+    require_admin_for_performance_test()?;
     let file_size = parse_binary_size(args.file_size())?;
     if args.file_count() == 0 {
         return Err(CliError::CommandFailed(
@@ -215,9 +225,7 @@ fn run_performance_test(
         )));
     }
 
-    fs::create_dir_all(args.tmp_dir())?;
     let run_id = timestamped_run_id();
-    let source_path = args.tmp_dir().join(format!("{run_id}-source.bin"));
     let ssd_bench_root = ssd_root
         .join(".dasobjectstore")
         .join("performance-test")
@@ -239,6 +247,10 @@ fn run_performance_test(
         .unwrap_or_else(|| args.tmp_dir().join(format!("{run_id}-report.md")));
     let qr_path = report_path.with_extension("qr.svg");
     let pdf_path = report_path.with_extension("pdf");
+    let json_path = args
+        .json_artifact()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| report_path.with_extension("json"));
     let reproduction_args = performance_test_reproduction_args(
         args,
         &ssd_root,
@@ -271,6 +283,7 @@ fn run_performance_test(
             "markdown_path": report_path.to_string_lossy(),
             "pdf_path": pdf_path.to_string_lossy(),
             "qr_path": qr_path.to_string_lossy(),
+            "json_path": json_path.to_string_lossy(),
         }
     })
     .to_string();
@@ -285,141 +298,148 @@ fn run_performance_test(
         args.max_hdd_concurrency(),
         report_path.display()
     )?;
+    if args.tui() {
+        writeln!(
+            writer,
+            "performance-test tui: scenario progress, aggregate rates, and artifact paths will be rendered during this administrative run"
+        )?;
+    }
 
-    let mut file_results = Vec::new();
-    let mut disk_results = Vec::new();
-    let mut concurrency_results = Vec::new();
     let max_concurrency = args.max_hdd_concurrency().min(disks.len()).max(1);
     let total_started = Instant::now();
 
-    let result = (|| -> Result<(), CliError> {
-        for file_index in 0..args.file_count() {
+    let result = (|| -> Result<PerformanceBenchmarkResults, CliError> {
+        let scenario_total = 1 + max_concurrency * 2;
+        let mut scenario_done = 0_usize;
+        if args.tui() {
+            render_performance_tui_snapshot(
+                writer,
+                &PerformanceTuiSnapshot {
+                    phase: "starting",
+                    scenario_done,
+                    scenario_total,
+                    file_count: args.file_count(),
+                    file_size,
+                    hdd_concurrency: 0,
+                    aggregate_rate: None,
+                    report_path: &report_path,
+                    json_path: &json_path,
+                },
+            )?;
+        }
+        writeln!(
+            writer,
+            "scenario ssd-only: writing generated files directly to SSD"
+        )?;
+        let ssd_only = benchmark_ssd_only(&ssd_bench_root, file_size, args.file_count(), writer)?;
+        scenario_done += 1;
+        if args.tui() {
+            render_performance_tui_snapshot(
+                writer,
+                &PerformanceTuiSnapshot {
+                    phase: "ssd-only complete",
+                    scenario_done,
+                    scenario_total,
+                    file_count: args.file_count(),
+                    file_size,
+                    hdd_concurrency: 0,
+                    aggregate_rate: Some(
+                        ssd_only.total_bytes as f64 / ssd_only.elapsed_seconds.max(0.001),
+                    ),
+                    report_path: &report_path,
+                    json_path: &json_path,
+                },
+            )?;
+        }
+
+        let mut ssd_pipeline = Vec::new();
+        for concurrency in 1..=max_concurrency {
             writeln!(
                 writer,
-                "file {}/{}: generating {}",
-                file_index + 1,
-                args.file_count(),
-                format_bytes(file_size as f64)
+                "scenario ssd-pipeline: SSD ingest with {} concurrent HDD drain worker(s)",
+                concurrency
             )?;
-            let generated = measure_generate_random_file(&source_path, file_size, file_index)?;
-            let ssd_payload = ssd_bench_root.join(format!("payload-{file_index:05}.bin"));
-            let ssd_write = measure_copy(&source_path, &ssd_payload)?;
-            let ssd_read = measure_read(&ssd_payload)?;
-            file_results.push(PerformanceFileResult {
-                file_index,
-                generate: generated,
-                ssd_write,
-                ssd_read,
-            });
-
-            let mut individual_rates = Vec::new();
-            for (disk_id, root) in &hdd_bench_roots {
-                let destination = root.join(format!(
-                    "payload-{file_index:05}-c1-{}.bin",
-                    disk_id.as_str()
-                ));
-                let measurement = measure_copy(&ssd_payload, &destination)?;
-                let _ = fs::remove_file(&destination);
-                let rate = throughput(measurement);
-                disk_results.push(PerformanceDiskResult {
-                    file_index,
-                    concurrency: 1,
-                    disk_id: disk_id.clone(),
-                    write: measurement,
-                });
-                concurrency_results.push(PerformanceConcurrencyResult {
-                    file_index,
-                    concurrency: 1,
-                    aggregate_bytes: measurement.bytes,
-                    seconds: measurement.seconds,
-                    slowest_seconds: measurement.seconds,
-                    members: vec![disk_id.clone()],
-                });
-                individual_rates.push((disk_id.clone(), root.clone(), rate));
-                writeln!(
+            let scenario = benchmark_ssd_pipeline(
+                &ssd_bench_root,
+                &hdd_bench_roots,
+                file_size,
+                args.file_count(),
+                concurrency,
+                writer,
+            )?;
+            scenario_done += 1;
+            if args.tui() {
+                render_performance_tui_snapshot(
                     writer,
-                    "file {}/{}: HDD {} individual {}/s",
-                    file_index + 1,
-                    args.file_count(),
-                    disk_id,
-                    format_bytes(rate)
+                    &PerformanceTuiSnapshot {
+                        phase: "ssd-pipeline complete",
+                        scenario_done,
+                        scenario_total,
+                        file_count: args.file_count(),
+                        file_size,
+                        hdd_concurrency: concurrency,
+                        aggregate_rate: Some(
+                            scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
+                        ),
+                        report_path: &report_path,
+                        json_path: &json_path,
+                    },
                 )?;
             }
-            individual_rates.sort_by(|left, right| {
-                right
-                    .2
-                    .total_cmp(&left.2)
-                    .then_with(|| left.0.cmp(&right.0))
-            });
-
-            for concurrency in 2..=max_concurrency {
-                let selected = &individual_rates[..concurrency];
-                let started = Instant::now();
-                let mut handles = Vec::new();
-                for (disk_id, root, _) in selected {
-                    let source = ssd_payload.clone();
-                    let destination = root.join(format!(
-                        "payload-{file_index:05}-c{concurrency}-{}.bin",
-                        disk_id.as_str()
-                    ));
-                    let disk_id = disk_id.clone();
-                    handles.push(thread::spawn(move || {
-                        let result = measure_copy(&source, &destination);
-                        let _ = fs::remove_file(&destination);
-                        result.map(|measurement| (disk_id, measurement))
-                    }));
-                }
-                let mut aggregate_bytes = 0_u64;
-                let mut slowest_seconds = 0.0_f64;
-                for handle in handles {
-                    let (disk_id, measurement) = handle.join().map_err(|_| {
-                        CliError::CommandFailed("performance-test HDD worker panicked".to_string())
-                    })??;
-                    aggregate_bytes = aggregate_bytes.saturating_add(measurement.bytes);
-                    slowest_seconds = slowest_seconds.max(measurement.seconds);
-                    disk_results.push(PerformanceDiskResult {
-                        file_index,
-                        concurrency,
-                        disk_id,
-                        write: measurement,
-                    });
-                }
-                let elapsed = started.elapsed().as_secs_f64().max(0.001);
-                concurrency_results.push(PerformanceConcurrencyResult {
-                    file_index,
-                    concurrency,
-                    aggregate_bytes,
-                    seconds: elapsed,
-                    slowest_seconds,
-                    members: selected
-                        .iter()
-                        .map(|(disk_id, _, _)| disk_id.clone())
-                        .collect(),
-                });
-                writeln!(
-                    writer,
-                    "file {}/{}: HDD concurrency {} aggregate {}/s",
-                    file_index + 1,
-                    args.file_count(),
-                    concurrency,
-                    format_bytes(aggregate_bytes as f64 / elapsed)
-                )?;
-            }
-
-            fs::remove_file(&ssd_payload)?;
-            fs::remove_file(&source_path)?;
+            ssd_pipeline.push(scenario);
         }
-        Ok(())
+
+        let mut direct_hdd = Vec::new();
+        for concurrency in 1..=max_concurrency {
+            writeln!(
+                writer,
+                "scenario direct-hdd: direct source-to-HDD ingest with {} worker(s)",
+                concurrency
+            )?;
+            let scenario = benchmark_direct_hdd(
+                &hdd_bench_roots,
+                file_size,
+                args.file_count(),
+                concurrency,
+                writer,
+            )?;
+            scenario_done += 1;
+            if args.tui() {
+                render_performance_tui_snapshot(
+                    writer,
+                    &PerformanceTuiSnapshot {
+                        phase: "direct-hdd complete",
+                        scenario_done,
+                        scenario_total,
+                        file_count: args.file_count(),
+                        file_size,
+                        hdd_concurrency: concurrency,
+                        aggregate_rate: Some(
+                            scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
+                        ),
+                        report_path: &report_path,
+                        json_path: &json_path,
+                    },
+                )?;
+            }
+            direct_hdd.push(scenario);
+        }
+
+        Ok(PerformanceBenchmarkResults {
+            ssd_only,
+            ssd_pipeline,
+            direct_hdd,
+        })
     })();
 
     if !args.keep_temp() {
-        let _ = fs::remove_file(&source_path);
         let _ = fs::remove_dir_all(&ssd_bench_root);
         for (_, root) in &hdd_bench_roots {
             let _ = fs::remove_dir_all(root);
         }
     }
-    result?;
+    let results = result?;
+    let recommendation = recommend_performance_strategy(&results);
 
     let qr_status = write_report_qr_svg(&qr_path, &reproduction_payload)?;
     let performance_report = PerformanceReport {
@@ -433,10 +453,14 @@ fn run_performance_test(
         disk_count: disks.len(),
         max_concurrency,
         elapsed_seconds: total_started.elapsed().as_secs_f64(),
-        file_results,
-        disk_results,
-        concurrency_results,
+        results,
+        recommendation,
+        tmp_dir: args.tmp_dir().to_path_buf(),
+        disks: hdd_bench_roots.clone(),
+        reproduction_args,
+        keep_temp: args.keep_temp(),
         report_path: report_path.clone(),
+        json_path: json_path.clone(),
         qr_path: qr_path.clone(),
         pdf_path: pdf_path.clone(),
         reproduce_command,
@@ -448,9 +472,14 @@ fn run_performance_test(
     if let Some(parent) = report_path.parent() {
         fs::create_dir_all(parent)?;
     }
+    if let Some(parent) = json_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&json_path, render_performance_json(&performance_report))?;
     fs::write(&report_path, &report)?;
     write_pdf_report(&report_path, &pdf_path, &performance_report)?;
     writeln!(writer, "Report: {}", report_path.display())?;
+    writeln!(writer, "JSON: {}", json_path.display())?;
     writeln!(writer, "PDF: {}", pdf_path.display())?;
     Ok(())
 }
@@ -464,7 +493,6 @@ struct PerformanceMeasurement {
 #[derive(Clone, Debug)]
 struct PerformanceFileResult {
     file_index: u32,
-    generate: PerformanceMeasurement,
     ssd_write: PerformanceMeasurement,
     ssd_read: PerformanceMeasurement,
 }
@@ -473,18 +501,70 @@ struct PerformanceFileResult {
 struct PerformanceDiskResult {
     file_index: u32,
     concurrency: usize,
+    scenario: PerformanceScenarioKind,
     disk_id: DiskId,
     write: PerformanceMeasurement,
 }
 
 #[derive(Clone, Debug)]
 struct PerformanceConcurrencyResult {
-    file_index: u32,
     concurrency: usize,
+    scenario: PerformanceScenarioKind,
     aggregate_bytes: u64,
     seconds: f64,
     slowest_seconds: f64,
     members: Vec<DiskId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PerformanceScenarioKind {
+    SsdOnly,
+    SsdPipeline,
+    DirectHdd,
+}
+
+impl PerformanceScenarioKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SsdOnly => "ssd-only",
+            Self::SsdPipeline => "ssd-pipeline",
+            Self::DirectHdd => "direct-hdd",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::SsdOnly => "SSD-only ingest",
+            Self::SsdPipeline => "SSD ingest with concurrent HDD drain",
+            Self::DirectHdd => "Direct source-to-HDD ingest",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceScenarioResult {
+    kind: PerformanceScenarioKind,
+    concurrency: usize,
+    elapsed_seconds: f64,
+    total_bytes: u64,
+    file_results: Vec<PerformanceFileResult>,
+    disk_results: Vec<PerformanceDiskResult>,
+    concurrency_result: PerformanceConcurrencyResult,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceBenchmarkResults {
+    ssd_only: PerformanceScenarioResult,
+    ssd_pipeline: Vec<PerformanceScenarioResult>,
+    direct_hdd: Vec<PerformanceScenarioResult>,
+}
+
+#[derive(Clone, Debug)]
+struct PerformanceRecommendation {
+    strategy: PerformanceScenarioKind,
+    hdd_concurrency: usize,
+    aggregate_bytes_per_second: f64,
+    reason: String,
 }
 
 #[derive(Clone, Debug)]
@@ -499,10 +579,14 @@ struct PerformanceReport {
     disk_count: usize,
     max_concurrency: usize,
     elapsed_seconds: f64,
-    file_results: Vec<PerformanceFileResult>,
-    disk_results: Vec<PerformanceDiskResult>,
-    concurrency_results: Vec<PerformanceConcurrencyResult>,
+    results: PerformanceBenchmarkResults,
+    recommendation: PerformanceRecommendation,
+    tmp_dir: PathBuf,
+    disks: Vec<(DiskId, PathBuf)>,
+    reproduction_args: Vec<String>,
+    keep_temp: bool,
     report_path: PathBuf,
+    json_path: PathBuf,
     qr_path: PathBuf,
     pdf_path: PathBuf,
     reproduce_command: String,
@@ -536,6 +620,10 @@ fn performance_test_reproduction_args(
         "--report".to_string(),
         report_path.display().to_string(),
     ];
+    if let Some(json_artifact) = args.json_artifact() {
+        command.push("--json-artifact".to_string());
+        command.push(json_artifact.display().to_string());
+    }
     if args.keep_temp() {
         command.push("--keep-temp".to_string());
     }
@@ -598,6 +686,520 @@ fn parse_binary_size(value: &str) -> Result<u64, CliError> {
         )));
     }
     Ok(bytes.round() as u64)
+}
+
+fn require_admin_for_performance_test() -> Result<(), CliError> {
+    if current_user_is_root()? {
+        return Ok(());
+    }
+
+    Err(CliError::CommandFailed(
+        "performance-test requires an administrative user because it performs sustained direct DAS IO; rerun with sudo".to_string(),
+    ))
+}
+
+struct PerformanceTuiSnapshot<'a> {
+    phase: &'a str,
+    scenario_done: usize,
+    scenario_total: usize,
+    file_count: u32,
+    file_size: u64,
+    hdd_concurrency: usize,
+    aggregate_rate: Option<f64>,
+    report_path: &'a Path,
+    json_path: &'a Path,
+}
+
+fn render_performance_tui_snapshot(
+    writer: &mut impl Write,
+    snapshot: &PerformanceTuiSnapshot<'_>,
+) -> Result<(), CliError> {
+    let backend = CrosstermBackend::new(writer);
+    let mut terminal = Terminal::with_options(
+        backend,
+        ratatui::TerminalOptions {
+            viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 110, 18)),
+        },
+    )?;
+    let percent = if snapshot.scenario_total == 0 {
+        0
+    } else {
+        ((snapshot.scenario_done * 100) / snapshot.scenario_total).min(100) as u16
+    };
+    terminal.draw(|frame| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(4),
+                Constraint::Length(3),
+                Constraint::Length(6),
+                Constraint::Min(5),
+            ])
+            .split(frame.area());
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(vec![Span::styled(
+                    "DASObjectStore Performance Test",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(format!("Phase: {}", snapshot.phase)),
+            ])
+            .block(Block::default().borders(Borders::ALL).title("Context")),
+            chunks[0],
+        );
+        frame.render_widget(
+            Gauge::default()
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Scenario Progress"),
+                )
+                .gauge_style(Style::default().fg(Color::Green))
+                .percent(percent),
+            chunks[1],
+        );
+        let rate = snapshot
+            .aggregate_rate
+            .map(|rate| format!("{}/s", format_bytes(rate)))
+            .unwrap_or_else(|| "pending".to_string());
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format!(
+                    "Scenarios: {}/{}",
+                    snapshot.scenario_done, snapshot.scenario_total
+                )),
+                Line::from(format!(
+                    "Files: {} x {}",
+                    snapshot.file_count,
+                    format_bytes(snapshot.file_size as f64)
+                )),
+                Line::from(format!("HDD concurrency: {}", snapshot.hdd_concurrency)),
+                Line::from(format!("Aggregate rate: {rate}")),
+            ])
+            .block(Block::default().borders(Borders::ALL).title("Workload")),
+            chunks[2],
+        );
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format!("Markdown: {}", snapshot.report_path.display())),
+                Line::from(format!("JSON: {}", snapshot.json_path.display())),
+            ])
+            .block(Block::default().borders(Borders::ALL).title("Artifacts")),
+            chunks[3],
+        );
+    })?;
+    Ok(())
+}
+
+fn benchmark_ssd_only(
+    ssd_bench_root: &Path,
+    file_size: u64,
+    file_count: u32,
+    writer: &mut impl Write,
+) -> Result<PerformanceScenarioResult, CliError> {
+    let started = Instant::now();
+    let mut file_results = Vec::new();
+    let mut total_bytes = 0_u64;
+    for file_index in 0..file_count {
+        let destination = ssd_bench_root.join(format!("ssd-only-{file_index:05}.bin"));
+        let ssd_write = measure_generate_random_file(&destination, file_size, file_index)?;
+        let ssd_read = measure_read(&destination)?;
+        let _ = fs::remove_file(&destination);
+        total_bytes = total_bytes.saturating_add(ssd_write.bytes);
+        file_results.push(PerformanceFileResult {
+            file_index,
+            ssd_write,
+            ssd_read,
+        });
+        writeln!(
+            writer,
+            "ssd-only file {}/{}: SSD write {}/s SSD read {}/s",
+            file_index + 1,
+            file_count,
+            format_bytes(throughput(ssd_write)),
+            format_bytes(throughput(ssd_read))
+        )?;
+    }
+    let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
+    Ok(PerformanceScenarioResult {
+        kind: PerformanceScenarioKind::SsdOnly,
+        concurrency: 0,
+        elapsed_seconds,
+        total_bytes,
+        file_results,
+        disk_results: Vec::new(),
+        concurrency_result: PerformanceConcurrencyResult {
+            concurrency: 0,
+            scenario: PerformanceScenarioKind::SsdOnly,
+            aggregate_bytes: total_bytes,
+            seconds: elapsed_seconds,
+            slowest_seconds: 0.0,
+            members: Vec::new(),
+        },
+    })
+}
+
+fn benchmark_ssd_pipeline(
+    ssd_bench_root: &Path,
+    hdd_bench_roots: &[(DiskId, PathBuf)],
+    file_size: u64,
+    file_count: u32,
+    concurrency: usize,
+    writer: &mut impl Write,
+) -> Result<PerformanceScenarioResult, CliError> {
+    let started = Instant::now();
+    let scheduler = Arc::new(Mutex::new(DiskPlacementScheduler::new(hdd_bench_roots)));
+    let (sender, receiver) = mpsc::channel::<SsdPipelineJob>();
+    let receiver = Arc::new(Mutex::new(receiver));
+    let worker_results = Arc::new(Mutex::new(Vec::<PerformanceDiskResult>::new()));
+    let mut handles = Vec::new();
+
+    for _ in 0..concurrency {
+        let receiver = Arc::clone(&receiver);
+        let scheduler = Arc::clone(&scheduler);
+        let worker_results = Arc::clone(&worker_results);
+        handles.push(thread::spawn(move || -> Result<(), CliError> {
+            loop {
+                let job = {
+                    let receiver = receiver.lock().map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test HDD queue lock poisoned".to_string(),
+                        )
+                    })?;
+                    receiver.recv()
+                };
+                let Ok(job) = job else {
+                    break;
+                };
+                let placement = scheduler
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test disk scheduler lock poisoned".to_string(),
+                        )
+                    })?
+                    .reserve_disk();
+                let destination = placement.root_path.join(format!(
+                    "ssd-pipeline-c{concurrency}-file{:05}.bin",
+                    job.file_index
+                ));
+                let measurement = measure_copy(&job.ssd_path, &destination);
+                let _ = fs::remove_file(&destination);
+                let _ = fs::remove_file(&job.ssd_path);
+                let measurement = measurement?;
+                scheduler
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test disk scheduler lock poisoned".to_string(),
+                        )
+                    })?
+                    .complete_disk(&placement.disk_id, measurement.bytes, measurement.seconds);
+                worker_results
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed("performance-test result lock poisoned".to_string())
+                    })?
+                    .push(PerformanceDiskResult {
+                        file_index: job.file_index,
+                        concurrency,
+                        scenario: PerformanceScenarioKind::SsdPipeline,
+                        disk_id: placement.disk_id,
+                        write: measurement,
+                    });
+            }
+            Ok(())
+        }));
+    }
+
+    let mut file_results = Vec::new();
+    let mut total_bytes = 0_u64;
+    for file_index in 0..file_count {
+        let ssd_path =
+            ssd_bench_root.join(format!("ssd-pipeline-c{concurrency}-{file_index:05}.bin"));
+        let ssd_write = measure_generate_random_file(&ssd_path, file_size, file_index)?;
+        let ssd_read = measure_read(&ssd_path)?;
+        total_bytes = total_bytes.saturating_add(ssd_write.bytes);
+        file_results.push(PerformanceFileResult {
+            file_index,
+            ssd_write,
+            ssd_read,
+        });
+        sender
+            .send(SsdPipelineJob {
+                file_index,
+                ssd_path,
+            })
+            .map_err(|_| {
+                CliError::CommandFailed("performance-test HDD workers stopped early".to_string())
+            })?;
+        writeln!(
+            writer,
+            "ssd-pipeline c{} file {}/{}: SSD write {}/s queued for HDD drain",
+            concurrency,
+            file_index + 1,
+            file_count,
+            format_bytes(throughput(ssd_write))
+        )?;
+    }
+    drop(sender);
+    for handle in handles {
+        handle.join().map_err(|_| {
+            CliError::CommandFailed("performance-test HDD worker panicked".to_string())
+        })??;
+    }
+    let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
+    let mut disk_results = Arc::try_unwrap(worker_results)
+        .map_err(|_| {
+            CliError::CommandFailed("performance-test result lock still shared".to_string())
+        })?
+        .into_inner()
+        .map_err(|_| {
+            CliError::CommandFailed("performance-test result lock poisoned".to_string())
+        })?;
+    disk_results.sort_by(|left, right| {
+        left.file_index
+            .cmp(&right.file_index)
+            .then_with(|| left.disk_id.cmp(&right.disk_id))
+    });
+    let slowest_seconds = disk_results
+        .iter()
+        .map(|row| row.write.seconds)
+        .fold(0.0_f64, f64::max);
+    let members = disk_results
+        .iter()
+        .map(|row| row.disk_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    writeln!(
+        writer,
+        "ssd-pipeline c{}: aggregate landing {}/s",
+        concurrency,
+        format_bytes(total_bytes as f64 / elapsed_seconds)
+    )?;
+    Ok(PerformanceScenarioResult {
+        kind: PerformanceScenarioKind::SsdPipeline,
+        concurrency,
+        elapsed_seconds,
+        total_bytes,
+        file_results,
+        disk_results,
+        concurrency_result: PerformanceConcurrencyResult {
+            concurrency,
+            scenario: PerformanceScenarioKind::SsdPipeline,
+            aggregate_bytes: total_bytes,
+            seconds: elapsed_seconds,
+            slowest_seconds,
+            members,
+        },
+    })
+}
+
+fn benchmark_direct_hdd(
+    hdd_bench_roots: &[(DiskId, PathBuf)],
+    file_size: u64,
+    file_count: u32,
+    concurrency: usize,
+    writer: &mut impl Write,
+) -> Result<PerformanceScenarioResult, CliError> {
+    let started = Instant::now();
+    let scheduler = Arc::new(Mutex::new(DiskPlacementScheduler::new(hdd_bench_roots)));
+    let (sender, receiver) = mpsc::channel::<u32>();
+    let receiver = Arc::new(Mutex::new(receiver));
+    let worker_results = Arc::new(Mutex::new(Vec::<PerformanceDiskResult>::new()));
+    let mut handles = Vec::new();
+    for worker_index in 0..concurrency {
+        let receiver = Arc::clone(&receiver);
+        let scheduler = Arc::clone(&scheduler);
+        let worker_results = Arc::clone(&worker_results);
+        handles.push(thread::spawn(move || -> Result<(), CliError> {
+            loop {
+                let file_index = {
+                    let receiver = receiver.lock().map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test direct HDD queue lock poisoned".to_string(),
+                        )
+                    })?;
+                    receiver.recv()
+                };
+                let Ok(file_index) = file_index else {
+                    break;
+                };
+                let placement = scheduler
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test disk scheduler lock poisoned".to_string(),
+                        )
+                    })?
+                    .reserve_disk();
+                let destination = placement
+                    .root_path
+                    .join(format!("direct-hdd-c{concurrency}-file{file_index:05}.bin"));
+                let measurement = measure_generate_random_file(
+                    &destination,
+                    file_size,
+                    file_index ^ worker_index as u32,
+                );
+                let _ = fs::remove_file(&destination);
+                let measurement = measurement?;
+                scheduler
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed(
+                            "performance-test disk scheduler lock poisoned".to_string(),
+                        )
+                    })?
+                    .complete_disk(&placement.disk_id, measurement.bytes, measurement.seconds);
+                worker_results
+                    .lock()
+                    .map_err(|_| {
+                        CliError::CommandFailed("performance-test result lock poisoned".to_string())
+                    })?
+                    .push(PerformanceDiskResult {
+                        file_index,
+                        concurrency,
+                        scenario: PerformanceScenarioKind::DirectHdd,
+                        disk_id: placement.disk_id,
+                        write: measurement,
+                    });
+            }
+            Ok(())
+        }));
+    }
+    for file_index in 0..file_count {
+        sender.send(file_index).map_err(|_| {
+            CliError::CommandFailed("performance-test direct HDD workers stopped early".to_string())
+        })?;
+    }
+    drop(sender);
+    for handle in handles {
+        handle.join().map_err(|_| {
+            CliError::CommandFailed("performance-test direct HDD worker panicked".to_string())
+        })??;
+    }
+    let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
+    let mut disk_results = Arc::try_unwrap(worker_results)
+        .map_err(|_| {
+            CliError::CommandFailed("performance-test result lock still shared".to_string())
+        })?
+        .into_inner()
+        .map_err(|_| {
+            CliError::CommandFailed("performance-test result lock poisoned".to_string())
+        })?;
+    disk_results.sort_by(|left, right| {
+        left.file_index
+            .cmp(&right.file_index)
+            .then_with(|| left.disk_id.cmp(&right.disk_id))
+    });
+    let total_bytes = disk_results.iter().map(|row| row.write.bytes).sum::<u64>();
+    let slowest_seconds = disk_results
+        .iter()
+        .map(|row| row.write.seconds)
+        .fold(0.0_f64, f64::max);
+    let members = disk_results
+        .iter()
+        .map(|row| row.disk_id.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    writeln!(
+        writer,
+        "direct-hdd c{}: aggregate landing {}/s",
+        concurrency,
+        format_bytes(total_bytes as f64 / elapsed_seconds)
+    )?;
+    Ok(PerformanceScenarioResult {
+        kind: PerformanceScenarioKind::DirectHdd,
+        concurrency,
+        elapsed_seconds,
+        total_bytes,
+        file_results: Vec::new(),
+        disk_results,
+        concurrency_result: PerformanceConcurrencyResult {
+            concurrency,
+            scenario: PerformanceScenarioKind::DirectHdd,
+            aggregate_bytes: total_bytes,
+            seconds: elapsed_seconds,
+            slowest_seconds,
+            members,
+        },
+    })
+}
+
+#[derive(Debug)]
+struct SsdPipelineJob {
+    file_index: u32,
+    ssd_path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct DiskPlacement {
+    disk_id: DiskId,
+    root_path: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct DiskPlacementState {
+    disk_id: DiskId,
+    root_path: PathBuf,
+    active: usize,
+    assigned_bytes: u64,
+    completed_seconds: f64,
+}
+
+#[derive(Debug)]
+struct DiskPlacementScheduler {
+    disks: Vec<DiskPlacementState>,
+}
+
+impl DiskPlacementScheduler {
+    fn new(disks: &[(DiskId, PathBuf)]) -> Self {
+        Self {
+            disks: disks
+                .iter()
+                .map(|(disk_id, root_path)| DiskPlacementState {
+                    disk_id: disk_id.clone(),
+                    root_path: root_path.clone(),
+                    active: 0,
+                    assigned_bytes: 0,
+                    completed_seconds: 0.0,
+                })
+                .collect(),
+        }
+    }
+
+    fn reserve_disk(&mut self) -> DiskPlacement {
+        let index = self
+            .disks
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                left.active
+                    .cmp(&right.active)
+                    .then_with(|| left.assigned_bytes.cmp(&right.assigned_bytes))
+                    .then_with(|| left.completed_seconds.total_cmp(&right.completed_seconds))
+                    .then_with(|| left.disk_id.cmp(&right.disk_id))
+            })
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        self.disks[index].active = self.disks[index].active.saturating_add(1);
+        DiskPlacement {
+            disk_id: self.disks[index].disk_id.clone(),
+            root_path: self.disks[index].root_path.clone(),
+        }
+    }
+
+    fn complete_disk(&mut self, disk_id: &DiskId, bytes: u64, seconds: f64) {
+        if let Some(disk) = self.disks.iter_mut().find(|disk| &disk.disk_id == disk_id) {
+            disk.active = disk.active.saturating_sub(1);
+            disk.assigned_bytes = disk.assigned_bytes.saturating_add(bytes);
+            disk.completed_seconds += seconds.max(0.0);
+        }
+    }
 }
 
 fn measure_generate_random_file(
@@ -932,6 +1534,171 @@ fn throughput(measurement: PerformanceMeasurement) -> f64 {
     measurement.bytes as f64 / measurement.seconds.max(0.001)
 }
 
+fn render_performance_json(report: &PerformanceReport) -> String {
+    let artifact = serde_json::json!({
+        "schema": "dasobjectstore.performance_test.recommendation.v1",
+        "artifact_kind": "ingress_recommendation",
+        "run": {
+            "run_id": report.run_id,
+            "generated_at_utc": report.generated_at_utc,
+            "repository_revision": report.repository_revision,
+            "cli_version": dasobjectstore_core::VERSION,
+            "command": report.reproduction_args,
+            "parameters": {
+                "file_size_bytes": report.file_size,
+                "file_count": report.file_count,
+                "max_hdd_concurrency": report.max_concurrency,
+                "keep_temp": report.keep_temp,
+            },
+            "artifacts": {
+                "markdown_path": report.report_path.to_string_lossy(),
+                "pdf_path": report.pdf_path.to_string_lossy(),
+                "qr_path": report.qr_path.to_string_lossy(),
+                "recommendation_json_path": report.json_path.to_string_lossy(),
+            },
+        },
+        "hardware": {
+            "roots": {
+                "ssd_root": report.ssd_root.to_string_lossy(),
+                "hdd_root": report.hdd_root.to_string_lossy(),
+                "tmp_dir": report.tmp_dir.to_string_lossy(),
+            },
+            "disks": report.disks.iter().map(|(disk_id, root_path)| {
+                serde_json::json!({
+                    "disk_id": disk_id.as_str(),
+                    "role": "hdd_capacity",
+                    "root_path": root_path.to_string_lossy(),
+                })
+            }).collect::<Vec<_>>(),
+        },
+        "scenarios": {
+            "ssd_only": ssd_only_json(&report.results.ssd_only, report.file_size),
+            "ssd_hdd_pipeline": {
+                "description": "Generated source is staged to SSD, read back from SSD, and settled to HDD members.",
+                "concurrency": report.results.ssd_pipeline.iter().map(scenario_concurrency_json).collect::<Vec<_>>(),
+            },
+            "direct_hdd_pipeline": {
+                "description": "Generated source is written directly to selected HDD members without SSD staging.",
+                "concurrency": report.results.direct_hdd.iter().map(scenario_concurrency_json).collect::<Vec<_>>(),
+            },
+        },
+        "recommendation": {
+            "strategy": recommendation_strategy_name(report.recommendation.strategy),
+            "hdd_concurrency": report.recommendation.hdd_concurrency,
+            "estimated_aggregate_bytes_per_second": rate_u64(report.recommendation.aggregate_bytes_per_second),
+            "ssd_read_limited": recommendation_is_ssd_read_limited(report),
+            "rationale": recommendation_rationale(report),
+        },
+    });
+    serde_json::to_string_pretty(&artifact).expect("serialize performance recommendation JSON")
+}
+
+fn ssd_only_json(scenario: &PerformanceScenarioResult, file_size: u64) -> serde_json::Value {
+    serde_json::json!({
+        "file_count": scenario.file_results.len() as u64,
+        "file_size_bytes": file_size,
+        "total_bytes": scenario.total_bytes,
+        "median_generate_bytes_per_second": rate_u64(median_rate(
+            scenario.file_results.iter().map(|row| throughput(row.ssd_write))
+        )),
+        "median_ssd_write_bytes_per_second": rate_u64(median_rate(
+            scenario.file_results.iter().map(|row| throughput(row.ssd_write))
+        )),
+        "median_ssd_read_bytes_per_second": rate_u64(median_rate(
+            scenario.file_results.iter().map(|row| throughput(row.ssd_read))
+        )),
+        "files": scenario.file_results.iter().map(|row| {
+            serde_json::json!({
+                "file_index": row.file_index,
+                "generated_bytes": row.ssd_write.bytes,
+                "generate_bytes_per_second": rate_u64(throughput(row.ssd_write)),
+                "ssd_write_bytes_per_second": rate_u64(throughput(row.ssd_write)),
+                "ssd_read_bytes_per_second": rate_u64(throughput(row.ssd_read)),
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn scenario_concurrency_json(scenario: &PerformanceScenarioResult) -> serde_json::Value {
+    serde_json::json!({
+        "concurrency": scenario.concurrency,
+        "aggregate_assigned_bytes": scenario.total_bytes,
+        "aggregate_write_bytes_per_second": rate_u64(
+            scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001)
+        ),
+        "slowest_member_seconds": scenario.concurrency_result.slowest_seconds,
+        "members": scenario.concurrency_result.members.iter().map(DiskId::as_str).collect::<Vec<_>>(),
+        "per_disk": per_disk_json(&scenario.disk_results),
+    })
+}
+
+fn per_disk_json(rows: &[PerformanceDiskResult]) -> Vec<serde_json::Value> {
+    let mut by_disk = BTreeMap::<DiskId, (u64, f64)>::new();
+    for row in rows {
+        let entry = by_disk.entry(row.disk_id.clone()).or_insert((0, 0.0));
+        entry.0 = entry.0.saturating_add(row.write.bytes);
+        entry.1 += row.write.seconds.max(0.001);
+    }
+    by_disk
+        .into_iter()
+        .map(|(disk_id, (assigned_bytes, seconds))| {
+            serde_json::json!({
+                "disk_id": disk_id.as_str(),
+                "assigned_bytes": assigned_bytes,
+                "write_bytes_per_second": rate_u64(assigned_bytes as f64 / seconds.max(0.001)),
+            })
+        })
+        .collect()
+}
+
+fn recommendation_strategy_name(strategy: PerformanceScenarioKind) -> &'static str {
+    match strategy {
+        PerformanceScenarioKind::SsdOnly => "ssd_only",
+        PerformanceScenarioKind::SsdPipeline => "ssd_hdd_pipeline",
+        PerformanceScenarioKind::DirectHdd => "direct_hdd_pipeline",
+    }
+}
+
+fn recommendation_is_ssd_read_limited(report: &PerformanceReport) -> bool {
+    let ssd_read = median_rate(
+        report
+            .results
+            .ssd_only
+            .file_results
+            .iter()
+            .map(|row| throughput(row.ssd_read)),
+    );
+    report.recommendation.aggregate_bytes_per_second > ssd_read * 0.9
+}
+
+fn recommendation_rationale(report: &PerformanceReport) -> Vec<String> {
+    let mut rationale = vec![report.recommendation.reason.clone()];
+    if recommendation_is_ssd_read_limited(report) {
+        rationale.push(
+            "Selected aggregate throughput is close to measured SSD read throughput; avoid raising concurrency without retesting."
+                .to_string(),
+        );
+    } else {
+        rationale.push(
+            "Measured SSD read throughput leaves headroom for the selected landing strategy."
+                .to_string(),
+        );
+    }
+    rationale.push(
+        "Use per-disk assigned byte and throughput rows to identify weak disks before scheduling latency-sensitive ingest."
+            .to_string(),
+    );
+    rationale
+}
+
+fn rate_u64(rate: f64) -> u64 {
+    if rate.is_finite() && rate > 0.0 {
+        rate.round() as u64
+    } else {
+        0
+    }
+}
+
 fn render_performance_report(report: PerformanceReport) -> String {
     let mut output = String::new();
     output.push_str("# DASObjectStore Performance Test Report\n\n");
@@ -948,6 +1715,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
 | CLI version | `{}` |\n\
 | Command | `{}` |\n\
 | Markdown artifact | `{}` |\n\
+| JSON artifact | `{}` |\n\
 | PDF artifact | `{}` |\n\
 | QR artifact | `{}` |\n\
 | QR status | `{}` |\n\
@@ -959,6 +1727,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
         dasobjectstore_core::VERSION,
         report.reproduce_command,
         report.report_path.display(),
+        report.json_path.display(),
         report.pdf_path.display(),
         report.qr_path.display(),
         report.qr_status,
@@ -994,6 +1763,8 @@ fn render_performance_report(report: PerformanceReport) -> String {
         "- Median SSD write: {}/s\n",
         format_bytes(median_rate(
             report
+                .results
+                .ssd_only
                 .file_results
                 .iter()
                 .map(|row| throughput(row.ssd_write))
@@ -1003,53 +1774,69 @@ fn render_performance_report(report: PerformanceReport) -> String {
         "- Median SSD read: {}/s\n",
         format_bytes(median_rate(
             report
+                .results
+                .ssd_only
                 .file_results
                 .iter()
                 .map(|row| throughput(row.ssd_read))
         ))
     ));
-    if let Some(best) = report.concurrency_results.iter().max_by(|left, right| {
-        let left_rate = left.aggregate_bytes as f64 / left.seconds.max(0.001);
-        let right_rate = right.aggregate_bytes as f64 / right.seconds.max(0.001);
-        left_rate.total_cmp(&right_rate)
-    }) {
+    output.push_str(&format!(
+        "- Recommended strategy: {} at {} HDD worker(s), observed aggregate {}/s\n",
+        report.recommendation.strategy.as_str(),
+        report.recommendation.hdd_concurrency,
+        format_bytes(report.recommendation.aggregate_bytes_per_second)
+    ));
+
+    output.push_str("\n## Scenario Summary\n\n");
+    output.push_str("| Scenario | HDD concurrency | Aggregate landing | Elapsed |\n");
+    output.push_str("| --- | ---: | ---: | ---: |\n");
+    for scenario in report.all_scenarios() {
         output.push_str(&format!(
-            "- Best observed HDD aggregate: concurrency {} at {}/s\n",
-            best.concurrency,
-            format_bytes(best.aggregate_bytes as f64 / best.seconds.max(0.001))
+            "| {} | {} | {}/s | {:.1} s |\n",
+            scenario.kind.label(),
+            scenario.concurrency,
+            format_bytes(scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001)),
+            scenario.elapsed_seconds
         ));
     }
 
-    output.push_str("\n## Per-file SSD Timings\n\n");
-    output.push_str("| File | Generate | SSD write | SSD read |\n");
-    output.push_str("| ---: | ---: | ---: | ---: |\n");
-    for row in &report.file_results {
-        output.push_str(&format!(
-            "| {} | {}/s | {}/s | {}/s |\n",
-            row.file_index + 1,
-            format_bytes(throughput(row.generate)),
-            format_bytes(throughput(row.ssd_write)),
-            format_bytes(throughput(row.ssd_read))
-        ));
+    output.push_str("\n## SSD Timings\n\n");
+    output.push_str("| Scenario | HDD concurrency | File | SSD write | SSD read |\n");
+    output.push_str("| --- | ---: | ---: | ---: | ---: |\n");
+    for scenario in report.all_scenarios() {
+        for row in &scenario.file_results {
+            output.push_str(&format!(
+                "| {} | {} | {} | {}/s | {}/s |\n",
+                scenario.kind.as_str(),
+                scenario.concurrency,
+                row.file_index + 1,
+                format_bytes(throughput(row.ssd_write)),
+                format_bytes(throughput(row.ssd_read))
+            ));
+        }
     }
 
-    output.push_str("\n## Per-disk HDD Writes\n\n");
-    output.push_str("| File | Concurrency | Disk | Write rate |\n");
-    output.push_str("| ---: | ---: | --- | ---: |\n");
-    for row in &report.disk_results {
+    output.push_str("\n## Per-disk Landed Files\n\n");
+    output.push_str("| Scenario | HDD concurrency | File | Disk | Write rate |\n");
+    output.push_str("| --- | ---: | ---: | --- | ---: |\n");
+    for row in report.all_disk_results() {
         output.push_str(&format!(
-            "| {} | {} | {} | {}/s |\n",
-            row.file_index + 1,
+            "| {} | {} | {} | {} | {}/s |\n",
+            row.scenario.as_str(),
             row.concurrency,
+            row.file_index + 1,
             row.disk_id,
             format_bytes(throughput(row.write))
         ));
     }
 
-    output.push_str("\n## Concurrency Model\n\n");
-    output.push_str("| File | HDD concurrency | Members | Aggregate write | Slowest member |\n");
-    output.push_str("| ---: | ---: | --- | ---: | ---: |\n");
-    for row in &report.concurrency_results {
+    output.push_str("\n## Concurrency Results\n\n");
+    output.push_str(
+        "| Scenario | HDD concurrency | Members | Aggregate landing | Slowest file write |\n",
+    );
+    output.push_str("| --- | ---: | --- | ---: | ---: |\n");
+    for row in report.all_concurrency_results() {
         let members = row
             .members
             .iter()
@@ -1058,7 +1845,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
             .join(", ");
         output.push_str(&format!(
             "| {} | {} | {} | {}/s | {:.1} s |\n",
-            row.file_index + 1,
+            row.scenario.as_str(),
             row.concurrency,
             members,
             format_bytes(row.aggregate_bytes as f64 / row.seconds.max(0.001)),
@@ -1067,7 +1854,13 @@ fn render_performance_report(report: PerformanceReport) -> String {
     }
 
     output.push_str("\n## Recommendation\n\n");
-    output.push_str(&recommendation(&report));
+    output.push_str(&format!(
+        "- Use `{}` with {} HDD worker(s) for this hardware constellation.\n",
+        report.recommendation.strategy.as_str(),
+        report.recommendation.hdd_concurrency
+    ));
+    output.push_str(&format!("- {}.\n", report.recommendation.reason));
+    output.push_str("- Use the JSON artifact as the machine-readable placement and concurrency guidance for future ingest policy.\n");
     output
 }
 
@@ -1080,41 +1873,69 @@ fn median_rate(values: impl Iterator<Item = f64>) -> f64 {
     values[values.len() / 2]
 }
 
-fn recommendation(report: &PerformanceReport) -> String {
-    let ssd_read = median_rate(
-        report
+fn recommend_performance_strategy(
+    results: &PerformanceBenchmarkResults,
+) -> PerformanceRecommendation {
+    let mut candidates = Vec::new();
+    for scenario in results.ssd_pipeline.iter().chain(results.direct_hdd.iter()) {
+        candidates.push((
+            scenario.kind,
+            scenario.concurrency,
+            scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
+        ));
+    }
+    let (strategy, hdd_concurrency, aggregate_bytes_per_second) = candidates
+        .into_iter()
+        .max_by(|left, right| left.2.total_cmp(&right.2))
+        .unwrap_or((PerformanceScenarioKind::SsdPipeline, 1, 0.0));
+    let ssd_only_write = median_rate(
+        results
+            .ssd_only
             .file_results
             .iter()
-            .map(|row| throughput(row.ssd_read)),
+            .map(|row| throughput(row.ssd_write)),
     );
-    let mut best_concurrency = 1_usize;
-    let mut best_rate = 0.0_f64;
-    for concurrency in 1..=report.max_concurrency {
-        let rate = median_rate(
-            report
-                .concurrency_results
-                .iter()
-                .filter(|row| row.concurrency == concurrency)
-                .map(|row| row.aggregate_bytes as f64 / row.seconds.max(0.001)),
-        );
-        if rate > best_rate {
-            best_rate = rate;
-            best_concurrency = concurrency;
-        }
-    }
-    let mut text = String::new();
-    if best_rate > ssd_read * 0.9 {
-        text.push_str("- SSD read bandwidth is close to the observed best HDD aggregate. Avoid increasing HDD write concurrency without re-testing because SSD read may become the limiter.\n");
+    let reason = if strategy == PerformanceScenarioKind::SsdPipeline {
+        format!(
+            "SSD-first ingest remained competitive while draining to HDD; SSD-only median write was {}/s",
+            format_bytes(ssd_only_write)
+        )
     } else {
-        text.push_str("- SSD read bandwidth exceeds the observed HDD aggregate. Additional HDD write concurrency is plausible if SSD pressure remains acceptable.\n");
+        format!(
+            "direct-to-HDD bypass produced the highest observed aggregate rate while avoiding SSD backlog; SSD-only median write was {}/s",
+            format_bytes(ssd_only_write)
+        )
+    };
+    PerformanceRecommendation {
+        strategy,
+        hdd_concurrency,
+        aggregate_bytes_per_second,
+        reason,
     }
-    text.push_str(&format!(
-        "- Recommended initial HDD settlement concurrency: {} concurrent write(s), based on median aggregate throughput of {}/s.\n",
-        best_concurrency,
-        format_bytes(best_rate)
-    ));
-    text.push_str("- Treat disks with persistently lower per-disk write rates as weak settlement targets for latency-sensitive ingest.\n");
-    text
+}
+
+impl PerformanceReport {
+    fn all_scenarios(&self) -> Vec<&PerformanceScenarioResult> {
+        let mut scenarios = Vec::new();
+        scenarios.push(&self.results.ssd_only);
+        scenarios.extend(self.results.ssd_pipeline.iter());
+        scenarios.extend(self.results.direct_hdd.iter());
+        scenarios
+    }
+
+    fn all_disk_results(&self) -> Vec<&PerformanceDiskResult> {
+        self.all_scenarios()
+            .into_iter()
+            .flat_map(|scenario| scenario.disk_results.iter())
+            .collect()
+    }
+
+    fn all_concurrency_results(&self) -> Vec<&PerformanceConcurrencyResult> {
+        self.all_scenarios()
+            .into_iter()
+            .map(|scenario| &scenario.concurrency_result)
+            .collect()
+    }
 }
 
 fn run_store_contents(args: &StoreContentsArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -4507,12 +5328,14 @@ impl From<ProbeError> for CliError {
 mod tests {
     use super::{
         collect_ingest_files, connection_status_from_probe, current_user_group_names,
-        parse_binary_size, performance_report_metadata_json, render_performance_report,
-        render_simple_pdf, run, validate_managed_hdds_on_supported_das, write_health_json,
-        write_health_summary, write_health_verbose, write_host_connection_status,
-        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
-        ManagedHddDevice, PerformanceConcurrencyResult, PerformanceDiskResult,
-        PerformanceFileResult, PerformanceMeasurement, PerformanceReport,
+        parse_binary_size, performance_report_metadata_json, render_performance_json,
+        render_performance_report, render_simple_pdf, run, validate_managed_hdds_on_supported_das,
+        write_health_json, write_health_summary, write_health_verbose,
+        write_host_connection_status, write_pretty_report, CliError, ConnectionAssessment,
+        DiskHealthSummary, HealthReport, ManagedHddDevice, PerformanceBenchmarkResults,
+        PerformanceConcurrencyResult, PerformanceDiskResult, PerformanceFileResult,
+        PerformanceMeasurement, PerformanceRecommendation, PerformanceReport,
+        PerformanceScenarioKind, PerformanceScenarioResult,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -4628,6 +5451,7 @@ mod tests {
 
         assert!(report.contains("# DASObjectStore Performance Test Report"));
         assert!(report.contains("| Brand | Mnemosyne Biosciences |"));
+        assert!(report.contains("| JSON artifact | `/tmp/perf-test-run.json` |"));
         assert!(report.contains("| QR artifact | `/tmp/perf-test-run.qr.svg` |"));
         assert!(report.contains("| QR status | `qrencode SVG` |"));
         assert!(report.contains("Reproduction payload SHA-256"));
@@ -4636,13 +5460,17 @@ mod tests {
         assert!(report.contains("Scenario: 1 files of 1.0 MiB each."));
         assert!(report.contains("- Run id: `perf-test-run`"));
         assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
-        assert!(report.contains("- Best observed HDD aggregate: concurrency 2 at 2.0 MiB/s"));
-        assert!(report.contains("| File | Generate | SSD write | SSD read |"));
-        assert!(report.contains("| File | Concurrency | Disk | Write rate |"));
-        assert!(report
-            .contains("| File | HDD concurrency | Members | Aggregate write | Slowest member |"));
-        assert!(report.contains("| 1 | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s |"));
-        assert!(report.contains("Recommended initial HDD settlement concurrency: 2"));
+        assert!(report.contains("- Recommended strategy: ssd-pipeline at 2 HDD worker(s)"));
+        assert!(report.contains("| Scenario | HDD concurrency | Aggregate landing | Elapsed |"));
+        assert!(report.contains("| SSD ingest with concurrent HDD drain | 2 | 2.0 MiB/s | 1.0 s |"));
+        assert!(report.contains("| Scenario | HDD concurrency | File | SSD write | SSD read |"));
+        assert!(report.contains("| Scenario | HDD concurrency | File | Disk | Write rate |"));
+        assert!(report.contains("| ssd-pipeline | 2 | 1 | disk-b | 512.0 KiB/s |"));
+        assert!(report.contains(
+            "| Scenario | HDD concurrency | Members | Aggregate landing | Slowest file write |"
+        ));
+        assert!(report.contains("| ssd-pipeline | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s |"));
+        assert!(report.contains("Use `ssd-pipeline` with 2 HDD worker(s)"));
         assert!(render_simple_pdf(&report).starts_with(b"%PDF-1.4"));
     }
 
@@ -4676,7 +5504,194 @@ mod tests {
         );
     }
 
+    #[test]
+    fn performance_recommendation_json_contains_ingress_guidance() {
+        let artifact = serde_json::from_str::<serde_json::Value>(&render_performance_json(
+            &example_performance_report(),
+        ))
+        .expect("performance JSON parses");
+
+        assert_eq!(
+            artifact["schema"],
+            "dasobjectstore.performance_test.recommendation.v1"
+        );
+        assert_eq!(artifact["artifact_kind"], "ingress_recommendation");
+        assert_eq!(artifact["recommendation"]["strategy"], "ssd_hdd_pipeline");
+        assert_eq!(artifact["recommendation"]["hdd_concurrency"], 2);
+        assert_eq!(artifact["hardware"]["disks"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            artifact["scenarios"]["ssd_hdd_pipeline"]["concurrency"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            artifact["scenarios"]["direct_hdd_pipeline"]["concurrency"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(artifact["recommendation"]["rationale"]
+            .as_array()
+            .is_some_and(|rows| rows.len() >= 2));
+    }
+
     fn example_performance_report() -> PerformanceReport {
+        let disk_a = DiskId::new("disk-a").expect("disk id");
+        let disk_b = DiskId::new("disk-b").expect("disk id");
+        let ssd_file = PerformanceFileResult {
+            file_index: 0,
+            ssd_write: PerformanceMeasurement {
+                bytes: 1_048_576,
+                seconds: 0.5,
+            },
+            ssd_read: PerformanceMeasurement {
+                bytes: 1_048_576,
+                seconds: 0.25,
+            },
+        };
+        let ssd_only = PerformanceScenarioResult {
+            kind: PerformanceScenarioKind::SsdOnly,
+            concurrency: 0,
+            elapsed_seconds: 0.5,
+            total_bytes: 1_048_576,
+            file_results: vec![ssd_file.clone()],
+            disk_results: Vec::new(),
+            concurrency_result: PerformanceConcurrencyResult {
+                concurrency: 0,
+                scenario: PerformanceScenarioKind::SsdOnly,
+                aggregate_bytes: 1_048_576,
+                seconds: 0.5,
+                slowest_seconds: 0.0,
+                members: Vec::new(),
+            },
+        };
+        let pipeline_one = PerformanceScenarioResult {
+            kind: PerformanceScenarioKind::SsdPipeline,
+            concurrency: 1,
+            elapsed_seconds: 1.0,
+            total_bytes: 1_048_576,
+            file_results: vec![ssd_file.clone()],
+            disk_results: vec![PerformanceDiskResult {
+                file_index: 0,
+                concurrency: 1,
+                scenario: PerformanceScenarioKind::SsdPipeline,
+                disk_id: disk_a.clone(),
+                write: PerformanceMeasurement {
+                    bytes: 1_048_576,
+                    seconds: 1.0,
+                },
+            }],
+            concurrency_result: PerformanceConcurrencyResult {
+                concurrency: 1,
+                scenario: PerformanceScenarioKind::SsdPipeline,
+                aggregate_bytes: 1_048_576,
+                seconds: 1.0,
+                slowest_seconds: 1.0,
+                members: vec![disk_a.clone()],
+            },
+        };
+        let pipeline_two = PerformanceScenarioResult {
+            kind: PerformanceScenarioKind::SsdPipeline,
+            concurrency: 2,
+            elapsed_seconds: 1.0,
+            total_bytes: 2_097_152,
+            file_results: vec![ssd_file.clone()],
+            disk_results: vec![
+                PerformanceDiskResult {
+                    file_index: 0,
+                    concurrency: 2,
+                    scenario: PerformanceScenarioKind::SsdPipeline,
+                    disk_id: disk_a.clone(),
+                    write: PerformanceMeasurement {
+                        bytes: 1_048_576,
+                        seconds: 1.0,
+                    },
+                },
+                PerformanceDiskResult {
+                    file_index: 0,
+                    concurrency: 2,
+                    scenario: PerformanceScenarioKind::SsdPipeline,
+                    disk_id: disk_b.clone(),
+                    write: PerformanceMeasurement {
+                        bytes: 1_048_576,
+                        seconds: 2.0,
+                    },
+                },
+            ],
+            concurrency_result: PerformanceConcurrencyResult {
+                concurrency: 2,
+                scenario: PerformanceScenarioKind::SsdPipeline,
+                aggregate_bytes: 2_097_152,
+                seconds: 1.0,
+                slowest_seconds: 2.0,
+                members: vec![disk_a.clone(), disk_b.clone()],
+            },
+        };
+        let direct_one = PerformanceScenarioResult {
+            kind: PerformanceScenarioKind::DirectHdd,
+            concurrency: 1,
+            elapsed_seconds: 2.0,
+            total_bytes: 1_048_576,
+            file_results: Vec::new(),
+            disk_results: vec![PerformanceDiskResult {
+                file_index: 0,
+                concurrency: 1,
+                scenario: PerformanceScenarioKind::DirectHdd,
+                disk_id: disk_a.clone(),
+                write: PerformanceMeasurement {
+                    bytes: 1_048_576,
+                    seconds: 2.0,
+                },
+            }],
+            concurrency_result: PerformanceConcurrencyResult {
+                concurrency: 1,
+                scenario: PerformanceScenarioKind::DirectHdd,
+                aggregate_bytes: 1_048_576,
+                seconds: 2.0,
+                slowest_seconds: 2.0,
+                members: vec![disk_a.clone()],
+            },
+        };
+        let direct_two = PerformanceScenarioResult {
+            kind: PerformanceScenarioKind::DirectHdd,
+            concurrency: 2,
+            elapsed_seconds: 2.0,
+            total_bytes: 2_097_152,
+            file_results: Vec::new(),
+            disk_results: vec![
+                PerformanceDiskResult {
+                    file_index: 0,
+                    concurrency: 2,
+                    scenario: PerformanceScenarioKind::DirectHdd,
+                    disk_id: disk_a.clone(),
+                    write: PerformanceMeasurement {
+                        bytes: 1_048_576,
+                        seconds: 2.0,
+                    },
+                },
+                PerformanceDiskResult {
+                    file_index: 0,
+                    concurrency: 2,
+                    scenario: PerformanceScenarioKind::DirectHdd,
+                    disk_id: disk_b.clone(),
+                    write: PerformanceMeasurement {
+                        bytes: 1_048_576,
+                        seconds: 2.5,
+                    },
+                },
+            ],
+            concurrency_result: PerformanceConcurrencyResult {
+                concurrency: 2,
+                scenario: PerformanceScenarioKind::DirectHdd,
+                aggregate_bytes: 2_097_152,
+                seconds: 2.0,
+                slowest_seconds: 2.5,
+                members: vec![disk_a.clone(), disk_b.clone()],
+            },
+        };
         PerformanceReport {
             run_id: "perf-test-run".to_string(),
             generated_at_utc: "2026-01-02T03:04:05Z".to_string(),
@@ -4688,65 +5703,35 @@ mod tests {
             disk_count: 2,
             max_concurrency: 2,
             elapsed_seconds: 3.2,
-            file_results: vec![PerformanceFileResult {
-                file_index: 0,
-                generate: PerformanceMeasurement {
-                    bytes: 1_048_576,
-                    seconds: 1.0,
-                },
-                ssd_write: PerformanceMeasurement {
-                    bytes: 1_048_576,
-                    seconds: 0.5,
-                },
-                ssd_read: PerformanceMeasurement {
-                    bytes: 1_048_576,
-                    seconds: 0.25,
-                },
-            }],
-            disk_results: vec![
-                PerformanceDiskResult {
-                    file_index: 0,
-                    concurrency: 1,
-                    disk_id: DiskId::new("disk-a").expect("disk id"),
-                    write: PerformanceMeasurement {
-                        bytes: 1_048_576,
-                        seconds: 1.0,
-                    },
-                },
-                PerformanceDiskResult {
-                    file_index: 0,
-                    concurrency: 2,
-                    disk_id: DiskId::new("disk-b").expect("disk id"),
-                    write: PerformanceMeasurement {
-                        bytes: 1_048_576,
-                        seconds: 2.0,
-                    },
-                },
+            results: PerformanceBenchmarkResults {
+                ssd_only,
+                ssd_pipeline: vec![pipeline_one, pipeline_two],
+                direct_hdd: vec![direct_one, direct_two],
+            },
+            recommendation: PerformanceRecommendation {
+                strategy: PerformanceScenarioKind::SsdPipeline,
+                hdd_concurrency: 2,
+                aggregate_bytes_per_second: 2_097_152.0,
+                reason: "SSD-first ingest remained competitive in the fixture".to_string(),
+            },
+            tmp_dir: PathBuf::from("/tmp"),
+            disks: vec![
+                (disk_a, PathBuf::from("/hdd/disk-a")),
+                (disk_b, PathBuf::from("/hdd/disk-b")),
             ],
-            concurrency_results: vec![
-                PerformanceConcurrencyResult {
-                    file_index: 0,
-                    concurrency: 1,
-                    aggregate_bytes: 1_048_576,
-                    seconds: 1.0,
-                    slowest_seconds: 1.0,
-                    members: vec![DiskId::new("disk-a").expect("disk id")],
-                },
-                PerformanceConcurrencyResult {
-                    file_index: 0,
-                    concurrency: 2,
-                    aggregate_bytes: 2_097_152,
-                    seconds: 1.0,
-                    slowest_seconds: 2.0,
-                    members: vec![
-                        DiskId::new("disk-a").expect("disk id"),
-                        DiskId::new("disk-b").expect("disk id"),
-                    ],
-                },
+            reproduction_args: vec![
+                "dasobjectstore".to_string(),
+                "performance-test".to_string(),
+                "--file_size".to_string(),
+                "1MiB".to_string(),
+                "--file_count".to_string(),
+                "1".to_string(),
             ],
             report_path: PathBuf::from("/tmp/perf-test-run.md"),
+            json_path: PathBuf::from("/tmp/perf-test-run.json"),
             qr_path: PathBuf::from("/tmp/perf-test-run.qr.svg"),
             pdf_path: PathBuf::from("/tmp/perf-test-run.pdf"),
+            keep_temp: false,
             reproduce_command: "dasobjectstore performance-test --file_size 1MiB --file_count 1"
                 .to_string(),
             reproduction_payload: r#"{"run_id":"perf-test-run"}"#.to_string(),

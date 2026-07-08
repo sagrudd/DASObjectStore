@@ -11,6 +11,13 @@ agreement before landing.
 - Add operator-facing `performance-test` CLI surface for embedded TUI rendering
   and optional JSON benchmark artifacts, and document administrative runs up to
   `--max-hdd-concurrency 5`.
+- Rework `performance-test` as an administrative, scenario-based benchmark
+  covering SSD-only landing, SSD-first FIFO HDD drainage, and direct-to-HDD
+  landing without writing the same logical file to every disk for a primary
+  measurement.
+- Emit `dasobjectstore.performance_test.recommendation.v1` JSON so future
+  ingress planning can consume the recommended strategy, HDD concurrency, and
+  per-disk assigned byte/rate measurements.
 
 ## 0.3.6 - 2026-07-08
 

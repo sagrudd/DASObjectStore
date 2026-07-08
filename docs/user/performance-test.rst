@@ -2,30 +2,33 @@ Performance Testing Ingest Storage
 ==================================
 
 Use ``dasobjectstore performance-test`` to measure how the local DAS storage
-path behaves when DASObjectStore creates generated test files, stages them
-through the managed SSD, reads them back from SSD, and models concurrent HDD
-settlement across discovered managed HDD members.
+path behaves when DASObjectStore creates generated test files directly on the
+managed SSD, drains the resulting SSD backlog to managed HDD members, and
+compares that SSD-first route with direct source-to-HDD landing.
 
 The command is intended for appliance commissioning, regression evidence, and
-capacity planning. It is not a normal ingest command and it does not add objects
-to an object store.
+capacity planning. It is an administrative command, not a service and not a
+normal ingest command, and it does not add objects to an object store.
 
 What It Measures
 ----------------
 
-For each generated test file, the command records:
+For the requested file count and size, the command records:
 
-* random source-file generation throughput in the temporary source directory;
-* SSD write throughput into the DASObjectStore SSD benchmark area;
-* SSD read throughput from the staged SSD payload;
-* per-disk HDD write throughput for each tested concurrency level;
-* aggregate HDD write throughput and the slowest member at each concurrency
-  level;
-* a recommendation for initial HDD settlement concurrency.
+* SSD-only generation/write throughput directly into the DASObjectStore SSD
+  benchmark area;
+* SSD read throughput from staged SSD payloads;
+* SSD-first pipeline throughput while generated files continue landing on SSD
+  and FIFO HDD drain workers settle that backlog;
+* direct source-to-HDD throughput for the same concurrency range;
+* per-disk assigned bytes and write rates from the scheduler's actual placement
+  decisions;
+* a recommendation for future ingest strategy and HDD settlement concurrency.
 
 The benchmark discovers the managed HDD members under the configured HDD root
 and tests concurrency from ``1`` up to ``--max-hdd-concurrency`` or the number
-of available disks, whichever is lower.
+of available disks, whichever is lower. Use ``--max-hdd-concurrency 5`` to test
+the requested one-to-five worker range on a sufficiently populated DAS.
 
 Safety and Resource Warnings
 ----------------------------
@@ -34,15 +37,16 @@ This command deliberately creates sustained disk IO. Do not run large
 performance tests while production ingest, repair, drain, or other storage-heavy
 work is active unless that contention is the test scenario.
 
-The test creates one source file at a time under ``--tmp-dir`` and one SSD
-payload at a time under:
+The SSD scenarios create generated payloads directly under:
 
 .. code-block:: text
 
    <ssd-root>/.dasobjectstore/performance-test/<run-id>/
 
-For each HDD member, it creates temporary benchmark files under that disk's
-managed ``.dasobjectstore/performance-test/<run-id>/`` directory. On normal
+HDD scenarios create temporary benchmark files under the selected disk's
+managed ``.dasobjectstore/performance-test/<run-id>/`` directory. Each logical
+file is assigned to one selected HDD for a scenario; the benchmark does not
+write the same file to every disk merely to inflate throughput. On normal
 completion these temporary benchmark files and run directories are removed.
 
 If the process is killed or the host loses power, temporary benchmark files may
@@ -50,9 +54,9 @@ remain. Inspect only the matching ``performance-test/<run-id>`` directories
 from the report output before deleting anything manually.
 
 Large runs should be planned against available free space and expected elapsed
-time. For example, ``--file_size 2GiB --file_count 100`` creates 200 GiB of
-source payloads over the run and writes substantially more data while modelling
-multiple HDD concurrency levels.
+time. For example, ``--file_size 2GiB --file_count 100`` writes 200 GiB of
+logical payload per scenario and substantially more total IO while testing SSD
+only, SSD-first HDD drainage, and direct-to-HDD landing.
 
 Basic Smoke Test
 ----------------
@@ -98,8 +102,7 @@ support more than one concurrent HDD writer:
      --max-hdd-concurrency 5 \
      --report /var/lib/dasobjectstore/reports/performance-100x2GiB.md
 
-Use ``--tmp-dir`` when ``/tmp`` is too small or is backed by storage that should
-not participate in the source-generation part of the test:
+Use ``--tmp-dir`` when the default report location under ``/tmp`` is unsuitable:
 
 .. code-block:: console
 
@@ -170,10 +173,11 @@ The Markdown report includes:
 * the exact reproduction command;
 * a JSON reproduction payload;
 * median SSD write and read throughput;
-* the best observed aggregate HDD write throughput;
+* the recommended ingress strategy and HDD worker count;
+* SSD-only, SSD-first pipeline, and direct-HDD scenario summaries;
 * per-file SSD timing tables;
-* per-disk HDD write tables;
-* the concurrency model table;
+* per-disk landed-file tables;
+* the concurrency result table;
 * the generated recommendation.
 
 The command also writes:
@@ -195,10 +199,10 @@ human-readable report bundle:
 
 The JSON artifact is intended for automation and audit ingestion. It should
 include the run ID, generation timestamp, CLI version, repository revision,
-input parameters, discovered disk count, Markdown/PDF/QR artifact paths,
-per-file SSD measurements, per-disk HDD measurements, concurrency model rows,
-and the generated recommendation. Keep it with the Markdown, QR SVG, and PDF
-files for a complete evidence bundle.
+input parameters, discovered disks, Markdown/PDF/QR artifact paths, per-file
+SSD measurements, per-disk assigned bytes and HDD write rates, concurrency
+scenario rows, and the generated recommendation. Keep it with the Markdown, QR
+SVG, and PDF files for a complete evidence bundle.
 
 Recommendation JSON Contract
 ----------------------------
@@ -212,7 +216,7 @@ The artifact records:
 
 * run identity, including run ID, generation time, repository revision, CLI
   version, command arguments, benchmark parameters, and related artifact paths;
-* hardware roots, including SSD root, HDD root, temporary source root, and
+* hardware roots, including SSD root, HDD root, report temporary root, and
   discovered managed HDD member roots with disk IDs;
 * SSD-only metrics, including generated bytes, SSD write/read rates, file
   count, file size, total bytes, and per-file rates;
