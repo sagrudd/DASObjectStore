@@ -46,10 +46,51 @@ pub struct HomeDashboardResponse {
 pub struct EnclosuresPageResponse {
     pub schema_version: String,
     pub generated_at_utc: String,
+    #[serde(default)]
+    pub add_enclosure: AddEnclosureAffordanceResponse,
     pub enclosures: Vec<DasEnclosureCardResponse>,
     pub selected_enclosure_id: Option<String>,
     pub details: Option<DasEnclosureDetailResponse>,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct AddEnclosureAffordanceResponse {
+    pub enabled: bool,
+    pub action_kind: String,
+    pub label: String,
+    pub state: String,
+    pub administrator: bool,
+    pub supported_enclosure_detected: bool,
+    pub daemon_ready: bool,
+    pub confirmation_required: bool,
+    pub blocked_reason: Option<String>,
+    pub next_step: String,
+}
+
+impl AddEnclosureAffordanceResponse {
+    pub fn checking() -> Self {
+        Self {
+            enabled: false,
+            action_kind: "enclosure_add".to_string(),
+            label: "Add enclosure".to_string(),
+            state: "checking".to_string(),
+            administrator: false,
+            supported_enclosure_detected: false,
+            daemon_ready: false,
+            confirmation_required: true,
+            blocked_reason: Some(
+                "Checking administrator capability and daemon readiness.".to_string(),
+            ),
+            next_step: "Wait for the live enclosure inventory request to complete.".to_string(),
+        }
+    }
+}
+
+impl Default for AddEnclosureAffordanceResponse {
+    fn default() -> Self {
+        Self::checking()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -544,6 +585,18 @@ mod tests {
         let payload = serde_json::json!({
             "schema_version": "dasobjectstore.web_redesign.v1",
             "generated_at_utc": "2026-07-08T08:00:00Z",
+            "add_enclosure": {
+                "enabled": false,
+                "action_kind": "enclosure_add",
+                "label": "Add enclosure",
+                "state": "admin_required",
+                "administrator": false,
+                "supported_enclosure_detected": true,
+                "daemon_ready": true,
+                "confirmation_required": true,
+                "blocked_reason": "Administrator capability is required before enclosure preparation is available.",
+                "next_step": "Sign in with an administrator-capable local account to prepare DAS hardware."
+            },
             "enclosures": [{
                 "enclosure_id": "qnap-tl-d800c-01",
                 "display_name": "QNAP TL-D800C",
@@ -596,6 +649,9 @@ mod tests {
             .expect("enclosures dashboard decodes");
 
         assert_eq!(decoded.enclosures.len(), 1);
+        assert!(!decoded.add_enclosure.enabled);
+        assert_eq!(decoded.add_enclosure.state, "admin_required");
+        assert!(decoded.add_enclosure.supported_enclosure_detected);
         assert_eq!(decoded.enclosures[0].drive_count.total, 8);
         assert_eq!(
             decoded.details.expect("detail").slots[0].drive_id,

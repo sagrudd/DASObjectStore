@@ -530,6 +530,16 @@ h2 {
   background: #fbfcfc;
 }
 
+.dos-create-card.is-enabled {
+  border-color: #0f6b78;
+  background: #f4fbfb;
+}
+
+.dos-create-card.is-disabled {
+  color: #66737b;
+  background: #f7f8f8;
+}
+
 .dos-create-mark {
   display: inline-grid;
   width: 34px;
@@ -541,6 +551,24 @@ h2 {
   background: #e3f1f3;
   font-size: 1.3rem;
   font-weight: 760;
+}
+
+.dos-create-card.is-disabled .dos-create-mark {
+  color: #66737b;
+  background: #e9edef;
+}
+
+.dos-create-next-step {
+  color: #41515a;
+  font-weight: 680;
+}
+
+.dos-create-gates {
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #66737b;
+  font-size: 0.76rem;
+  font-weight: 720;
 }
 
 .dos-placeholder-card {

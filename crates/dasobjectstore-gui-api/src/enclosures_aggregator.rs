@@ -1,7 +1,7 @@
 use crate::dashboard::{
-    DasEnclosureCardView, DasEnclosureDetailView, DashboardHealthStateView, DashboardWarning,
-    EnclosureConnectionView, EnclosureDriveSlotView, EnclosuresPageView,
-    REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    AddEnclosureAffordanceView, DasEnclosureCardView, DasEnclosureDetailView,
+    DashboardHealthStateView, DashboardWarning, EnclosureConnectionView, EnclosureDriveSlotView,
+    EnclosuresPageView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 use crate::home_aggregator::{
     capacity_for_root, capacity_summary, discover_hdd_roots, drive_count_summary, env_path,
@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 struct EnclosuresAggregatorConfig {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
+    administrator: bool,
 }
 
 impl EnclosuresAggregatorConfig {
@@ -21,6 +22,7 @@ impl EnclosuresAggregatorConfig {
         Self {
             ssd_root: env_path("DASOBJECTSTORE_SSD_ROOT", DEFAULT_SSD_ROOT),
             hdd_root: env_path("DASOBJECTSTORE_HDD_ROOT", DEFAULT_HDD_ROOT),
+            administrator: env_flag("DASOBJECTSTORE_WEB_ADMINISTRATOR"),
         }
     }
 }
@@ -79,6 +81,13 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
         .iter()
         .map(|root| marker_for_root(root))
         .collect::<Vec<_>>();
+    let supported_enclosure_detected = !hdd_roots.is_empty();
+    let daemon_ready = daemon_ready_for_affordance(&warnings);
+    let add_enclosure = add_enclosure_affordance(
+        config.administrator,
+        supported_enclosure_detected,
+        daemon_ready,
+    );
 
     let mut enclosures = Vec::new();
     let mut details = None;
@@ -121,11 +130,71 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
     EnclosuresPageView {
         schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
         generated_at_utc,
+        add_enclosure,
         enclosures,
         selected_enclosure_id,
         details,
         warnings,
     }
+}
+
+fn env_flag(name: &str) -> bool {
+    matches!(
+        std::env::var(name).ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
+fn daemon_ready_for_affordance(warnings: &[DashboardWarning]) -> bool {
+    !warnings.iter().any(|warning| {
+        matches!(
+            warning.code.as_str(),
+            "hdd_root_unreadable" | "hdd_capacity_partial"
+        )
+    })
+}
+
+fn add_enclosure_affordance(
+    administrator: bool,
+    supported_enclosure_detected: bool,
+    daemon_ready: bool,
+) -> AddEnclosureAffordanceView {
+    if !administrator {
+        return AddEnclosureAffordanceView {
+            administrator,
+            supported_enclosure_detected,
+            daemon_ready,
+            ..AddEnclosureAffordanceView::admin_required()
+        };
+    }
+    if !daemon_ready {
+        return AddEnclosureAffordanceView {
+            administrator,
+            supported_enclosure_detected,
+            ..AddEnclosureAffordanceView::blocked(
+                "daemon_unavailable",
+                administrator,
+                daemon_ready,
+                "The daemon inventory path is not ready enough to prepare an enclosure.",
+                "Resolve dashboard inventory warnings before preparing DAS hardware.",
+            )
+        };
+    }
+    if !supported_enclosure_detected {
+        return AddEnclosureAffordanceView {
+            administrator,
+            supported_enclosure_detected,
+            ..AddEnclosureAffordanceView::blocked(
+                "unsupported_or_absent",
+                administrator,
+                daemon_ready,
+                "No supported DAS enclosure is visible to the daemon inventory path.",
+                "Attach a supported DAS enclosure and refresh the inventory.",
+            )
+        };
+    }
+
+    AddEnclosureAffordanceView::available()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -304,9 +373,18 @@ mod tests {
         )
         .expect("disk b marker");
 
-        let view = build_enclosures_dashboard(EnclosuresAggregatorConfig { ssd_root, hdd_root });
+        let view = build_enclosures_dashboard(EnclosuresAggregatorConfig {
+            ssd_root,
+            hdd_root,
+            administrator: true,
+        });
 
         assert_eq!(view.enclosures.len(), 1);
+        assert!(view.add_enclosure.enabled);
+        assert_eq!(view.add_enclosure.state, "ready");
+        assert!(view.add_enclosure.administrator);
+        assert!(view.add_enclosure.supported_enclosure_detected);
+        assert!(view.add_enclosure.daemon_ready);
         assert_eq!(view.enclosures[0].display_name, "QNAP TL-D800C");
         assert_eq!(view.enclosures[0].health, DashboardHealthStateView::Healthy);
         assert_eq!(view.enclosures[0].drive_count.mounted, 3);
@@ -335,9 +413,14 @@ mod tests {
         let view = build_enclosures_dashboard(EnclosuresAggregatorConfig {
             ssd_root: root.join("missing-ssd"),
             hdd_root: root.join("missing-hdd"),
+            administrator: false,
         });
 
         assert!(view.enclosures.is_empty());
+        assert!(!view.add_enclosure.enabled);
+        assert_eq!(view.add_enclosure.state, "admin_required");
+        assert!(!view.add_enclosure.administrator);
+        assert!(!view.add_enclosure.supported_enclosure_detected);
         assert_eq!(view.selected_enclosure_id, None);
         assert_eq!(view.details, None);
         assert!(view

@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.24.0 - 2026-07-08
+
+- Add a live Web Enclosures `Add enclosure` affordance payload that reports
+  administrator capability, supported DAS discovery, daemon readiness, disabled
+  reasons, and the next operator step.
+- Replace the static Yew `Add enclosure` card with enabled/disabled rendering
+  driven by the live dashboard payload.
+- Document the Enclosures page readiness gate and daemon-owned administrator
+  workflow boundary.
+
 ## 0.23.0 - 2026-07-08
 
 - Extend Web enclosure slot payloads with role, mount path, device path,

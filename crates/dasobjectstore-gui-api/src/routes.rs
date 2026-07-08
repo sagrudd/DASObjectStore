@@ -170,6 +170,8 @@ mod tests {
 
         assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
         assert!(encoded["generated_at_utc"].is_string());
+        assert_eq!(encoded["add_enclosure"]["action_kind"], "enclosure_add");
+        assert!(encoded["add_enclosure"]["enabled"].is_boolean());
         assert!(encoded["enclosures"].is_array());
         assert!(encoded["warnings"].is_array());
         assert!(!encoded["warnings"]

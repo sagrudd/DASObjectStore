@@ -194,6 +194,7 @@ pub struct SmartWarningView {
 pub struct EnclosuresPageView {
     pub schema_version: String,
     pub generated_at_utc: String,
+    pub add_enclosure: AddEnclosureAffordanceView,
     pub enclosures: Vec<DasEnclosureCardView>,
     pub selected_enclosure_id: Option<String>,
     pub details: Option<DasEnclosureDetailView>,
@@ -205,6 +206,7 @@ impl EnclosuresPageView {
         Self {
             schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
             generated_at_utc: "2026-07-08T08:00:00Z".to_string(),
+            add_enclosure: AddEnclosureAffordanceView::admin_required(),
             enclosures: Vec::new(),
             selected_enclosure_id: None,
             details: None,
@@ -212,6 +214,68 @@ impl EnclosuresPageView {
                 "enclosure_inventory_pending",
                 "Live DAS enclosure inventory is pending daemon integration.",
             )],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AddEnclosureAffordanceView {
+    pub enabled: bool,
+    pub action_kind: String,
+    pub label: String,
+    pub state: String,
+    pub administrator: bool,
+    pub supported_enclosure_detected: bool,
+    pub daemon_ready: bool,
+    pub confirmation_required: bool,
+    pub blocked_reason: Option<String>,
+    pub next_step: String,
+}
+
+impl AddEnclosureAffordanceView {
+    pub fn available() -> Self {
+        Self {
+            enabled: true,
+            action_kind: "enclosure_add".to_string(),
+            label: "Add enclosure".to_string(),
+            state: "ready".to_string(),
+            administrator: true,
+            supported_enclosure_detected: true,
+            daemon_ready: true,
+            confirmation_required: true,
+            blocked_reason: None,
+            next_step: "Start supported DAS detection and preparation planning.".to_string(),
+        }
+    }
+
+    pub fn admin_required() -> Self {
+        Self::blocked(
+            "admin_required",
+            false,
+            true,
+            "Administrator capability is required before enclosure preparation is available.",
+            "Sign in with an administrator-capable local account to prepare DAS hardware.",
+        )
+    }
+
+    pub fn blocked(
+        state: &str,
+        administrator: bool,
+        daemon_ready: bool,
+        blocked_reason: impl Into<String>,
+        next_step: impl Into<String>,
+    ) -> Self {
+        Self {
+            enabled: false,
+            action_kind: "enclosure_add".to_string(),
+            label: "Add enclosure".to_string(),
+            state: state.to_string(),
+            administrator,
+            supported_enclosure_detected: false,
+            daemon_ready,
+            confirmation_required: true,
+            blocked_reason: Some(blocked_reason.into()),
+            next_step: next_step.into(),
         }
     }
 }

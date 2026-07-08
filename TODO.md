@@ -539,7 +539,7 @@ older checklist claims.
 - [x] Implement selected-enclosure detail panels with drive cards for SSD and
   HDD members, mounted paths, bay labels, role assignment, capacity, health,
   SMART warnings, and daemon-managed action availability.
-- [ ] Replace the static Enclosures "Add enclosure" card with a disabled/enabled
+- [x] Replace the static Enclosures "Add enclosure" card with a disabled/enabled
   state driven by authenticated administrator capability, supported enclosure
   discovery, and daemon readiness.
 - [ ] Wire `ObjectStoresPage` to fetch live object-store registry data and render

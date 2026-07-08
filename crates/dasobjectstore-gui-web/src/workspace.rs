@@ -2,7 +2,8 @@
 use crate::api::BioinformaticsWorkspaceResponse;
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
-    DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosureDriveSlotResponse,
+    AddEnclosureAffordanceResponse, DasEnclosureCardResponse, DasEnclosureDetailResponse,
+    EnclosureDriveSlotResponse,
 };
 use crate::api::{EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse};
 
@@ -837,7 +838,7 @@ fn render_enclosures_state(
         ApiLoadState::Loading => html! {
             <div class="dos-two-column">
                 <div class="dos-card-list">
-                    { render_add_enclosure_card() }
+                    { render_add_enclosure_card(&AddEnclosureAffordanceResponse::checking()) }
                     { render_enclosures_state_message(
                         "Loading",
                         "Loading enclosure inventory",
@@ -890,7 +891,7 @@ fn render_enclosure_inventory(
     html! {
         <div class="dos-two-column">
             <div class="dos-card-list">
-                { render_add_enclosure_card() }
+                { render_add_enclosure_card(&view.add_enclosure) }
                 { for enclosure_card_summaries(view).into_iter().map(|summary| {
                     render_enclosure_card(summary, &active_id, selected_id.clone())
                 }) }
@@ -901,13 +902,42 @@ fn render_enclosure_inventory(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_add_enclosure_card() -> Html {
+fn render_add_enclosure_card(affordance: &AddEnclosureAffordanceResponse) -> Html {
+    let state_label = match affordance.state.as_str() {
+        "ready" => "Ready",
+        "admin_required" => "Admin required",
+        "unsupported_or_absent" => "No supported DAS",
+        "daemon_unavailable" => "Daemon not ready",
+        "checking" => "Checking",
+        _ => "Unavailable",
+    };
+    let body = affordance
+        .blocked_reason
+        .as_deref()
+        .unwrap_or("Administrator workflow: detect supported DAS hardware, identify SSD/HDD media, review format risk, then submit the daemon preparation job.");
+
     html! {
-        <section class="dos-card dos-create-card" data-action="enclosure_add">
+        <section
+            class={classes!(
+                "dos-card",
+                "dos-create-card",
+                affordance.enabled.then_some("is-enabled"),
+                (!affordance.enabled).then_some("is-disabled"),
+            )}
+            data-action={affordance.action_kind.clone()}
+            data-state={affordance.state.clone()}
+            aria-disabled={(!affordance.enabled).to_string()}
+        >
             <span class="dos-create-mark">{ "+" }</span>
-            <h2>{ "Add enclosure" }</h2>
-            <p>{ "Admin workflow: detect supported DAS hardware, identify SSD/HDD media, review format risk, then submit the daemon preparation job." }</p>
-            <span class="dos-status-pill">{ "Admin only" }</span>
+            <h2>{ affordance.label.clone() }</h2>
+            <p>{ body }</p>
+            <p class="dos-create-next-step">{ affordance.next_step.clone() }</p>
+            <div class="dos-card-row dos-create-gates">
+                <span class="dos-status-pill">{ state_label }</span>
+                <span>{ if affordance.administrator { "admin verified" } else { "admin pending" } }</span>
+                <span>{ if affordance.supported_enclosure_detected { "supported DAS visible" } else { "DAS not detected" } }</span>
+                <span>{ if affordance.daemon_ready { "daemon ready" } else { "daemon pending" } }</span>
+            </div>
         </section>
     }
 }

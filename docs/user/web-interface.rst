@@ -212,6 +212,13 @@ health, SMART warning count, and the daemon-managed actions currently available
 for that member. These controls are informational until the administrator
 workflow routes submit confirmed daemon jobs.
 
+The ``Add enclosure`` card is no longer static placeholder text. The dashboard
+payload carries a live affordance state that combines administrator capability,
+supported enclosure discovery, and daemon inventory readiness. Non-admin users
+see the card disabled with an explicit reason. Administrator-capable sessions
+may see the card become ready only when a supported DAS enclosure is visible to
+the daemon and the inventory path is healthy enough to plan preparation.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the
