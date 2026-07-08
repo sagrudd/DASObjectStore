@@ -111,7 +111,7 @@ use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -296,20 +296,16 @@ fn run_performance_test(
     .to_string();
     let reproduction_payload_sha256 = sha256_hex_bytes(reproduction_payload.as_bytes());
 
-    writeln!(
-        writer,
-        "performance-test: workload={} files={} total={} disks={} max_hdd_concurrency={} report={}",
-        workload.kind.as_str(),
-        workload.file_count(),
-        format_bytes(workload.total_bytes() as f64),
-        disks.len(),
-        args.max_hdd_concurrency(),
-        report_path.display()
-    )?;
-    if args.tui() {
+    if !args.tui() {
         writeln!(
             writer,
-            "performance-test tui: scenario progress, aggregate rates, and artifact paths will be rendered during this administrative run"
+            "performance-test: workload={} files={} total={} disks={} max_hdd_concurrency={} report={}",
+            workload.kind.as_str(),
+            workload.file_count(),
+            format_bytes(workload.total_bytes() as f64),
+            disks.len(),
+            args.max_hdd_concurrency(),
+            report_path.display()
         )?;
     }
 
@@ -337,11 +333,13 @@ fn run_performance_test(
                 },
             )?;
         }
-        writeln!(
-            writer,
-            "scenario ssd-only: writing generated files directly to SSD"
-        )?;
-        let ssd_only = benchmark_ssd_only(&ssd_bench_root, &workload, writer)?;
+        if !args.tui() {
+            writeln!(
+                writer,
+                "scenario ssd-only: writing source payloads directly to SSD"
+            )?;
+        }
+        let ssd_only = benchmark_ssd_only(&ssd_bench_root, &workload, writer, !args.tui())?;
         scenario_done += 1;
         if args.tui() {
             render_performance_tui_snapshot(
@@ -364,17 +362,20 @@ fn run_performance_test(
 
         let mut ssd_pipeline = Vec::new();
         for concurrency in 1..=max_concurrency {
-            writeln!(
-                writer,
-                "scenario ssd-pipeline: SSD ingest with {} concurrent HDD drain worker(s)",
-                concurrency
-            )?;
+            if !args.tui() {
+                writeln!(
+                    writer,
+                    "scenario ssd-pipeline: SSD ingest with {} concurrent HDD drain worker(s)",
+                    concurrency
+                )?;
+            }
             let scenario = benchmark_ssd_pipeline(
                 &ssd_bench_root,
                 &hdd_bench_roots,
                 &workload,
                 concurrency,
                 writer,
+                !args.tui(),
             )?;
             scenario_done += 1;
             if args.tui() {
@@ -400,12 +401,20 @@ fn run_performance_test(
 
         let mut direct_hdd = Vec::new();
         for concurrency in 1..=max_concurrency {
-            writeln!(
+            if !args.tui() {
+                writeln!(
+                    writer,
+                    "scenario direct-hdd: direct source-to-HDD ingest with {} worker(s)",
+                    concurrency
+                )?;
+            }
+            let scenario = benchmark_direct_hdd(
+                &hdd_bench_roots,
+                &workload,
+                concurrency,
                 writer,
-                "scenario direct-hdd: direct source-to-HDD ingest with {} worker(s)",
-                concurrency
+                !args.tui(),
             )?;
-            let scenario = benchmark_direct_hdd(&hdd_bench_roots, &workload, concurrency, writer)?;
             scenario_done += 1;
             if args.tui() {
                 render_performance_tui_snapshot(
@@ -931,6 +940,7 @@ fn render_performance_tui_snapshot(
             viewport: ratatui::Viewport::Fixed(ratatui::layout::Rect::new(0, 0, 110, 18)),
         },
     )?;
+    terminal.clear()?;
     let percent = if snapshot.scenario_total == 0 {
         0
     } else {
@@ -1007,6 +1017,7 @@ fn benchmark_ssd_only(
     ssd_bench_root: &Path,
     workload: &PerformanceWorkload,
     writer: &mut impl Write,
+    log_progress: bool,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let mut file_results = Vec::new();
@@ -1023,14 +1034,16 @@ fn benchmark_ssd_only(
             ssd_write,
             ssd_read,
         });
-        writeln!(
-            writer,
-            "ssd-only file {}/{}: SSD write {}/s SSD read {}/s",
-            payload.file_index + 1,
-            workload.file_count(),
-            format_bytes(throughput(ssd_write)),
-            format_bytes(throughput(ssd_read))
-        )?;
+        if log_progress {
+            writeln!(
+                writer,
+                "ssd-only file {}/{}: SSD write {}/s SSD read {}/s",
+                payload.file_index + 1,
+                workload.file_count(),
+                format_bytes(throughput(ssd_write)),
+                format_bytes(throughput(ssd_read))
+            )?;
+        }
     }
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     Ok(PerformanceScenarioResult {
@@ -1057,6 +1070,7 @@ fn benchmark_ssd_pipeline(
     workload: &PerformanceWorkload,
     concurrency: usize,
     writer: &mut impl Write,
+    log_progress: bool,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let scheduler = Arc::new(Mutex::new(DiskPlacementScheduler::new(hdd_bench_roots)));
@@ -1127,43 +1141,76 @@ fn benchmark_ssd_pipeline(
 
     let mut file_results = Vec::new();
     let mut total_bytes = 0_u64;
+    let mut producer_error = None;
     for payload in &workload.payloads {
-        check_performance_cancelled()?;
+        if let Err(err) = check_performance_cancelled() {
+            producer_error = Some(err);
+            break;
+        }
         let ssd_path = ssd_bench_root
             .join("ssd-pipeline")
             .join(format!("c{concurrency}"))
             .join(&payload.relative_path);
-        let ssd_write = measure_land_payload(payload, &ssd_path)?;
-        let ssd_read = measure_read(&ssd_path)?;
+        let ssd_write = match measure_land_payload(payload, &ssd_path) {
+            Ok(measurement) => measurement,
+            Err(err) => {
+                let _ = fs::remove_file(&ssd_path);
+                producer_error = Some(err);
+                break;
+            }
+        };
+        let ssd_read = match measure_read(&ssd_path) {
+            Ok(measurement) => measurement,
+            Err(err) => {
+                let _ = fs::remove_file(&ssd_path);
+                producer_error = Some(err);
+                break;
+            }
+        };
         total_bytes = total_bytes.saturating_add(ssd_write.bytes);
         file_results.push(PerformanceFileResult {
             file_index: payload.file_index,
             ssd_write,
             ssd_read,
         });
-        sender
-            .send(SsdPipelineJob {
-                file_index: payload.file_index,
-                relative_path: payload.relative_path.clone(),
-                ssd_path,
-            })
-            .map_err(|_| {
-                CliError::CommandFailed("performance-test HDD workers stopped early".to_string())
-            })?;
-        writeln!(
-            writer,
-            "ssd-pipeline c{} file {}/{}: SSD write {}/s queued for HDD drain",
-            concurrency,
-            payload.file_index + 1,
-            workload.file_count(),
-            format_bytes(throughput(ssd_write))
-        )?;
+        if let Err(_err) = sender.send(SsdPipelineJob {
+            file_index: payload.file_index,
+            relative_path: payload.relative_path.clone(),
+            ssd_path,
+        }) {
+            producer_error = Some(CliError::CommandFailed(
+                "performance-test HDD workers stopped early".to_string(),
+            ));
+            break;
+        }
+        if log_progress {
+            writeln!(
+                writer,
+                "ssd-pipeline c{} file {}/{}: SSD write {}/s queued for HDD drain",
+                concurrency,
+                payload.file_index + 1,
+                workload.file_count(),
+                format_bytes(throughput(ssd_write))
+            )?;
+        }
     }
     drop(sender);
+    let mut worker_error = None;
     for handle in handles {
-        handle.join().map_err(|_| {
-            CliError::CommandFailed("performance-test HDD worker panicked".to_string())
-        })??;
+        match handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                let _ = worker_error.get_or_insert(err);
+            }
+            Err(_) => {
+                let _ = worker_error.get_or_insert(CliError::CommandFailed(
+                    "performance-test HDD worker panicked".to_string(),
+                ));
+            }
+        };
+    }
+    if let Some(err) = producer_error.or(worker_error) {
+        return Err(err);
     }
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let mut disk_results = Arc::try_unwrap(worker_results)
@@ -1189,12 +1236,14 @@ fn benchmark_ssd_pipeline(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    writeln!(
-        writer,
-        "ssd-pipeline c{}: aggregate landing {}/s",
-        concurrency,
-        format_bytes(total_bytes as f64 / elapsed_seconds)
-    )?;
+    if log_progress {
+        writeln!(
+            writer,
+            "ssd-pipeline c{}: aggregate landing {}/s",
+            concurrency,
+            format_bytes(total_bytes as f64 / elapsed_seconds)
+        )?;
+    }
     Ok(PerformanceScenarioResult {
         kind: PerformanceScenarioKind::SsdPipeline,
         concurrency,
@@ -1218,6 +1267,7 @@ fn benchmark_direct_hdd(
     workload: &PerformanceWorkload,
     concurrency: usize,
     writer: &mut impl Write,
+    log_progress: bool,
 ) -> Result<PerformanceScenarioResult, CliError> {
     let started = Instant::now();
     let scheduler = Arc::new(Mutex::new(DiskPlacementScheduler::new(hdd_bench_roots)));
@@ -1287,17 +1337,36 @@ fn benchmark_direct_hdd(
             Ok(())
         }));
     }
+    let mut producer_error = None;
     for payload in &workload.payloads {
-        check_performance_cancelled()?;
-        sender.send(payload.clone()).map_err(|_| {
-            CliError::CommandFailed("performance-test direct HDD workers stopped early".to_string())
-        })?;
+        if let Err(err) = check_performance_cancelled() {
+            producer_error = Some(err);
+            break;
+        }
+        if sender.send(payload.clone()).is_err() {
+            producer_error = Some(CliError::CommandFailed(
+                "performance-test direct HDD workers stopped early".to_string(),
+            ));
+            break;
+        }
     }
     drop(sender);
+    let mut worker_error = None;
     for handle in handles {
-        handle.join().map_err(|_| {
-            CliError::CommandFailed("performance-test direct HDD worker panicked".to_string())
-        })??;
+        match handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                let _ = worker_error.get_or_insert(err);
+            }
+            Err(_) => {
+                let _ = worker_error.get_or_insert(CliError::CommandFailed(
+                    "performance-test direct HDD worker panicked".to_string(),
+                ));
+            }
+        };
+    }
+    if let Some(err) = producer_error.or(worker_error) {
+        return Err(err);
     }
     let elapsed_seconds = started.elapsed().as_secs_f64().max(0.001);
     let mut disk_results = Arc::try_unwrap(worker_results)
@@ -1324,12 +1393,14 @@ fn benchmark_direct_hdd(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    writeln!(
-        writer,
-        "direct-hdd c{}: aggregate landing {}/s",
-        concurrency,
-        format_bytes(total_bytes as f64 / elapsed_seconds)
-    )?;
+    if log_progress {
+        writeln!(
+            writer,
+            "direct-hdd c{}: aggregate landing {}/s",
+            concurrency,
+            format_bytes(total_bytes as f64 / elapsed_seconds)
+        )?;
+    }
     Ok(PerformanceScenarioResult {
         kind: PerformanceScenarioKind::DirectHdd,
         concurrency,
@@ -1435,11 +1506,13 @@ fn measure_generate_random_file(
     let mut buffer = vec![0_u8; 1024 * 1024];
     let mut state = 0x9e37_79b9_7f4a_7c15_u64 ^ u64::from(seed);
     while remaining > 0 {
+        check_performance_cancelled()?;
         fill_pseudorandom(&mut buffer, &mut state);
         let write_len = remaining.min(buffer.len() as u64) as usize;
         file.write_all(&buffer[..write_len])?;
         remaining -= write_len as u64;
     }
+    check_performance_cancelled()?;
     file.sync_all()?;
     Ok(PerformanceMeasurement {
         bytes: size_bytes,
@@ -1483,7 +1556,18 @@ fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurem
     let started = Instant::now();
     let mut reader = File::open(source)?;
     let mut writer = File::create(destination)?;
-    let bytes = io::copy(&mut reader, &mut writer)?;
+    let mut bytes = 0_u64;
+    let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+    loop {
+        check_performance_cancelled()?;
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..read])?;
+        bytes = bytes.saturating_add(read as u64);
+    }
+    check_performance_cancelled()?;
     writer.sync_all()?;
     Ok(PerformanceMeasurement {
         bytes,
@@ -1494,7 +1578,16 @@ fn measure_copy(source: &Path, destination: &Path) -> Result<PerformanceMeasurem
 fn measure_read(source: &Path) -> Result<PerformanceMeasurement, CliError> {
     let started = Instant::now();
     let mut reader = File::open(source)?;
-    let bytes = io::copy(&mut reader, &mut io::sink())?;
+    let mut bytes = 0_u64;
+    let mut buffer = vec![0_u8; 4 * 1024 * 1024];
+    loop {
+        check_performance_cancelled()?;
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes.saturating_add(read as u64);
+    }
     Ok(PerformanceMeasurement {
         bytes,
         seconds: started.elapsed().as_secs_f64().max(0.001),
@@ -5586,16 +5679,16 @@ impl From<ProbeError> for CliError {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_ingest_files, connection_status_from_probe, current_user_group_names,
-        parse_binary_size, performance_report_metadata_json, render_performance_json,
-        render_performance_report, render_simple_pdf, run, source_performance_workload,
-        validate_managed_hdds_on_supported_das, write_health_json, write_health_summary,
-        write_health_verbose, write_host_connection_status, write_pretty_report, CliError,
-        ConnectionAssessment, DiskHealthSummary, HealthReport, ManagedHddDevice,
-        PerformanceBenchmarkResults, PerformanceConcurrencyResult, PerformanceDiskResult,
-        PerformanceFileResult, PerformanceMeasurement, PerformanceRecommendation,
-        PerformanceReport, PerformanceScenarioKind, PerformanceScenarioResult,
-        PerformanceWorkloadKind,
+        benchmark_ssd_only, collect_ingest_files, connection_status_from_probe,
+        current_user_group_names, parse_binary_size, performance_report_metadata_json,
+        render_performance_json, render_performance_report, render_simple_pdf, run,
+        source_performance_workload, validate_managed_hdds_on_supported_das, write_health_json,
+        write_health_summary, write_health_verbose, write_host_connection_status,
+        write_pretty_report, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
+        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
+        PerformanceDiskResult, PerformanceFileResult, PerformanceMeasurement, PerformancePayload,
+        PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
+        PerformanceScenarioResult, PerformanceWorkload, PerformanceWorkloadKind,
     };
     use crate::cli::Cli;
     use clap::Parser;
@@ -5737,6 +5830,37 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("cleanup source fixture");
+    }
+
+    #[test]
+    fn performance_ssd_only_suppresses_progress_logs_for_tui_rendering() {
+        let root = temp_root("performance-tui-log-suppression");
+        let workload = PerformanceWorkload {
+            kind: PerformanceWorkloadKind::Generated,
+            source_path: None,
+            payloads: vec![
+                PerformancePayload {
+                    file_index: 0,
+                    relative_path: PathBuf::from("a.bin"),
+                    source_path: None,
+                    size_bytes: 4,
+                },
+                PerformancePayload {
+                    file_index: 1,
+                    relative_path: PathBuf::from("b.bin"),
+                    source_path: None,
+                    size_bytes: 4,
+                },
+            ],
+        };
+        let mut output = Vec::new();
+
+        let report =
+            benchmark_ssd_only(&root, &workload, &mut output, false).expect("benchmark runs");
+
+        assert_eq!(report.total_bytes, 8);
+        assert!(output.is_empty(), "TUI path must not receive line logs");
+        fs::remove_dir_all(root).expect("cleanup benchmark fixture");
     }
 
     #[test]

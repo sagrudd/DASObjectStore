@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.4.1 - 2026-07-08
+
+- Keep `performance-test --tui` rendering isolated from benchmark progress log
+  lines so ratatui frames are not corrupted by per-file or shell-style output.
+- Make performance-test generated writes, source copies, and readback checks
+  Ctrl-C aware at chunk granularity so cancellation stops large-file work
+  promptly and lets temporary benchmark roots be cleaned.
+- Close benchmark worker queues and join HDD worker threads before returning
+  cancellation errors, avoiding detached workers after Ctrl-C.
+
 ## 0.4.0 - 2026-07-08
 
 - Add the standalone `dasobjectstore-remote` CLI for remote computers to list
