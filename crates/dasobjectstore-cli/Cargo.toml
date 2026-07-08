@@ -14,6 +14,8 @@ name = "dasobjectstore-server"
 path = "src/server_main.rs"
 
 [dependencies]
+axum.workspace = true
+axum-server.workspace = true
 clap.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
@@ -28,9 +30,11 @@ ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tokio.workspace = true
 
 [features]
 debug-commands = []
 
 [dev-dependencies]
 rusqlite.workspace = true
+tower.workspace = true

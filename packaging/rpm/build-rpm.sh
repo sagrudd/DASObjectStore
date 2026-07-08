@@ -19,6 +19,7 @@ fi
 
 packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
+packaging_product="$packaging_linux/opt/dasobjectstore"
 bash "$packaging_debian/validate-package-assets.sh"
 
 cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
@@ -35,6 +36,8 @@ source_path="$rpm_root/SOURCES/${payload_name}.tar.gz"
 rm -rf "$payload_root"
 install -d \
   "$payload_root/etc/dasobjectstore" \
+  "$payload_root/opt/dasobjectstore" \
+  "$payload_root/opt/dasobjectstore/web" \
   "$payload_root/usr/bin" \
   "$payload_root/usr/lib/systemd/system" \
   "$payload_root/usr/lib/sysusers.d" \
@@ -52,12 +55,17 @@ install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_nam
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$payload_root/etc/dasobjectstore/daemon.json"
+install -m 0644 "$packaging_product/config.json" \
+  "$payload_root/opt/dasobjectstore/config.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstored.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-server.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-server.service"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
+cp -a "$repo_root/crates/dasobjectstore-gui-web/dist/." "$payload_root/opt/dasobjectstore/web/"
 
 install -d "$rpm_root/BUILD" "$rpm_root/RPMS" "$rpm_root/SOURCES" "$rpm_root/SPECS" "$rpm_root/SRPMS"
 tar -C "$staging_root" -czf "$source_path" "$payload_name"
@@ -113,8 +121,14 @@ fi
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /run/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/log/dasobjectstore
+install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore
+install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore/tls
 install -d -o root -g "\$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' -exec chgrp "\$service_group" {} + -exec chmod 0640 {} +
+if [ -f /opt/dasobjectstore/config.json ]; then
+  chown root:"\$service_group" /opt/dasobjectstore/config.json
+  chmod 0640 /opt/dasobjectstore/config.json
+fi
 
 if [ -e "\$managed_root" ]; then
   owner="\$(stat -c '%U' "\$managed_root")"
@@ -146,15 +160,20 @@ if command -v systemd-tmpfiles >/dev/null 2>&1; then
 fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
+  systemctl enable --now dasobjectstored.service dasobjectstore-server.service || true
+  systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
+%config(noreplace) /opt/dasobjectstore/config.json
+/opt/dasobjectstore/web
 /usr/bin/dasobjectstore
 /usr/bin/dasobjectstore-server
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
 /usr/lib/systemd/system/dasobjectstored.service
+/usr/lib/systemd/system/dasobjectstore-server.service
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
 %doc /usr/share/doc/dasobjectstore/README.md

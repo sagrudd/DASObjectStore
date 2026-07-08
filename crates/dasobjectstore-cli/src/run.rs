@@ -7,10 +7,10 @@ use crate::cli::{
     IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
     ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceTestArgs,
     PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
-    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StoreAdoptArgs, StoreCommand,
-    StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
-    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand,
-    SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
+    ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StatusArgs, StoreAdoptArgs,
+    StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs,
+    StoreDrainArgs, StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs,
+    SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -44,12 +44,14 @@ use dasobjectstore_core::risk::{
     ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
+use dasobjectstore_core::DEFAULT_STANDALONE_CONFIG_PATH;
 use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestProgressEvent, DaemonIngestStage, DaemonRuntimeConfig,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
     DEFAULT_DAEMON_STATE_DIR,
 };
+use dasobjectstore_gui_api::StandaloneServerConfig;
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, delete_store, drain_ingest_queue, drain_store,
     export_settled_object, force_retire_disk, import_dirty_pool_read_only,
@@ -107,12 +109,14 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph, Wrap},
     Terminal,
 };
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream};
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 #[cfg(target_os = "linux")]
@@ -120,7 +124,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::thread;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{collections::hash_map::DefaultHasher, collections::BTreeMap, collections::BTreeSet};
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -133,6 +137,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
         Some(Command::Probe(args)) => run_probe(args, writer),
         Some(Command::Health(args)) => run_health(args, writer),
+        Some(Command::Status(args)) => run_status(args, writer),
         Some(Command::Pool(args)) => match args.command() {
             PoolCommand::Inspect(args) => run_pool_inspect(args, writer),
             PoolCommand::Import(args) => run_pool_import(args, writer),
@@ -4772,6 +4777,193 @@ fn run_health(args: &HealthArgs, writer: &mut impl Write) -> Result<(), CliError
         write_health_summary(&report, writer)?;
     }
 
+    Ok(())
+}
+
+fn run_status(args: &StatusArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let report = read_runtime_status();
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_runtime_status(&report, writer)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct RuntimeStatusReport {
+    daemon: RuntimeEndpointStatus,
+    web: RuntimeEndpointStatus,
+    object_service: RuntimeEndpointStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct RuntimeEndpointStatus {
+    name: &'static str,
+    kind: &'static str,
+    configured: bool,
+    active: bool,
+    bind_address: Option<String>,
+    port: Option<u16>,
+    url: Option<String>,
+    service: Option<String>,
+    service_state: Option<String>,
+    config_path: Option<String>,
+    message: Option<String>,
+}
+
+fn read_runtime_status() -> RuntimeStatusReport {
+    RuntimeStatusReport {
+        daemon: daemon_runtime_status(),
+        web: web_runtime_status(),
+        object_service: object_service_runtime_status(),
+    }
+}
+
+fn daemon_runtime_status() -> RuntimeEndpointStatus {
+    let socket_path = DaemonRuntimeConfig::default().socket_path;
+    let service_state = systemd_service_state("dasobjectstored.service");
+    let active = socket_path.exists() || service_state.as_deref() == Some("active");
+    RuntimeEndpointStatus {
+        name: "daemon",
+        kind: "unix_socket",
+        configured: true,
+        active,
+        bind_address: None,
+        port: None,
+        url: Some(socket_path.display().to_string()),
+        service: Some("dasobjectstored.service".to_string()),
+        service_state,
+        config_path: Some("/etc/dasobjectstore/daemon.json".to_string()),
+        message: if active {
+            None
+        } else {
+            Some("daemon socket is not available".to_string())
+        },
+    }
+}
+
+fn web_runtime_status() -> RuntimeEndpointStatus {
+    let config_path = PathBuf::from(DEFAULT_STANDALONE_CONFIG_PATH);
+    let config = fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<StandaloneServerConfig>(&contents).ok())
+        .unwrap_or_else(StandaloneServerConfig::default);
+    let socket_addr = config.socket_addr().ok();
+    let active = socket_addr.is_some_and(local_tcp_listener_active);
+    let service_state = systemd_service_state("dasobjectstore-server.service");
+    RuntimeEndpointStatus {
+        name: "web",
+        kind: "https",
+        configured: true,
+        active,
+        bind_address: Some(config.bind_address),
+        port: Some(config.https_port),
+        url: Some(config.public_base_url),
+        service: Some("dasobjectstore-server.service".to_string()),
+        service_state,
+        config_path: Some(config_path.display().to_string()),
+        message: if active {
+            None
+        } else {
+            Some("web listener is not reachable locally".to_string())
+        },
+    }
+}
+
+fn object_service_runtime_status() -> RuntimeEndpointStatus {
+    let port = 3900;
+    let endpoint = format!("http://127.0.0.1:{port}");
+    let active = "127.0.0.1:3900"
+        .parse::<SocketAddr>()
+        .is_ok_and(local_tcp_listener_active);
+    RuntimeEndpointStatus {
+        name: "object_service",
+        kind: "s3_compatible",
+        configured: true,
+        active,
+        bind_address: Some("127.0.0.1".to_string()),
+        port: Some(port),
+        url: Some(endpoint),
+        service: None,
+        service_state: None,
+        config_path: None,
+        message: if active {
+            None
+        } else {
+            Some("S3-compatible object-service listener is not reachable locally".to_string())
+        },
+    }
+}
+
+fn local_tcp_listener_active(addr: SocketAddr) -> bool {
+    let connect_addr = if addr.ip().is_unspecified() {
+        SocketAddr::new("127.0.0.1".parse().expect("loopback IP"), addr.port())
+    } else {
+        addr
+    };
+    TcpStream::connect_timeout(&connect_addr, Duration::from_millis(200)).is_ok()
+}
+
+fn systemd_service_state(service: &str) -> Option<String> {
+    let output = ProcessCommand::new("systemctl")
+        .arg("is-active")
+        .arg(service)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn write_runtime_status(
+    report: &RuntimeStatusReport,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(writer, "DASObjectStore status")?;
+    write_runtime_endpoint_status(&report.daemon, writer)?;
+    write_runtime_endpoint_status(&report.web, writer)?;
+    write_runtime_endpoint_status(&report.object_service, writer)?;
+    Ok(())
+}
+
+fn write_runtime_endpoint_status(
+    endpoint: &RuntimeEndpointStatus,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(
+        writer,
+        "- {}: {}{}",
+        endpoint.name,
+        if endpoint.active {
+            "active"
+        } else {
+            "inactive"
+        },
+        endpoint
+            .service_state
+            .as_deref()
+            .map(|state| format!(" (service {state})"))
+            .unwrap_or_default()
+    )?;
+    if let Some(url) = &endpoint.url {
+        writeln!(writer, "  url: {url}")?;
+    }
+    if let Some(bind_address) = &endpoint.bind_address {
+        writeln!(
+            writer,
+            "  bind: {}:{}",
+            bind_address,
+            endpoint.port.unwrap_or_default()
+        )?;
+    }
+    if let Some(config_path) = &endpoint.config_path {
+        writeln!(writer, "  config: {config_path}")?;
+    }
+    if let Some(message) = &endpoint.message {
+        writeln!(writer, "  note: {message}")?;
+    }
     Ok(())
 }
 

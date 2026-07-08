@@ -45,6 +45,8 @@ pub(crate) enum Command {
     Probe(ProbeArgs),
     /// Report pool, disk, and service health.
     Health(HealthArgs),
+    /// Report daemon, Web UI, and object-service listener status.
+    Status(StatusArgs),
     /// Manage portable storage pools.
     Pool(PoolArgs),
     /// Manage DAS member disks.
@@ -63,6 +65,19 @@ pub(crate) enum Command {
     Mnemosyne(MnemosyneArgs),
     /// Benchmark SSD and HDD ingest settlement performance.
     PerformanceTest(PerformanceTestArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StatusArgs {
+    /// Emit status as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StatusArgs {
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -1882,8 +1897,8 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 mod tests {
     use super::{
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
-        MnemosyneCommand, ObjectCommand, PoolCommand, ProbeArgs, ServiceCommand, StoreArgs,
-        StoreCommand, StoreS3UploadAuth, SubobjectCommand,
+        MnemosyneCommand, ObjectCommand, PoolCommand, ProbeArgs, ServiceCommand, StatusArgs,
+        StoreArgs, StoreCommand, StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
@@ -1911,6 +1926,17 @@ mod tests {
 
             assert_eq!(cli.command(), Some(&expected));
         }
+    }
+
+    #[test]
+    fn parses_top_level_status_json() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "status", "--json"])
+            .expect("status command parses");
+
+        assert_eq!(
+            cli.command(),
+            Some(&Command::Status(StatusArgs { json: true }))
+        );
     }
 
     #[test]

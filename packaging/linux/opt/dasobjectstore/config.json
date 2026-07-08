@@ -1,0 +1,10 @@
+{
+  "bind_address": "0.0.0.0",
+  "https_port": 8448,
+  "public_base_url": "https://127.0.0.1:8448",
+  "product_root": "/opt/dasobjectstore",
+  "tls": {
+    "certificate_path": "/opt/dasobjectstore/tls/server.crt",
+    "private_key_path": "/opt/dasobjectstore/tls/server.key"
+  }
+}

@@ -1,0 +1,27 @@
+[Unit]
+Description=DASObjectStore standalone Web UI and API
+Documentation=https://github.com/sagrudd/DASObjectStore
+After=network-online.target dasobjectstored.service
+Wants=network-online.target
+Requires=dasobjectstored.service
+
+[Service]
+Type=simple
+User=dasobjectstore
+Group=dasobjectstore
+StateDirectory=dasobjectstore
+StateDirectoryMode=0750
+LogsDirectory=dasobjectstore
+LogsDirectoryMode=0750
+ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /opt/dasobjectstore
+
+[Install]
+WantedBy=multi-user.target

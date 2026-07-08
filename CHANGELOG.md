@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.9.0 - 2026-07-08
+
+- Add packaged standalone Web UI/API service startup with
+  ``dasobjectstore-server`` enabled by default through systemd.
+- Install ``/opt/dasobjectstore/config.json`` with appliance defaults,
+  including ``0.0.0.0:8448`` for the standalone HTTPS listener and TLS asset
+  paths under ``/opt/dasobjectstore/tls``.
+- Add top-level ``dasobjectstore status`` to report daemon, Web UI, and
+  S3-compatible object-service endpoints, including configured ports and
+  listener activity.
+
 ## 0.8.1 - 2026-07-08
 
 - Keep performance-test TUI SSD write and read rates populated with live

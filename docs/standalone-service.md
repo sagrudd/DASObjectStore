@@ -48,17 +48,20 @@ direct write ownership of managed DAS roots.
 
 DASObjectStore standalone packages SHALL reserve HTTPS port `8448`.
 
-The default standalone listener SHALL remain loopback-only:
+The compiled fallback standalone listener remains loopback-only for local
+development:
 
 ```text
 https://127.0.0.1:8448
 ```
 
-Linux appliance packages MAY expose the same port on every interface only when
-the operator explicitly selects appliance mode:
+Linux appliance packages SHALL install `/opt/dasobjectstore/config.json` and
+enable the standalone Web UI/API by default. The packaged appliance
+configuration binds the same port on every interface:
 
 ```text
-dasobjectstore-server --bind-address 0.0.0.0 --https-port 8448
+bind_address = 0.0.0.0
+https_port = 8448
 ```
 
 Synoptikon-integrated deployments SHALL NOT expose `8448` as a public listener.
@@ -77,18 +80,16 @@ SHALL run it with the same configuration model that the CLI validates:
 
 ```text
 dasobjectstore-server \
-  --bind-address 127.0.0.1 \
-  --https-port 8448 \
-  --public-base-url https://127.0.0.1:8448 \
-  --product-root /opt/dasobjectstore
+  --config /opt/dasobjectstore/config.json \
+  --generate-missing-tls
 ```
 
 Operators and packages SHOULD validate generated service configuration before
 first start:
 
 ```text
-dasobjectstore-server --check-config
-dasobjectstore-server --check-config --json
+dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config
+dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config --json
 ```
 
 The server owns local standalone authentication, local audit posture, and the
@@ -118,6 +119,14 @@ generate self-signed local assets when both files are absent:
 
 ```text
 dasobjectstore-server --check-config --generate-missing-tls
+```
+
+The top-level runtime status command SHALL expose the configured Web UI and
+object-service ports:
+
+```text
+dasobjectstore status
+dasobjectstore status --json
 ```
 
 Partial TLS state is invalid: if either the certificate or private key is

@@ -4,6 +4,7 @@ set -euo pipefail
 service_user="dasobjectstore"
 service_group="dasobjectstore"
 managed_root="/srv/dasobjectstore"
+product_root="/opt/dasobjectstore"
 
 ensure_group() {
   if ! getent group "$service_group" >/dev/null; then
@@ -74,10 +75,16 @@ ensure_user
 ensure_owned_dir /run/dasobjectstore 0750
 ensure_owned_dir /var/lib/dasobjectstore 0750
 ensure_owned_dir /var/log/dasobjectstore 0750
+ensure_owned_dir "$product_root" 0750
+ensure_owned_dir "$product_root/tls" 0750
 install -d -o root -g "$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' \
   -exec chgrp "$service_group" {} + \
   -exec chmod 0640 {} +
+if [[ -f "$product_root/config.json" ]]; then
+  chown root:"$service_group" "$product_root/config.json"
+  chmod 0640 "$product_root/config.json"
+fi
 
 reject_user_owned_managed_root "$managed_root"
 ensure_owned_dir "$managed_root" 0750
@@ -92,4 +99,6 @@ fi
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
+  systemctl enable --now dasobjectstored.service dasobjectstore-server.service || true
+  systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi

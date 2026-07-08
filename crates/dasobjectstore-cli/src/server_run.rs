@@ -1,13 +1,20 @@
 use crate::server_cli::ServerCli;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::get;
+use axum::Router;
+use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
-    ensure_standalone_tls_assets, StandaloneServerConfig, StandaloneServerConfigError,
-    StandaloneTlsAssetError, StandaloneTlsAssetReport,
+    ensure_standalone_tls_assets, gui_api_router, StandaloneServerConfig,
+    StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
+use std::fs;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
-pub(crate) fn run(cli: &ServerCli, writer: &mut impl Write) -> Result<(), ServerRunError> {
-    let config = cli.server_config();
+pub(crate) async fn run(cli: &ServerCli, writer: &mut impl Write) -> Result<(), ServerRunError> {
+    let config = cli.server_config()?;
     config.validate()?;
     let tls_report = if cli.generate_missing_tls() {
         Some(ensure_standalone_tls_assets(&config)?)
@@ -15,18 +22,109 @@ pub(crate) fn run(cli: &ServerCli, writer: &mut impl Write) -> Result<(), Server
         None
     };
 
-    if !cli.check_config() {
-        return Err(ServerRunError::StartupRequiresTlsAssetHandling);
+    if cli.check_config() {
+        if cli.json() {
+            write_json_config(&config, tls_report.as_ref(), writer)?;
+            writer.write_all(b"\n")?;
+        } else {
+            write_pretty_config(&config, tls_report.as_ref(), writer)?;
+        }
+        return Ok(());
     }
 
-    if cli.json() {
-        write_json_config(&config, tls_report.as_ref(), writer)?;
-        writer.write_all(b"\n")?;
-    } else {
-        write_pretty_config(&config, tls_report.as_ref(), writer)?;
-    }
+    start_server(config, writer).await
+}
 
+async fn start_server(
+    config: StandaloneServerConfig,
+    writer: &mut impl Write,
+) -> Result<(), ServerRunError> {
+    let socket_addr = config.socket_addr()?;
+    ensure_standalone_tls_assets(&config)?;
+    let tls =
+        RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
+            .await?;
+    writeln!(
+        writer,
+        "dasobjectstore-server listening on https://{}",
+        socket_addr
+    )?;
+    let web_root = config.product_root.join("web");
+    axum_server::bind_rustls(socket_addr, tls)
+        .serve(standalone_router(web_root).into_make_service())
+        .await?;
     Ok(())
+}
+
+fn standalone_router(web_root: PathBuf) -> Router {
+    let index_root = web_root.clone();
+    let index_root_with_slash = web_root.clone();
+    let js_root = web_root.clone();
+    let wasm_root = web_root.clone();
+    let css_root = web_root;
+    Router::new()
+        .route("/", get(root_redirect))
+        .route(
+            "/products/dasobjectstore",
+            get(move || serve_asset(index_root.join("index.html"), "text/html; charset=utf-8")),
+        )
+        .route(
+            "/products/dasobjectstore/",
+            get(move || {
+                serve_asset(
+                    index_root_with_slash.join("index.html"),
+                    "text/html; charset=utf-8",
+                )
+            }),
+        )
+        .route(
+            "/products/dasobjectstore/dasobjectstore-gui-web-68f9565a632c3ded.js",
+            get(move || {
+                serve_asset(
+                    js_root.join("dasobjectstore-gui-web-68f9565a632c3ded.js"),
+                    "application/javascript",
+                )
+            }),
+        )
+        .route(
+            "/products/dasobjectstore/dasobjectstore-gui-web-68f9565a632c3ded_bg.wasm",
+            get(move || {
+                serve_asset(
+                    wasm_root.join("dasobjectstore-gui-web-68f9565a632c3ded_bg.wasm"),
+                    "application/wasm",
+                )
+            }),
+        )
+        .route(
+            "/products/dasobjectstore/styles-ddee865e3ae271da.css",
+            get(move || {
+                serve_asset(
+                    css_root.join("styles-ddee865e3ae271da.css"),
+                    "text/css; charset=utf-8",
+                )
+            }),
+        )
+        .merge(gui_api_router())
+        .nest("/products/dasobjectstore", gui_api_router())
+}
+
+async fn root_redirect() -> Redirect {
+    Redirect::temporary("/products/dasobjectstore/")
+}
+
+async fn serve_asset(path: PathBuf, content_type: &'static str) -> Response {
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    bytes_response(content_type, bytes)
+}
+
+fn bytes_response(content_type: &'static str, bytes: Vec<u8>) -> Response {
+    match HeaderValue::from_str(content_type) {
+        Ok(content_type) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 #[derive(Debug)]
@@ -35,7 +133,6 @@ pub(crate) enum ServerRunError {
     Tls(StandaloneTlsAssetError),
     Io(io::Error),
     Json(serde_json::Error),
-    StartupRequiresTlsAssetHandling,
 }
 
 impl Display for ServerRunError {
@@ -45,10 +142,6 @@ impl Display for ServerRunError {
             Self::Tls(err) => write!(formatter, "{err}"),
             Self::Io(err) => write!(formatter, "server output failed: {err}"),
             Self::Json(err) => write!(formatter, "server JSON output failed: {err}"),
-            Self::StartupRequiresTlsAssetHandling => write!(
-                formatter,
-                "server startup requires the TLS asset loading milestone; use --check-config to validate the entry point"
-            ),
         }
     }
 }
@@ -121,33 +214,36 @@ fn write_json_config(
 
 #[cfg(test)]
 mod tests {
-    use super::{run, ServerRunError};
+    use super::{run, standalone_router};
     use crate::server_cli::ServerCli;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
     use clap::Parser;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tower::ServiceExt;
 
-    #[test]
-    fn emits_pretty_check_config() {
+    #[tokio::test]
+    async fn emits_pretty_check_config() {
         let cli = ServerCli::try_parse_from(["dasobjectstore-server", "--check-config"])
             .expect("server CLI parses");
         let mut output = Vec::new();
 
-        run(&cli, &mut output).expect("check config runs");
+        run(&cli, &mut output).await.expect("check config runs");
 
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("DASObjectStore standalone server configuration OK"));
         assert!(output.contains("bind: 127.0.0.1:8448"));
     }
 
-    #[test]
-    fn emits_json_check_config() {
+    #[tokio::test]
+    async fn emits_json_check_config() {
         let cli = ServerCli::try_parse_from(["dasobjectstore-server", "--check-config", "--json"])
             .expect("server CLI parses");
         let mut output = Vec::new();
 
-        run(&cli, &mut output).expect("check config runs");
+        run(&cli, &mut output).await.expect("check config runs");
 
         let output: serde_json::Value =
             serde_json::from_slice(&output).expect("server config JSON parses");
@@ -156,8 +252,8 @@ mod tests {
         assert_eq!(output["tls_assets"], serde_json::Value::Null);
     }
 
-    #[test]
-    fn generates_missing_tls_assets_when_requested() {
+    #[tokio::test]
+    async fn generates_missing_tls_assets_when_requested() {
         let root = temp_root("server-run-generate");
         let cli = ServerCli::try_parse_from([
             "dasobjectstore-server",
@@ -169,7 +265,7 @@ mod tests {
         .expect("server CLI parses");
         let mut output = Vec::new();
 
-        run(&cli, &mut output).expect("check config runs");
+        run(&cli, &mut output).await.expect("check config runs");
 
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("tls_generated: true"));
@@ -179,18 +275,50 @@ mod tests {
         cleanup(&root);
     }
 
-    #[test]
-    fn refuses_startup_until_tls_asset_handling_lands() {
-        let cli = ServerCli::try_parse_from(["dasobjectstore-server"]).expect("server CLI parses");
-        let mut output = Vec::new();
+    #[tokio::test]
+    async fn standalone_router_serves_product_mount_and_api() {
+        let root = temp_root("server-run-web");
+        write_web_asset(
+            &root,
+            "index.html",
+            "<!doctype html><title>DASObjectStore</title>",
+        );
+        write_web_asset(
+            &root,
+            "dasobjectstore-gui-web-68f9565a632c3ded.js",
+            "export {};",
+        );
+        write_web_asset(
+            &root,
+            "dasobjectstore-gui-web-68f9565a632c3ded_bg.wasm",
+            "wasm",
+        );
+        write_web_asset(&root, "styles-ddee865e3ae271da.css", "body{}");
 
-        let err = run(&cli, &mut output).expect_err("startup is blocked");
+        let response = standalone_router(root.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/products/dasobjectstore/")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("index response");
 
-        assert!(matches!(
-            err,
-            ServerRunError::StartupRequiresTlsAssetHandling
-        ));
-        assert!(output.is_empty());
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = standalone_router(root.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/products/dasobjectstore/api/v1/health")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("api response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        cleanup(&root);
     }
 
     fn temp_root(label: &str) -> PathBuf {
@@ -206,5 +334,10 @@ mod tests {
 
     fn cleanup(root: &Path) {
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn write_web_asset(root: &Path, name: &str, contents: impl AsRef<[u8]>) {
+        fs::create_dir_all(root).expect("web root created");
+        fs::write(root.join(name), contents).expect("web asset written");
     }
 }
