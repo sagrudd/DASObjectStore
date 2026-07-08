@@ -896,7 +896,7 @@ fn validate_create_object_store_request(
         request.confirmation_marker.as_deref(),
     )?;
 
-    Ok(DaemonCreateObjectStoreRequest {
+    let request = DaemonCreateObjectStoreRequest {
         store_id,
         store_class,
         required_copies: request.required_copies,
@@ -920,7 +920,15 @@ fn validate_create_object_store_request(
         client_request_id: request.client_request_id,
         administrator_actor: None,
         confirmation_marker,
-    })
+    };
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_objectstore_policy",
+            err.to_string(),
+        )
+    })?;
+    Ok(request)
 }
 
 fn validate_cancel_admin_job_request(
@@ -1471,6 +1479,11 @@ mod tests {
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::store::{
+        CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass, StorePolicy,
+    };
+    use dasobjectstore_object_service::StoreServiceDefinition;
     use serde::de::DeserializeOwned;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -2263,11 +2276,12 @@ mod tests {
         assert_eq!(response.accepted.kind, "object_store_creation");
         assert_eq!(response.store_id, "zymo-fecal-2025-05");
         assert_eq!(response.administrator_actor.as_deref(), Some("operator"));
+        let forwarded_requests = client.create_object_store_requests();
         assert_eq!(
-            client.create_object_store_requests(),
+            forwarded_requests,
             vec![DaemonCreateObjectStoreRequest {
                 store_id: "zymo-fecal-2025-05".to_string(),
-                store_class: "sequence_data".to_string(),
+                store_class: "generated_data".to_string(),
                 required_copies: 2,
                 bucket: Some("zymo-fecal-2025-05".to_string()),
                 writer_group: "bioinformatics".to_string(),
@@ -2285,6 +2299,59 @@ mod tests {
                 confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
             }]
         );
+        assert_eq!(
+            forwarded_requests[0]
+                .registry_definition()
+                .expect("registry definition projects"),
+            StoreServiceDefinition {
+                store_id: StoreId::new("zymo-fecal-2025-05").expect("store id"),
+                policy: StorePolicy {
+                    class: StoreClass::GeneratedData,
+                    copies: 2,
+                    capacity_behavior: CapacityBehavior::BackpressureByPriority,
+                    retention_policy: RetentionPolicy::TombstoneThenGc,
+                    export_policy: ExportPolicy::S3,
+                    ..StorePolicy::defaults_for(StoreClass::GeneratedData)
+                },
+                bucket_name: Some("zymo-fecal-2025-05".to_string()),
+                writer_group: Some("bioinformatics".to_string()),
+            }
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn create_object_store_rejects_invalid_domain_policy_values() {
+        let root = temp_root("objectstore-create-invalid-policy");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let request = CreateObjectStoreRequest {
+            capacity_behavior: "fast".to_string(),
+            ..create_object_store_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/object-stores/create",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "invalid_objectstore_policy");
+        assert!(encoded["message"]
+            .as_str()
+            .expect("message")
+            .contains("unsupported capacity_behavior"));
 
         cleanup(&root);
     }
@@ -2938,7 +3005,7 @@ mod tests {
     fn create_object_store_request() -> CreateObjectStoreRequest {
         CreateObjectStoreRequest {
             store_id: "zymo-fecal-2025-05".to_string(),
-            store_class: "sequence_data".to_string(),
+            store_class: "generated_data".to_string(),
             required_copies: 2,
             bucket: Some("zymo-fecal-2025-05".to_string()),
             writer_group: "bioinformatics".to_string(),

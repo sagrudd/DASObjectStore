@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.41.0 - 2026-07-08
+
+- Project Web-submitted ObjectStore creation requests into the same typed store
+  service definition used by CLI registry paths, and reject unsupported or
+  invalid store policy combinations before daemon submission.
+- Add Web/API regression coverage proving ObjectStore creation forwards the
+  expected registry/domain shape and rejects invalid policy vocabulary.
+- Add Web action-plan regression coverage proving SubObject creation matches the
+  CLI SubObject registry definition shape.
+
 ## 0.40.0 - 2026-07-08
 
 - Add an explicit existing-data acknowledgement gate to enclosure preparation

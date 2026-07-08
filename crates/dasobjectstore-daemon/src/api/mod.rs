@@ -153,6 +153,12 @@ fn create_object_store_validation_error(
                 expected: OBJECT_STORE_CREATE_CONFIRMATION,
             }
         }
+        CreateObjectStoreValidationError::InvalidFieldValue { field, value } => {
+            DaemonRequestValidationError::UnsupportedFieldValue { field, value }
+        }
+        CreateObjectStoreValidationError::InvalidPolicy { message } => {
+            DaemonRequestValidationError::InvalidPolicy { message }
+        }
     }
 }
 

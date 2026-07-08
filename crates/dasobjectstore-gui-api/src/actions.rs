@@ -312,6 +312,7 @@ fn plan_store_create(request: GuiActionPlanRequest) -> Result<GuiActionPlan, Gui
             missing_fields: missing,
         });
     }
+    validate_store_configure_policy(&request)?;
 
     let mut argv = strings(["dasobjectstore", "store", "create"]);
     argv.push(request.store_id.expect("validated store id"));
@@ -473,22 +474,38 @@ fn validate_store_configure_policy(
     if request.capacity_behavior.as_deref().is_some_and(|value| {
         !matches!(
             value,
-            "reject_writes" | "backpressure_by_priority" | "mark_redownload_required"
+            "reject_writes"
+                | "conservative"
+                | "backpressure_by_priority"
+                | "balanced"
+                | "fill_lowest_fractional_usage"
+                | "mark_redownload_required"
+                | "reproducible_cache"
         )
     }) {
         invalid.push("capacity_behavior".to_string());
     }
-    if request
-        .retention
-        .as_deref()
-        .is_some_and(|value| !matches!(value, "immediate_delete" | "tombstone_then_gc"))
-    {
+    if request.retention.as_deref().is_some_and(|value| {
+        !matches!(
+            value,
+            "immediate_delete" | "tombstone_then_gc" | "standard" | "retain_until_deleted"
+        )
+    }) {
         invalid.push("retention".to_string());
     }
     if request
         .endpoint_export_mode
         .as_deref()
-        .is_some_and(|value| !matches!(value, "s3" | "read_only_file_export" | "disabled"))
+        .is_some_and(|value| {
+            !matches!(
+                value,
+                "s3" | "s3_bucket"
+                    | "read_only_file_export"
+                    | "read_only_export"
+                    | "disabled"
+                    | "internal_only"
+            )
+        })
     {
         invalid.push("endpoint_export_mode".to_string());
     }
@@ -743,6 +760,10 @@ mod tests {
     use super::{
         action_catalog, plan_action, strings, GuiActionKind, GuiActionPlanRequest, GuiActionSafety,
     };
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_object_service::{
+        create_subobject_definition, SubObjectDefinition, SubObjectParent,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -932,6 +953,34 @@ mod tests {
     }
 
     #[test]
+    fn rejects_store_create_with_invalid_policy_values() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::StoreCreate,
+            store_id: Some("generated-data".to_string()),
+            store_class: Some("unknown".to_string()),
+            store_copies: Some(4),
+            bucket: Some("generated-data".to_string()),
+            writer_group: Some("mnemosyne".to_string()),
+            capacity_behavior: Some("fast".to_string()),
+            retention: Some("forever".to_string()),
+            endpoint_export_mode: Some("ftp".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("invalid create policy values are rejected");
+
+        assert_eq!(
+            err.missing_fields,
+            [
+                "store_class",
+                "store_copies",
+                "capacity_behavior",
+                "retention",
+                "endpoint_export_mode"
+            ]
+        );
+    }
+
+    #[test]
     fn plans_store_configure_with_policy_fields() {
         let plan = plan_action(GuiActionPlanRequest {
             action: GuiActionKind::StoreConfigure,
@@ -1088,6 +1137,68 @@ mod tests {
             ])
         );
         assert!(plan.confirmation_required);
+    }
+
+    #[test]
+    fn planned_subobject_create_matches_cli_registry_definition_shape() {
+        let registry_root = std::env::temp_dir().join(format!(
+            "dasobjectstore-subobject-web-parity-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        let registry_path = registry_root.join("subobjects.json");
+        let store_id = StoreId::new("generated-data").expect("store id");
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("pod5-raw".to_string()),
+            parent_store_id: Some(store_id.to_string()),
+            ssd_root: Some(PathBuf::from("/srv/dasobjectstore/ssd")),
+            subobject_inherits_object_type: Some(false),
+            subobject_object_type: Some("pod5".to_string()),
+            subobject_s3_routing: Some("dedicated_prefix".to_string()),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("SubObject create plan");
+
+        let report = create_subobject_definition(
+            &registry_path,
+            "pod5-raw",
+            SubObjectParent::Store {
+                store_id: store_id.clone(),
+            },
+        )
+        .expect("CLI registry definition");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "pod5-raw",
+                "--store",
+                "generated-data",
+                "--ssd-root",
+                "/srv/dasobjectstore/ssd"
+            ])
+        );
+        assert_eq!(
+            report.definition,
+            SubObjectDefinition {
+                name: "pod5-raw".to_string(),
+                store_id,
+                parent: SubObjectParent::Store {
+                    store_id: StoreId::new("generated-data").expect("store id"),
+                },
+                path: vec!["pod5-raw".to_string()],
+            }
+        );
+        assert_eq!(report.definition.object_prefix(), "generated-data/pod5-raw");
+
+        let _ = std::fs::remove_dir_all(registry_root);
     }
 
     #[test]

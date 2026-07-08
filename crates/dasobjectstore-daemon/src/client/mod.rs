@@ -543,7 +543,7 @@ mod tests {
                     "2026-07-08T21:15:00Z",
                     CreateObjectStoreRequest {
                         store_id: "generated-data".to_string(),
-                        store_class: "sequence_data".to_string(),
+                        store_class: "generated_data".to_string(),
                         required_copies: 2,
                         bucket: Some("generated-data".to_string()),
                         writer_group: "bioinformatics".to_string(),
@@ -568,7 +568,7 @@ mod tests {
         let response = client
             .create_object_store(CreateObjectStoreRequest {
                 store_id: "generated-data".to_string(),
-                store_class: "sequence_data".to_string(),
+                store_class: "generated_data".to_string(),
                 required_copies: 2,
                 bucket: Some("generated-data".to_string()),
                 writer_group: "bioinformatics".to_string(),

@@ -1,7 +1,13 @@
 use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
+use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::store::{
+    CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass, StorePolicy,
+};
+use dasobjectstore_object_service::StoreServiceDefinition;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 pub const OBJECT_STORE_CREATE_CONFIRMATION: &str = "confirm create objectstore";
 
@@ -59,8 +65,46 @@ impl CreateObjectStoreRequest {
         if self.confirmation_marker.trim() != OBJECT_STORE_CREATE_CONFIRMATION {
             return Err(CreateObjectStoreValidationError::ConfirmationMismatch);
         }
+        self.registry_definition()?;
 
         Ok(())
+    }
+
+    pub fn registry_definition(
+        &self,
+    ) -> Result<StoreServiceDefinition, CreateObjectStoreValidationError> {
+        validate_safe_name("store_id", &self.store_id)?;
+        validate_safe_name("store_class", &self.store_class)?;
+        validate_safe_name("writer_group", &self.writer_group)?;
+        validate_safe_name("object_type", &self.object_type)?;
+        validate_safe_name("capacity_behavior", &self.capacity_behavior)?;
+        validate_safe_name("retention", &self.retention)?;
+        validate_safe_name("endpoint_export_mode", &self.endpoint_export_mode)?;
+        validate_optional_safe_name("bucket", self.bucket.as_deref())?;
+        if self.required_copies == 0 || self.required_copies > 3 {
+            return Err(CreateObjectStoreValidationError::InvalidCopyCount {
+                copies: self.required_copies,
+            });
+        }
+
+        let class = parse_store_class(&self.store_class)?;
+        let mut policy = StorePolicy::defaults_for(class);
+        policy.copies = self.required_copies;
+        policy.capacity_behavior = parse_capacity_behavior(&self.capacity_behavior)?;
+        policy.retention_policy = parse_retention_policy(&self.retention)?;
+        policy.export_policy = parse_export_policy(&self.endpoint_export_mode)?;
+        policy
+            .validate()
+            .map_err(|error| CreateObjectStoreValidationError::InvalidPolicy {
+                message: error.to_string(),
+            })?;
+
+        Ok(StoreServiceDefinition {
+            store_id: StoreId::new(self.store_id.clone()).expect("validated store id"),
+            policy,
+            bucket_name: self.bucket.clone(),
+            writer_group: Some(self.writer_group.clone()),
+        })
     }
 }
 
@@ -122,6 +166,8 @@ pub enum CreateObjectStoreValidationError {
     RelativePath { field: &'static str, path: PathBuf },
     BlankClientRequestId,
     ConfirmationMismatch,
+    InvalidFieldValue { field: &'static str, value: String },
+    InvalidPolicy { message: String },
 }
 
 impl Display for CreateObjectStoreValidationError {
@@ -148,6 +194,10 @@ impl Display for CreateObjectStoreValidationError {
                 formatter,
                 "confirmation_marker must exactly match \"{OBJECT_STORE_CREATE_CONFIRMATION}\""
             ),
+            Self::InvalidFieldValue { field, value } => {
+                write!(formatter, "unsupported {field}: {value}")
+            }
+            Self::InvalidPolicy { message } => formatter.write_str(message),
         }
     }
 }
@@ -194,6 +244,58 @@ fn is_safe_name(value: &str) -> bool {
     })
 }
 
+fn parse_store_class(value: &str) -> Result<StoreClass, CreateObjectStoreValidationError> {
+    StoreClass::from_str(value).map_err(|_| CreateObjectStoreValidationError::InvalidFieldValue {
+        field: "store_class",
+        value: value.to_string(),
+    })
+}
+
+fn parse_capacity_behavior(
+    value: &str,
+) -> Result<CapacityBehavior, CreateObjectStoreValidationError> {
+    match value {
+        "reject_writes" | "conservative" => Ok(CapacityBehavior::RejectWrites),
+        "backpressure_by_priority" | "balanced" | "fill_lowest_fractional_usage" => {
+            Ok(CapacityBehavior::BackpressureByPriority)
+        }
+        "mark_redownload_required" | "reproducible_cache" => {
+            Ok(CapacityBehavior::MarkRedownloadRequired)
+        }
+        _ => Err(CreateObjectStoreValidationError::InvalidFieldValue {
+            field: "capacity_behavior",
+            value: value.to_string(),
+        }),
+    }
+}
+
+fn parse_retention_policy(
+    value: &str,
+) -> Result<RetentionPolicy, CreateObjectStoreValidationError> {
+    match value {
+        "immediate_delete" => Ok(RetentionPolicy::ImmediateDelete),
+        "tombstone_then_gc" | "standard" | "retain_until_deleted" => {
+            Ok(RetentionPolicy::TombstoneThenGc)
+        }
+        _ => Err(CreateObjectStoreValidationError::InvalidFieldValue {
+            field: "retention",
+            value: value.to_string(),
+        }),
+    }
+}
+
+fn parse_export_policy(value: &str) -> Result<ExportPolicy, CreateObjectStoreValidationError> {
+    match value {
+        "s3" | "s3_bucket" => Ok(ExportPolicy::S3),
+        "read_only_file_export" | "read_only_export" => Ok(ExportPolicy::ReadOnlyFileExport),
+        "disabled" | "internal_only" => Ok(ExportPolicy::Disabled),
+        _ => Err(CreateObjectStoreValidationError::InvalidFieldValue {
+            field: "endpoint_export_mode",
+            value: value.to_string(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -201,6 +303,7 @@ mod tests {
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::api::{DaemonJobId, DaemonJobKind};
+    use dasobjectstore_core::store::{CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass};
     use std::path::PathBuf;
 
     fn valid_request() -> CreateObjectStoreRequest {
@@ -231,6 +334,28 @@ mod tests {
     }
 
     #[test]
+    fn request_projects_to_cli_registry_definition_shape() {
+        let definition = valid_request()
+            .registry_definition()
+            .expect("registry definition projects");
+
+        assert_eq!(definition.store_id.as_str(), "generated-data");
+        assert_eq!(definition.policy.class, StoreClass::GeneratedData);
+        assert_eq!(definition.policy.copies, 2);
+        assert_eq!(
+            definition.policy.capacity_behavior,
+            CapacityBehavior::BackpressureByPriority
+        );
+        assert_eq!(
+            definition.policy.retention_policy,
+            RetentionPolicy::TombstoneThenGc
+        );
+        assert_eq!(definition.policy.export_policy, ExportPolicy::S3);
+        assert_eq!(definition.bucket_name.as_deref(), Some("generated-data"));
+        assert_eq!(definition.writer_group.as_deref(), Some("bioinformatics"));
+    }
+
+    #[test]
     fn rejects_blank_store_id() {
         let request = CreateObjectStoreRequest {
             store_id: " ".to_string(),
@@ -254,6 +379,39 @@ mod tests {
             request.validate(),
             Err(CreateObjectStoreValidationError::InvalidCopyCount { copies: 4 })
         );
+    }
+
+    #[test]
+    fn rejects_unsupported_domain_policy_values() {
+        let request = CreateObjectStoreRequest {
+            capacity_behavior: "fast".to_string(),
+            ..valid_request()
+        };
+
+        assert_eq!(
+            request.validate(),
+            Err(CreateObjectStoreValidationError::InvalidFieldValue {
+                field: "capacity_behavior",
+                value: "fast".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_policy_combinations_not_accepted_by_cli_registry() {
+        let request = CreateObjectStoreRequest {
+            store_class: "critical_metadata".to_string(),
+            required_copies: 1,
+            retention: "immediate_delete".to_string(),
+            capacity_behavior: "mark_redownload_required".to_string(),
+            ..valid_request()
+        };
+
+        let Err(CreateObjectStoreValidationError::InvalidPolicy { message }) = request.validate()
+        else {
+            panic!("invalid policy combination should be rejected");
+        };
+        assert!(message.contains("protected store class critical_metadata"));
     }
 
     #[test]

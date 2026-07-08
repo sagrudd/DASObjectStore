@@ -309,6 +309,8 @@ pub enum DaemonRequestValidationError {
     ConfirmationMismatch { expected: &'static str },
     FormatNotAllowed,
     ExistingDataNotAcknowledged,
+    UnsupportedFieldValue { field: &'static str, value: String },
+    InvalidPolicy { message: String },
     DuplicateFieldValue { field: &'static str, value: String },
     UnsupportedServiceProvider { provider: String },
 }
@@ -359,6 +361,10 @@ impl Display for DaemonRequestValidationError {
             Self::ExistingDataNotAcknowledged => {
                 formatter.write_str("existing_data_acknowledged must be true for this operation")
             }
+            Self::UnsupportedFieldValue { field, value } => {
+                write!(formatter, "unsupported {field}: {value}")
+            }
+            Self::InvalidPolicy { message } => formatter.write_str(message),
             Self::DuplicateFieldValue { field, value } => {
                 write!(formatter, "duplicate {field}: {value}")
             }

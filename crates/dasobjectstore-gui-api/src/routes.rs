@@ -638,6 +638,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn action_plan_route_rejects_invalid_store_create_policy_values() {
+        let response = post_json(
+            "/api/v1/actions/plan",
+            json!({
+                "action": "store_create",
+                "store_id": "generated-data",
+                "store_class": "unknown",
+                "store_copies": 4,
+                "capacity_behavior": "fast",
+                "retention": "forever",
+                "endpoint_export_mode": "ftp"
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["action"], "store_create");
+        assert_eq!(
+            encoded["missing_fields"],
+            json!([
+                "store_class",
+                "store_copies",
+                "capacity_behavior",
+                "retention",
+                "endpoint_export_mode"
+            ])
+        );
+    }
+
+    #[tokio::test]
     async fn action_plan_route_returns_subobject_create_plan() {
         let response = post_json(
             "/api/v1/actions/plan",

@@ -365,6 +365,10 @@ plan for administrator review. Submission then requires the exact phrase
 the daemon ObjectStore creation contract. The browser displays the accepted
 administrator job identifier, dry-run state, administrator actor, client request
 identifier, and policy summary after the daemon accepts the request.
+The Web route validates this request against the same store-service definition
+shape used by CLI registry creation, so unsupported policy vocabulary or invalid
+store-class/copy/retention combinations are rejected before any administrator
+job is accepted.
 
 Existing ObjectStores can be selected in the ``Configure ObjectStore`` card.
 The policy editor is populated from the live ObjectStore card and lets an

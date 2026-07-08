@@ -620,7 +620,7 @@ older checklist claims.
 - [x] Implement SubObject creation/configuration UI for nested prefixes, parent
   ObjectStore selection, object type inheritance/override, S3 routing, and
   registry preview before confirmation.
-- [ ] Add Web tests proving ObjectStore and SubObject creation produce the same
+- [x] Add Web tests proving ObjectStore and SubObject creation produce the same
   registry/domain records as CLI paths and reject invalid policy combinations.
 - [ ] Promote Users/Groups into primary navigation when host mode permits local
   administration, including current OS authority, product-local users, local
