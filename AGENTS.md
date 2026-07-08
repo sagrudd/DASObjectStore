@@ -12,6 +12,20 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
   implementing a scoped request.
 - Prefer surgical modifications and additions over broad rewrites.
 
+## Deployment Host
+
+- The DAS appliance currently used for deployment testing is
+  `stephen@192.168.1.192`.
+- Use the PEM at `~/.ssh/dasobjectstore-codex` for SSH access:
+  `ssh -i ~/.ssh/dasobjectstore-codex stephen@192.168.1.192`.
+- Do not commit or copy private key material into this repository; only the
+  expected local key path is documented here.
+- The active deployment checkout on the DAS host is usually
+  `/home/stephen/src/DASObjectStore`.
+- Build Linux packages on the DAS host when working from a non-Linux
+  development machine, then install the generated Debian package with `dpkg`
+  and restart `dasobjectstored`.
+
 ## Versioning
 
 - Maintain semantic versioning for every release; releases have begun at
