@@ -2,10 +2,12 @@ use crate::actions::{
     action_catalog, plan_action as build_action_plan, GuiActionCatalog, GuiActionPlan,
     GuiActionPlanError, GuiActionPlanRequest,
 };
+use crate::dashboard::{EnclosuresPageView, HomeDashboardView, ObjectStoresPageView};
 use crate::view::{api_health, ApiHealth};
 use crate::workspaces::{
     ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, ObjectsWorkspaceView,
-    OverviewWorkspaceView, StoresWorkspaceView,
+    OverviewWorkspaceView, ProductBioinformaticsWorkspaceView, ProductEnclosuresWorkspaceView,
+    ProductHomeWorkspaceView, ProductObjectStoresWorkspaceView, StoresWorkspaceView,
 };
 use axum::{http::StatusCode, routing::get, routing::post, Json, Router};
 
@@ -14,7 +16,26 @@ pub fn gui_api_router() -> Router {
         .route("/api/v1/health", get(health))
         .route("/api/v1/actions", get(actions))
         .route("/api/v1/actions/plan", post(plan_action))
+        .route("/api/v1/dashboard/home", get(home_dashboard))
+        .route("/api/v1/dashboard/enclosures", get(enclosures_dashboard))
+        .route(
+            "/api/v1/dashboard/object-stores",
+            get(object_stores_dashboard),
+        )
         .route("/api/v1/workspaces/overview", get(overview_workspace))
+        .route("/api/v1/workspaces/home", get(product_home_workspace))
+        .route(
+            "/api/v1/workspaces/enclosures",
+            get(product_enclosures_workspace),
+        )
+        .route(
+            "/api/v1/workspaces/objectstores",
+            get(product_objectstores_workspace),
+        )
+        .route(
+            "/api/v1/workspaces/bioinformatics",
+            get(product_bioinformatics_workspace),
+        )
         .route("/api/v1/workspaces/disks", get(disks_workspace))
         .route("/api/v1/workspaces/stores", get(stores_workspace))
         .route("/api/v1/workspaces/objects", get(objects_workspace))
@@ -30,8 +51,36 @@ async fn actions() -> Json<GuiActionCatalog> {
     Json(action_catalog())
 }
 
+async fn home_dashboard() -> Json<HomeDashboardView> {
+    Json(HomeDashboardView::bootstrap_fixture())
+}
+
+async fn enclosures_dashboard() -> Json<EnclosuresPageView> {
+    Json(EnclosuresPageView::bootstrap_fixture())
+}
+
+async fn object_stores_dashboard() -> Json<ObjectStoresPageView> {
+    Json(ObjectStoresPageView::bootstrap_fixture())
+}
+
 async fn overview_workspace() -> Json<OverviewWorkspaceView> {
     Json(OverviewWorkspaceView::empty())
+}
+
+async fn product_home_workspace() -> Json<ProductHomeWorkspaceView> {
+    Json(ProductHomeWorkspaceView::bootstrap())
+}
+
+async fn product_enclosures_workspace() -> Json<ProductEnclosuresWorkspaceView> {
+    Json(ProductEnclosuresWorkspaceView::bootstrap())
+}
+
+async fn product_objectstores_workspace() -> Json<ProductObjectStoresWorkspaceView> {
+    Json(ProductObjectStoresWorkspaceView::bootstrap())
+}
+
+async fn product_bioinformatics_workspace() -> Json<ProductBioinformaticsWorkspaceView> {
+    Json(ProductBioinformaticsWorkspaceView::bootstrap())
 }
 
 async fn disks_workspace() -> Json<DisksWorkspaceView> {
@@ -76,6 +125,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn home_dashboard_route_returns_redesign_payload() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/home")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("home dashboard response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
+        assert_eq!(encoded["health"]["state"], "watch");
+        assert_eq!(encoded["drives"]["mounted"], 18);
+        assert_eq!(encoded["capacity"]["free_tib"], "83.4");
+        assert_eq!(encoded["throughput_7d"]["window_days"], 7);
+        assert_eq!(encoded["memory_stress"]["state"], "nominal");
+        assert_eq!(
+            encoded["create_object_store"]["action_kind"],
+            "store_create"
+        );
+    }
+
+    #[tokio::test]
+    async fn enclosures_dashboard_route_returns_redesign_payload() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/enclosures")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("enclosures dashboard response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
+        assert_eq!(encoded["selected_enclosure_id"], "das-enc-a");
+        assert_eq!(
+            encoded["enclosures"].as_array().expect("enclosures").len(),
+            2
+        );
+        assert_eq!(encoded["enclosures"][0]["drive_count"]["mounted"], 8);
+        assert_eq!(
+            encoded["details"]["slots"][0]["drive_id"],
+            "das-enc-a-slot-01"
+        );
+    }
+
+    #[tokio::test]
+    async fn object_stores_dashboard_route_returns_redesign_payload() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/object-stores")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("object stores dashboard response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
+        assert_eq!(encoded["selected_store_id"], "generated-data");
+        assert_eq!(encoded["stores"][0]["store_id"], "generated-data");
+        assert_eq!(
+            encoded["create_object_store"]["defaults"]["required_copies"],
+            2
+        );
+        assert_eq!(
+            encoded["create_object_store"]["confirmation_required"],
+            true
+        );
+    }
+
+    #[tokio::test]
     async fn overview_route_returns_workspace_payload() {
         let response = gui_api_router()
             .oneshot(
@@ -95,6 +227,116 @@ mod tests {
 
         assert_eq!(encoded["endpoints"]["endpoint_count"], 0);
         assert_eq!(encoded["attention"]["action_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn product_home_route_returns_dashboard_contract() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/home")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("home response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(
+            encoded["schema_version"],
+            "dasobjectstore.product_workspaces.v1"
+        );
+        assert_eq!(encoded["health"]["drive_count"], 0);
+        assert_eq!(encoded["capacity"]["available_bytes"], 0);
+        assert_eq!(encoded["smart_warnings"].as_array().unwrap().len(), 0);
+        assert_eq!(encoded["warnings"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn product_enclosures_route_returns_admin_gated_workflow() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/enclosures")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("enclosures response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(encoded["administrator_actions_enabled"], false);
+        assert_eq!(encoded["add_enclosure"]["enabled"], false);
+        assert_eq!(
+            encoded["add_enclosure"]["steps"].as_array().unwrap().len(),
+            5
+        );
+        assert_eq!(encoded["enclosures"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn product_objectstores_route_returns_group_policy_contract() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/objectstores")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("objectstores response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(
+            encoded["groups_file_path"],
+            "/opt/dasobjectstore/groups.json"
+        );
+        assert_eq!(encoded["create"]["requires_sudo_administrator"], true);
+        assert!(encoded["create"]["supported_store_types"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("pod5")));
+        assert_eq!(encoded["object_stores"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn product_bioinformatics_route_is_explicit_placeholder() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/bioinformatics")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("bioinformatics response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(encoded["available"], false);
+        assert!(encoded["supported_object_types"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("POD5")));
     }
 
     #[tokio::test]

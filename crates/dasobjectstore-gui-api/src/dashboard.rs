@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 mod attention;
 mod destage_queue;
 mod ingest_queue;
+mod redesign;
 
 pub use attention::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
@@ -15,6 +16,15 @@ pub use attention::{
 pub use destage_queue::{DestageQueueObjectView, DestageQueueView, ObjectStateView};
 pub use ingest_queue::{
     IngestJobStateView, IngestProgressView, IngestQueueJobView, IngestQueueView, QueuePressureView,
+};
+pub use redesign::{
+    CapacitySummaryView, CreateObjectStoreAffordanceView, CreateObjectStoreDefaultsView,
+    CreateObjectStoreFieldView, DasEnclosureCardView, DasEnclosureDetailView,
+    DashboardHealthStateView, DriveCountSummaryView, EnclosureConnectionView,
+    EnclosureDriveSlotView, EnclosuresPageView, HealthSummaryView, HomeDashboardView,
+    MemoryStressStateView, MemoryStressView, ObjectStoreCardView, ObjectStoresPageView,
+    SmartWarningView, SmartWarningsSummaryView, StoreClassOptionView, ThroughputDayView,
+    ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

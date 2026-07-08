@@ -1,12 +1,14 @@
 use crate::dashboard::{
-    DashboardAttentionView, DashboardWarning, DestageQueueView, DiskHealthView, IngestQueueView,
-    ObjectStateView, PoolStatusView,
+    CreateObjectStoreAffordanceView, DasEnclosureCardView, DashboardAttentionView,
+    DashboardWarning, DestageQueueView, DiskHealthView, HomeDashboardView, IngestQueueView,
+    ObjectStateView, ObjectStoreCardView, PoolStatusView,
 };
 use crate::endpoints::EndpointInventoryView;
 use crate::{LocalUserMetadata, UserSummary, SUDO_ADMIN_GROUPS};
 use serde::{Deserialize, Serialize};
 
 pub const OPERATIONS_WORKSPACES_SCHEMA_VERSION: &str = "dasobjectstore.operations_workspaces.v1";
+pub const PRODUCT_WORKSPACES_SCHEMA_VERSION: &str = "dasobjectstore.product_workspaces.v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OperationsWorkspacesView {
@@ -127,6 +129,7 @@ pub fn workspace_navigation(
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OverviewWorkspaceView {
+    pub home: Option<HomeDashboardView>,
     pub pool: Option<PoolStatusView>,
     pub ingest: Option<IngestQueueView>,
     pub destage: Option<DestageQueueView>,
@@ -137,6 +140,7 @@ pub struct OverviewWorkspaceView {
 impl OverviewWorkspaceView {
     pub fn empty() -> Self {
         Self {
+            home: None,
             pool: None,
             ingest: None,
             destage: None,
@@ -146,9 +150,305 @@ impl OverviewWorkspaceView {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ProductHomeWorkspaceView {
+    pub schema_version: String,
+    pub health: ProductHealthSummaryView,
+    pub capacity: ProductCapacitySummaryView,
+    pub throughput_7d: ProductThroughputSummaryView,
+    pub memory: ProductMemoryStressView,
+    pub smart_warnings: Vec<ProductSmartWarningView>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+impl ProductHomeWorkspaceView {
+    pub fn bootstrap() -> Self {
+        Self {
+            schema_version: PRODUCT_WORKSPACES_SCHEMA_VERSION.to_string(),
+            health: ProductHealthSummaryView {
+                appliance_state: "bootstrap".to_string(),
+                write_ready: false,
+                drive_count: 0,
+                mounted_enclosure_count: 0,
+                object_store_count: 0,
+                smart_warning_count: 0,
+            },
+            capacity: ProductCapacitySummaryView {
+                total_bytes: 0,
+                used_bytes: 0,
+                available_bytes: 0,
+                protected_used_bytes: 0,
+            },
+            throughput_7d: ProductThroughputSummaryView {
+                ingress_bytes: 0,
+                destage_bytes: 0,
+                average_ingress_mib_s: None,
+                peak_ingress_mib_s: None,
+            },
+            memory: ProductMemoryStressView {
+                used_bytes: 0,
+                total_bytes: 0,
+                stress_percent: 0,
+                pressure_state: "unknown".to_string(),
+            },
+            smart_warnings: Vec::new(),
+            warnings: vec![DashboardWarning::new(
+                "live_inventory_pending",
+                "Live enclosure, SMART, capacity, throughput, and memory data are pending daemon inventory integration.",
+            )],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductHealthSummaryView {
+    pub appliance_state: String,
+    pub write_ready: bool,
+    pub drive_count: usize,
+    pub mounted_enclosure_count: usize,
+    pub object_store_count: usize,
+    pub smart_warning_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductCapacitySummaryView {
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
+    pub protected_used_bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ProductThroughputSummaryView {
+    pub ingress_bytes: u64,
+    pub destage_bytes: u64,
+    pub average_ingress_mib_s: Option<f64>,
+    pub peak_ingress_mib_s: Option<f64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductMemoryStressView {
+    pub used_bytes: u64,
+    pub total_bytes: u64,
+    pub stress_percent: u8,
+    pub pressure_state: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductSmartWarningView {
+    pub disk_id: String,
+    pub enclosure_id: Option<String>,
+    pub bay_label: Option<String>,
+    pub warning: String,
+    pub severity: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductEnclosuresWorkspaceView {
+    pub schema_version: String,
+    pub administrator_actions_enabled: bool,
+    pub add_enclosure: EnclosureAddWorkflowView,
+    pub enclosures: Vec<ProductEnclosureCardView>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+impl ProductEnclosuresWorkspaceView {
+    pub fn bootstrap() -> Self {
+        Self {
+            schema_version: PRODUCT_WORKSPACES_SCHEMA_VERSION.to_string(),
+            administrator_actions_enabled: false,
+            add_enclosure: EnclosureAddWorkflowView::bootstrap(false),
+            enclosures: Vec::new(),
+            warnings: vec![DashboardWarning::new(
+                "enclosure_inventory_pending",
+                "Live DAS enclosure inventory is pending daemon-backed discovery.",
+            )],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EnclosureAddWorkflowView {
+    pub enabled: bool,
+    pub requires_sudo_administrator: bool,
+    pub steps: Vec<String>,
+    pub blocked_reason: Option<String>,
+}
+
+impl EnclosureAddWorkflowView {
+    fn bootstrap(administrator_actions_enabled: bool) -> Self {
+        Self {
+            enabled: administrator_actions_enabled,
+            requires_sudo_administrator: true,
+            steps: vec![
+                "Detect supported DAS enclosure".to_string(),
+                "Identify SSD landing media".to_string(),
+                "Identify eligible HDD media".to_string(),
+                "Review format and data-loss plan".to_string(),
+                "Submit daemon preparation job".to_string(),
+            ],
+            blocked_reason: (!administrator_actions_enabled).then(|| {
+                "Current user must have sudo-derived DASObjectStore administrator rights."
+                    .to_string()
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductEnclosureCardView {
+    pub enclosure_id: String,
+    pub display_name: String,
+    pub vendor: Option<String>,
+    pub product: Option<String>,
+    pub branding: String,
+    pub topology: Option<String>,
+    pub mounted: bool,
+    pub ssd_count: usize,
+    pub hdd_count: usize,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
+    pub health_state: String,
+    pub drives: Vec<ProductEnclosureDriveView>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductEnclosureDriveView {
+    pub disk_id: String,
+    pub role: String,
+    pub device_path: Option<String>,
+    pub bay_label: Option<String>,
+    pub capacity_bytes: u64,
+    pub used_bytes: u64,
+    pub health_state: String,
+    pub smart_warning_count: u16,
+    pub mounted_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductObjectStoresWorkspaceView {
+    pub schema_version: String,
+    pub administrator_actions_enabled: bool,
+    pub groups_file_path: String,
+    pub groups: Vec<ProductStorageGroupView>,
+    pub create: ObjectStoreCreateWorkflowView,
+    pub object_stores: Vec<ProductObjectStoreCardView>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+impl ProductObjectStoresWorkspaceView {
+    pub fn bootstrap() -> Self {
+        let administrator_actions_enabled = false;
+        Self {
+            schema_version: PRODUCT_WORKSPACES_SCHEMA_VERSION.to_string(),
+            administrator_actions_enabled,
+            groups_file_path: "/opt/dasobjectstore/groups.json".to_string(),
+            groups: Vec::new(),
+            create: ObjectStoreCreateWorkflowView::bootstrap(administrator_actions_enabled),
+            object_stores: Vec::new(),
+            warnings: vec![DashboardWarning::new(
+                "object_store_inventory_pending",
+                "Live object-store inventory and group policy are pending daemon-backed discovery.",
+            )],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductStorageGroupView {
+    pub group_name: String,
+    pub display_name: String,
+    pub source: String,
+    pub current_user_member: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectStoreCreateWorkflowView {
+    pub enabled: bool,
+    pub requires_sudo_administrator: bool,
+    pub supported_store_types: Vec<String>,
+    pub supported_redundancy: Vec<u8>,
+    pub required_fields: Vec<String>,
+    pub blocked_reason: Option<String>,
+}
+
+impl ObjectStoreCreateWorkflowView {
+    fn bootstrap(administrator_actions_enabled: bool) -> Self {
+        Self {
+            enabled: administrator_actions_enabled,
+            requires_sudo_administrator: true,
+            supported_store_types: vec![
+                "naive".to_string(),
+                "bam".to_string(),
+                "pod5".to_string(),
+                "fastq".to_string(),
+                "ena_sra".to_string(),
+            ],
+            supported_redundancy: vec![1, 2, 3],
+            required_fields: vec![
+                "store name".to_string(),
+                "writer group".to_string(),
+                "enclosure".to_string(),
+                "object type".to_string(),
+                "redundancy".to_string(),
+            ],
+            blocked_reason: (!administrator_actions_enabled).then(|| {
+                "Current user must have sudo-derived DASObjectStore administrator rights."
+                    .to_string()
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductObjectStoreCardView {
+    pub store_id: String,
+    pub display_name: String,
+    pub writer_group: String,
+    pub enclosure_id: String,
+    pub object_type: String,
+    pub redundancy: u8,
+    pub public: bool,
+    pub writeable: bool,
+    pub used_bytes: u64,
+    pub object_count: usize,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProductBioinformaticsWorkspaceView {
+    pub schema_version: String,
+    pub available: bool,
+    pub supported_object_types: Vec<String>,
+    pub message: String,
+}
+
+impl ProductBioinformaticsWorkspaceView {
+    pub fn bootstrap() -> Self {
+        Self {
+            schema_version: PRODUCT_WORKSPACES_SCHEMA_VERSION.to_string(),
+            available: false,
+            supported_object_types: vec![
+                "BAM".to_string(),
+                "POD5".to_string(),
+                "FASTQ".to_string(),
+                "ENA/SRA".to_string(),
+                "CRAM".to_string(),
+                "VCF/BCF".to_string(),
+                "FASTA".to_string(),
+                "GFF/GTF".to_string(),
+            ],
+            message: "Bioinformatics orchestration will surface workflow-ready data sets once pipeline adapters are connected.".to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DisksWorkspaceView {
     pub disks: Vec<DiskHealthView>,
+    pub enclosures: Vec<DasEnclosureCardView>,
     pub selected_disk_id: Option<String>,
     pub warnings: Vec<DashboardWarning>,
 }
@@ -166,15 +466,23 @@ impl DisksWorkspaceView {
 
         Self {
             disks,
+            enclosures: Vec::new(),
             selected_disk_id: None,
             warnings,
         }
+    }
+
+    pub fn with_enclosures(mut self, enclosures: Vec<DasEnclosureCardView>) -> Self {
+        self.enclosures = enclosures;
+        self
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoresWorkspaceView {
     pub stores: Vec<StorePolicySummaryView>,
+    pub object_store_cards: Vec<ObjectStoreCardView>,
+    pub create_object_store: CreateObjectStoreAffordanceView,
     pub selected_store_id: Option<String>,
     pub warnings: Vec<DashboardWarning>,
 }
@@ -187,9 +495,16 @@ impl StoresWorkspaceView {
     pub fn from_stores(stores: Vec<StorePolicySummaryView>) -> Self {
         Self {
             stores,
+            object_store_cards: Vec::new(),
+            create_object_store: CreateObjectStoreAffordanceView::enabled(),
             selected_store_id: None,
             warnings: Vec::new(),
         }
+    }
+
+    pub fn with_object_store_cards(mut self, stores: Vec<ObjectStoreCardView>) -> Self {
+        self.object_store_cards = stores;
+        self
     }
 }
 
@@ -583,6 +898,7 @@ mod tests {
                 crate::EndpointValidationView::new(crate::EndpointValidationStateView::Validated),
             )]);
         let overview = OverviewWorkspaceView {
+            home: None,
             pool: None,
             ingest: None,
             destage: None,
@@ -664,6 +980,7 @@ mod tests {
         let overview = OverviewWorkspaceView::empty();
         let encoded = serde_json::to_value(overview).expect("overview serializes");
 
+        assert_eq!(encoded["home"], serde_json::Value::Null);
         assert_eq!(encoded["pool"], serde_json::Value::Null);
         assert_eq!(encoded["ingest"], serde_json::Value::Null);
         assert_eq!(encoded["destage"], serde_json::Value::Null);
@@ -677,6 +994,10 @@ mod tests {
         let encoded = serde_json::to_value(disks).expect("disks serializes");
 
         assert_eq!(encoded["disks"].as_array().expect("disks").len(), 0);
+        assert_eq!(
+            encoded["enclosures"].as_array().expect("enclosures").len(),
+            0
+        );
         assert_eq!(encoded["selected_disk_id"], serde_json::Value::Null);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
@@ -687,6 +1008,18 @@ mod tests {
         let encoded = serde_json::to_value(stores).expect("stores serializes");
 
         assert_eq!(encoded["stores"].as_array().expect("stores").len(), 0);
+        assert_eq!(
+            encoded["object_store_cards"]
+                .as_array()
+                .expect("object store cards")
+                .len(),
+            0
+        );
+        assert_eq!(encoded["create_object_store"]["enabled"], true);
+        assert_eq!(
+            encoded["create_object_store"]["action_kind"],
+            "store_create"
+        );
         assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
         assert_eq!(encoded["warnings"].as_array().expect("warnings").len(), 0);
     }
