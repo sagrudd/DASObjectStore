@@ -166,6 +166,46 @@ logical file is eventually landed on two distinct disks. The internal FIFO
 write queue is bounded so a fast SSD producer cannot create an unbounded HDD
 backlog inside the benchmark process.
 
+Scenario Matrix Selection
+-------------------------
+
+By default, ``performance-test`` runs the complete benchmark matrix:
+
+* ``ssd-only``
+* ``ssd-stage-then-drain``
+* ``ssd-overlap-drain``
+* ``direct-hdd``
+
+The HDD-writing scenarios use every concurrency value from ``1`` through
+``--max-hdd-concurrency``. This is useful for commissioning, but production
+source folders can be too large for every permutation to be worth repeating.
+
+Use ``--scenario`` to select the scenario classes that should run, and
+``--hdd-concurrency`` to select the HDD worker counts for HDD-writing
+scenarios. ``--scenario`` may be repeated. ``--hdd-concurrency`` accepts a
+comma-separated list:
+
+.. code-block:: console
+
+   sudo dasobjectstore performance-test \
+     --source /data/zymo_fecal_2025.05 \
+     --cap 750GiB \
+     --scenario ssd-overlap-drain \
+     --scenario direct-hdd \
+     --hdd-concurrency 1,3,5 \
+     --redundancy 1 \
+     --tui \
+     --report /var/lib/dasobjectstore/reports/performance-zymo-selected.pdf \
+     --json-artifact /var/lib/dasobjectstore/reports/performance-zymo-selected.json \
+     --authoritative
+
+The PDF report and JSON artifact record the selected scenario classes and HDD
+concurrency values. Omitted scenario classes are marked as not selected, rather
+than being treated as failed or zero-throughput tests. When ``--authoritative``
+is supplied, the persisted policy is based only on the selected matrix that was
+actually measured. Authoritative runs must include at least one HDD landing
+scenario: ``ssd-stage-then-drain``, ``ssd-overlap-drain``, or ``direct-hdd``.
+
 Commissioning Test
 ------------------
 

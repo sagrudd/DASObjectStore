@@ -97,6 +97,12 @@ pub(crate) struct PerformanceTestArgs {
     /// Maximum concurrent HDD writes to model.
     #[arg(long, default_value_t = 3)]
     max_hdd_concurrency: usize,
+    /// Scenario class to include; repeat to run a selected matrix instead of the default full sweep.
+    #[arg(long = "scenario", value_enum)]
+    scenarios: Vec<PerformanceScenarioSelection>,
+    /// HDD concurrency values to run for HDD-writing scenarios, for example 1,3,5.
+    #[arg(long = "hdd-concurrency", value_delimiter = ',', num_args = 1..)]
+    hdd_concurrency: Vec<usize>,
     /// Number of HDD copies to land for each logical file; accepted values are 1, 2, or 3.
     #[arg(long, default_value_t = 1)]
     redundancy: usize,
@@ -126,6 +132,18 @@ pub(crate) struct PerformanceTestArgs {
     keep_temp: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, ValueEnum)]
+pub(crate) enum PerformanceScenarioSelection {
+    /// Write all selected files to SSD, then read them back from SSD.
+    SsdOnly,
+    /// Stage selected files to SSD first, then drain SSD to HDD.
+    SsdStageThenDrain,
+    /// Overlap SSD ingest with FIFO HDD drain.
+    SsdOverlapDrain,
+    /// Write source files directly to HDD without SSD staging.
+    DirectHdd,
+}
+
 impl PerformanceTestArgs {
     pub(crate) fn file_size(&self) -> Option<&str> {
         self.file_size.as_deref()
@@ -145,6 +163,14 @@ impl PerformanceTestArgs {
 
     pub(crate) fn max_hdd_concurrency(&self) -> usize {
         self.max_hdd_concurrency
+    }
+
+    pub(crate) fn scenarios(&self) -> &[PerformanceScenarioSelection] {
+        &self.scenarios
+    }
+
+    pub(crate) fn hdd_concurrency(&self) -> &[usize] {
+        &self.hdd_concurrency
     }
 
     pub(crate) fn redundancy(&self) -> usize {
@@ -1897,8 +1923,8 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 mod tests {
     use super::{
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
-        MnemosyneCommand, ObjectCommand, PoolCommand, ProbeArgs, ServiceCommand, StatusArgs,
-        StoreArgs, StoreCommand, StoreS3UploadAuth, SubobjectCommand,
+        MnemosyneCommand, ObjectCommand, PerformanceScenarioSelection, PoolCommand, ProbeArgs,
+        ServiceCommand, StatusArgs, StoreArgs, StoreCommand, StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
@@ -1950,6 +1976,12 @@ mod tests {
             "2",
             "--max-hdd-concurrency",
             "5",
+            "--scenario",
+            "ssd-overlap-drain",
+            "--scenario",
+            "direct-hdd",
+            "--hdd-concurrency",
+            "1,3,5",
             "--ssd-root",
             "/srv/dasobjectstore/ssd",
             "--hdd-root",
@@ -1974,6 +2006,14 @@ mod tests {
         assert_eq!(args.source(), None);
         assert_eq!(args.cap(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);
+        assert_eq!(
+            args.scenarios(),
+            &[
+                PerformanceScenarioSelection::SsdOverlapDrain,
+                PerformanceScenarioSelection::DirectHdd
+            ]
+        );
+        assert_eq!(args.hdd_concurrency(), &[1, 3, 5]);
         assert_eq!(args.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
         assert_eq!(args.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
         assert_eq!(args.tmp_dir(), Path::new("/tmp/dos-perf"));

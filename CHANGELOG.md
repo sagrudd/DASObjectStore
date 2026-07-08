@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.12.0 - 2026-07-08
+
+- Add selectable ``dasobjectstore performance-test --scenario`` values so large
+  real-world source-folder benchmarks can include only the desired scenario
+  classes.
+- Add ``--hdd-concurrency`` for explicit HDD worker-count matrices such as
+  ``1,3,5`` instead of always sweeping every value through
+  ``--max-hdd-concurrency``.
+- Record the selected scenario matrix in reproduction metadata, JSON artifacts,
+  and PDF reports so authoritative recommendations reflect only measured
+  benchmark permutations.
+
 ## 0.11.1 - 2026-07-08
 
 - Change generated ``dasobjectstore performance-test`` workloads to create all
