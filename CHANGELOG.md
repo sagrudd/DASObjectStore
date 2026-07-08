@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.46.0 - 2026-07-09
+
+- Connect the Web Activity workspace API to live SSD ingest queue metadata,
+  including queued, active, complete, failed, and cancelled ingest rows.
+- Derive Activity destage summaries from live ingest queue rows so HDD
+  settlement state is visible without browser-side storage mutation.
+- Document Activity source warnings for unavailable daemon job and ingest queue
+  metadata feeds.
+
 ## 0.45.0 - 2026-07-09
 
 - Add a transport-neutral daemon `job_list` request/response and typed client

@@ -636,9 +636,10 @@ older checklist claims.
   registry so Web Activity renders daemon-recorded enclosure preparation,
   ObjectStore creation, local administration, service, ingest, and
   repair-oriented job rows without browser-side storage mutation.
-- [ ] Connect the Activity workspace API to live ingest queue events,
-  destage/repair events, and endpoint-validation events without browser-side
-  storage mutation.
+- [x] Connect the Activity workspace API to live ingest queue metadata and
+  queue-derived destage summaries without browser-side storage mutation.
+- [ ] Connect the Activity workspace API to live repair events and
+  endpoint-validation events without browser-side storage mutation.
 - [ ] Replace the Bioinformatics placeholder with dataset/workflow readiness
   cards for BAM, CRAM, POD5, FASTQ/FASTQ.GZ, FASTA, VCF/BCF, GFF/GTF, and
   ENA/SRA object types.

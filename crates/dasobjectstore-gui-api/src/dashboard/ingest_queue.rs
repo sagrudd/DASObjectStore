@@ -105,6 +105,7 @@ pub enum IngestJobStateView {
     Destaging,
     Complete,
     Failed,
+    Cancelled,
 }
 
 impl IngestJobStateView {
@@ -113,7 +114,7 @@ impl IngestJobStateView {
     }
 
     fn is_active(self) -> bool {
-        !matches!(self, Self::Complete | Self::Failed)
+        !matches!(self, Self::Complete | Self::Failed | Self::Cancelled)
     }
 
     fn is_failed(self) -> bool {
