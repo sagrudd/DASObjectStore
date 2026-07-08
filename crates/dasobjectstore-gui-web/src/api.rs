@@ -39,6 +39,16 @@ pub struct HomeDashboardResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EnclosuresPageResponse {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub enclosures: Vec<DasEnclosureCardResponse>,
+    pub selected_enclosure_id: Option<String>,
+    pub details: Option<DasEnclosureDetailResponse>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct HealthSummaryResponse {
     pub state: String,
     pub label: String,
@@ -70,8 +80,39 @@ pub struct CapacitySummaryResponse {
 pub struct DasEnclosureCardResponse {
     pub enclosure_id: String,
     pub display_name: String,
+    pub mount_path: String,
+    pub connection: EnclosureConnectionResponse,
     pub health: String,
+    pub drive_count: DriveCountSummaryResponse,
+    pub capacity: CapacitySummaryResponse,
+    pub last_seen_at_utc: String,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EnclosureConnectionResponse {
+    pub bus: String,
+    pub protocol: String,
+    pub link_speed: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct DasEnclosureDetailResponse {
+    pub enclosure_id: String,
+    pub vendor: String,
+    pub model: String,
+    pub serial: String,
+    pub firmware: Option<String>,
+    pub slots: Vec<EnclosureDriveSlotResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EnclosureDriveSlotResponse {
+    pub slot_number: u8,
+    pub drive_id: String,
+    pub size_tib: String,
+    pub health: String,
+    pub mounted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -232,6 +273,11 @@ pub async fn get_home_dashboard(path: &str) -> Result<HomeDashboardResponse, Api
     get_json(path).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn get_enclosures_dashboard(path: &str) -> Result<EnclosuresPageResponse, ApiError> {
+    get_json(path).await
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn auth_path(auth_base_path: &str, route: &str) -> String {
     format!("{}/{}", auth_base_path.trim_end_matches('/'), route)
@@ -293,7 +339,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_path, HomeDashboardResponse};
+    use super::{auth_path, EnclosuresPageResponse, HomeDashboardResponse};
 
     #[test]
     fn builds_auth_routes_under_product_mount() {
@@ -377,5 +423,69 @@ mod tests {
         assert_eq!(decoded.drives.total, 7);
         assert_eq!(decoded.capacity.free_tib, "87.5");
         assert_eq!(decoded.throughput_7d.avg_write_mib_s, 240);
+    }
+
+    #[test]
+    fn decodes_enclosures_dashboard_response_subset() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "enclosures": [{
+                "enclosure_id": "qnap-tl-d800c-01",
+                "display_name": "QNAP TL-D800C",
+                "mount_path": "/srv/dasobjectstore",
+                "connection": {
+                    "bus": "usb",
+                    "protocol": "uas",
+                    "link_speed": "10 Gb/s"
+                },
+                "health": "watch",
+                "drive_count": {
+                    "total": 8,
+                    "mounted": 7,
+                    "healthy": 6,
+                    "watch": 1,
+                    "suspect": 0,
+                    "failed": 0
+                },
+                "capacity": {
+                    "total_tib": "100.0",
+                    "used_tib": "12.5",
+                    "free_tib": "87.5",
+                    "used_percent_basis_points": 1250
+                },
+                "last_seen_at_utc": "2026-07-08T08:00:00Z",
+                "warnings": [{
+                    "code": "smart_watch",
+                    "message": "One member drive has a SMART warning."
+                }]
+            }],
+            "selected_enclosure_id": "qnap-tl-d800c-01",
+            "details": {
+                "enclosure_id": "qnap-tl-d800c-01",
+                "vendor": "QNAP",
+                "model": "TL-D800C",
+                "serial": "TL-D800C-TEST",
+                "firmware": null,
+                "slots": [{
+                    "slot_number": 1,
+                    "drive_id": "qnap-1057",
+                    "size_tib": "14.6",
+                    "health": "healthy",
+                    "mounted": true
+                }]
+            },
+            "warnings": []
+        });
+
+        let decoded = serde_json::from_value::<EnclosuresPageResponse>(payload)
+            .expect("enclosures dashboard decodes");
+
+        assert_eq!(decoded.enclosures.len(), 1);
+        assert_eq!(decoded.enclosures[0].drive_count.total, 8);
+        assert_eq!(
+            decoded.details.expect("detail").slots[0].drive_id,
+            "qnap-1057"
+        );
     }
 }

@@ -1,4 +1,6 @@
-use crate::api::HomeDashboardResponse;
+#[cfg(target_arch = "wasm32")]
+use crate::api::{DasEnclosureCardResponse, DasEnclosureDetailResponse};
+use crate::api::{EnclosuresPageResponse, HomeDashboardResponse};
 
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
@@ -306,6 +308,56 @@ pub fn fallback_enclosures() -> Vec<EnclosureSummary> {
     Vec::new()
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnclosureCardSummary {
+    pub id: String,
+    pub label: String,
+    pub name: String,
+    pub health: String,
+    pub drives: String,
+    pub capacity: String,
+    pub mount_path: String,
+    pub warning_count: usize,
+}
+
+pub fn enclosure_card_summaries(view: &EnclosuresPageResponse) -> Vec<EnclosureCardSummary> {
+    view.enclosures
+        .iter()
+        .map(|enclosure| {
+            let label = format!(
+                "{} / {} / {}",
+                enclosure.connection.bus,
+                enclosure.connection.protocol,
+                enclosure.connection.link_speed
+            );
+            let drives = format!(
+                "{} mounted of {} drive(s); {} healthy; {} watch; {} suspect; {} failed",
+                enclosure.drive_count.mounted,
+                enclosure.drive_count.total,
+                enclosure.drive_count.healthy,
+                enclosure.drive_count.watch,
+                enclosure.drive_count.suspect,
+                enclosure.drive_count.failed
+            );
+            let capacity = format!(
+                "{} TiB free of {} TiB",
+                enclosure.capacity.free_tib, enclosure.capacity.total_tib
+            );
+
+            EnclosureCardSummary {
+                id: enclosure.enclosure_id.clone(),
+                label,
+                name: enclosure.display_name.clone(),
+                health: enclosure.health.clone(),
+                drives,
+                capacity,
+                mount_path: enclosure.mount_path.clone(),
+                warning_count: enclosure.warnings.len(),
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ObjectStoreSummary {
     pub id: &'static str,
@@ -450,17 +502,34 @@ pub struct EnclosuresPageProps {
 #[function_component(EnclosuresPage)]
 pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
     let api_path = WorkspacePage::Enclosures.api_path(&props.api_base_path);
-    let enclosures = fallback_enclosures();
-    let selected_id = use_state(|| {
-        enclosures
-            .first()
-            .map(|enclosure| enclosure.id.to_string())
-            .unwrap_or_default()
-    });
-    let selected = enclosures
-        .iter()
-        .find(|enclosure| enclosure.id == selected_id.as_str())
-        .copied();
+    let selected_id = use_state(String::new);
+    let enclosures_state = use_state(|| ApiLoadState::<EnclosuresPageResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let enclosures_state = enclosures_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match crate::api::get_enclosures_dashboard(&path).await {
+                    Ok(view) if view.enclosures.is_empty() => {
+                        let message = view
+                            .warnings
+                            .first()
+                            .map(|warning| warning.message.clone())
+                            .unwrap_or_else(|| "No supported DAS enclosures reported.".to_string());
+                        enclosures_state.set(ApiLoadState::Empty(message));
+                    }
+                    Ok(view) => enclosures_state.set(ApiLoadState::loaded(view)),
+                    Err(error) if error.is_permission_denied() => {
+                        enclosures_state.set(ApiLoadState::PermissionDenied(error.message))
+                    }
+                    Err(error) => enclosures_state.set(ApiLoadState::Error(error.message)),
+                }
+            });
+            || ()
+        });
+    }
 
     html! {
         <section class="dos-page" data-page="enclosures" data-api-route={api_path}>
@@ -469,67 +538,209 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
                 title="Enclosures"
                 summary="Physical shelves and landing media grouped for operator review."
             />
+            { render_enclosures_state(&*enclosures_state, selected_id) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosures_state(
+    state: &ApiLoadState<EnclosuresPageResponse>,
+    selected_id: UseStateHandle<String>,
+) -> Html {
+    match state {
+        ApiLoadState::Loading => html! {
             <div class="dos-two-column">
                 <div class="dos-card-list">
-                    <section class="dos-card dos-create-card" data-action="enclosure_add">
-                        <span class="dos-create-mark">{ "+" }</span>
-                        <h2>{ "Add enclosure" }</h2>
-                        <p>{ "Admin workflow: detect supported DAS hardware, identify SSD/HDD media, review format risk, then submit the daemon preparation job." }</p>
-                        <span class="dos-status-pill">{ "Admin only" }</span>
-                    </section>
-                    if enclosures.is_empty() {
-                        <section class="dos-card dos-empty-card">
-                            <span class="dos-card-label">{ "Inventory" }</span>
-                            <h2>{ "No live enclosures reported yet." }</h2>
-                            <p>{ "Supported DAS enclosures will appear here as cards with branding, topology, capacity, health, and drive membership." }</p>
-                        </section>
-                    }
-                    { for enclosures.iter().map(|enclosure| {
-                        let is_selected = enclosure.id == selected_id.as_str();
-                        let selected_id = selected_id.clone();
-                        let enclosure_id = enclosure.id.to_string();
-                        html! {
-                            <button
-                                type="button"
-                                class={classes!("dos-card", "dos-enclosure-card", is_selected.then_some("is-selected"))}
-                                aria-pressed={is_selected.to_string()}
-                                onclick={Callback::from(move |_| selected_id.set(enclosure_id.clone()))}
-                            >
-                                <div class="dos-card-row">
-                                    <span class="dos-card-label">{ enclosure.role }</span>
-                                    <span class="dos-status-pill">{ enclosure.health }</span>
-                                </div>
-                                <strong>{ enclosure.name }</strong>
-                                <p>{ format!("{}/{} bays · {}", enclosure.bays_used, enclosure.bays_total, enclosure.capacity) }</p>
-                            </button>
-                        }
-                    }) }
+                    { render_add_enclosure_card() }
+                    { render_enclosures_state_message(
+                        "Loading",
+                        "Loading enclosure inventory",
+                        "The Web console is requesting daemon-backed DAS enclosure, drive, mount, capacity, and warning state.",
+                    ) }
                 </div>
                 <section class="dos-card dos-detail-panel">
-                    { match selected {
-                        Some(enclosure) => html! {
-                            <>
-                                <span class="dos-card-label">{ "Enclosure detail" }</span>
-                                <h2>{ enclosure.name }</h2>
-                                <dl class="dos-detail-list">
-                                    <div><dt>{ "Role" }</dt><dd>{ enclosure.role }</dd></div>
-                                    <div><dt>{ "Health" }</dt><dd>{ enclosure.health }</dd></div>
-                                    <div><dt>{ "Bays" }</dt><dd>{ format!("{}/{}", enclosure.bays_used, enclosure.bays_total) }</dd></div>
-                                    <div><dt>{ "Capacity" }</dt><dd>{ enclosure.capacity }</dd></div>
-                                </dl>
-                                <p>{ enclosure.note }</p>
-                            </>
-                        },
-                        None => html! {
-                            <>
-                                <span class="dos-card-label">{ "Enclosure detail" }</span>
-                                <h2>{ "Select an enclosure" }</h2>
-                                <p>{ "Drive cards, SMART warnings, bay mapping, mount state, and administrator actions will appear here once a supported enclosure is detected." }</p>
-                            </>
-                        },
-                    } }
+                    <span class="dos-card-label">{ "Enclosure detail" }</span>
+                    <h2>{ "Waiting for daemon inventory" }</h2>
+                    <p>{ "Drive cards, SMART warnings, bay mapping, mount state, and administrator actions will appear here once a supported enclosure is detected." }</p>
                 </section>
             </div>
+        },
+        ApiLoadState::Loaded(view) | ApiLoadState::Stale { value: view, .. } => {
+            render_enclosure_inventory(view, selected_id)
+        }
+        ApiLoadState::Empty(message) => {
+            render_enclosures_state_message("Inventory", "No live enclosures reported yet", message)
+        }
+        ApiLoadState::PermissionDenied(message) => render_enclosures_state_message(
+            "Permission denied",
+            "Enclosure inventory requires an authenticated session",
+            message,
+        ),
+        ApiLoadState::Error(message) => {
+            render_enclosures_state_message("Error", "Unable to load enclosure inventory", message)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_inventory(
+    view: &EnclosuresPageResponse,
+    selected_id: UseStateHandle<String>,
+) -> Html {
+    let active_id = if selected_id.is_empty() {
+        view.selected_enclosure_id
+            .as_deref()
+            .or_else(|| {
+                view.enclosures
+                    .first()
+                    .map(|enclosure| enclosure.enclosure_id.as_str())
+            })
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        (*selected_id).clone()
+    };
+
+    html! {
+        <div class="dos-two-column">
+            <div class="dos-card-list">
+                { render_add_enclosure_card() }
+                { for enclosure_card_summaries(view).into_iter().map(|summary| {
+                    render_enclosure_card(summary, &active_id, selected_id.clone())
+                }) }
+            </div>
+            { render_enclosure_detail_panel(view, &active_id) }
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_add_enclosure_card() -> Html {
+    html! {
+        <section class="dos-card dos-create-card" data-action="enclosure_add">
+            <span class="dos-create-mark">{ "+" }</span>
+            <h2>{ "Add enclosure" }</h2>
+            <p>{ "Admin workflow: detect supported DAS hardware, identify SSD/HDD media, review format risk, then submit the daemon preparation job." }</p>
+            <span class="dos-status-pill">{ "Admin only" }</span>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_card(
+    summary: EnclosureCardSummary,
+    active_id: &str,
+    selected_id: UseStateHandle<String>,
+) -> Html {
+    let is_selected = summary.id == active_id;
+    let enclosure_id = summary.id.clone();
+    html! {
+        <button
+            type="button"
+            class={classes!("dos-card", "dos-enclosure-card", is_selected.then_some("is-selected"))}
+            data-enclosure-id={summary.id.clone()}
+            aria-pressed={is_selected.to_string()}
+            onclick={Callback::from(move |_| selected_id.set(enclosure_id.clone()))}
+        >
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ summary.label }</span>
+                <span class="dos-status-pill">{ summary.health }</span>
+            </div>
+            <strong>{ summary.name }</strong>
+            <p>{ summary.drives }</p>
+            <p>{ summary.capacity }</p>
+            <p>{ format!("{} warning(s) · {}", summary.warning_count, summary.mount_path) }</p>
+        </button>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_detail_panel(view: &EnclosuresPageResponse, active_id: &str) -> Html {
+    let enclosure = view
+        .enclosures
+        .iter()
+        .find(|enclosure| enclosure.enclosure_id == active_id);
+    let detail = view
+        .details
+        .as_ref()
+        .filter(|detail| detail.enclosure_id == active_id);
+
+    html! {
+        <section class="dos-card dos-detail-panel">
+            { match (enclosure, detail) {
+                (Some(enclosure), Some(detail)) => render_enclosure_detail(enclosure, detail),
+                (Some(enclosure), None) => render_enclosure_summary_detail(enclosure),
+                _ => html! {
+                    <>
+                        <span class="dos-card-label">{ "Enclosure detail" }</span>
+                        <h2>{ "Select an enclosure" }</h2>
+                        <p>{ "Drive cards, SMART warnings, bay mapping, mount state, and administrator actions will appear here once a supported enclosure is detected." }</p>
+                    </>
+                },
+            } }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_detail(
+    enclosure: &DasEnclosureCardResponse,
+    detail: &DasEnclosureDetailResponse,
+) -> Html {
+    html! {
+        <>
+            <span class="dos-card-label">{ "Enclosure detail" }</span>
+            <h2>{ &enclosure.display_name }</h2>
+            <dl class="dos-detail-list">
+                <div><dt>{ "Vendor" }</dt><dd>{ &detail.vendor }</dd></div>
+                <div><dt>{ "Model" }</dt><dd>{ &detail.model }</dd></div>
+                <div><dt>{ "Serial" }</dt><dd>{ &detail.serial }</dd></div>
+                <div><dt>{ "Firmware" }</dt><dd>{ detail.firmware.as_deref().unwrap_or("unknown") }</dd></div>
+                <div><dt>{ "Mount" }</dt><dd>{ &enclosure.mount_path }</dd></div>
+                <div><dt>{ "Connection" }</dt><dd>{ format!("{} / {} / {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</dd></div>
+                <div><dt>{ "Capacity" }</dt><dd>{ format!("{} TiB free of {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</dd></div>
+                <div><dt>{ "Warnings" }</dt><dd>{ enclosure.warnings.len().to_string() }</dd></div>
+            </dl>
+            <div class="dos-slot-list">
+                { for detail.slots.iter().map(|slot| html! {
+                    <div class="dos-slot-row">
+                        <span>{ format!("Bay {}", slot.slot_number) }</span>
+                        <strong>{ &slot.drive_id }</strong>
+                        <span>{ format!("{} TiB · {} · {}", slot.size_tib, slot.health, if slot.mounted { "mounted" } else { "not mounted" }) }</span>
+                    </div>
+                }) }
+            </div>
+        </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_summary_detail(enclosure: &DasEnclosureCardResponse) -> Html {
+    html! {
+        <>
+            <span class="dos-card-label">{ "Enclosure detail" }</span>
+            <h2>{ &enclosure.display_name }</h2>
+            <dl class="dos-detail-list">
+                <div><dt>{ "Health" }</dt><dd>{ &enclosure.health }</dd></div>
+                <div><dt>{ "Mount" }</dt><dd>{ &enclosure.mount_path }</dd></div>
+                <div><dt>{ "Connection" }</dt><dd>{ format!("{} / {} / {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</dd></div>
+                <div><dt>{ "Drives" }</dt><dd>{ format!("{} mounted of {}", enclosure.drive_count.mounted, enclosure.drive_count.total) }</dd></div>
+                <div><dt>{ "Capacity" }</dt><dd>{ format!("{} TiB free of {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</dd></div>
+                <div><dt>{ "Last seen" }</dt><dd>{ &enclosure.last_seen_at_utc }</dd></div>
+            </dl>
+            <p>{ format!("{} warning(s) reported for this enclosure.", enclosure.warnings.len()) }</p>
+        </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosures_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label }</span>
+            <h2>{ title }</h2>
+            <p>{ message }</p>
         </section>
     }
 }
@@ -632,13 +843,13 @@ fn page_header(props: &PageHeaderProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::{
-        bioinformatics_workspace_api_path, enclosures_workspace_api_path, fallback_enclosures,
-        fallback_object_stores, home_dashboard_attention, home_dashboard_metrics,
-        home_workspace_api_path, objectstores_workspace_api_path, WorkspacePage,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        bioinformatics_workspace_api_path, enclosure_card_summaries, enclosures_workspace_api_path,
+        fallback_enclosures, fallback_object_stores, home_dashboard_attention,
+        home_dashboard_metrics, home_workspace_api_path, objectstores_workspace_api_path,
+        WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
-    use crate::api::HomeDashboardResponse;
+    use crate::api::{EnclosuresPageResponse, HomeDashboardResponse};
 
     #[test]
     fn primary_navigation_uses_redesign_labels() {
@@ -714,6 +925,59 @@ mod tests {
         assert!(stores.is_empty());
         assert!(stores.iter().all(|store| !store.id.is_empty()));
         assert!(stores.iter().all(|store| !store.policy.is_empty()));
+    }
+
+    #[test]
+    fn enclosures_live_payload_maps_to_card_summaries() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "enclosures": [{
+                "enclosure_id": "qnap-tl-d800c-01",
+                "display_name": "QNAP TL-D800C",
+                "mount_path": "/srv/dasobjectstore/hdd",
+                "connection": {
+                    "bus": "usb",
+                    "protocol": "uas",
+                    "link_speed": "10 Gb/s"
+                },
+                "health": "watch",
+                "drive_count": {
+                    "total": 8,
+                    "mounted": 7,
+                    "healthy": 6,
+                    "watch": 1,
+                    "suspect": 0,
+                    "failed": 0
+                },
+                "capacity": {
+                    "total_tib": "100.0",
+                    "used_tib": "12.5",
+                    "free_tib": "87.5",
+                    "used_percent_basis_points": 1250
+                },
+                "last_seen_at_utc": "2026-07-08T08:00:00Z",
+                "warnings": [{
+                    "code": "smart_watch",
+                    "message": "One member drive has a SMART warning."
+                }]
+            }],
+            "selected_enclosure_id": "qnap-tl-d800c-01",
+            "details": null,
+            "warnings": []
+        });
+        let view = serde_json::from_value::<EnclosuresPageResponse>(payload)
+            .expect("enclosures payload decodes");
+
+        let summaries = enclosure_card_summaries(&view);
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "qnap-tl-d800c-01");
+        assert_eq!(summaries[0].name, "QNAP TL-D800C");
+        assert!(summaries[0].label.contains("usb / uas / 10 Gb/s"));
+        assert!(summaries[0].drives.contains("7 mounted of 8"));
+        assert_eq!(summaries[0].capacity, "87.5 TiB free of 100.0 TiB");
+        assert_eq!(summaries[0].warning_count, 1);
     }
 
     #[test]

@@ -445,6 +445,31 @@ h2 {
   margin: 0;
 }
 
+.dos-slot-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.dos-slot-row {
+  display: grid;
+  grid-template-columns: 72px minmax(120px, 1fr) minmax(0, 1.6fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid #e7ecef;
+}
+
+.dos-slot-row span {
+  color: #5d6a72;
+  font-size: 0.88rem;
+}
+
+.dos-slot-row strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .dos-create-card {
   display: grid;
   align-content: center;

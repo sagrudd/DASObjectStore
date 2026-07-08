@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.14.0 - 2026-07-08
+
+- Wire the redesigned Web Enclosures page to load the authenticated
+  ``/products/dasobjectstore/api/v1/dashboard/enclosures`` payload.
+- Render Enclosures loading, empty, permission-denied, and transport-error
+  states without using fixture hardware for authenticated pages.
+- Add live enclosure cards and detail panels for connection topology, mount
+  path, drive counts, capacity, warning counts, enclosure identity, and bay
+  membership.
+
 ## 0.13.1 - 2026-07-08
 
 - Enforce one active HDD settlement writer per managed HDD in daemon ingest and

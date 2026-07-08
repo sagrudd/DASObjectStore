@@ -161,6 +161,15 @@ workflows. It should show stable device identities, enclosure or bay grouping
 when known, DAS role, mounted path, filesystem, capacity, health state, and
 warnings that affect placement eligibility.
 
+The redesigned Enclosures page loads its inventory from
+``/products/dasobjectstore/api/v1/dashboard/enclosures`` using the browser
+session issued at login. It shows explicit loading, empty-inventory,
+permission-denied, and transport-error states instead of presenting fixture
+hardware as though it were live. When enclosure data is present, the page
+renders cards with connection topology, mount path, drive counts, capacity,
+warning count, and health, plus a selected detail panel for enclosure identity
+and bay membership when the daemon provides it.
+
 Administrative disk actions, such as preparing media, locking down managed
 roots, drain, replacement, retirement, or repair, are admin-only workflows. The
 Web UI may collect parameters and present plans, but it must submit the
