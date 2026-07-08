@@ -1,6 +1,9 @@
 use crate::mount::{FrontendHost, FrontendMount};
-use crate::overview::OverviewWorkspace;
 use crate::session::{AppState, StableState};
+use crate::workspace::{
+    BioinformaticsPage, EnclosuresPage, HomeDashboard, ObjectStoresPage, WorkspacePage,
+    PRIMARY_NAVIGATION,
+};
 use crate::{api, storage};
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
@@ -173,31 +176,27 @@ struct LandingPageProps {
 fn landing_page(props: &LandingPageProps) -> Html {
     html! {
         <section class="dos-auth-shell">
-            <aside class="dos-auth-hero">
-                <p class="dos-auth-kicker">{ "DAS storage appliance" }</p>
-                <h1>{ "DASObjectStore" }</h1>
-                <p class="dos-auth-copy">
-                    { "Managed ingress, SSD-backed settlement, and object-store operations for directly attached sequencing data." }
-                </p>
-                <div class="dos-auth-highlight-grid">
-                    <div class="dos-auth-highlight">
-                        <span>{ "Ingress posture" }</span>
-                        <strong>{ "SSD-first controlled landing" }</strong>
-                    </div>
-                    <div class="dos-auth-highlight">
-                        <span>{ "Storage posture" }</span>
-                        <strong>{ "DAS-aware object stores" }</strong>
-                    </div>
-                    <div class="dos-auth-highlight">
-                        <span>{ "Authority" }</span>
-                        <strong>{ "Local appliance session" }</strong>
+            <aside class="dos-auth-brand">
+                <div class="dos-brand-lockup" aria-label="Mnemosyne Biosciences DASObjectStore">
+                    <span class="dos-brand-mark">{ "M" }</span>
+                    <div>
+                        <strong>{ "Mnemosyne Biosciences" }</strong>
+                        <span>{ "DASObjectStore" }</span>
                     </div>
                 </div>
+                <div class="dos-auth-summary">
+                    <p>{ "Local appliance access" }</p>
+                    <h1>{ "Sign in to manage directly attached object storage." }</h1>
+                    <span>{ "Storage, ingest, and service controls for the DASObjectStore appliance." }</span>
+                </div>
+                <footer class="dos-auth-brand-footer">
+                    { "Mnemosyne Biosciences Ltd · Local operator console" }
+                </footer>
             </aside>
             <section class="dos-auth-panel">
                 <div class="dos-auth-panel-header">
-                    <p>{ "Secure access" }</p>
-                    <h2>{ "Sign in to the local DAS appliance" }</h2>
+                    <p>{ "Secure session" }</p>
+                    <h2>{ "DASObjectStore login" }</h2>
                 </div>
                 if let Some(message) = &props.error_message {
                     <div class="dos-auth-error" role="alert">{ message.clone() }</div>
@@ -240,12 +239,33 @@ struct AuthenticatedWorkspaceProps {
 
 #[function_component(AuthenticatedWorkspace)]
 fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
+    let active_page = use_state(|| WorkspacePage::Home);
+
     html! {
         <section class="dos-workspace-shell">
             <header class="dos-topbar">
-                <div>
-                    <p>{ "DASObjectStore" }</p>
-                    <h1>{ "Operations" }</h1>
+                <div class="dos-topbar-left">
+                    <div class="dos-topbar-brand">
+                        <span class="dos-brand-mark dos-brand-mark--small">{ "M" }</span>
+                        <strong>{ "DASObjectStore" }</strong>
+                    </div>
+                    <nav class="dos-primary-nav" aria-label="Primary">
+                        { for PRIMARY_NAVIGATION.into_iter().map(|page| {
+                            let is_active = *active_page == page;
+                            let active_page = active_page.clone();
+                            html! {
+                                <button
+                                    type="button"
+                                    class={classes!(is_active.then_some("is-active"))}
+                                    aria-current={is_active.then_some("page")}
+                                    data-page={page.id()}
+                                    onclick={Callback::from(move |_| active_page.set(page))}
+                                >
+                                    { page.label() }
+                                </button>
+                            }
+                        }) }
+                    </nav>
                 </div>
                 <div class="dos-session-controls">
                     <span>{ props.username.clone() }</span>
@@ -254,7 +274,20 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                     </button>
                 </div>
             </header>
-            <OverviewWorkspace api_base_path={props.api_base_path.clone()} />
+            { match *active_page {
+                WorkspacePage::Home => html! {
+                    <HomeDashboard api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::Enclosures => html! {
+                    <EnclosuresPage api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::ObjectStores => html! {
+                    <ObjectStoresPage api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::Bioinformatics => html! {
+                    <BioinformaticsPage api_base_path={props.api_base_path.clone()} />
+                },
+            } }
         </section>
     }
 }
