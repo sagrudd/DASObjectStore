@@ -1,7 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, env, fmt, fs, io};
+#[cfg(target_os = "linux")]
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 
 pub const SUDO_ADMIN_GROUPS: [&str; 3] = ["admin", "sudo", "wheel"];
+#[cfg(target_os = "linux")]
+pub const LOCAL_AUTH_HELPER_ENV: &str = "DASOBJECTSTORE_LOCAL_AUTH_HELPER";
+#[cfg(target_os = "linux")]
+pub const LOCAL_AUTH_HELPER_BYPASS_ENV: &str = "DASOBJECTSTORE_LOCAL_AUTH_HELPER_BYPASS";
+#[cfg(target_os = "linux")]
+pub const DEFAULT_LOCAL_AUTH_HELPER_PATH: &str =
+    "/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LocalUserMetadata {
@@ -125,6 +138,17 @@ fn authenticate_local_password(
         return Err(LocalPasswordAuthError::PasswordRequired);
     }
 
+    if env::var_os(LOCAL_AUTH_HELPER_BYPASS_ENV).is_none() {
+        if let Some(helper_path) = local_auth_helper_path() {
+            return authenticate_local_password_with_helper(
+                &helper_path,
+                service_name,
+                username,
+                password,
+            );
+        }
+    }
+
     let conversation = Conversation::with_credentials(username, password);
     let mut context = Context::new(service_name, Some(username), conversation).map_err(|err| {
         LocalPasswordAuthError::BackendUnavailable {
@@ -139,6 +163,74 @@ fn authenticate_local_password(
         .map_err(|err| LocalPasswordAuthError::BackendUnavailable {
             message: err.to_string(),
         })
+}
+
+#[cfg(target_os = "linux")]
+fn local_auth_helper_path() -> Option<PathBuf> {
+    if let Some(path) = env::var_os(LOCAL_AUTH_HELPER_ENV) {
+        let path = PathBuf::from(path);
+        return (!path.as_os_str().is_empty()).then_some(path);
+    }
+    let path = PathBuf::from(DEFAULT_LOCAL_AUTH_HELPER_PATH);
+    path.exists().then_some(path)
+}
+
+#[cfg(target_os = "linux")]
+fn authenticate_local_password_with_helper(
+    helper_path: &Path,
+    service_name: &str,
+    username: &str,
+    password: &str,
+) -> Result<(), LocalPasswordAuthError> {
+    let mut child = Command::new(helper_path)
+        .arg("--service")
+        .arg(service_name)
+        .arg(username)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| LocalPasswordAuthError::BackendUnavailable {
+            message: format!(
+                "failed to start local auth helper {}: {err}",
+                helper_path.display()
+            ),
+        })?;
+
+    let mut stdin =
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| LocalPasswordAuthError::BackendUnavailable {
+                message: "local auth helper stdin was unavailable".to_string(),
+            })?;
+    stdin.write_all(password.as_bytes()).map_err(|err| {
+        LocalPasswordAuthError::BackendUnavailable {
+            message: format!("failed to send password to local auth helper: {err}"),
+        }
+    })?;
+    drop(stdin);
+
+    let output =
+        child
+            .wait_with_output()
+            .map_err(|err| LocalPasswordAuthError::BackendUnavailable {
+                message: format!("failed to wait for local auth helper: {err}"),
+            })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    if output.status.code() == Some(1) {
+        return Err(LocalPasswordAuthError::InvalidCredentials);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(LocalPasswordAuthError::BackendUnavailable {
+        message: if stderr.is_empty() {
+            format!("local auth helper exited with {}", output.status)
+        } else {
+            format!("local auth helper exited with {}: {stderr}", output.status)
+        },
+    })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -270,6 +362,16 @@ struct GroupLine<'a> {
 mod tests {
     use super::{local_user_metadata_from_unix_account_files, LocalUserMetadata};
 
+    #[cfg(target_os = "linux")]
+    use super::{PamLocalPasswordAuthenticator, LOCAL_AUTH_HELPER_ENV};
+    #[cfg(target_os = "linux")]
+    use std::{
+        fs,
+        os::unix::fs::PermissionsExt,
+        path::PathBuf,
+        sync::{Mutex, OnceLock},
+    };
+
     #[test]
     fn detects_sudo_admin_from_group_membership() {
         let passwd = "stephen:x:1000:1000:Stephen:/home/stephen:/bin/bash\n";
@@ -332,5 +434,61 @@ mod tests {
             vec!["guest".to_string(), "users".to_string()]
         );
         assert!(!metadata.sudo_administrator);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn local_password_authenticator_accepts_successful_helper_result() {
+        let _guard = helper_env_lock().lock().expect("helper env lock");
+        let helper = write_fake_auth_helper("success", "exit 0");
+        std::env::set_var(LOCAL_AUTH_HELPER_ENV, &helper);
+
+        PamLocalPasswordAuthenticator::new("dasobjectstore")
+            .authenticate("stephen", "correct-password")
+            .expect("helper success authenticates");
+
+        std::env::remove_var(LOCAL_AUTH_HELPER_ENV);
+        let _ = fs::remove_file(helper);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn local_password_authenticator_maps_helper_invalid_credentials() {
+        let _guard = helper_env_lock().lock().expect("helper env lock");
+        let helper = write_fake_auth_helper("invalid", "exit 1");
+        std::env::set_var(LOCAL_AUTH_HELPER_ENV, &helper);
+
+        let err = PamLocalPasswordAuthenticator::new("dasobjectstore")
+            .authenticate("stephen", "wrong-password")
+            .expect_err("helper invalid result is rejected");
+
+        assert_eq!(err, super::LocalPasswordAuthError::InvalidCredentials);
+        std::env::remove_var(LOCAL_AUTH_HELPER_ENV);
+        let _ = fs::remove_file(helper);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn helper_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn write_fake_auth_helper(label: &str, command: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "dasobjectstore-fake-auth-helper-{label}-{}",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            format!("#!/usr/bin/env bash\nset -euo pipefail\ncat >/dev/null\n{command}\n"),
+        )
+        .expect("write fake auth helper");
+        let mut permissions = fs::metadata(&path)
+            .expect("fake helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&path, permissions).expect("fake helper executable");
+        path
     }
 }

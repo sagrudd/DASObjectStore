@@ -75,6 +75,8 @@ require_text "$postinst" "product_root=\"/opt/dasobjectstore\""
 require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
 require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
 require_text "$postinst" "-exec chmod 0640 {} +"
+require_text "$postinst" "chown root:\"\$service_group\" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
+require_text "$postinst" "chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
 require_text "$postinst" 'repair_managed_tree "$managed_root/ssd"'
 require_text "$postinst" 'repair_managed_tree "$root"'
@@ -87,6 +89,7 @@ require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'
 require_text "$build_deb" 'target/release/dasobjectstore-remote'
+require_text "$build_deb" 'target/release/dasobjectstore-local-auth-helper'
 require_text "$build_deb" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-server.service'
@@ -105,6 +108,7 @@ require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'
+require_text "$build_rpm" 'target/release/dasobjectstore-local-auth-helper'
 require_text "$build_rpm" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_rpm" 'usr/lib/systemd/system/dasobjectstored.service'
 require_text "$build_rpm" 'etc/pam.d/dasobjectstore'
@@ -112,6 +116,7 @@ require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf'
+require_text "$build_rpm" '/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper'
 require_text "$build_rpm" 'BuildRequires:  clang'
 require_text "$build_rpm" 'BuildRequires:  libclang-devel'
 require_text "$build_rpm" 'BuildRequires:  pam-devel'

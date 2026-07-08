@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.10 - 2026-07-08
+
+- Add a root-owned local authentication helper for packaged standalone Web UI
+  logins so PAM can verify OS-local passwords while the Web service remains
+  unprivileged.
+- Install and harden the helper under
+  `/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper` with
+  `root:dasobjectstore` ownership and `4750` mode during Debian and RPM package
+  configuration.
+- Document the packaged local-auth helper and extend package asset regression
+  coverage for the helper binary and permissions.
+
 ## 0.10.9 - 2026-07-08
 
 - Correct performance benchmark rate attribution so SSD read rates are measured

@@ -49,6 +49,7 @@ install -d \
   "$payload_root/opt/dasobjectstore" \
   "$payload_root/opt/dasobjectstore/web" \
   "$payload_root/usr/bin" \
+  "$payload_root/usr/libexec/dasobjectstore" \
   "$payload_root/usr/lib/systemd/system" \
   "$payload_root/usr/lib/sysusers.d" \
   "$payload_root/usr/lib/tmpfiles.d" \
@@ -61,6 +62,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$payload_root/usr/bin/dasobjectstored"
 install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
+install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
+  "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
@@ -149,6 +152,10 @@ if [ -f /opt/dasobjectstore/config.json ]; then
   chown root:"\$service_group" /opt/dasobjectstore/config.json
   chmod 0640 /opt/dasobjectstore/config.json
 fi
+if [ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]; then
+  chown root:"\$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
+  chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
+fi
 
 if [ -e "\$managed_root" ]; then
   owner="\$(stat -c '%U' "\$managed_root")"
@@ -193,6 +200,7 @@ fi
 /usr/bin/dasobjectstore-server
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
+/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/systemd/system/dasobjectstore-server.service
 /usr/lib/sysusers.d/dasobjectstore.conf

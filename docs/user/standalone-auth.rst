@@ -16,6 +16,12 @@ session is not the source of administrator authority. For administrator
 workflows, DASObjectStore uses OS-local identity and sudo-derived administrator
 status, then submits the action to ``dasobjectstored``.
 
+The packaged service runs the Web process as the unprivileged
+``dasobjectstore`` user. Local password verification is therefore delegated to
+the root-owned ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``
+binary, which is executable only by the ``dasobjectstore`` group and uses the
+packaged ``/etc/pam.d/dasobjectstore`` PAM service.
+
 Local group administration is also daemon-backed. Creating a local writer or
 administrator group, and assigning a local user to one of those groups, is
 accepted by the Web UI only as a request to ``dasobjectstored``. The daemon is

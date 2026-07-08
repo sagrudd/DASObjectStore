@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "dasobjectstore-server"
 path = "src/server_main.rs"
 
+[[bin]]
+name = "dasobjectstore-local-auth-helper"
+path = "src/local_auth_helper_main.rs"
+
 [dependencies]
 axum.workspace = true
 axum-server.workspace = true

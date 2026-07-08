@@ -72,6 +72,12 @@ DASObjectStore browser session tokens; users do not need to be pre-created in
 that file before logging in. OS-local sudo status and daemon policy remain the
 authority for administrative storage mutation.
 
+Packaged appliances keep the Web service unprivileged and perform the PAM check
+through ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``. The
+helper must be owned by ``root:dasobjectstore`` with mode ``4750`` so
+``pam_unix`` can verify local OS passwords without running the whole Web server
+as root.
+
 The server can also be started manually with explicit overrides:
 
 .. code-block:: console

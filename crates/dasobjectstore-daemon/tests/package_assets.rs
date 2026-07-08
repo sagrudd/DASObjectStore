@@ -131,8 +131,13 @@ fn deb_build_installs_daemon_boundary_assets() {
     );
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_DEB, "target/release/dasobjectstore-local-auth-helper");
     assert_contains(BUILD_DEB, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-remote");
+    assert_contains(
+        BUILD_DEB,
+        "usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
+    );
     assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
     assert_contains(
         BUILD_DEB,
@@ -155,8 +160,13 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_RPM, "target/release/dasobjectstore-local-auth-helper");
     assert_contains(BUILD_RPM, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-remote");
+    assert_contains(
+        BUILD_RPM,
+        "/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
+    );
     assert_contains(BUILD_RPM, "usr/lib/systemd/system/dasobjectstored.service");
     assert_contains(
         BUILD_RPM,
@@ -214,6 +224,14 @@ fn deb_postinst_rejects_user_owned_managed_root() {
     assert_contains(POSTINST, "service_group=\"dasobjectstore\"");
     assert_contains(POSTINST, "managed_root=\"/srv/dasobjectstore\"");
     assert_contains(POSTINST, "product_root=\"/opt/dasobjectstore\"");
+    assert_contains(
+        POSTINST,
+        "chown root:\"$service_group\" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
+    );
+    assert_contains(
+        POSTINST,
+        "chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
+    );
     assert_contains(POSTINST, "reject_user_owned_managed_root \"$managed_root\"");
     assert_contains(
         POSTINST,

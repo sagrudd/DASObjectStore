@@ -46,6 +46,7 @@ install -d \
   "$build_root/opt/dasobjectstore" \
   "$build_root/opt/dasobjectstore/web" \
   "$build_root/usr/bin" \
+  "$build_root/usr/libexec/dasobjectstore" \
   "$build_root/usr/lib/sysusers.d" \
   "$build_root/usr/lib/tmpfiles.d" \
   "$build_root/usr/share/doc/$package_name"
@@ -56,6 +57,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$build_root/usr/bin/dasobjectstored"
 install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$build_root/usr/bin/dasobjectstore-remote"
+install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
+  "$build_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"

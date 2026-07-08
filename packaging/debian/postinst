@@ -85,6 +85,10 @@ if [[ -f "$product_root/config.json" ]]; then
   chown root:"$service_group" "$product_root/config.json"
   chmod 0640 "$product_root/config.json"
 fi
+if [[ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]]; then
+  chown root:"$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
+  chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
+fi
 
 reject_user_owned_managed_root "$managed_root"
 ensure_owned_dir "$managed_root" 0750
