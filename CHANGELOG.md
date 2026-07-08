@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.29.1 - 2026-07-08
+
+- Clarify the Web interface documentation for live-data dashboard behavior,
+  canonical navigation surfaces, placeholder removal, daemon-owned mutation
+  boundaries, and the shared Mnemosyne footer standard.
+
 ## 0.29.0 - 2026-07-08
 
 - Add a Trunk-backed Playwright screenshot regression harness for login, Home,

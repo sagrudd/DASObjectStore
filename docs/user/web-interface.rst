@@ -100,6 +100,14 @@ standalone appliance and the embedded DASObjectStore surface when mounted behind
 Synoptikon. After login, the first screen is the Home dashboard rather than a
 marketing or setup page.
 
+The Web console is live-data first. The Home, Enclosures, ObjectStores, and
+Bioinformatics pages request authenticated API payloads from the appliance and
+show loading, empty, permission-denied, transport-error, and stale-data states
+explicitly. They must not present bootstrap fixtures, mock hardware, or
+placeholder store cards as though they were live appliance state. If a daemon
+writer or data source is not implemented yet, the page should show a clear
+unavailable-source warning or reserved-workflow message.
+
 The primary navigation is:
 
 ``Home``
@@ -127,6 +135,34 @@ The primary navigation is:
 queues, repair work, and audit/provenance events as the implementation expands.
 Regardless of labels, storage mutation must still be submitted to
 ``dasobjectstored`` and must use the same job model as CLI and API operations.
+
+Implementation Boundaries
+-------------------------
+
+The Web UI is a client surface. It may authenticate an operator, display live
+inventory, collect workflow parameters, request action plans, and render job
+progress, but it must not mutate managed DAS roots, format media, rewrite store
+registries, change group policy, or move object data directly from browser
+code. Those operations belong behind ``dasobjectstored`` so CLI, Web, TUI, and
+future Synoptikon/Mneion adapters share the same policy checks, confirmation
+phrases, audit metadata, cancellation, and recovery behavior.
+
+Milestone 19 removes the old holder-page pattern from the primary browser
+experience. The active Web console surfaces are:
+
+* ``Home`` for daemon-backed health and attention state;
+* ``Enclosures`` for live DAS and drive inventory;
+* ``ObjectStores`` for registry-backed store cards and writer-policy
+  readiness; and
+* ``Bioinformatics`` for clearly reserved workflow-readiness state.
+
+Legacy ``workspaces/stores`` and ``workspaces/users-groups`` routes remain
+compatibility API endpoints only. They are not primary navigation targets and
+must not be used to reintroduce parallel static holders. Milestone 20 will add
+administrator workflows on top of the canonical console, including enclosure
+preparation, ObjectStore/SubObject creation, Users/Groups promotion when host
+mode permits local administration, Activity views, and concrete bioinformatics
+workflow-readiness cards.
 
 Home Dashboard
 --------------
@@ -322,6 +358,11 @@ the login page and authenticated console pages. The footer follows the compact
 dark Mnemosyne product style used by sibling Web surfaces: monospace text,
 ``DASObjectStore v<version>``, "Developed by", a ``https://mnemosyne.co.uk``
 Mnemosyne link, and 2026 Mnemosyne Biosciences attribution.
+
+This footer is a product provenance requirement, not decorative page copy.
+Future pages, dialogs that own a full operator route, and standalone error
+states should keep the shared footer visible unless they are embedded inside a
+host product that already supplies an equivalent Mnemosyne provenance footer.
 
 Screenshot regression coverage is available through:
 

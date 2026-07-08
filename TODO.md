@@ -566,7 +566,7 @@ older checklist claims.
 - [x] Add Playwright or trunk-driven screenshot regression coverage for login,
   Home, Enclosures, ObjectStores, and Bioinformatics at desktop and mobile
   widths, including footer fidelity and no-overlap checks.
-- [ ] Update `docs/user/web-interface.rst` with the live Web dashboard behavior,
+- [x] Update `docs/user/web-interface.rst` with the live Web dashboard behavior,
   footer standard, placeholder removal plan, and daemon-owned data boundaries.
 
 ## Milestone 20: Web Administrator Workflows and Bioinformatics Readiness
