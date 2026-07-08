@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.53.2 - 2026-07-09
+
+- Extend the Web screenshot regression harness into role-aware end-to-end
+  workflow coverage for viewer and administrator sessions, including enclosure
+  preparation, ObjectStore creation, SubObject planning, local group
+  administration, Activity task visibility, and Bioinformatics readiness.
+- Add deterministic mocked daemon responses for Web workflow planning,
+  administrator job acceptance/status, local group dry-run/live submissions,
+  and API-derived Bioinformatics readiness/context cards.
+
 ## 0.53.1 - 2026-07-09
 
 - Document administrator Web workflow operation, permission boundaries, daemon

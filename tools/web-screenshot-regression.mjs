@@ -22,6 +22,21 @@ const viewports = [
   { name: "mobile", width: 390, height: 844 },
 ];
 
+const roles = [
+  {
+    name: "viewer",
+    username: "visual-viewer",
+    token: "visual-viewer-token",
+    administrator: false,
+  },
+  {
+    name: "admin",
+    username: "visual-admin",
+    token: "visual-admin-token",
+    administrator: true,
+  },
+];
+
 const authenticatedPages = [
   {
     name: "home",
@@ -48,10 +63,16 @@ const authenticatedPages = [
     readySelector: "text=Daemon task stream",
   },
   {
+    name: "users-groups",
+    selector: "button[data-page='users-groups']",
+    pageSelector: "section[data-page='users-groups']",
+    readySelector: "[data-action='assign_local_user_to_group']",
+  },
+  {
     name: "bioinformatics",
     selector: "button[data-page='bioinformatics']",
     pageSelector: "section[data-page='bioinformatics']",
-    readySelector: "text=Bioinformatics workspace is reserved.",
+    readySelector: "[data-object-type='POD5'][data-state='ready']",
   },
 ];
 
@@ -65,7 +86,9 @@ async function main() {
   try {
     for (const viewport of viewports) {
       await captureLogin(browser, baseUrl, viewport);
-      await captureAuthenticatedPages(browser, baseUrl, viewport);
+      for (const role of roles) {
+        await captureAuthenticatedPages(browser, baseUrl, viewport, role);
+      }
     }
   } finally {
     await browser.close();
@@ -99,12 +122,12 @@ async function captureLogin(browser, baseUrl, viewport) {
   await context.close();
 }
 
-async function captureAuthenticatedPages(browser, baseUrl, viewport) {
+async function captureAuthenticatedPages(browser, baseUrl, viewport, role) {
   const context = await browser.newContext({ viewport });
-  await context.addInitScript(() => {
-    window.localStorage.setItem("dasobjectstore.username", "visual-operator");
-    window.localStorage.setItem("dasobjectstore.session_token", "visual-session-token");
-  });
+  await context.addInitScript((session) => {
+    window.localStorage.setItem("dasobjectstore.username", session.username);
+    window.localStorage.setItem("dasobjectstore.session_token", session.token);
+  }, role);
   const page = await context.newPage();
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.locator(".dos-topbar").waitFor();
@@ -115,8 +138,11 @@ async function captureAuthenticatedPages(browser, baseUrl, viewport) {
     await page.locator(pageSpec.readySelector).waitFor();
     await page.waitForLoadState("networkidle");
     await assertVisualContract(page, { auth: true });
+    if (viewport.name === "desktop") {
+      await assertWorkflowContract(page, pageSpec.name, role);
+    }
     await page.screenshot({
-      path: join(artifactDir, `${viewport.name}-${pageSpec.name}.png`),
+      path: join(artifactDir, `${viewport.name}-${role.name}-${pageSpec.name}.png`),
       fullPage: true,
     });
   }
@@ -216,6 +242,141 @@ async function assertVisualContract(page, { auth }) {
   }
 }
 
+async function assertWorkflowContract(page, pageName, role) {
+  switch (pageName) {
+    case "enclosures":
+      await assertEnclosureWorkflow(page, role);
+      break;
+    case "objectstores":
+      await assertObjectStoreWorkflow(page, role);
+      break;
+    case "users-groups":
+      await assertUsersGroupsWorkflow(page, role);
+      break;
+    case "activity":
+      await assertActivityWorkflow(page);
+      break;
+    case "bioinformatics":
+      await assertBioinformaticsWorkflow(page);
+      break;
+  }
+}
+
+async function assertEnclosureWorkflow(page, role) {
+  const card = page.locator("[data-action='enclosure_add']");
+  await card.waitFor();
+  const planButton = card.getByRole("button", { name: "Plan preparation" });
+
+  if (!role.administrator) {
+    await expectDisabled(planButton, "non-admin enclosure preparation must be disabled");
+    await card.getByText("Admin required").waitFor();
+    return;
+  }
+
+  await expectEnabled(planButton, "admin enclosure preparation must be enabled");
+  await planButton.click();
+  await page.locator("[data-workflow='enclosure_add']").waitFor();
+  await page.getByText("SSD landing device").waitFor();
+  await page.getByLabel("I allow formatting of the selected devices.").check();
+  await page.getByLabel("I acknowledge existing data on selected devices may be destroyed.").check();
+  await page.getByPlaceholder("confirm prepare das").fill("confirm prepare das");
+  await page.getByRole("button", { name: "Submit preparation job" }).click();
+  await page.getByText("Job enclosure-prepare-visual").waitFor();
+}
+
+async function assertObjectStoreWorkflow(page, role) {
+  const createCard = page.locator("[data-action='store_create']");
+  const createButton = createCard.getByRole("button", { name: "Configure store" });
+  const subobjectCard = page.locator("[data-action='subobject_create']");
+  const subobjectButton = subobjectCard.getByRole("button", { name: "Define SubObject" });
+
+  if (!role.administrator) {
+    await expectDisabled(createButton, "non-admin ObjectStore creation must be disabled");
+    await expectDisabled(subobjectButton, "non-admin SubObject creation must be disabled");
+    await createCard.getByText("Admin only").waitFor();
+    await subobjectCard.getByText("Admin only").waitFor();
+    return;
+  }
+
+  await expectEnabled(createButton, "admin ObjectStore creation must be enabled");
+  await createButton.click();
+  await createCard.getByLabel("Store name").fill("visual-e2e-store");
+  await createCard.getByLabel("Enclosure anchor").fill("qnap-tl-d800c-visual");
+  await createCard.getByRole("button", { name: "Review daemon plan" }).click();
+  await createCard.getByText("dasobjectstore store create visual-e2e-store").waitFor();
+  await createCard.getByPlaceholder("confirm create objectstore").fill("confirm create objectstore");
+  await createCard.getByRole("button", { name: "Submit daemon job" }).click();
+  await createCard.getByText("ObjectStore creation submitted to dasobjectstored.").waitFor();
+
+  await expectEnabled(subobjectButton, "admin SubObject creation must be enabled");
+  await subobjectButton.click();
+  await subobjectCard.getByLabel("SubObject name").fill("pod5/raw");
+  await subobjectCard.getByRole("button", { name: "Review SubObject plan" }).click();
+  await subobjectCard.getByText("dasobjectstore subobject create pod5/raw").waitFor();
+}
+
+async function assertUsersGroupsWorkflow(page, role) {
+  const createCard = page.locator("[data-action='create_local_group']");
+  const assignCard = page.locator("[data-action='assign_local_user_to_group']");
+  const createPreview = createCard.getByRole("button", { name: "Dry-run preview" });
+  const assignPreview = assignCard.getByRole("button", { name: "Dry-run preview" });
+
+  if (!role.administrator) {
+    await createCard.getByText("Admin only").waitFor();
+    await assignCard.getByText("Admin only").waitFor();
+    await expectDisabled(createPreview, "non-admin group creation preview must be disabled");
+    await expectDisabled(assignPreview, "non-admin group assignment preview must be disabled");
+    return;
+  }
+
+  await createCard.getByLabel("Group name").fill("mnemosyne-writers");
+  await expectEnabled(createPreview, "admin group creation preview must be enabled");
+  await createPreview.click();
+  await createCard.getByText("Job local-group-dry-run-visual").waitFor();
+  await createCard.getByPlaceholder("confirm local group administration").fill("confirm local group administration");
+  await createCard.getByRole("button", { name: "Submit group creation" }).click();
+  await createCard.getByText("Job local-group-apply-visual").waitFor();
+
+  await assignCard.getByLabel("Username").fill("stephen");
+  await assignCard.getByLabel("Group").selectOption("bioinformatics");
+  await expectEnabled(assignPreview, "admin group assignment preview must be enabled");
+  await assignPreview.click();
+  await assignCard.getByText("Job local-group-assign-dry-run-visual").waitFor();
+  await assignCard.getByPlaceholder("confirm local group administration").fill("confirm local group administration");
+  await assignCard.getByRole("button", { name: "Submit group assignment" }).click();
+  await assignCard.getByText("Job local-group-assign-apply-visual").waitFor();
+}
+
+async function assertActivityWorkflow(page) {
+  await page.getByText("Administrator jobs", { exact: true }).waitFor();
+  await page.getByText("Enclosure preparation", { exact: true }).waitFor();
+  await page.getByText("ObjectStore creation", { exact: true }).waitFor();
+  await page.getByText("SubObject creation", { exact: true }).waitFor();
+  await page.getByText("Create local writer group").waitFor();
+  await page.getByText("Ingest zymo_fecal_2025.05").waitFor();
+}
+
+async function assertBioinformaticsWorkflow(page) {
+  await page.locator("[data-object-type='POD5']").first().waitFor();
+  await page.getByText("Sequencing run provenance").waitFor();
+  await page
+    .locator("[data-source-kind='ObjectStore']")
+    .getByText("ObjectStore, SubObject, object-type, and Mneion source records")
+    .waitFor();
+}
+
+async function expectEnabled(locator, message) {
+  if (!(await locator.isEnabled())) {
+    throw new Error(message);
+  }
+}
+
+async function expectDisabled(locator, message) {
+  if (await locator.isEnabled()) {
+    throw new Error(message);
+  }
+}
+
 function startServer() {
   const server = createServer(async (request, response) => {
     try {
@@ -234,8 +395,9 @@ function startServer() {
 async function handleRequest(request, response) {
   const url = new URL(request.url, "http://127.0.0.1");
   if (url.pathname.startsWith(apiBase)) {
+    const body = await readJsonBody(request);
     response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify(apiResponse(url.pathname, request.method)));
+    response.end(JSON.stringify(apiResponse(url.pathname, request.method, request, body)));
     return;
   }
 
@@ -261,6 +423,25 @@ async function handleRequest(request, response) {
   response.end(await readFile(join(distDir, "index.html")));
 }
 
+async function readJsonBody(request) {
+  if (!["POST", "PUT", "PATCH"].includes(request.method || "")) {
+    return {};
+  }
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8").trim();
+  if (!raw) {
+    return {};
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 function contentType(filePath) {
   switch (extname(filePath)) {
     case ".css":
@@ -280,40 +461,67 @@ function contentType(filePath) {
   }
 }
 
-function apiResponse(pathname, method) {
+function apiResponse(pathname, method, request, body = {}) {
+  const role = roleFromRequest(request);
   if (pathname === `${apiBase}/session` && method === "POST") {
     return {
-      username: "visual-operator",
+      username: role.username,
       valid: true,
       expires_at_unix_seconds: 1_803_988_800,
     };
   }
   if (pathname === `${apiBase}/login` && method === "POST") {
     return {
-      username: "visual-operator",
-      session_token: "visual-session-token",
+      username: roles[1].username,
+      session_token: roles[1].token,
       expires_at_unix_seconds: 1_803_988_800,
     };
   }
   if (pathname === `${apiBase}/logout` && method === "POST") {
-    return { username: "visual-operator", disconnected: true };
+    return { username: role.username, disconnected: true };
   }
   if (pathname === `${apiV1Base}/dashboard/home`) {
     return homeDashboard();
   }
   if (pathname === `${apiV1Base}/dashboard/enclosures`) {
-    return enclosuresDashboard();
+    return enclosuresDashboard(role);
   }
   if (pathname === `${apiV1Base}/dashboard/object-stores`) {
-    return objectStoresDashboard();
+    return objectStoresDashboard(role);
   }
   if (pathname === `${apiV1Base}/workspaces/activity`) {
     return activityWorkspace();
   }
+  if (pathname === `${apiV1Base}/workspaces/users-groups`) {
+    return usersGroupsWorkspace(role);
+  }
   if (pathname === `${apiV1Base}/workspaces/bioinformatics`) {
     return bioinformaticsWorkspace();
   }
+  if (pathname === `${apiV1Base}/actions/plan` && method === "POST") {
+    return actionPlanResponse(body);
+  }
+  if (pathname === `${apiV1Base}/workspaces/enclosures/prepare` && method === "POST") {
+    return enclosurePrepareResponse(role);
+  }
+  if (pathname === `${apiV1Base}/workspaces/object-stores/create` && method === "POST") {
+    return objectStoreCreateResponse(role);
+  }
+  if (pathname === `${apiV1Base}/workspaces/users-groups/local-groups` && method === "POST") {
+    return localGroupAdminResponse("create_local_group", body.group_name || "mnemosyne-writers", null, body);
+  }
+  if (pathname === `${apiV1Base}/workspaces/users-groups/local-groups/members` && method === "POST") {
+    return localGroupAdminResponse("assign_local_user_to_group", body.group_name || "bioinformatics", body.username || "stephen", body);
+  }
+  if (pathname.startsWith(`${apiV1Base}/workspaces/admin/jobs/`)) {
+    return adminJobStatusResponse(pathname);
+  }
   return {};
+}
+
+function roleFromRequest(request) {
+  const token = request.headers["x-dasobjectstore-session-token"] || "";
+  return roles.find((role) => role.token === token) || roles[1];
 }
 
 function capacity(total, used, free, usedPercentBasisPoints) {
@@ -394,25 +602,30 @@ function homeDashboard() {
         },
       ],
     },
-    object_stores: objectStoresDashboard().stores,
+    object_stores: objectStoresDashboard(roles[1]).stores,
   };
 }
 
-function enclosuresDashboard() {
+function enclosuresDashboard(role = roles[1]) {
+  const canAdmin = role.administrator;
   return {
     schema_version: "dasobjectstore.enclosures_page.v1",
     generated_at_utc: "2026-07-08T19:00:00Z",
     add_enclosure: {
-      enabled: false,
+      enabled: canAdmin,
       action_kind: "enclosure_add",
       label: "Add enclosure",
-      state: "admin_required",
-      administrator: false,
+      state: canAdmin ? "ready" : "admin_required",
+      administrator: canAdmin,
       supported_enclosure_detected: true,
       daemon_ready: true,
       confirmation_required: true,
-      blocked_reason: "Administrator rights are required before preparing DAS media.",
-      next_step: "Sign in as a sudo-capable operator to prepare an enclosure.",
+      blocked_reason: canAdmin
+        ? null
+        : "Administrator rights are required before preparing DAS media.",
+      next_step: canAdmin
+        ? "Review detected SSD/HDD devices before submitting the daemon preparation job."
+        : "Sign in as a sudo-capable operator to prepare an enclosure.",
     },
     enclosures: [enclosureCard()],
     selected_enclosure_id: "qnap-tl-d800c-visual",
@@ -449,7 +662,8 @@ function driveSlot(slotNumber, driveId, role, sizeTib, health) {
   };
 }
 
-function objectStoresDashboard() {
+function objectStoresDashboard(role = roles[1]) {
+  const canAdmin = role.administrator;
   return {
     schema_version: "dasobjectstore.objectstores_page.v1",
     generated_at_utc: "2026-07-08T19:00:00Z",
@@ -492,7 +706,7 @@ function objectStoresDashboard() {
     ],
     selected_store_id: "zymo-fecal-2025-05",
     create_object_store: {
-      enabled: false,
+      enabled: canAdmin,
       action_kind: "store_create",
       label: "Create ObjectStore",
       required_fields: [
@@ -506,7 +720,9 @@ function objectStoresDashboard() {
       ],
       copy_count_options: [1, 2, 3],
       confirmation_required: true,
-      blocked_reason: "Administrator rights are required to create an ObjectStore.",
+      blocked_reason: canAdmin
+        ? null
+        : "Administrator rights are required to create an ObjectStore.",
     },
     warnings: [],
   };
@@ -572,13 +788,298 @@ function activityCategory(kind, label, description) {
   return { kind, label, description };
 }
 
+function usersGroupsWorkspace(role = roles[1]) {
+  const canAdmin = role.administrator;
+  return {
+    host_mode: "standalone",
+    current_user: {
+      username: role.username,
+      groups: canAdmin ? ["sudo", "bioinformatics"] : ["bioinformatics"],
+      sudo_administrator: canAdmin,
+    },
+    users: [
+      {
+        username: "stephen",
+        registered: true,
+        created_at_unix_seconds: 1_783_411_200,
+        registered_at_unix_seconds: 1_783_411_200,
+        active_session_count: 1,
+      },
+      {
+        username: role.username,
+        registered: true,
+        created_at_unix_seconds: 1_783_411_200,
+        registered_at_unix_seconds: 1_783_411_200,
+        active_session_count: 1,
+      },
+    ],
+    groups: [
+      {
+        group_name: "sudo",
+        current_user_member: canAdmin,
+        sudo_administrator_group: true,
+      },
+      {
+        group_name: "bioinformatics",
+        current_user_member: true,
+        sudo_administrator_group: false,
+      },
+    ],
+    groups_file_path: "/opt/dasobjectstore/groups.json",
+    writer_groups: [
+      {
+        group_name: "bioinformatics",
+        display_name: "Bioinformatics",
+        source: "local",
+        current_user_member: true,
+      },
+    ],
+    operations: [
+      localGroupOperation(
+        "create_local_group",
+        "Create local writer/admin group",
+        canAdmin,
+      ),
+      localGroupOperation("assign_local_user_to_group", "Assign local user to group", canAdmin),
+    ],
+    capabilities: {
+      product_local_user_registration: true,
+      os_local_user_management: false,
+      os_local_group_management: canAdmin,
+      administrator_actions_enabled: canAdmin,
+    },
+    selected_username: role.username,
+    selected_group_name: "bioinformatics",
+    warnings: [],
+  };
+}
+
+function localGroupOperation(kind, label, enabled) {
+  return {
+    kind,
+    label,
+    requires_sudo_administrator: true,
+    enabled,
+    blocked_reason: enabled ? null : "Requires sudo-derived authority.",
+  };
+}
+
 function bioinformaticsWorkspace() {
   return {
     schema_version: "dasobjectstore.bioinformatics_workspace.v1",
-    available: false,
-    supported_object_types: ["BAM", "CRAM", "POD5", "FASTQ", "FASTA", "VCF", "GFF", "ENA/SRA"],
+    available: true,
+    supported_object_types: [
+      "BAM",
+      "CRAM",
+      "POD5",
+      "FASTQ",
+      "FASTQ.GZ",
+      "FASTA",
+      "VCF",
+      "BCF",
+      "GFF",
+      "GTF",
+      "ENA/SRA",
+    ],
+    readiness_cards: [
+      readinessCard("POD5", "Nanopore POD5", "Sequencing signal", "ready", "Basecalling", "Dorado/Remora"),
+      readinessCard("FASTQ", "FASTQ reads", "Reads", "ready", "Alignment/QC", "Minimap2/FastQC"),
+      readinessCard("BAM", "BAM alignment", "Alignment", "watch", "Variant calling", "Samtools/BCFtools"),
+    ],
+    derivation_sources: [
+      {
+        source_kind: "ObjectStore",
+        source_id: "zymo-fecal-2025-05",
+        display_name: "ObjectStore, SubObject, object-type, and Mneion source records",
+        object_type: "POD5",
+        parent_id: null,
+        endpoint_export_mode: "s3",
+        mneion_binding_state: "bound",
+        governance_domain: "zymo-fecal",
+        workflow_roles: ["basecalling", "metagenomics"],
+        evidence: ["ObjectStore object_type POD5", "Mneion governance binding zymo-fecal"],
+      },
+      {
+        source_kind: "SubObject",
+        source_id: "zymo-fecal-2025-05/raw",
+        display_name: "SubObject lineage and object-type policy",
+        object_type: "POD5",
+        parent_id: "zymo-fecal-2025-05",
+        endpoint_export_mode: "s3",
+        mneion_binding_state: "inherited",
+        governance_domain: "zymo-fecal",
+        workflow_roles: ["basecalling"],
+        evidence: ["SubObject parent relationship", "Inherited object type"],
+      },
+    ],
+    sequencing_runs: [
+      contextCard(
+        "Sequencing run provenance",
+        "ready",
+        "Run metadata is linked to the imported POD5 folder.",
+        "Flowcell, kit, run identifier, and acquisition timestamp are available to orchestration.",
+      ),
+    ],
+    object_lineage: [
+      contextCard(
+        "Object lineage",
+        "ready",
+        "Parent ObjectStore and raw SubObject relationship is known.",
+        "Derived FASTQ and BAM outputs can retain lineage to raw signal.",
+      ),
+    ],
+    workflow_handoffs: [
+      contextCard(
+        "Basecalling readiness",
+        "ready",
+        "POD5 files can be handed to basecalling workflows.",
+        "The workflow receives object type, S3 route, and governance-domain metadata.",
+      ),
+    ],
+    governance_bindings: [
+      contextCard(
+        "Mnemosyne governance binding",
+        "ready",
+        "The ObjectStore is associated with a Mneion governance domain.",
+        "Audit and downstream project visibility can be resolved by the API layer.",
+      ),
+    ],
     message:
-      "Bioinformatics workflow cards are reserved while daemon-backed orchestration is completed.",
+      "Bioinformatics readiness is derived from ObjectStore/SubObject metadata and Mneion bindings supplied by the API.",
+  };
+}
+
+function readinessCard(objectType, label, category, state, primaryWorkflow, handoff) {
+  return {
+    object_type: objectType,
+    label,
+    category,
+    state,
+    primary_workflow: primaryWorkflow,
+    handoff,
+    required_metadata: ["object type", "settled placement", "governance binding"],
+  };
+}
+
+function contextCard(label, state, summary, detail) {
+  return {
+    label,
+    state,
+    summary,
+    detail,
+    evidence: ["API fixture", "workflow contract"],
+  };
+}
+
+function actionPlanResponse(body) {
+  if (body.action === "subobject_create") {
+    const name = body.subobject_name || "pod5/raw";
+    return {
+      action: "subobject_create",
+      execution: "daemon",
+      argv: ["dasobjectstore", "subobject", "create", name],
+      mutates_pool: true,
+      writes_recovery_metadata: true,
+      confirmation_required: true,
+    };
+  }
+  const storeId = body.store_id || "visual-e2e-store";
+  return {
+    action: body.action || "store_create",
+    execution: "daemon",
+    argv: ["dasobjectstore", "store", "create", storeId],
+    mutates_pool: true,
+    writes_recovery_metadata: true,
+    confirmation_required: true,
+  };
+}
+
+function enclosurePrepareResponse(role) {
+  return {
+    accepted: {
+      job_id: "enclosure-prepare-visual",
+      kind: "enclosure_preparation",
+      accepted_at_utc: "2026-07-08T19:10:00Z",
+      dry_run: false,
+    },
+    ssd_device: "/dev/nvme0n1",
+    hdd_devices: [
+      { disk_id: "qnap-1057", device_path: "/dev/sda" },
+      { disk_id: "qnap-1058", device_path: "/dev/sdb" },
+      { disk_id: "qnap-1059", device_path: "/dev/sdc" },
+    ],
+    mount_root: "/srv/dasobjectstore",
+    filesystem: "ext4",
+    owner: role.username,
+    administrator_actor: role.username,
+    client_request_id: null,
+  };
+}
+
+function objectStoreCreateResponse(role) {
+  return {
+    accepted: {
+      job_id: "objectstore-create-visual",
+      kind: "object_store_creation",
+      accepted_at_utc: "2026-07-08T19:11:00Z",
+      dry_run: false,
+    },
+    store_id: "visual-e2e-store",
+    store_class: "research",
+    required_copies: 1,
+    bucket: "visual-e2e-store",
+    writer_group: "bioinformatics",
+    ssd_root: "/srv/dasobjectstore/ssd",
+    object_type: "naive",
+    enclosure_id: "qnap-tl-d800c-visual",
+    public: false,
+    writeable: true,
+    capacity_behavior: "balanced",
+    retention: "standard",
+    endpoint_export_mode: "s3_bucket",
+    administrator_actor: role.username,
+    client_request_id: null,
+  };
+}
+
+function localGroupAdminResponse(operation, groupName, username, body) {
+  const dryRun = Boolean(body.dry_run);
+  const jobPrefix = operation === "create_local_group" ? "local-group" : "local-group-assign";
+  return {
+    accepted: {
+      job_id: `${jobPrefix}-${dryRun ? "dry-run" : "apply"}-visual`,
+      kind: "system_administration",
+      accepted_at_utc: "2026-07-08T19:12:00Z",
+      dry_run: dryRun,
+    },
+    operation,
+    group_name: groupName,
+    username,
+    client_request_id: null,
+  };
+}
+
+function adminJobStatusResponse(pathname) {
+  const jobId = pathname.split("/").filter(Boolean).at(-1);
+  return {
+    job: {
+      job_id: jobId,
+      kind: jobId.includes("enclosure") ? "enclosure_preparation" : "system_administration",
+      state: "running",
+      progress: {
+        stage: "validating-plan",
+        work_bytes_done: 0,
+        work_bytes_total: 0,
+        work_units_done: 1,
+        work_units_total: 4,
+        message: "Daemon accepted the administrator workflow and is validating media.",
+      },
+      percent_complete: 25,
+      submitted_at_utc: "2026-07-08T19:10:00Z",
+      updated_at_utc: "2026-07-08T19:10:02Z",
+      actor: "visual-admin",
+      failure_message: null,
+    },
   };
 }
 

@@ -773,12 +773,18 @@ Screenshot regression coverage is available through:
 
 The check builds the real Trunk/WebAssembly interface, serves it under
 ``/products/dasobjectstore/`` with deterministic mocked API payloads, captures
-login, Home, Enclosures, ObjectStores, Activity, and Bioinformatics screenshots
-at desktop and mobile widths, and fails if the footer, primary navigation,
-major cards, or page headers visibly overlap. Generated screenshots are written under
-``target/web-screenshots/`` for review and are not committed. The check expects
-the same Web packaging prerequisites as ``make web`` plus Node.js and Playwright
-with Chromium installed.
+login plus viewer/admin Home, Enclosures, ObjectStores, Activity,
+Users/Groups, and Bioinformatics screenshots at desktop and mobile widths, and
+fails if the footer, primary navigation, major cards, or page headers visibly
+overlap. The desktop pass also exercises role-aware Web workflows: non-admin
+sessions must keep enclosure preparation, ObjectStore/SubObject creation, and
+local group assignment disabled, while administrator sessions must be able to
+open the preparation wizard, review and submit daemon-backed ObjectStore
+creation, review SubObject routing, dry-run/apply local group administration,
+see Activity task progress, and render API-derived Bioinformatics readiness.
+Generated screenshots are written under ``target/web-screenshots/`` for review
+and are not committed. The check expects the same Web packaging prerequisites
+as ``make web`` plus Node.js and Playwright with Chromium installed.
 
 Checking the Web Server
 -----------------------

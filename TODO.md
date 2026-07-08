@@ -664,7 +664,7 @@ older checklist claims.
 - [x] Add documentation for administrator Web workflows, Bioinformatics
   readiness semantics, permission boundaries, audit expectations, and recovery
   from failed Web-submitted jobs.
-- [ ] Add end-to-end Web workflow tests for administrator and non-administrator
+- [x] Add end-to-end Web workflow tests for administrator and non-administrator
   users covering enclosure preparation, ObjectStore creation, SubObject
   creation, group assignment, Bioinformatics readiness, and Activity progress.
 
