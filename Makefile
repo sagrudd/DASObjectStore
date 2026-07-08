@@ -2,7 +2,7 @@ SHELL := /usr/bin/env bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test fmt check deb rpm package clean distclean
+.PHONY: help build test fmt check deb rpm remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -12,6 +12,8 @@ help:
 	@printf '  make check      Run cargo check for the workspace\n'
 	@printf '  make deb        Build a Debian package under target/deb/\n'
 	@printf '  make rpm        Build an RPM package under target/rpm/rpmbuild/RPMS/\n'
+	@printf '  make remote-deb Build a Debian package for dasobjectstore-remote only\n'
+	@printf '  make remote-rpm Build an RPM package for dasobjectstore-remote only\n'
 	@printf '  make package    Build both DEB and RPM packages\n'
 	@printf '  make clean      Remove Cargo build artifacts\n'
 	@printf '  make distclean  Remove Cargo and package build artifacts\n'
@@ -33,6 +35,12 @@ deb:
 
 rpm:
 	bash packaging/rpm/build-rpm.sh
+
+remote-deb:
+	bash packaging/debian/build-remote-deb.sh
+
+remote-rpm:
+	bash packaging/rpm/build-remote-rpm.sh
 
 package: deb rpm
 

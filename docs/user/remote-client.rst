@@ -16,6 +16,19 @@ Install ``dasobjectstore-remote`` and the AWS CLI on the remote computer. The
 remote client plans and invokes ``aws s3api`` and ``aws s3`` commands against
 the configured DASObjectStore endpoint.
 
+Build the remote-only packages from a source checkout when distributing the
+client to upload-only hosts:
+
+.. code-block:: console
+
+   make remote-deb
+   make remote-rpm
+
+These targets produce packages named ``dasobjectstore-remote`` and install only
+the remote client binary and its documentation. They do not install
+``dasobjectstored``, systemd service units, local appliance configuration, or
+managed storage directories.
+
 The remote computer must have one of the following credential paths:
 
 * an AWS CLI profile containing S3 access key credentials authorized for the

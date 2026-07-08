@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.5.0 - 2026-07-08
+
+- Add remote-only packaging targets, ``make remote-deb`` and
+  ``make remote-rpm``, for distributing the standalone
+  ``dasobjectstore-remote`` upload client without installing the appliance
+  daemon or managed storage service assets.
+
 ## 0.4.6 - 2026-07-08
 
 - Render performance-test TUI snapshots through ratatui's in-memory backend and

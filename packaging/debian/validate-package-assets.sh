@@ -9,6 +9,8 @@ daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
 postinst="$repo_root/packaging/debian/postinst"
 build_deb="$repo_root/packaging/debian/build-deb.sh"
 build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
+build_remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
+build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
 
 require_file() {
   local path="$1"
@@ -34,6 +36,8 @@ require_file "$daemon_config"
 require_file "$postinst"
 require_file "$build_deb"
 require_file "$build_rpm"
+require_file "$build_remote_deb"
+require_file "$build_remote_rpm"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -77,3 +81,17 @@ require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf'
+
+require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
+require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."
+require_text "$build_remote_deb" 'target/release/dasobjectstore-remote'
+require_text "$build_remote_deb" 'docs/user/remote-client.rst'
+require_text "$build_remote_deb" 'Package: $package_name'
+require_text "$build_remote_deb" 'Suggests: awscli'
+
+require_text "$build_remote_rpm" "rpmbuild is required to build the DASObjectStore remote RPM."
+require_text "$build_remote_rpm" "cargo build --release -p dasobjectstore-remote"
+require_text "$build_remote_rpm" 'target/release/dasobjectstore-remote'
+require_text "$build_remote_rpm" 'docs/user/remote-client.rst'
+require_text "$build_remote_rpm" '/usr/bin/dasobjectstore-remote'
+require_text "$build_remote_rpm" 'Recommends:      awscli'
