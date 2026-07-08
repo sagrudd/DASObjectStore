@@ -43,8 +43,8 @@ pub use users_groups::{
 };
 pub use workspace::{
     bioinformatics_workspace_api_path, enclosures_workspace_api_path, home_workspace_api_path,
-    objectstores_workspace_api_path, ApiLoadState, DashboardMetric, EnclosureCardSummary,
-    ObjectStoreCardSummary, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE,
+    objectstores_workspace_api_path, primary_navigation_for_host, ApiLoadState, DashboardMetric,
+    EnclosureCardSummary, ObjectStoreCardSummary, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE,
     ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
     PRIMARY_NAVIGATION,
 };

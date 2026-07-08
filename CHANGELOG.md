@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.42.0 - 2026-07-08
+
+- Promote Users/Groups into the primary Web navigation for standalone
+  local-user appliances while keeping Synoptikon/Monas integrated hosts
+  host-authority gated.
+- Add a read-only Users/Groups Web page backed by the existing authenticated
+  workspace route, showing host mode, current OS authority, product-local
+  users, local groups, writer groups, administrator readiness, and warnings.
+- Add Web regression coverage for host-aware navigation, Users/Groups API path
+  construction, payload decoding, and summary card derivation.
+
 ## 0.41.0 - 2026-07-08
 
 - Project Web-submitted ObjectStore creation requests into the same typed store

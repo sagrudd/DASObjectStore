@@ -304,6 +304,61 @@ pub struct StorageGroupResponse {
     pub current_user_member: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct UsersGroupsWorkspaceResponse {
+    pub host_mode: String,
+    pub current_user: Option<LocalUserAuthorityResponse>,
+    pub users: Vec<StandaloneUserAccountResponse>,
+    pub groups: Vec<LocalGroupMembershipResponse>,
+    pub groups_file_path: String,
+    pub writer_groups: Vec<StorageGroupResponse>,
+    pub operations: Vec<LocalGroupOperationResponse>,
+    pub capabilities: UsersGroupsCapabilitiesResponse,
+    pub selected_username: Option<String>,
+    pub selected_group_name: Option<String>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LocalUserAuthorityResponse {
+    pub username: String,
+    pub groups: Vec<String>,
+    pub sudo_administrator: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct StandaloneUserAccountResponse {
+    pub username: String,
+    pub registered: bool,
+    pub created_at_unix_seconds: i64,
+    pub registered_at_unix_seconds: Option<i64>,
+    pub active_session_count: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LocalGroupMembershipResponse {
+    pub group_name: String,
+    pub current_user_member: bool,
+    pub sudo_administrator_group: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LocalGroupOperationResponse {
+    pub kind: String,
+    pub label: String,
+    pub requires_sudo_administrator: bool,
+    pub enabled: bool,
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct UsersGroupsCapabilitiesResponse {
+    pub product_local_user_registration: bool,
+    pub os_local_user_management: bool,
+    pub os_local_group_management: bool,
+    pub administrator_actions_enabled: bool,
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct BioinformaticsWorkspaceResponse {
@@ -644,6 +699,13 @@ pub async fn get_bioinformatics_workspace(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn get_users_groups_workspace(
+    path: &str,
+) -> Result<UsersGroupsWorkspaceResponse, ApiError> {
+    get_json(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
 #[allow(dead_code)]
 pub async fn plan_gui_action(
     api_base_path: &str,
@@ -792,6 +854,7 @@ mod tests {
         AdminJobCancelResponse, AdminJobStatusResponse, BioinformaticsWorkspaceResponse,
         CreateObjectStoreResponse, EnclosurePrepareResponse, EnclosuresPageResponse,
         GuiActionPlanResponse, HomeDashboardResponse, ObjectStoresPageResponse,
+        UsersGroupsWorkspaceResponse,
     };
 
     #[test]
@@ -1210,5 +1273,66 @@ mod tests {
             .supported_object_types
             .iter()
             .any(|object_type| object_type == "POD5"));
+    }
+
+    #[test]
+    fn decodes_users_groups_workspace_response_subset() {
+        let payload = serde_json::json!({
+            "host_mode": "standalone",
+            "current_user": {
+                "username": "operator",
+                "groups": ["sudo", "mnemosyne"],
+                "sudo_administrator": true
+            },
+            "users": [{
+                "username": "operator",
+                "registered": true,
+                "created_at_unix_seconds": 1,
+                "registered_at_unix_seconds": 2,
+                "active_session_count": 1
+            }],
+            "groups": [{
+                "group_name": "mnemosyne",
+                "current_user_member": true,
+                "sudo_administrator_group": false
+            }],
+            "groups_file_path": "/opt/dasobjectstore/groups.json",
+            "writer_groups": [{
+                "group_name": "mnemosyne",
+                "display_name": "Mnemosyne",
+                "source": "object_storage_group_registry",
+                "current_user_member": true
+            }],
+            "operations": [{
+                "kind": "create_local_group",
+                "label": "Create local writer/admin group",
+                "requires_sudo_administrator": true,
+                "enabled": true,
+                "blocked_reason": null
+            }],
+            "capabilities": {
+                "product_local_user_registration": true,
+                "os_local_user_management": true,
+                "os_local_group_management": true,
+                "administrator_actions_enabled": true
+            },
+            "selected_username": "operator",
+            "selected_group_name": "mnemosyne",
+            "warnings": []
+        });
+
+        let decoded = serde_json::from_value::<UsersGroupsWorkspaceResponse>(payload)
+            .expect("users/groups workspace decodes");
+
+        assert_eq!(decoded.host_mode, "standalone");
+        assert!(
+            decoded
+                .current_user
+                .as_ref()
+                .expect("current user")
+                .sudo_administrator
+        );
+        assert_eq!(decoded.writer_groups[0].group_name, "mnemosyne");
+        assert!(decoded.capabilities.administrator_actions_enabled);
     }
 }

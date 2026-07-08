@@ -125,6 +125,12 @@ The primary navigation is:
    policy, class defaults, redundancy, ingest behavior, endpoint/export state,
    and store lifecycle actions.
 
+``Users/Groups``
+   Standalone appliance identity and writer-policy view. It is shown in primary
+   navigation when the DASObjectStore host mode uses local-user authentication
+   and reports OS authority, product-local browser users, local groups, writer
+   groups, administrator readiness, and warnings.
+
 ``Bioinformatics``
    Placeholder workspace for the first bioinformatics-oriented workflow. Until
    the workflow is implemented, this page should clearly present itself as a
@@ -153,16 +159,18 @@ experience. The active Web console surfaces are:
 * ``Home`` for daemon-backed health and attention state;
 * ``Enclosures`` for live DAS and drive inventory;
 * ``ObjectStores`` for registry-backed store cards and writer-policy
-  readiness; and
+  readiness;
+* ``Users/Groups`` for standalone local-user authority, writer-policy
+  readiness, and administrator capability when host mode permits it; and
 * ``Bioinformatics`` for clearly reserved workflow-readiness state.
 
-Legacy ``workspaces/stores`` and ``workspaces/users-groups`` routes remain
-compatibility API endpoints only. They are not primary navigation targets and
-must not be used to reintroduce parallel static holders. Milestone 20 will add
-administrator workflows on top of the canonical console, including enclosure
-preparation, ObjectStore/SubObject creation, Users/Groups promotion when host
-mode permits local administration, Activity views, and concrete bioinformatics
-workflow-readiness cards.
+Legacy ``workspaces/stores`` remains a compatibility API endpoint only. The
+``workspaces/users-groups`` route is now consumed by the first-class
+``Users/Groups`` page in standalone local-user host mode; Synoptikon or Monas
+integrated deployments should continue to omit this page until the host product
+supplies the authority surface. Milestone 20 continues with administrator
+workflow forms, Activity views, and concrete bioinformatics workflow-readiness
+cards.
 
 Home Dashboard
 --------------
@@ -397,19 +405,19 @@ writer policy allows it.
 Users/Groups Workspace
 ----------------------
 
-Users/group state is currently surfaced through the coherent product console
-rather than a second standalone holder page. The compatibility API
-``/products/dasobjectstore/api/v1/workspaces/users-groups`` remains available
-for authenticated clients and future first-class Users/Groups navigation work.
-It reports the current OS authority, product-local users, local group
-memberships, administrator capability, and daemon-submitted group-management
-operations. The same server-side groups registry used by the ObjectStores
-dashboard is included as ``writer_groups`` so operators can see which managed
-writer groups exist and whether the current local user is a member.
+Users/group state is surfaced through the coherent product console rather than
+a second standalone holder page. In standalone local-user host mode, the
+``Users/Groups`` primary navigation entry loads
+``/products/dasobjectstore/api/v1/workspaces/users-groups`` and presents the
+current OS authority, product-local users, local group memberships,
+administrator capability, and daemon-submitted group-management operations. The
+same server-side groups registry used by the ObjectStores dashboard is included
+as ``writer_groups`` so operators can see which managed writer groups exist and
+whether the current local user is a member.
 
-Legacy ``workspaces/stores`` and ``workspaces/users-groups`` Web holder
-components are not part of the primary browser navigation. Operators should use
-``Home``, ``Enclosures``, ``ObjectStores``, and ``Bioinformatics`` as the
+Legacy ``workspaces/stores`` Web holder components are not part of the primary
+browser navigation. Operators should use ``Home``, ``Enclosures``,
+``ObjectStores``, ``Users/Groups``, and ``Bioinformatics`` as the
 canonical Web console surfaces.
 
 Bioinformatics Workspace

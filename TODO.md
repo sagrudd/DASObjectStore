@@ -622,7 +622,7 @@ older checklist claims.
   registry preview before confirmation.
 - [x] Add Web tests proving ObjectStore and SubObject creation produce the same
   registry/domain records as CLI paths and reject invalid policy combinations.
-- [ ] Promote Users/Groups into primary navigation when host mode permits local
+- [x] Promote Users/Groups into primary navigation when host mode permits local
   administration, including current OS authority, product-local users, local
   groups, administrator readiness, and writer-policy readiness.
 - [ ] Implement Users/Groups forms for local group creation and local

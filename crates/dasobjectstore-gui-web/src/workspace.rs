@@ -12,8 +12,9 @@ use crate::api::{
 };
 use crate::api::{
     EnclosureDriveSlotResponse, EnclosuresPageResponse, HomeDashboardResponse,
-    ObjectStoresPageResponse,
+    ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
 };
+use crate::mount::FrontendHost;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::Timeout;
 
@@ -21,12 +22,14 @@ pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
 pub const OBJECTSTORES_WORKSPACE_ROUTE: &str = "dashboard/object-stores";
 pub const BIOINFORMATICS_WORKSPACE_ROUTE: &str = "workspaces/bioinformatics";
+pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkspacePage {
     Home,
     Enclosures,
     ObjectStores,
+    UsersGroups,
     Bioinformatics,
 }
 
@@ -36,6 +39,7 @@ impl WorkspacePage {
             Self::Home => "home",
             Self::Enclosures => "enclosures",
             Self::ObjectStores => "objectstores",
+            Self::UsersGroups => "users-groups",
             Self::Bioinformatics => "bioinformatics",
         }
     }
@@ -45,6 +49,7 @@ impl WorkspacePage {
             Self::Home => "Home",
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
+            Self::UsersGroups => "Users/Groups",
             Self::Bioinformatics => "Bioinformatics",
         }
     }
@@ -54,6 +59,7 @@ impl WorkspacePage {
             Self::Home => "Home",
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
+            Self::UsersGroups => "Users/Groups",
             Self::Bioinformatics => "Bioinformatics",
         }
     }
@@ -63,17 +69,33 @@ impl WorkspacePage {
             Self::Home => home_workspace_api_path(api_base_path),
             Self::Enclosures => enclosures_workspace_api_path(api_base_path),
             Self::ObjectStores => objectstores_workspace_api_path(api_base_path),
+            Self::UsersGroups => users_groups_workspace_api_path(api_base_path),
             Self::Bioinformatics => bioinformatics_workspace_api_path(api_base_path),
         }
     }
 }
 
-pub const PRIMARY_NAVIGATION: [WorkspacePage; 4] = [
+pub const PRIMARY_NAVIGATION: [WorkspacePage; 5] = [
+    WorkspacePage::Home,
+    WorkspacePage::Enclosures,
+    WorkspacePage::ObjectStores,
+    WorkspacePage::UsersGroups,
+    WorkspacePage::Bioinformatics,
+];
+
+pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 4] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
     WorkspacePage::Bioinformatics,
 ];
+
+pub fn primary_navigation_for_host(host: FrontendHost) -> &'static [WorkspacePage] {
+    match host {
+        FrontendHost::Standalone => &PRIMARY_NAVIGATION,
+        FrontendHost::Monas | FrontendHost::Synoptikon => &INTEGRATED_PRIMARY_NAVIGATION,
+    }
+}
 
 pub fn home_workspace_api_path(api_base_path: &str) -> String {
     format!(
@@ -105,6 +127,10 @@ pub fn bioinformatics_workspace_api_path(api_base_path: &str) -> String {
         api_base_path.trim_end_matches('/'),
         BIOINFORMATICS_WORKSPACE_ROUTE
     )
+}
+
+pub fn users_groups_workspace_api_path(api_base_path: &str) -> String {
+    crate::users_groups::users_groups_workspace_api_path(api_base_path)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3458,6 +3484,204 @@ fn render_object_stores_state_message(label: &str, title: &str, message: &str) -
     }
 }
 
+pub fn users_groups_summary_cards(view: &UsersGroupsWorkspaceResponse) -> Vec<DashboardMetric> {
+    let authority = view
+        .current_user
+        .as_ref()
+        .map(|user| {
+            if user.sudo_administrator {
+                "sudo administrator".to_string()
+            } else {
+                "standard local user".to_string()
+            }
+        })
+        .unwrap_or_else(|| "not reported".to_string());
+    let username = view
+        .current_user
+        .as_ref()
+        .map(|user| user.username.as_str())
+        .unwrap_or("none");
+
+    vec![
+        DashboardMetric::new(
+            "Host mode",
+            &view.host_mode,
+            "Authority source for this console",
+            "identity",
+        ),
+        DashboardMetric::new("Current user", username, authority, "authority"),
+        DashboardMetric::new(
+            "Product users",
+            view.users.len().to_string(),
+            "Browser-session users known to DASObjectStore",
+            "local",
+        ),
+        DashboardMetric::new(
+            "Local groups",
+            view.groups.len().to_string(),
+            "OS groups visible for the current user",
+            "membership",
+        ),
+        DashboardMetric::new(
+            "Writer groups",
+            view.writer_groups.len().to_string(),
+            format!("Managed registry: {}", view.groups_file_path),
+            "policy",
+        ),
+        DashboardMetric::new(
+            "Admin operations",
+            view.operations
+                .iter()
+                .filter(|operation| operation.enabled)
+                .count()
+                .to_string(),
+            if view.capabilities.administrator_actions_enabled {
+                "Local group administration is available."
+            } else {
+                "Local group administration requires sudo-derived authority."
+            },
+            "readiness",
+        ),
+    ]
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Properties)]
+pub struct UsersGroupsPageProps {
+    pub api_base_path: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[function_component(UsersGroupsPage)]
+pub fn users_groups_page(props: &UsersGroupsPageProps) -> Html {
+    let api_path = WorkspacePage::UsersGroups.api_path(&props.api_base_path);
+    let users_groups_state = use_state(|| ApiLoadState::<UsersGroupsWorkspaceResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let users_groups_state = users_groups_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                users_groups_state.set(page_load_state_from_result(
+                    crate::api::get_users_groups_workspace(&path).await,
+                    |view| {
+                        (view.current_user.is_none()
+                            && view.users.is_empty()
+                            && view.writer_groups.is_empty())
+                        .then(|| {
+                            "No local identity or writer-policy state was returned by the appliance."
+                                .to_string()
+                        })
+                    },
+                ));
+            });
+            || ()
+        });
+    }
+
+    html! {
+        <section class="dos-page" data-page="users-groups" data-api-route={api_path}>
+            <PageHeader
+                eyebrow="Identity and writer policy"
+                title="Users/Groups"
+                summary="Local OS authority, product-local sessions, writer groups, and administrator readiness."
+            />
+            { render_users_groups_state(&*users_groups_state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_users_groups_state(state: &ApiLoadState<UsersGroupsWorkspaceResponse>) -> Html {
+    match state {
+        ApiLoadState::Loading => render_users_groups_state_message(
+            "Loading",
+            "Loading local authority",
+            "The Web console is requesting OS-local user, group, and writer-policy readiness.",
+        ),
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
+            render_users_groups_workspace(view)
+        }
+        ApiLoadState::Empty(message) => {
+            render_users_groups_state_message("Inventory", "No local authority data", message)
+        }
+        ApiLoadState::PermissionDenied(message) => render_users_groups_state_message(
+            "Permission denied",
+            "Users/Groups requires a standalone authenticated session",
+            message,
+        ),
+        ApiLoadState::TransportError(message) => {
+            render_users_groups_state_message("Error", "Unable to load Users/Groups", message)
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_users_groups_workspace(view: &UsersGroupsWorkspaceResponse) -> Html {
+    html! {
+        <>
+            <section class="dos-metric-grid">
+                { for users_groups_summary_cards(view).into_iter().map(render_metric_card) }
+            </section>
+            <section class="dos-attention-grid">
+                <section class="dos-card dos-wide-card">
+                    <span class="dos-card-label">{ "Current OS authority" }</span>
+                    if let Some(user) = &view.current_user {
+                        <h2>{ &user.username }</h2>
+                        <p>{ if user.sudo_administrator { "Sudo-derived administrator." } else { "Inspection-only local user." } }</p>
+                        <div class="dos-chip-row">
+                            { for user.groups.iter().map(|group| html! {
+                                <span class="dos-status-pill">{ group }</span>
+                            }) }
+                        </div>
+                    } else {
+                        <h2>{ "No current local user" }</h2>
+                        <p>{ "The standalone session did not include OS-local authority metadata." }</p>
+                    }
+                </section>
+                <section class="dos-card">
+                    <span class="dos-card-label">{ "Writer policy" }</span>
+                    <h2>{ format!("{} managed group(s)", view.writer_groups.len()) }</h2>
+                    <p>{ format!("Registry: {}", view.groups_file_path) }</p>
+                    <div class="dos-chip-row">
+                        { for view.writer_groups.iter().map(|group| html! {
+                            <span class="dos-status-pill">{ format!("{} · {}", group.display_name, if group.current_user_member { "member" } else { "not member" }) }</span>
+                        }) }
+                    </div>
+                </section>
+                <section class="dos-card">
+                    <span class="dos-card-label">{ "Administrator readiness" }</span>
+                    <h2>{ if view.capabilities.administrator_actions_enabled { "Ready" } else { "Not ready" } }</h2>
+                    <p>{ if view.capabilities.os_local_group_management { "Local group management is available for this session." } else { "Local group management is gated until sudo-derived authority is present." } }</p>
+                    { for view.operations.iter().map(|operation| html! {
+                        <p>{ format!("{}: {}", operation.label, if operation.enabled { "available" } else { operation.blocked_reason.as_deref().unwrap_or("blocked") }) }</p>
+                    }) }
+                </section>
+            </section>
+            if !view.warnings.is_empty() {
+                <section class="dos-card dos-wide-card">
+                    <span class="dos-card-label">{ "Warnings" }</span>
+                    { for view.warnings.iter().map(|warning| html! {
+                        <p>{ format!("{}: {}", warning.code, warning.message) }</p>
+                    }) }
+                </section>
+            }
+        </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_users_groups_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label }</span>
+            <h2>{ title }</h2>
+            <p>{ message }</p>
+        </section>
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq, Properties)]
 pub struct BioinformaticsPageProps {
@@ -3589,16 +3813,21 @@ mod tests {
         home_workspace_api_path, object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
-        objectstores_workspace_api_path, subobject_registry_preview_from_values, ApiLoadState,
-        EnclosureWizardState, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE,
-        ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
-        PRIMARY_NAVIGATION,
+        objectstores_workspace_api_path, primary_navigation_for_host,
+        subobject_registry_preview_from_values, users_groups_summary_cards,
+        users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, WorkspacePage,
+        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use crate::api::{
         AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
         EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice, EnclosurePrepareResponse,
-        EnclosuresPageResponse, HomeDashboardResponse, ObjectStoresPageResponse,
+        EnclosuresPageResponse, HomeDashboardResponse, LocalGroupMembershipResponse,
+        LocalGroupOperationResponse, LocalUserAuthorityResponse, ObjectStoresPageResponse,
+        StandaloneUserAccountResponse, StorageGroupResponse, UsersGroupsCapabilitiesResponse,
+        UsersGroupsWorkspaceResponse,
     };
+    use crate::mount::FrontendHost;
     use crate::stores::STORES_WORKSPACE_ROUTE;
     use crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
@@ -3608,8 +3837,29 @@ mod tests {
 
         assert_eq!(
             labels,
-            vec!["Home", "Enclosures", "ObjectStores", "Bioinformatics"]
+            vec![
+                "Home",
+                "Enclosures",
+                "ObjectStores",
+                "Users/Groups",
+                "Bioinformatics"
+            ]
         );
+    }
+
+    #[test]
+    fn primary_navigation_is_host_mode_aware_for_users_groups() {
+        let standalone_labels: Vec<_> = primary_navigation_for_host(FrontendHost::Standalone)
+            .iter()
+            .map(|page| page.label())
+            .collect();
+        let synoptikon_labels: Vec<_> = primary_navigation_for_host(FrontendHost::Synoptikon)
+            .iter()
+            .map(|page| page.label())
+            .collect();
+
+        assert!(standalone_labels.contains(&"Users/Groups"));
+        assert!(!synoptikon_labels.contains(&"Users/Groups"));
     }
 
     #[test]
@@ -3627,6 +3877,10 @@ mod tests {
         assert_eq!(
             WorkspacePage::ObjectStores.api_path(base),
             "/products/dasobjectstore/api/v1/dashboard/object-stores"
+        );
+        assert_eq!(
+            WorkspacePage::UsersGroups.api_path(base),
+            "/products/dasobjectstore/api/v1/workspaces/users-groups"
         );
         assert_eq!(
             WorkspacePage::Bioinformatics.api_path(base),
@@ -3648,10 +3902,14 @@ mod tests {
             objectstores_workspace_api_path("/api/"),
             "/api/dashboard/object-stores"
         );
+        assert_eq!(
+            users_groups_workspace_api_path("/api/"),
+            "/api/workspaces/users-groups"
+        );
     }
 
     #[test]
-    fn primary_navigation_excludes_legacy_holder_routes() {
+    fn primary_navigation_promotes_users_groups_without_legacy_stores_holder() {
         let base = "/products/dasobjectstore/api/v1/";
         let primary_paths: Vec<_> = PRIMARY_NAVIGATION
             .iter()
@@ -3661,12 +3919,27 @@ mod tests {
         assert!(!primary_paths
             .iter()
             .any(|path| path.ends_with(STORES_WORKSPACE_ROUTE)));
-        assert!(!primary_paths
+        assert!(primary_paths
             .iter()
             .any(|path| path.ends_with(USERS_GROUPS_WORKSPACE_ROUTE)));
         assert!(primary_paths
             .iter()
             .any(|path| path.ends_with(OBJECTSTORES_WORKSPACE_ROUTE)));
+    }
+
+    #[test]
+    fn users_groups_summary_surfaces_authority_and_writer_policy() {
+        let cards = users_groups_summary_cards(&users_groups_workspace_fixture());
+        let values: Vec<_> = cards
+            .iter()
+            .map(|card| (card.label.as_str(), card.value.as_str()))
+            .collect();
+
+        assert!(values.contains(&("Host mode", "standalone")));
+        assert!(values.contains(&("Current user", "operator")));
+        assert!(values.contains(&("Product users", "1")));
+        assert!(values.contains(&("Writer groups", "1")));
+        assert!(values.contains(&("Admin operations", "2")));
     }
 
     #[test]
@@ -4504,5 +4777,67 @@ mod tests {
         assert_eq!(attention[0].title, "No operator attention required");
         assert!(!attention[0].detail.contains("bootstrapped"));
         assert!(!attention[0].detail.contains("fixture"));
+    }
+
+    fn users_groups_workspace_fixture() -> UsersGroupsWorkspaceResponse {
+        UsersGroupsWorkspaceResponse {
+            host_mode: "standalone".to_string(),
+            current_user: Some(LocalUserAuthorityResponse {
+                username: "operator".to_string(),
+                groups: vec!["sudo".to_string(), "mnemosyne".to_string()],
+                sudo_administrator: true,
+            }),
+            users: vec![StandaloneUserAccountResponse {
+                username: "operator".to_string(),
+                registered: true,
+                created_at_unix_seconds: 1,
+                registered_at_unix_seconds: Some(2),
+                active_session_count: 1,
+            }],
+            groups: vec![
+                LocalGroupMembershipResponse {
+                    group_name: "sudo".to_string(),
+                    current_user_member: true,
+                    sudo_administrator_group: true,
+                },
+                LocalGroupMembershipResponse {
+                    group_name: "mnemosyne".to_string(),
+                    current_user_member: true,
+                    sudo_administrator_group: false,
+                },
+            ],
+            groups_file_path: "/opt/dasobjectstore/groups.json".to_string(),
+            writer_groups: vec![StorageGroupResponse {
+                group_name: "mnemosyne".to_string(),
+                display_name: "Mnemosyne".to_string(),
+                source: "object_storage_group_registry".to_string(),
+                current_user_member: true,
+            }],
+            operations: vec![
+                LocalGroupOperationResponse {
+                    kind: "create_local_group".to_string(),
+                    label: "Create local writer/admin group".to_string(),
+                    requires_sudo_administrator: true,
+                    enabled: true,
+                    blocked_reason: None,
+                },
+                LocalGroupOperationResponse {
+                    kind: "assign_local_user_to_group".to_string(),
+                    label: "Assign local user to group".to_string(),
+                    requires_sudo_administrator: true,
+                    enabled: true,
+                    blocked_reason: None,
+                },
+            ],
+            capabilities: UsersGroupsCapabilitiesResponse {
+                product_local_user_registration: true,
+                os_local_user_management: true,
+                os_local_group_management: true,
+                administrator_actions_enabled: true,
+            },
+            selected_username: Some("operator".to_string()),
+            selected_group_name: Some("mnemosyne".to_string()),
+            warnings: Vec::new(),
+        }
     }
 }

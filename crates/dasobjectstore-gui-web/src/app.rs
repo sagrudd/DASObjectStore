@@ -2,8 +2,8 @@ use crate::components::DasObjectStoreFooter;
 use crate::mount::{FrontendHost, FrontendMount};
 use crate::session::{AppState, StableState};
 use crate::workspace::{
-    BioinformaticsPage, EnclosuresPage, HomeDashboard, ObjectStoresPage, WorkspacePage,
-    PRIMARY_NAVIGATION,
+    primary_navigation_for_host, BioinformaticsPage, EnclosuresPage, HomeDashboard,
+    ObjectStoresPage, UsersGroupsPage, WorkspacePage,
 };
 use crate::{api, storage};
 use web_sys::HtmlInputElement;
@@ -148,6 +148,7 @@ pub fn app() -> Html {
                         <AuthenticatedWorkspace
                             username={(*username).clone()}
                             busy_label={(*app_state).busy_label().map(str::to_string)}
+                            host={mount.host}
                             api_base_path={api_base_path}
                             on_logout={on_logout}
                         />
@@ -228,6 +229,7 @@ fn landing_page(props: &LandingPageProps) -> Html {
 struct AuthenticatedWorkspaceProps {
     username: String,
     busy_label: Option<String>,
+    host: FrontendHost,
     api_base_path: String,
     on_logout: Callback<MouseEvent>,
 }
@@ -235,6 +237,7 @@ struct AuthenticatedWorkspaceProps {
 #[function_component(AuthenticatedWorkspace)]
 fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
     let active_page = use_state(|| WorkspacePage::Home);
+    let navigation = primary_navigation_for_host(props.host);
 
     html! {
         <section class="dos-workspace-shell">
@@ -245,7 +248,7 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                         <strong>{ "DASObjectStore" }</strong>
                     </div>
                     <nav class="dos-primary-nav" aria-label="Primary">
-                        { for PRIMARY_NAVIGATION.into_iter().map(|page| {
+                        { for navigation.iter().copied().map(|page| {
                             let is_active = *active_page == page;
                             let active_page = active_page.clone();
                             html! {
@@ -278,6 +281,9 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                 },
                 WorkspacePage::ObjectStores => html! {
                     <ObjectStoresPage api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::UsersGroups => html! {
+                    <UsersGroupsPage api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::Bioinformatics => html! {
                     <BioinformaticsPage api_base_path={props.api_base_path.clone()} />

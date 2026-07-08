@@ -1,10 +1,10 @@
-//! Compatibility helpers for the standalone Users/Groups route.
+//! Route helpers for the standalone Users/Groups console surface.
 //!
 //! Users and group readiness are now represented inside the coherent product
 //! console, with ObjectStore writer-policy readiness surfaced on the canonical
-//! ObjectStores page. These helpers remain for the authenticated API boundary
-//! and future first-class Users/Groups work, but this module intentionally does
-//! not expose a parallel Yew holder surface.
+//! ObjectStores page. These helpers expose the authenticated API boundary used
+//! by the first-class primary navigation page without reintroducing a parallel
+//! legacy holder surface.
 
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = "workspaces/users-groups";
 pub const CREATE_LOCAL_GROUP_ACTION_ROUTE: &str = "workspaces/users-groups/local-groups";
