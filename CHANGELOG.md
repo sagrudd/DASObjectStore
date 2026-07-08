@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.43.0 - 2026-07-09
+
+- Add Users/Groups Web forms for daemon-backed local group creation and local
+  user-to-group assignment, with dry-run preview, exact confirmation phrase,
+  accepted-result rendering, and error display.
+- Add typed frontend API requests and responses for the existing standalone
+  local group administration routes.
+- Add Web regression coverage for local group admin payload decoding and
+  form readiness/confirmation gates.
+
 ## 0.42.0 - 2026-07-08
 
 - Promote Users/Groups into the primary Web navigation for standalone

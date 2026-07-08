@@ -415,6 +415,14 @@ same server-side groups registry used by the ObjectStores dashboard is included
 as ``writer_groups`` so operators can see which managed writer groups exist and
 whether the current local user is a member.
 
+Administrator sessions can use the Users/Groups page to create a local writer
+or administrator group, or assign a local user to a managed writer group. Both
+forms submit first as a dry run through the daemon-backed local group
+administration routes, then require the exact confirmation phrase
+``confirm local group administration`` before a live daemon job is accepted.
+Non-admin sessions keep the forms visible as unavailable controls and receive a
+clear permission-denied response if they attempt to submit through the API.
+
 Legacy ``workspaces/stores`` Web holder components are not part of the primary
 browser navigation. Operators should use ``Home``, ``Enclosures``,
 ``ObjectStores``, ``Users/Groups``, and ``Bioinformatics`` as the

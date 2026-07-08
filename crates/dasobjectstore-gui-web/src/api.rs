@@ -360,6 +360,46 @@ pub struct UsersGroupsCapabilitiesResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CreateLocalGroupRequest {
+    pub group_name: String,
+    pub dry_run: bool,
+    pub confirmation_marker: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AssignLocalUserToGroupRequest {
+    pub group_name: String,
+    pub username: String,
+    pub dry_run: bool,
+    pub confirmation_marker: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LocalGroupAdminResponse {
+    pub accepted: LocalGroupAdminAcceptedResponse,
+    pub operation: String,
+    pub group_name: String,
+    pub username: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LocalGroupAdminAcceptedResponse {
+    pub job_id: String,
+    pub kind: String,
+    pub accepted_at_utc: String,
+    pub dry_run: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct BioinformaticsWorkspaceResponse {
     pub schema_version: String,
@@ -706,6 +746,30 @@ pub async fn get_users_groups_workspace(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn submit_create_local_group(
+    api_base_path: &str,
+    request: &CreateLocalGroupRequest,
+) -> Result<LocalGroupAdminResponse, ApiError> {
+    post_json(
+        &crate::users_groups::create_local_group_action_api_path(api_base_path),
+        request,
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn submit_assign_local_user_to_group(
+    api_base_path: &str,
+    request: &AssignLocalUserToGroupRequest,
+) -> Result<LocalGroupAdminResponse, ApiError> {
+    post_json(
+        &crate::users_groups::assign_local_user_to_group_action_api_path(api_base_path),
+        request,
+    )
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
 #[allow(dead_code)]
 pub async fn plan_gui_action(
     api_base_path: &str,
@@ -853,8 +917,8 @@ mod tests {
         admin_job_cancel_path, admin_job_status_path, auth_path, object_store_create_path,
         AdminJobCancelResponse, AdminJobStatusResponse, BioinformaticsWorkspaceResponse,
         CreateObjectStoreResponse, EnclosurePrepareResponse, EnclosuresPageResponse,
-        GuiActionPlanResponse, HomeDashboardResponse, ObjectStoresPageResponse,
-        UsersGroupsWorkspaceResponse,
+        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
+        ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
 
     #[test]
@@ -1334,5 +1398,29 @@ mod tests {
         );
         assert_eq!(decoded.writer_groups[0].group_name, "mnemosyne");
         assert!(decoded.capabilities.administrator_actions_enabled);
+    }
+
+    #[test]
+    fn decodes_local_group_admin_response_subset() {
+        let payload = serde_json::json!({
+            "accepted": {
+                "job_id": "local-admin-1",
+                "kind": "system_administration",
+                "accepted_at_utc": "2026-07-09T08:00:00Z",
+                "dry_run": true
+            },
+            "operation": "create_group",
+            "group_name": "mnemosyne-writers",
+            "username": null,
+            "client_request_id": "request-1"
+        });
+
+        let decoded = serde_json::from_value::<LocalGroupAdminResponse>(payload)
+            .expect("local group admin response decodes");
+
+        assert_eq!(decoded.accepted.job_id, "local-admin-1");
+        assert_eq!(decoded.operation, "create_group");
+        assert!(decoded.accepted.dry_run);
+        assert_eq!(decoded.group_name, "mnemosyne-writers");
     }
 }

@@ -625,7 +625,7 @@ older checklist claims.
 - [x] Promote Users/Groups into primary navigation when host mode permits local
   administration, including current OS authority, product-local users, local
   groups, administrator readiness, and writer-policy readiness.
-- [ ] Implement Users/Groups forms for local group creation and local
+- [x] Implement Users/Groups forms for local group creation and local
   user-to-group assignment against the existing daemon-backed routes, including
   dry-run/preview, confirmation, result, and permission-denied states.
 - [ ] Extend Web Activity to show administrator jobs, enclosure preparation,
