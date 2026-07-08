@@ -17,4 +17,5 @@ stabilized in the current MVP.
    inspecting-store-contents
    subobjects
    ingesting-files
+   performance-test
    remote-s3-uploads
