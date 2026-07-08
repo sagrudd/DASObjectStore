@@ -31,6 +31,7 @@ dasobjectstore-platform.workspace = true
 dasobjectstore-tui.workspace = true
 libc.workspace = true
 ratatui.workspace = true
+rand_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

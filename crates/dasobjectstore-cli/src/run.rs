@@ -5,7 +5,7 @@ use crate::cli::{
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
     IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs,
     IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
-    ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs,
+    ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceFileSelection,
     PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand, PoolImportArgs,
     PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceComposeArgs,
     ServiceRenderComposeArgs, ServiceStatusArgs, StatusArgs, StoreAdoptArgs, StoreCommand,
@@ -102,6 +102,7 @@ use dasobjectstore_platform::{
     ObservedDisk, ProbeError, ProbeProvider, ProbeReport, Transport,
 };
 use dasobjectstore_tui::{UploadTui, UploadTuiContext};
+use rand_core::{OsRng, RngCore};
 use ratatui::{
     backend::TestBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -421,6 +422,7 @@ fn run_performance_test(
             "file_count": args.file_count(),
             "cap": args.cap(),
             "cap_bytes": workload.source_cap_bytes,
+            "file_selection": workload.file_selection.as_str(),
             "planned_file_count": workload.file_count(),
             "planned_total_bytes": workload.total_bytes(),
             "discovered_file_count": workload.discovered_file_count,
@@ -824,6 +826,7 @@ fn run_performance_test(
         workload_kind: workload.kind,
         source_path: workload.source_path.clone(),
         source_cap_bytes: workload.source_cap_bytes,
+        file_selection: workload.file_selection,
         discovered_file_count: workload.discovered_file_count,
         discovered_total_bytes: workload.discovered_total_bytes,
         total_source_bytes: workload.total_bytes(),
@@ -923,6 +926,7 @@ struct PerformanceWorkload {
     kind: PerformanceWorkloadKind,
     source_path: Option<PathBuf>,
     source_cap_bytes: Option<u64>,
+    file_selection: PerformanceFileSelection,
     discovered_file_count: u32,
     discovered_total_bytes: u64,
     payloads: Vec<PerformancePayload>,
@@ -1199,15 +1203,23 @@ fn performance_scenario_bounds(
         .source_cap_bytes
         .map(|bytes| format!(" cap {}", format_bytes(bytes as f64)))
         .unwrap_or_else(|| " no cap".to_string());
+    let file_selection = if workload.kind == PerformanceWorkloadKind::SourceFolder
+        && workload.source_cap_bytes.is_some()
+    {
+        format!(" {} selection", workload.file_selection.as_str())
+    } else {
+        String::new()
+    };
     let selection = if workload.kind == PerformanceWorkloadKind::SourceFolder
         && workload.source_cap_bytes.is_some()
     {
         format!(
-            "selected {}/{} file(s), {}/{};",
+            "selected {}/{} file(s), {}/{}{};",
             workload.file_count(),
             workload.discovered_file_count,
             format_bytes(workload.total_bytes() as f64),
-            format_bytes(workload.discovered_total_bytes as f64)
+            format_bytes(workload.discovered_total_bytes as f64),
+            file_selection
         )
     } else {
         format!(
@@ -1277,6 +1289,7 @@ struct PerformanceReport {
     workload_kind: PerformanceWorkloadKind,
     source_path: Option<PathBuf>,
     source_cap_bytes: Option<u64>,
+    file_selection: PerformanceFileSelection,
     discovered_file_count: u32,
     discovered_total_bytes: u64,
     total_source_bytes: u64,
@@ -1318,6 +1331,8 @@ fn performance_test_reproduction_args(
             command.push("--cap".to_string());
             command.push(cap.to_string());
         }
+        command.push("--file_select".to_string());
+        command.push(args.file_select().as_str().to_string());
     } else {
         if let Some(file_size) = args.file_size() {
             command.push("--file_size".to_string());
@@ -1448,7 +1463,9 @@ fn parse_binary_size(value: &str) -> Result<u64, CliError> {
 fn plan_performance_workload(args: &PerformanceTestArgs) -> Result<PerformanceWorkload, CliError> {
     let cap_bytes = args.cap().map(parse_binary_size).transpose()?;
     match (args.source(), args.file_size(), args.file_count()) {
-        (Some(source), None, None) => source_performance_workload(source, cap_bytes),
+        (Some(source), None, None) => {
+            source_performance_workload(source, cap_bytes, args.file_select())
+        }
         (None, Some(file_size), Some(file_count)) => {
             if cap_bytes.is_some() {
                 return Err(CliError::CommandFailed(
@@ -1473,6 +1490,7 @@ fn plan_performance_workload(args: &PerformanceTestArgs) -> Result<PerformanceWo
                 kind: PerformanceWorkloadKind::Generated,
                 source_path: None,
                 source_cap_bytes: None,
+                file_selection: args.file_select(),
                 discovered_file_count: file_count,
                 discovered_total_bytes: size_bytes.saturating_mul(u64::from(file_count)),
                 payloads,
@@ -1492,6 +1510,7 @@ fn plan_performance_workload(args: &PerformanceTestArgs) -> Result<PerformanceWo
 fn source_performance_workload(
     source: &Path,
     cap_bytes: Option<u64>,
+    file_selection: PerformanceFileSelection,
 ) -> Result<PerformanceWorkload, CliError> {
     if !source.is_dir() {
         return Err(CliError::CommandFailed(format!(
@@ -1518,24 +1537,7 @@ fn source_performance_workload(
         )));
     }
     if let Some(cap_bytes) = cap_bytes {
-        let mut selected = Vec::new();
-        let mut selected_bytes = 0_u64;
-        for payload in files {
-            let next_bytes = selected_bytes.saturating_add(payload.size_bytes);
-            if next_bytes > cap_bytes {
-                break;
-            }
-            selected_bytes = next_bytes;
-            selected.push(payload);
-        }
-        if selected.is_empty() {
-            return Err(CliError::CommandFailed(format!(
-                "performance-test --cap {} is smaller than the first FIFO source file in {}",
-                format_bytes(cap_bytes as f64),
-                source.display()
-            )));
-        }
-        files = selected;
+        files = select_performance_source_files(files, cap_bytes, file_selection, source)?;
     }
     for (index, payload) in files.iter_mut().enumerate() {
         payload.file_index = index as u32;
@@ -1544,10 +1546,60 @@ fn source_performance_workload(
         kind: PerformanceWorkloadKind::SourceFolder,
         source_path: Some(source.to_path_buf()),
         source_cap_bytes: cap_bytes,
+        file_selection,
         discovered_file_count: discovered_file_count as u32,
         discovered_total_bytes,
         payloads: files,
     })
+}
+
+fn select_performance_source_files(
+    mut files: Vec<PerformancePayload>,
+    cap_bytes: u64,
+    file_selection: PerformanceFileSelection,
+    source: &Path,
+) -> Result<Vec<PerformancePayload>, CliError> {
+    match file_selection {
+        PerformanceFileSelection::Random => shuffle_performance_payloads(&mut files),
+        PerformanceFileSelection::Smaller => files.sort_by(|left, right| {
+            left.size_bytes
+                .cmp(&right.size_bytes)
+                .then_with(|| left.relative_path.cmp(&right.relative_path))
+        }),
+        PerformanceFileSelection::Larger => files.sort_by(|left, right| {
+            right
+                .size_bytes
+                .cmp(&left.size_bytes)
+                .then_with(|| left.relative_path.cmp(&right.relative_path))
+        }),
+    }
+
+    let mut selected = Vec::new();
+    let mut selected_bytes = 0_u64;
+    for payload in files {
+        let next_bytes = selected_bytes.saturating_add(payload.size_bytes);
+        if next_bytes <= cap_bytes {
+            selected_bytes = next_bytes;
+            selected.push(payload);
+        }
+    }
+    if selected.is_empty() {
+        return Err(CliError::CommandFailed(format!(
+            "performance-test --cap {} is smaller than every selectable source file in {}",
+            format_bytes(cap_bytes as f64),
+            source.display()
+        )));
+    }
+    selected.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(selected)
+}
+
+fn shuffle_performance_payloads(files: &mut [PerformancePayload]) {
+    let mut rng = OsRng;
+    for index in (1..files.len()).rev() {
+        let swap_index = (rng.next_u64() % (index as u64 + 1)) as usize;
+        files.swap(index, swap_index);
+    }
 }
 
 fn collect_performance_source_files(
@@ -4932,6 +4984,7 @@ fn render_performance_json(report: &PerformanceReport) -> String {
                 "file_count": report.file_count,
                 "total_source_bytes": report.total_source_bytes,
                 "source_cap_bytes": report.source_cap_bytes,
+                "file_selection": report.file_selection.as_str(),
                 "discovered_file_count": report.discovered_file_count,
                 "discovered_total_bytes": report.discovered_total_bytes,
                 "max_hdd_concurrency": report.max_concurrency,
@@ -5305,13 +5358,14 @@ fn render_performance_report(report: PerformanceReport) -> String {
         String::new()
     };
     output.push_str(&format!(
-        "Scenario: {} workload, {} files, {} logical source total{}{}{}. Redundancy {}; SSD root `{}`; HDD root `{}`; disks {}; selected scenarios {}; selected HDD concurrency {}.\n\n",
+        "Scenario: {} workload, {} files, {} logical source total{}{}{}; file selection `{}`. Redundancy {}; SSD root `{}`; HDD root `{}`; disks {}; selected scenarios {}; selected HDD concurrency {}.\n\n",
         report.workload_kind.as_str(),
         report.file_count,
         format_bytes(report.total_source_bytes as f64),
         source,
         cap,
         discovered,
+        report.file_selection.as_str(),
         report.redundancy,
         report.ssd_root.display(),
         report.hdd_root.display(),
@@ -9453,7 +9507,7 @@ mod tests {
         PerformanceWorkloadKind, SsdPipelineBenchmarkOptions, SsdPipelineJob,
         PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
-    use crate::cli::Cli;
+    use crate::cli::{Cli, PerformanceFileSelection};
     use clap::Parser;
     use dasobjectstore_core::health::{HealthScore, HealthSignals};
     use dasobjectstore_core::ids::{DiskId, IngestJobId, PoolId, StoreId};
@@ -9572,8 +9626,8 @@ mod tests {
         fs::write(source.join("nested").join("sample.pod5"), b"POD5DATA")
             .expect("write nested fixture");
 
-        let workload =
-            source_performance_workload(&source, None).expect("source workload is planned");
+        let workload = source_performance_workload(&source, None, PerformanceFileSelection::Random)
+            .expect("source workload is planned");
 
         assert_eq!(workload.kind, PerformanceWorkloadKind::SourceFolder);
         assert_eq!(workload.source_path, Some(source.clone()));
@@ -9608,6 +9662,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 2,
             discovered_total_bytes: 96,
             payloads: vec![
@@ -9665,18 +9720,58 @@ mod tests {
     }
 
     #[test]
-    fn performance_source_workload_cap_selects_fifo_prefix() {
+    fn performance_source_workload_cap_can_select_smaller_files() {
         let root = temp_root("performance-source-workload-cap");
         let source = root.join("source");
         fs::create_dir_all(&source).expect("create source fixture");
-        fs::write(source.join("a.fastq.gz"), b"aaaa").expect("write first fixture");
-        fs::write(source.join("b.fastq.gz"), b"bbbbbb").expect("write second fixture");
-        fs::write(source.join("c.fastq.gz"), b"cccc").expect("write third fixture");
+        fs::write(source.join("a.fastq.gz"), b"aaaaaaaa").expect("write larger fixture");
+        fs::write(source.join("b.fastq.gz"), b"bb").expect("write smaller fixture");
+        fs::write(source.join("c.fastq.gz"), b"cccc").expect("write middle fixture");
 
         let workload =
-            source_performance_workload(&source, Some(10)).expect("capped source workload");
+            source_performance_workload(&source, Some(6), PerformanceFileSelection::Smaller)
+                .expect("capped source workload");
+
+        assert_eq!(workload.source_cap_bytes, Some(6));
+        assert_eq!(workload.file_selection, PerformanceFileSelection::Smaller);
+        assert_eq!(workload.discovered_file_count, 3);
+        assert_eq!(workload.discovered_total_bytes, 14);
+        assert_eq!(workload.file_count(), 2);
+        assert_eq!(workload.total_bytes(), 6);
+        assert_eq!(
+            workload
+                .payloads
+                .iter()
+                .map(|payload| (
+                    payload.file_index,
+                    payload.relative_path.clone(),
+                    payload.size_bytes
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, PathBuf::from("b.fastq.gz"), 2),
+                (1, PathBuf::from("c.fastq.gz"), 4),
+            ]
+        );
+
+        fs::remove_dir_all(root).expect("cleanup source fixture");
+    }
+
+    #[test]
+    fn performance_source_workload_cap_can_select_larger_files() {
+        let root = temp_root("performance-source-workload-cap-larger");
+        let source = root.join("source");
+        fs::create_dir_all(&source).expect("create source fixture");
+        fs::write(source.join("a.fastq.gz"), b"aaaaaaaa").expect("write larger fixture");
+        fs::write(source.join("b.fastq.gz"), b"bb").expect("write smaller fixture");
+        fs::write(source.join("c.fastq.gz"), b"cccc").expect("write middle fixture");
+
+        let workload =
+            source_performance_workload(&source, Some(10), PerformanceFileSelection::Larger)
+                .expect("capped source workload");
 
         assert_eq!(workload.source_cap_bytes, Some(10));
+        assert_eq!(workload.file_selection, PerformanceFileSelection::Larger);
         assert_eq!(workload.discovered_file_count, 3);
         assert_eq!(workload.discovered_total_bytes, 14);
         assert_eq!(workload.file_count(), 2);
@@ -9692,8 +9787,8 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             vec![
-                (0, PathBuf::from("a.fastq.gz"), 4),
-                (1, PathBuf::from("b.fastq.gz"), 6),
+                (0, PathBuf::from("a.fastq.gz"), 8),
+                (1, PathBuf::from("b.fastq.gz"), 2),
             ]
         );
 
@@ -9707,12 +9802,12 @@ mod tests {
         fs::create_dir_all(&source).expect("create source fixture");
         fs::write(source.join("a.fastq.gz"), b"aaaa").expect("write fixture");
 
-        let err =
-            source_performance_workload(&source, Some(3)).expect_err("cap smaller than first file");
+        let err = source_performance_workload(&source, Some(3), PerformanceFileSelection::Smaller)
+            .expect_err("cap smaller than every file");
 
         assert!(err
             .to_string()
-            .contains("smaller than the first FIFO source file"));
+            .contains("smaller than every selectable source file"));
         fs::remove_dir_all(root).expect("cleanup source fixture");
     }
 
@@ -9733,6 +9828,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 2,
             discovered_total_bytes: 8,
             payloads: vec![
@@ -9766,6 +9862,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 4,
             discovered_total_bytes: 19,
             payloads: vec![
@@ -9878,6 +9975,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 2,
             discovered_total_bytes: 8,
             payloads: vec![
@@ -10026,6 +10124,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 2,
             discovered_total_bytes: 8,
             payloads: vec![
@@ -10078,6 +10177,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 1,
             discovered_total_bytes: 8,
             payloads: vec![PerformancePayload {
@@ -10126,6 +10226,7 @@ mod tests {
             kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 1,
             discovered_total_bytes: 8,
             payloads: vec![PerformancePayload {
@@ -10498,7 +10599,7 @@ mod tests {
         assert!(report.contains("Reproduction QR payload"));
         assert!(report.contains("## Reproduction Payload"));
         assert!(
-            report.contains("Scenario: generated workload, 1 files, 1.0 MiB logical source total.")
+            report.contains("Scenario: generated workload, 1 files, 1.0 MiB logical source total; file selection `random`.")
         );
         assert!(report.contains("- Run id: `perf-test-run`"));
         assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
@@ -10979,6 +11080,7 @@ mod tests {
             workload_kind: PerformanceWorkloadKind::Generated,
             source_path: None,
             source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
             discovered_file_count: 1,
             discovered_total_bytes: 1_048_576,
             total_source_bytes: 1_048_576,

@@ -94,6 +94,14 @@ pub(crate) struct PerformanceTestArgs {
     /// Cap an existing source-folder benchmark to a prefix such as 750GiB or 1TiB.
     #[arg(long)]
     cap: Option<String>,
+    /// Source-folder file selection policy used with --cap.
+    #[arg(
+        long = "file_select",
+        alias = "file-select",
+        value_enum,
+        default_value_t = PerformanceFileSelection::Random
+    )]
+    file_select: PerformanceFileSelection,
     /// Maximum concurrent HDD writes to model.
     #[arg(long, default_value_t = 3)]
     max_hdd_concurrency: usize,
@@ -144,6 +152,26 @@ pub(crate) enum PerformanceScenarioSelection {
     DirectHdd,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, ValueEnum)]
+pub(crate) enum PerformanceFileSelection {
+    /// Select a random whole-file subset under --cap.
+    Random,
+    /// Select smaller files first until the --cap budget is exhausted.
+    Smaller,
+    /// Select larger files first until the --cap budget is exhausted.
+    Larger,
+}
+
+impl PerformanceFileSelection {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Random => "random",
+            Self::Smaller => "smaller",
+            Self::Larger => "larger",
+        }
+    }
+}
+
 impl PerformanceTestArgs {
     pub(crate) fn file_size(&self) -> Option<&str> {
         self.file_size.as_deref()
@@ -159,6 +187,10 @@ impl PerformanceTestArgs {
 
     pub(crate) fn cap(&self) -> Option<&str> {
         self.cap.as_deref()
+    }
+
+    pub(crate) fn file_select(&self) -> PerformanceFileSelection {
+        self.file_select
     }
 
     pub(crate) fn max_hdd_concurrency(&self) -> usize {
@@ -1923,8 +1955,9 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 mod tests {
     use super::{
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
-        MnemosyneCommand, ObjectCommand, PerformanceScenarioSelection, PoolCommand, ProbeArgs,
-        ServiceCommand, StatusArgs, StoreArgs, StoreCommand, StoreS3UploadAuth, SubobjectCommand,
+        MnemosyneCommand, ObjectCommand, PerformanceFileSelection, PerformanceScenarioSelection,
+        PoolCommand, ProbeArgs, ServiceCommand, StatusArgs, StoreArgs, StoreCommand,
+        StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
@@ -2036,6 +2069,8 @@ mod tests {
             "/data/source-folder",
             "--cap",
             "750GiB",
+            "--file_select",
+            "larger",
             "--max-hdd-concurrency",
             "5",
         ])
@@ -2046,6 +2081,7 @@ mod tests {
         };
         assert_eq!(args.source(), Some(Path::new("/data/source-folder")));
         assert_eq!(args.cap(), Some("750GiB"));
+        assert_eq!(args.file_select(), PerformanceFileSelection::Larger);
         assert_eq!(args.file_size(), None);
         assert_eq!(args.file_count(), None);
         assert_eq!(args.max_hdd_concurrency(), 5);

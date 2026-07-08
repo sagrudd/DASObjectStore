@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.15.0 - 2026-07-08
+
+- Add ``dasobjectstore performance-test --file_select <random|smaller|larger>``
+  for source-folder benchmarks capped with ``--cap``.
+- Default capped source-folder sampling to random whole-file selection while
+  preserving sorted FIFO execution order for the selected cohort.
+- Record the source file-selection policy in reproduction commands, JSON
+  artifacts, and performance reports.
+
 ## 0.14.0 - 2026-07-08
 
 - Wire the redesigned Web Enclosures page to load the authenticated
