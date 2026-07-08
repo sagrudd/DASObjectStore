@@ -1,6 +1,8 @@
 //! Yew frontend scaffold for Monas and Synoptikon delivery surfaces.
 
 pub mod activity;
+#[cfg(target_arch = "wasm32")]
+mod api;
 pub mod components;
 pub mod disks;
 pub mod endpoints;
@@ -8,6 +10,10 @@ pub mod entrypoint;
 pub mod mount;
 pub mod objects;
 pub mod overview;
+#[cfg(target_arch = "wasm32")]
+mod session;
+#[cfg(target_arch = "wasm32")]
+mod storage;
 pub mod stores;
 pub mod users_groups;
 

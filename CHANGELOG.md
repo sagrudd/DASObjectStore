@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.0 - 2026-07-08
+
+- Add an authenticated standalone DASObjectStore Web UI landing page modeled on
+  the Mnematikon connection surface, with local login, stored session recovery,
+  session-token verification, and logout.
+- Extend `/opt/dasobjectstore/config.json` with an explicit
+  `authentication.authority` setting. Packaged standalone appliances default to
+  `local_user`; `synoptikon` and `monas` remain integrated host-authority modes.
+- Wire `dasobjectstore-server` through the auth-aware GUI router so standalone
+  deployments expose `/api/login`, `/api/session`, and `/api/logout` under the
+  product mount when local authentication is configured.
+
 ## 0.9.4 - 2026-07-08
 
 - Improve the performance-test TUI by separating workload, active HDD landing,

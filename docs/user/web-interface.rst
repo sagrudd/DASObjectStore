@@ -23,6 +23,29 @@ The default packaged bind address is ``0.0.0.0`` so the Web UI is reachable from
 other hosts on the appliance network. Local development without the package may
 still use the compiled fallback of ``127.0.0.1``.
 
+The packaged standalone configuration also declares the authentication
+authority. The DAS appliance default is local user authentication:
+
+.. code-block:: json
+
+   {
+     "authentication": {
+       "authority": "local_user",
+       "session_ttl_seconds": 3600
+     }
+   }
+
+``local_user`` enables the standalone login, session validation, and logout
+routes under ``/products/dasobjectstore/api``. ``synoptikon`` and ``monas`` are
+external authority modes; those deployments should mount DASObjectStore behind
+the host product surface so account, entitlement, audit, and correlation context
+come from that host.
+
+Standalone login uses the product-local browser session store under
+``/opt/dasobjectstore/users.json``. That session gates Web UI access. OS-local
+sudo status and daemon policy remain the authority for administrative storage
+mutation.
+
 The server can also be started manually with explicit overrides:
 
 .. code-block:: console
@@ -69,6 +92,10 @@ running listener:
 
    dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config
    dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config --json
+
+The JSON output includes ``auth_host_mode`` so operators can confirm whether the
+server is exposing local standalone auth routes or expecting an integrated host
+authority.
 
 Self-signed TLS assets may be generated for standalone bootstrap when both the
 certificate and private key are missing:

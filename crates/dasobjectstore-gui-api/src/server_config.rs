@@ -1,3 +1,4 @@
+use crate::GuiApiHostMode;
 use dasobjectstore_core::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_HTTPS_PORT,
 };
@@ -16,6 +17,8 @@ pub struct StandaloneServerConfig {
     pub https_port: u16,
     pub public_base_url: String,
     pub product_root: PathBuf,
+    #[serde(default)]
+    pub authentication: StandaloneAuthenticationConfig,
     pub tls: StandaloneTlsConfig,
 }
 
@@ -33,6 +36,7 @@ impl StandaloneServerConfig {
             https_port: DEFAULT_STANDALONE_HTTPS_PORT,
             public_base_url: DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
             product_root,
+            authentication: StandaloneAuthenticationConfig::default(),
             tls,
         }
     }
@@ -54,7 +58,12 @@ impl StandaloneServerConfig {
         validate_public_base_url(&self.public_base_url)?;
         validate_absolute_path("product_root", &self.product_root)?;
         self.tls.validate()?;
+        self.authentication.validate()?;
         Ok(())
+    }
+
+    pub fn gui_api_host_mode(&self) -> GuiApiHostMode {
+        self.authentication.gui_api_host_mode()
     }
 }
 
@@ -88,6 +97,56 @@ impl StandaloneTlsConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneAuthenticationConfig {
+    #[serde(default)]
+    pub authority: StandaloneAuthenticationAuthority,
+    #[serde(default = "default_session_ttl_seconds")]
+    pub session_ttl_seconds: i64,
+}
+
+impl StandaloneAuthenticationConfig {
+    pub fn validate(&self) -> Result<(), StandaloneServerConfigError> {
+        if self.session_ttl_seconds <= 0 {
+            return Err(StandaloneServerConfigError::InvalidSessionTtlSeconds {
+                session_ttl_seconds: self.session_ttl_seconds,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn gui_api_host_mode(&self) -> GuiApiHostMode {
+        match self.authority {
+            StandaloneAuthenticationAuthority::LocalUser => GuiApiHostMode::Standalone,
+            StandaloneAuthenticationAuthority::Synoptikon
+            | StandaloneAuthenticationAuthority::Monas => GuiApiHostMode::SynoptikonIntegrated,
+        }
+    }
+}
+
+impl Default for StandaloneAuthenticationConfig {
+    fn default() -> Self {
+        Self {
+            authority: StandaloneAuthenticationAuthority::LocalUser,
+            session_ttl_seconds: default_session_ttl_seconds(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StandaloneAuthenticationAuthority {
+    LocalUser,
+    Synoptikon,
+    Monas,
+}
+
+impl Default for StandaloneAuthenticationAuthority {
+    fn default() -> Self {
+        Self::LocalUser
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StandaloneServerConfigError {
     InvalidBindAddress { bind_address: String },
@@ -95,6 +154,7 @@ pub enum StandaloneServerConfigError {
     InvalidPublicBaseUrl { public_base_url: String },
     RelativePath { field: &'static str, path: PathBuf },
     DuplicateTlsAssetPath,
+    InvalidSessionTtlSeconds { session_ttl_seconds: i64 },
 }
 
 impl Display for StandaloneServerConfigError {
@@ -127,8 +187,20 @@ impl Display for StandaloneServerConfigError {
                     "TLS certificate_path and private_key_path must be distinct"
                 )
             }
+            Self::InvalidSessionTtlSeconds {
+                session_ttl_seconds,
+            } => {
+                write!(
+                    formatter,
+                    "authentication session_ttl_seconds must be positive: {session_ttl_seconds}"
+                )
+            }
         }
     }
+}
+
+fn default_session_ttl_seconds() -> i64 {
+    60 * 60
 }
 
 impl std::error::Error for StandaloneServerConfigError {}
@@ -181,6 +253,10 @@ mod tests {
         assert_eq!(config.https_port, DEFAULT_STANDALONE_HTTPS_PORT);
         assert_eq!(config.public_base_url, DEFAULT_STANDALONE_PUBLIC_BASE_URL);
         assert_eq!(config.product_root, PathBuf::from(DEFAULT_PRODUCT_ROOT));
+        assert_eq!(
+            config.authentication.authority,
+            super::StandaloneAuthenticationAuthority::LocalUser
+        );
         assert_eq!(
             config.socket_addr().expect("socket address"),
             "127.0.0.1:8448".parse().expect("expected socket address")
@@ -253,6 +329,58 @@ mod tests {
         assert_eq!(
             encoded["tls"]["certificate_path"],
             "/opt/dasobjectstore/tls/server.crt"
+        );
+        assert_eq!(encoded["authentication"]["authority"], "local_user");
+        assert_eq!(encoded["authentication"]["session_ttl_seconds"], 3600);
+    }
+
+    #[test]
+    fn maps_external_authentication_to_integrated_host_mode() {
+        let mut config = StandaloneServerConfig::default();
+        config.authentication.authority = super::StandaloneAuthenticationAuthority::Synoptikon;
+        assert_eq!(
+            config.gui_api_host_mode(),
+            crate::GuiApiHostMode::SynoptikonIntegrated
+        );
+    }
+
+    #[test]
+    fn defaults_partial_authentication_config_to_local_user() {
+        let config: StandaloneServerConfig = serde_json::from_value(serde_json::json!({
+            "bind_address": "127.0.0.1",
+            "https_port": 8448,
+            "public_base_url": "https://127.0.0.1:8448",
+            "product_root": "/opt/dasobjectstore",
+            "authentication": {},
+            "tls": {
+                "certificate_path": "/opt/dasobjectstore/tls/server.crt",
+                "private_key_path": "/opt/dasobjectstore/tls/server.key"
+            }
+        }))
+        .expect("partial auth config parses");
+
+        assert_eq!(
+            config.authentication.authority,
+            super::StandaloneAuthenticationAuthority::LocalUser
+        );
+        assert_eq!(config.authentication.session_ttl_seconds, 3600);
+    }
+
+    #[test]
+    fn rejects_non_positive_session_ttl() {
+        let config = StandaloneServerConfig {
+            authentication: super::StandaloneAuthenticationConfig {
+                authority: super::StandaloneAuthenticationAuthority::LocalUser,
+                session_ttl_seconds: 0,
+            },
+            ..StandaloneServerConfig::default()
+        };
+
+        assert_eq!(
+            config.validate().expect_err("ttl rejected"),
+            StandaloneServerConfigError::InvalidSessionTtlSeconds {
+                session_ttl_seconds: 0
+            }
         );
     }
 }

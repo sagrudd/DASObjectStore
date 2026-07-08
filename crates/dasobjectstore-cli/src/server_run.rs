@@ -6,8 +6,9 @@ use axum::routing::get;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
-    ensure_standalone_tls_assets, gui_api_router, StandaloneServerConfig,
-    StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
+    ensure_standalone_tls_assets, gui_api_router_for_host_mode, LocalAuthStore,
+    StandaloneAuthenticationConfig, StandaloneServerConfig, StandaloneServerConfigError,
+    StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::fs;
@@ -51,16 +52,25 @@ async fn start_server(
         socket_addr
     )?;
     let web_root = config.product_root.join("web");
+    let auth_root = config.product_root.clone();
     axum_server::bind_rustls(socket_addr, tls)
-        .serve(standalone_router(web_root).into_make_service())
+        .serve(standalone_router(web_root, config.authentication, auth_root).into_make_service())
         .await?;
     Ok(())
 }
 
-fn standalone_router(web_root: PathBuf) -> Router {
+fn standalone_router(
+    web_root: PathBuf,
+    authentication: StandaloneAuthenticationConfig,
+    auth_root: PathBuf,
+) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
     let asset_root = web_root;
+    let host_mode = authentication.gui_api_host_mode();
+    let auth_store = LocalAuthStore::new(auth_root);
+    let root_api = gui_api_router_for_host_mode(host_mode, auth_store.clone());
+    let product_api = gui_api_router_for_host_mode(host_mode, auth_store);
     Router::new()
         .route("/", get(root_redirect))
         .route(
@@ -82,8 +92,8 @@ fn standalone_router(web_root: PathBuf) -> Router {
                 serve_named_asset(asset_root.clone(), asset)
             }),
         )
-        .merge(gui_api_router())
-        .nest("/products/dasobjectstore", gui_api_router())
+        .merge(root_api)
+        .nest("/products/dasobjectstore", product_api)
 }
 
 async fn root_redirect() -> Redirect {
@@ -223,6 +233,7 @@ fn write_json_config(
         &mut *writer,
         &serde_json::json!({
             "server": config,
+            "auth_host_mode": config.gui_api_host_mode(),
             "tls_assets": tls_report,
         }),
     )?;
@@ -304,7 +315,8 @@ mod tests {
         write_web_asset(&root, "dasobjectstore-gui-web-abcdef_bg.wasm", "wasm");
         write_web_asset(&root, "styles-abcdef.css", "body{}");
 
-        let response = standalone_router(root.clone())
+        let auth_root = temp_root("server-run-auth");
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/")
@@ -316,7 +328,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let response = standalone_router(root.clone())
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/dasobjectstore-gui-web-abcdef.js")
@@ -328,7 +340,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let response = standalone_router(root.clone())
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/api/v1/health")
@@ -339,15 +351,42 @@ mod tests {
             .expect("api response");
 
         assert_eq!(response.status(), StatusCode::OK);
+        cleanup(&auth_root);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_router_mounts_local_auth_when_configured() {
+        let root = temp_root("server-run-auth-web");
+        let auth_root = temp_root("server-run-auth-state");
+        write_web_asset(&root, "index.html", "<!doctype html>");
+
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/products/dasobjectstore/api/session")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"username":"admin","session_token":"invalid"}"#,
+                    ))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("auth response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&auth_root);
         cleanup(&root);
     }
 
     #[tokio::test]
     async fn standalone_router_rejects_asset_traversal() {
         let root = temp_root("server-run-web-traversal");
+        let auth_root = temp_root("server-run-web-traversal-auth");
         write_web_asset(&root, "index.html", "<!doctype html>");
 
-        let response = standalone_router(root.clone())
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/../secret")
@@ -358,6 +397,7 @@ mod tests {
             .expect("asset response");
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        cleanup(&auth_root);
         cleanup(&root);
     }
 
