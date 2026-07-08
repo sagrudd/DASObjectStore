@@ -159,6 +159,16 @@ empty, permission-denied, transport-error, and stale-data states so operators
 can distinguish an empty appliance from an authentication problem or a transport
 failure.
 
+Home attention cards are derived from the daemon Home payload rather than from
+static placeholder text. The current Web layer surfaces appliance health,
+failed or suspect drives, ingest pressure, destage backlog, capacity pressure,
+memory pressure warnings, enclosure warnings, SMART warnings, ObjectStore
+warning state, object-service export readiness, and empty enclosure or
+ObjectStore inventories. Ingest and destage cards are rendered when the
+backward-compatible optional queue summaries are present in the Home payload;
+the daemon/API aggregator remains responsible for populating those summaries
+from live queue state.
+
 Enclosures Page
 ---------------
 

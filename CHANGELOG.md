@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.19.1 - 2026-07-08
+
+- Replace generic Home attention copy with operator cards derived from the
+  daemon Home payload for drive health, ingest pressure, destage backlog,
+  capacity pressure, memory stress, DAS enclosure warnings, SMART warnings,
+  ObjectStore/service readiness, and empty inventory states.
+- Extend the Home dashboard Web contract with backward-compatible optional
+  ingest and destage queue summaries.
+- Add Web regression coverage for Home attention-card signal mapping and clear
+  all-good copy.
+
 ## 0.19.0 - 2026-07-08
 
 - Add a shared Yew API page loading model for the redesigned Web console

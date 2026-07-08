@@ -1,4 +1,4 @@
-use crate::dashboard::{DashboardSeverity, DashboardWarning};
+use crate::dashboard::{DashboardSeverity, DashboardWarning, DestageQueueView, IngestQueueView};
 use serde::{Deserialize, Serialize};
 
 pub const REDESIGN_DASHBOARD_SCHEMA_VERSION: &str = "dasobjectstore.web_redesign.v1";
@@ -12,6 +12,8 @@ pub struct HomeDashboardView {
     pub capacity: CapacitySummaryView,
     pub mounted_enclosures: Vec<DasEnclosureCardView>,
     pub throughput_7d: ThroughputSummaryView,
+    pub ingest: Option<IngestQueueView>,
+    pub destage: Option<DestageQueueView>,
     pub memory_stress: MemoryStressView,
     pub smart_warnings: SmartWarningsSummaryView,
     pub object_stores: Vec<ObjectStoreCardView>,
@@ -47,6 +49,8 @@ impl HomeDashboardView {
             },
             mounted_enclosures: Vec::new(),
             throughput_7d: ThroughputSummaryView::bootstrap_fixture(),
+            ingest: None,
+            destage: None,
             memory_stress: MemoryStressView {
                 state: MemoryStressStateView::Elevated,
                 pressure_percent: 0,

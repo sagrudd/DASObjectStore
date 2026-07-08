@@ -525,7 +525,7 @@ older checklist claims.
   or the canonical product workspace route and render live drive count, mounted
   enclosure count, total/used/free capacity, seven-day throughput, memory stress,
   SMART warning count, required actions, and object-store count.
-- [ ] Replace Home "Live dashboard telemetry is being bootstrapped" copy with
+- [x] Replace Home "Live dashboard telemetry is being bootstrapped" copy with
   real attention cards sourced from daemon health, ingest, destage, SMART,
   capacity, and object-service warnings.
 - [ ] Implement the daemon/API aggregator that populates `HomeDashboardView` or

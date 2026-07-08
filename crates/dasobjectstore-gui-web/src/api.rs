@@ -33,6 +33,10 @@ pub struct HomeDashboardResponse {
     pub capacity: CapacitySummaryResponse,
     pub mounted_enclosures: Vec<DasEnclosureCardResponse>,
     pub throughput_7d: ThroughputSummaryResponse,
+    #[serde(default)]
+    pub ingest: Option<IngestQueueSummaryResponse>,
+    #[serde(default)]
+    pub destage: Option<DestageQueueSummaryResponse>,
     pub memory_stress: MemoryStressResponse,
     pub smart_warnings: SmartWarningsSummaryResponse,
     pub object_stores: Vec<ObjectStoreCardResponse>,
@@ -142,6 +146,25 @@ pub struct ThroughputSummaryResponse {
     pub ingest_tib: String,
     pub avg_read_mib_s: u32,
     pub avg_write_mib_s: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct IngestQueueSummaryResponse {
+    pub pressure: String,
+    pub queued_jobs: usize,
+    pub active_jobs: usize,
+    pub failed_jobs: usize,
+    #[serde(default)]
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct DestageQueueSummaryResponse {
+    pub pending_objects: usize,
+    pub copying_objects: usize,
+    pub verified_objects: usize,
+    #[serde(default)]
+    pub warnings: Vec<DashboardWarning>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]

@@ -331,7 +331,8 @@ h2 {
 }
 
 .dos-metric-grid,
-.dos-store-grid {
+.dos-store-grid,
+.dos-attention-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
@@ -339,6 +340,11 @@ h2 {
 
 .dos-store-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dos-attention-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
 }
 
 .dos-card {

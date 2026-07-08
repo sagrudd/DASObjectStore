@@ -284,11 +284,102 @@ pub fn home_dashboard_attention(view: &HomeDashboardResponse) -> Vec<DashboardAt
             &view.health.state,
         ));
     }
+    if view.drives.failed > 0 || view.drives.suspect > 0 {
+        items.push(DashboardAttentionItem::new(
+            "Drive health",
+            format!(
+                "{} failed drive(s), {} suspect drive(s), {} watch drive(s)",
+                view.drives.failed, view.drives.suspect, view.drives.watch
+            ),
+            if view.drives.failed > 0 {
+                "critical"
+            } else {
+                "warning"
+            },
+        ));
+    }
+    if let Some(capacity_item) = capacity_attention_item(view) {
+        items.push(capacity_item);
+    }
+    if let Some(ingest) = &view.ingest {
+        if ingest.failed_jobs > 0
+            || ingest.active_jobs > 0
+            || ingest.queued_jobs > 0
+            || ingest.pressure != "normal"
+            || !ingest.warnings.is_empty()
+        {
+            let detail = ingest
+                .warnings
+                .first()
+                .map(|warning| warning.message.clone())
+                .unwrap_or_else(|| {
+                    format!(
+                        "{} queued, {} active, {} failed ingest job(s).",
+                        ingest.queued_jobs, ingest.active_jobs, ingest.failed_jobs
+                    )
+                });
+            items.push(DashboardAttentionItem::new(
+                "Ingest queue",
+                detail,
+                queue_attention_state(&ingest.pressure, ingest.failed_jobs),
+            ));
+        }
+    }
+    if let Some(destage) = &view.destage {
+        if destage.pending_objects > 0
+            || destage.copying_objects > 0
+            || !destage.warnings.is_empty()
+        {
+            let detail = destage
+                .warnings
+                .first()
+                .map(|warning| warning.message.clone())
+                .unwrap_or_else(|| {
+                    format!(
+                        "{} pending, {} copying, {} verified destage object(s).",
+                        destage.pending_objects, destage.copying_objects, destage.verified_objects
+                    )
+                });
+            items.push(DashboardAttentionItem::new(
+                "Destage queue",
+                detail,
+                if destage.warnings.is_empty() {
+                    "watch"
+                } else {
+                    "warning"
+                },
+            ));
+        }
+    }
     if let Some(warning) = &view.memory_stress.warning {
         items.push(DashboardAttentionItem::new(
             "Memory stress",
             warning.message.clone(),
             &view.memory_stress.state,
+        ));
+    }
+    for enclosure in view.mounted_enclosures.iter().filter(|enclosure| {
+        !enclosure.warnings.is_empty() || !matches_health_clear(&enclosure.health)
+    }) {
+        let state = if !enclosure.warnings.is_empty() && matches_health_clear(&enclosure.health) {
+            "warning"
+        } else {
+            enclosure.health.as_str()
+        };
+        let detail = enclosure
+            .warnings
+            .first()
+            .map(|warning| warning.message.clone())
+            .unwrap_or_else(|| {
+                format!(
+                    "{} reports {} health at {}.",
+                    enclosure.display_name, enclosure.health, enclosure.mount_path
+                )
+            });
+        items.push(DashboardAttentionItem::new(
+            format!("Enclosure {}", enclosure.display_name),
+            detail,
+            state,
         ));
     }
     for warning in view.smart_warnings.warnings.iter().take(3) {
@@ -298,14 +389,107 @@ pub fn home_dashboard_attention(view: &HomeDashboardResponse) -> Vec<DashboardAt
             &warning.severity,
         ));
     }
+    for store in view.object_stores.iter().filter(|store| {
+        !store.warnings.is_empty()
+            || !matches_health_clear(&store.health)
+            || store.endpoint_export_mode.is_none()
+    }) {
+        let state = if (!store.warnings.is_empty() || store.endpoint_export_mode.is_none())
+            && matches_health_clear(&store.health)
+        {
+            "warning"
+        } else {
+            store.health.as_str()
+        };
+        let detail = store
+            .warnings
+            .first()
+            .map(|warning| warning.message.clone())
+            .unwrap_or_else(|| {
+                if store.endpoint_export_mode.is_none() {
+                    format!(
+                        "{} has no daemon-reported object-service export mode.",
+                        store.display_name
+                    )
+                } else {
+                    format!(
+                        "{} reports {} health with {} object(s).",
+                        store.display_name, store.health, store.object_count
+                    )
+                }
+            });
+        items.push(DashboardAttentionItem::new(
+            format!("ObjectStore {}", store.display_name),
+            detail,
+            state,
+        ));
+    }
+    if view.mounted_enclosures.is_empty() {
+        items.push(DashboardAttentionItem::new(
+            "Enclosure inventory",
+            "The daemon dashboard payload did not report any mounted supported DAS enclosures.",
+            "watch",
+        ));
+    }
+    if view.object_stores.is_empty() {
+        items.push(DashboardAttentionItem::new(
+            "ObjectStore inventory",
+            "The daemon dashboard payload did not report any object stores visible to this user.",
+            "watch",
+        ));
+    }
     if items.is_empty() {
         items.push(DashboardAttentionItem::new(
-            "No dashboard warnings reported",
-            "The daemon dashboard API did not report active Home attention items.",
+            "No operator attention required",
+            "The daemon dashboard payload reports clear drive, ingest, destage, capacity, memory, SMART, enclosure, and ObjectStore state.",
             "clear",
         ));
     }
     items
+}
+
+fn capacity_attention_item(view: &HomeDashboardResponse) -> Option<DashboardAttentionItem> {
+    if view.capacity.total_tib == "0.0" && view.health.action_count > 0 {
+        return Some(DashboardAttentionItem::new(
+            "Capacity telemetry",
+            "The daemon dashboard payload has not reported usable capacity yet.",
+            "watch",
+        ));
+    }
+
+    match view.capacity.used_percent_basis_points {
+        9000..=u16::MAX => Some(DashboardAttentionItem::new(
+            "Capacity pressure",
+            format!(
+                "{} TiB used of {} TiB total; {} TiB remains free.",
+                view.capacity.used_tib, view.capacity.total_tib, view.capacity.free_tib
+            ),
+            "critical",
+        )),
+        8000..=8999 => Some(DashboardAttentionItem::new(
+            "Capacity pressure",
+            format!(
+                "{} TiB used of {} TiB total; {} TiB remains free.",
+                view.capacity.used_tib, view.capacity.total_tib, view.capacity.free_tib
+            ),
+            "warning",
+        )),
+        _ => None,
+    }
+}
+
+fn matches_health_clear(health: &str) -> bool {
+    matches!(health, "healthy" | "nominal" | "clear")
+}
+
+fn queue_attention_state(pressure: &str, failed_jobs: usize) -> &'static str {
+    if failed_jobs > 0 || pressure == "critical" {
+        "critical"
+    } else if pressure == "normal" {
+        "watch"
+    } else {
+        "warning"
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1433,5 +1617,252 @@ mod tests {
             .any(|item| item.title == "Appliance attention"));
         assert!(attention.iter().any(|item| item.title == "Memory stress"));
         assert!(attention.iter().any(|item| item.title == "SMART qnap-1057"));
+    }
+
+    #[test]
+    fn home_dashboard_attention_surfaces_capacity_enclosure_and_store_signals() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "health": {
+                "state": "watch",
+                "label": "Watch",
+                "warning_count": 0,
+                "critical_count": 0,
+                "action_count": 0,
+                "last_checked_at_utc": null
+            },
+            "drives": {
+                "total": 7,
+                "mounted": 7,
+                "healthy": 6,
+                "watch": 0,
+                "suspect": 1,
+                "failed": 0
+            },
+            "capacity": {
+                "total_tib": "100.0",
+                "used_tib": "91.0",
+                "free_tib": "9.0",
+                "used_percent_basis_points": 9100
+            },
+            "mounted_enclosures": [{
+                "enclosure_id": "tl-d800c-1",
+                "display_name": "QNAP TL-D800C",
+                "mount_path": "/srv/dasobjectstore",
+                "connection": {
+                    "bus": "usb",
+                    "protocol": "uas",
+                    "link_speed": "10Gbps"
+                },
+                "health": "healthy",
+                "drive_count": {
+                    "total": 7,
+                    "mounted": 7,
+                    "healthy": 6,
+                    "watch": 1,
+                    "suspect": 0,
+                    "failed": 0
+                },
+                "capacity": {
+                    "total_tib": "100.0",
+                    "used_tib": "91.0",
+                    "free_tib": "9.0",
+                    "used_percent_basis_points": 9100
+                },
+                "last_seen_at_utc": "2026-07-08T08:00:00Z",
+                "warnings": [{
+                    "code": "enclosure_usb_reset",
+                    "message": "USB reset observed on this enclosure."
+                }]
+            }],
+            "throughput_7d": {
+                "window_days": 7,
+                "read_tib": "1.0",
+                "written_tib": "2.0",
+                "ingest_tib": "2.5",
+                "avg_read_mib_s": 120,
+                "avg_write_mib_s": 240
+            },
+            "ingest": {
+                "pressure": "critical",
+                "queued_jobs": 2,
+                "active_jobs": 1,
+                "failed_jobs": 1,
+                "jobs": [],
+                "warnings": [{
+                    "code": "ingest_critical_pressure",
+                    "message": "SSD ingest pressure is critical; new writes may be blocked."
+                }]
+            },
+            "destage": {
+                "pending_objects": 3,
+                "copying_objects": 1,
+                "verified_objects": 4,
+                "objects": [],
+                "warnings": [{
+                    "code": "destage_objects_need_review",
+                    "message": "One or more destage objects need review before SSD eviction."
+                }]
+            },
+            "memory_stress": {
+                "state": "nominal",
+                "pressure_percent": 31,
+                "swap_used_percent": 0,
+                "page_cache_tib": "0.4",
+                "warning": null
+            },
+            "smart_warnings": {
+                "warning_count": 0,
+                "affected_drive_count": 0,
+                "warnings": []
+            },
+            "object_stores": [{
+                "store_id": "zymo_fecal_2025.05",
+                "display_name": "zymo_fecal_2025.05",
+                "health": "healthy",
+                "object_count": 42,
+                "endpoint_export_mode": null,
+                "warnings": []
+            }]
+        });
+        let view =
+            serde_json::from_value::<HomeDashboardResponse>(payload).expect("dashboard decodes");
+
+        let attention = home_dashboard_attention(&view);
+
+        assert!(attention.iter().any(|item| item.title == "Drive health"
+            && item.state == "warning"
+            && item.detail.contains("1 suspect")));
+        assert!(attention
+            .iter()
+            .any(|item| item.title == "Capacity pressure"
+                && item.state == "critical"
+                && item.detail.contains("91.0 TiB used")));
+        assert!(attention.iter().any(|item| item.title == "Ingest queue"
+            && item.state == "critical"
+            && item.detail.contains("SSD ingest pressure is critical")));
+        assert!(attention.iter().any(|item| item.title == "Destage queue"
+            && item.state == "warning"
+            && item.detail.contains("destage objects need review")));
+        assert!(attention
+            .iter()
+            .any(|item| item.title == "Enclosure QNAP TL-D800C"
+                && item.state == "warning"
+                && item.detail.contains("USB reset")));
+        assert!(attention
+            .iter()
+            .any(|item| item.title == "ObjectStore zymo_fecal_2025.05"
+                && item.state == "warning"
+                && item.detail.contains("object-service export mode")));
+    }
+
+    #[test]
+    fn home_dashboard_attention_clear_state_has_operator_copy() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-08T08:00:00Z",
+            "health": {
+                "state": "healthy",
+                "label": "Healthy",
+                "warning_count": 0,
+                "critical_count": 0,
+                "action_count": 0,
+                "last_checked_at_utc": "2026-07-08T08:00:00Z"
+            },
+            "drives": {
+                "total": 7,
+                "mounted": 7,
+                "healthy": 7,
+                "watch": 0,
+                "suspect": 0,
+                "failed": 0
+            },
+            "capacity": {
+                "total_tib": "100.0",
+                "used_tib": "45.0",
+                "free_tib": "55.0",
+                "used_percent_basis_points": 4500
+            },
+            "mounted_enclosures": [{
+                "enclosure_id": "tl-d800c-1",
+                "display_name": "QNAP TL-D800C",
+                "mount_path": "/srv/dasobjectstore",
+                "connection": {
+                    "bus": "usb",
+                    "protocol": "uas",
+                    "link_speed": "10Gbps"
+                },
+                "health": "healthy",
+                "drive_count": {
+                    "total": 7,
+                    "mounted": 7,
+                    "healthy": 7,
+                    "watch": 0,
+                    "suspect": 0,
+                    "failed": 0
+                },
+                "capacity": {
+                    "total_tib": "100.0",
+                    "used_tib": "45.0",
+                    "free_tib": "55.0",
+                    "used_percent_basis_points": 4500
+                },
+                "last_seen_at_utc": "2026-07-08T08:00:00Z",
+                "warnings": []
+            }],
+            "throughput_7d": {
+                "window_days": 7,
+                "read_tib": "1.0",
+                "written_tib": "2.0",
+                "ingest_tib": "2.5",
+                "avg_read_mib_s": 120,
+                "avg_write_mib_s": 240
+            },
+            "ingest": {
+                "pressure": "normal",
+                "queued_jobs": 0,
+                "active_jobs": 0,
+                "failed_jobs": 0,
+                "jobs": [],
+                "warnings": []
+            },
+            "destage": {
+                "pending_objects": 0,
+                "copying_objects": 0,
+                "verified_objects": 2,
+                "objects": [],
+                "warnings": []
+            },
+            "memory_stress": {
+                "state": "nominal",
+                "pressure_percent": 31,
+                "swap_used_percent": 0,
+                "page_cache_tib": "0.4",
+                "warning": null
+            },
+            "smart_warnings": {
+                "warning_count": 0,
+                "affected_drive_count": 0,
+                "warnings": []
+            },
+            "object_stores": [{
+                "store_id": "zymo_fecal_2025.05",
+                "display_name": "zymo_fecal_2025.05",
+                "health": "healthy",
+                "object_count": 42,
+                "endpoint_export_mode": "s3_bucket",
+                "warnings": []
+            }]
+        });
+        let view =
+            serde_json::from_value::<HomeDashboardResponse>(payload).expect("dashboard decodes");
+
+        let attention = home_dashboard_attention(&view);
+
+        assert_eq!(attention.len(), 1);
+        assert_eq!(attention[0].title, "No operator attention required");
+        assert!(!attention[0].detail.contains("bootstrapped"));
+        assert!(!attention[0].detail.contains("fixture"));
     }
 }
