@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.7.1 - 2026-07-08
+
+- Split performance-test SSD/HDD benchmarking into explicit
+  ``ssd-stage-then-drain`` and ``ssd-overlap-drain`` routes so separated
+  staging/drain behavior can be compared against real-world overlapping SSD
+  ingest and HDD settlement.
+- Add overlap evidence to performance-test report and JSON rows, recording
+  whether HDD drainage started before all selected files finished SSD staging.
+- Expand the performance-test TUI workload panel with separate SSD write,
+  SSD read, aggregate HDD write, and per-disk HDD write rate fields.
+
 ## 0.7.0 - 2026-07-08
 
 - Add ``dasobjectstore performance-test --cap <SIZE>`` for source-folder

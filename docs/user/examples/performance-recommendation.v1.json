@@ -5,7 +5,7 @@
     "run_id": "dasobjectstore-performance-20260708T120000Z",
     "generated_at_utc": "2026-07-08T12:00:00Z",
     "repository_revision": "abc1234",
-    "cli_version": "0.7.0",
+    "cli_version": "0.7.1",
     "command": [
       "dasobjectstore",
       "performance-test",
@@ -71,8 +71,8 @@
         }
       ]
     },
-    "ssd_hdd_pipeline": {
-      "description": "Source payloads are staged to SSD, read back from SSD, and settled to HDD members.",
+    "ssd_stage_then_drain_pipeline": {
+      "description": "Source payloads are fully staged to SSD first; HDD drain begins only after all selected files have landed.",
       "concurrency": [
         {
           "concurrency": 1,
@@ -88,7 +88,9 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 209715200
             }
-          ]
+          ],
+          "scenario": "ssd-stage-then-drain",
+          "hdd_drain_started_before_all_ssd_staged": false
         },
         {
           "concurrency": 2,
@@ -110,7 +112,56 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 157286400
             }
-          ]
+          ],
+          "scenario": "ssd-stage-then-drain",
+          "hdd_drain_started_before_all_ssd_staged": false
+        }
+      ]
+    },
+    "ssd_hdd_pipeline": {
+      "description": "Source payloads are staged to SSD and FIFO HDD drain begins as soon as staged files are available, overlapping SSD reads and writes.",
+      "concurrency": [
+        {
+          "concurrency": 1,
+          "aggregate_assigned_bytes": 10737418240,
+          "aggregate_write_bytes_per_second": 209715200,
+          "slowest_member_seconds": 5.12,
+          "members": [
+            "disk-a"
+          ],
+          "per_disk": [
+            {
+              "disk_id": "disk-a",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 209715200
+            }
+          ],
+          "scenario": "ssd-overlap-drain",
+          "hdd_drain_started_before_all_ssd_staged": true
+        },
+        {
+          "concurrency": 2,
+          "aggregate_assigned_bytes": 21474836480,
+          "aggregate_write_bytes_per_second": 367001600,
+          "slowest_member_seconds": 5.85,
+          "members": [
+            "disk-a",
+            "disk-b"
+          ],
+          "per_disk": [
+            {
+              "disk_id": "disk-a",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 209715200
+            },
+            {
+              "disk_id": "disk-b",
+              "assigned_bytes": 10737418240,
+              "write_bytes_per_second": 157286400
+            }
+          ],
+          "scenario": "ssd-overlap-drain",
+          "hdd_drain_started_before_all_ssd_staged": true
         }
       ]
     },
@@ -131,7 +182,9 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 136314880
             }
-          ]
+          ],
+          "scenario": "direct-hdd",
+          "hdd_drain_started_before_all_ssd_staged": false
         },
         {
           "concurrency": 2,
@@ -153,7 +206,9 @@
               "assigned_bytes": 10737418240,
               "write_bytes_per_second": 104857600
             }
-          ]
+          ],
+          "scenario": "direct-hdd",
+          "hdd_drain_started_before_all_ssd_staged": false
         }
       ]
     }

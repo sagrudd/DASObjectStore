@@ -50,6 +50,7 @@ fn documented_performance_recommendation_artifact_covers_ingress_decision_contra
     }
 
     assert_ssd_only_metrics(&artifact);
+    assert_pipeline_metrics_cover_concurrency_range(&artifact, "ssd_stage_then_drain_pipeline");
     assert_pipeline_metrics_cover_concurrency_range(&artifact, "ssd_hdd_pipeline");
     assert_pipeline_metrics_cover_concurrency_range(&artifact, "direct_hdd_pipeline");
 
@@ -116,6 +117,11 @@ fn assert_pipeline_metrics_cover_concurrency_range(artifact: &Value, scenario: &
                 .as_u64()
                 .unwrap_or_else(|| panic!("{scenario}.concurrency row has numeric concurrency"));
             assert!(concurrency > 0, "{scenario} concurrency is positive");
+            assert_string(row, &["scenario"]);
+            assert!(
+                row["hdd_drain_started_before_all_ssd_staged"].is_boolean(),
+                "{scenario} row records overlap evidence"
+            );
             assert_positive_u64(row, &["aggregate_assigned_bytes"]);
             assert_positive_u64(row, &["aggregate_write_bytes_per_second"]);
             assert_number(row, &["slowest_member_seconds"]);
