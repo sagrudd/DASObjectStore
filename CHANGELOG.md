@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.10.9 - 2026-07-08
+
+- Correct performance benchmark rate attribution so SSD read rates are measured
+  only while SSD bytes are actively read during HDD drain work.
+- Charge HDD destination write rates to active `write_all()` work plus final
+  file settlement, without blending in unrelated source-read or idle elapsed
+  time.
+- Add regression coverage for idle-rate stability, sync-only HDD settlement
+  accounting, split copy progress attribution, and SSD-read report rollups.
+
 ## 0.10.8 - 2026-07-08
 
 - Document native PAM/libclang packaging prerequisites in the generated Debian
