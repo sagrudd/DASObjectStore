@@ -26,6 +26,8 @@ fn package_daemon_config_matches_runtime_defaults() {
         serde_json::from_str(DAEMON_CONFIG).expect("daemon config parses");
 
     assert_eq!(config, DaemonRuntimeConfig::linux_packaged());
+    assert!(config.telemetry.enabled);
+    assert_eq!(config.telemetry.cadence_seconds, 30);
     config.validate().expect("packaged config is valid");
 }
 

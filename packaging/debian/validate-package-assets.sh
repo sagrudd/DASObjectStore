@@ -72,6 +72,8 @@ require_text "$tmpfiles" "d /var/lib/dasobjectstore/telemetry 0750 dasobjectstor
 require_text "$web_config" "\"bind_address\": \"0.0.0.0\""
 require_text "$web_config" "\"https_port\": 8448"
 require_text "$daemon_config" "\"socket_path\": \"/run/dasobjectstore/dasobjectstored.sock\""
+require_text "$daemon_config" "\"telemetry\": {"
+require_text "$daemon_config" "\"cadence_seconds\": 30"
 require_text "$pam_service" "auth required pam_unix.so"
 require_text "$pam_service" "account required pam_unix.so"
 

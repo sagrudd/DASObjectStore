@@ -35,6 +35,18 @@ The Unix-domain socket is the local client transport. The daemon will use peer
 credentials on Linux to identify the submitting local actor before accepting
 storage-mutating jobs.
 
+The packaged daemon also owns appliance telemetry collection. By default,
+``/etc/dasobjectstore/daemon.json`` enables telemetry with a 30 second cadence
+and writes the current JSON state under:
+
+.. code-block:: text
+
+   /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json
+
+The telemetry directory is daemon-owned state; operators and Web/API readers
+should treat the JSON file as read-only and use supported interfaces as they are
+added.
+
 Packaged installations restrict the socket directory and socket file to the
 ``dasobjectstore`` group. A local user must be in this transport group before
 the CLI can connect to ``dasobjectstored``:

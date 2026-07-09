@@ -19,16 +19,25 @@ pub use admin_jobs::{
     ADMIN_JOB_REGISTRY_DIR_NAME, ADMIN_JOB_REGISTRY_FILE_NAME, ADMIN_JOB_REGISTRY_SCHEMA,
 };
 pub use appliance_telemetry::{
-    collect_linux_cpu_telemetry, collect_linux_memory_telemetry, parse_linux_cpu_snapshot,
-    ApplianceCpuTelemetry, ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError,
-    LinuxCpuSnapshot, LinuxHostTelemetrySample, LinuxProcTelemetryCollector,
+    appliance_sample_set, appliance_telemetry_state_path, collect_linux_cpu_telemetry,
+    collect_linux_memory_telemetry, parse_linux_cpu_snapshot, validate_appliance_telemetry_cadence,
+    ApplianceCpuTelemetry, ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry,
+    ApplianceSessionTelemetry, ApplianceTelemetryCollectionQuality,
+    ApplianceTelemetryCollectorError, ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig,
+    ApplianceTelemetryLoopError, ApplianceTelemetryMissingDataMarker,
+    ApplianceTelemetryMissingReason, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
+    ApplianceTelemetrySink, ApplianceTelemetrySleeper, ApplianceTelemetrySource,
+    FileBackedApplianceTelemetrySink, LinuxCpuSnapshot, LinuxHostTelemetrySample,
+    LinuxProcTelemetryCollector, ThreadApplianceTelemetrySleeper, APPLIANCE_TELEMETRY_DIR_NAME,
+    APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS, APPLIANCE_TELEMETRY_FILE_NAME,
+    APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS, APPLIANCE_TELEMETRY_SCHEMA_VERSION,
 };
 pub use config::{
-    DaemonRuntimeConfig, DaemonRuntimeConfigError, DEFAULT_DAEMON_CONFIG_PATH,
-    DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR,
-    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
-    LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
-    LINUX_DAEMON_STATE_DIR,
+    DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonTelemetryRuntimeConfig,
+    DEFAULT_DAEMON_CONFIG_PATH, DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR,
+    DEFAULT_DAEMON_RUNTIME_DIR, DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME,
+    DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR,
+    LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
 };
 pub use endpoint_registry::{
     default_endpoint_registry_path, upsert_endpoint_inventory_record,

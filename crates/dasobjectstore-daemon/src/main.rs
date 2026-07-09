@@ -1,7 +1,10 @@
 use dasobjectstore_daemon::{
-    admin_job_registry_path, DaemonRequestHandler, DaemonRuntimeConfig, FileBackedAdminJobRegistry,
-    GarageServiceController, GarageServiceRuntimeConfig, SystemDaemonClock,
-    SystemServiceCommandRunner, UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
+    admin_job_registry_path, appliance_telemetry_state_path, ApplianceTelemetryLoop,
+    ApplianceTelemetryLoopConfig, ApplianceTelemetrySink, ApplianceTelemetrySource,
+    DaemonRequestHandler, DaemonRuntimeConfig, FileBackedAdminJobRegistry,
+    FileBackedApplianceTelemetrySink, GarageServiceController, GarageServiceRuntimeConfig,
+    LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
+    UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
 use std::env;
@@ -9,6 +12,8 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn main() -> ExitCode {
     match run() {
@@ -45,12 +50,80 @@ fn run() -> Result<(), String> {
         SystemDaemonClock,
         admin_job_registry,
     );
+    let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
     println!(
         "dasobjectstored listening on {}",
         server.socket_path().display()
     );
     server.serve_forever().map_err(|err| err.to_string())
+}
+
+fn spawn_appliance_telemetry_loop(
+    config: &DaemonRuntimeConfig,
+) -> Result<Option<thread::JoinHandle<()>>, String> {
+    if !config.telemetry.enabled {
+        return Ok(None);
+    }
+    let loop_config = ApplianceTelemetryLoopConfig::new(
+        config.telemetry.cadence_seconds,
+        ApplianceTelemetrySource {
+            appliance_id: "local-appliance".to_string(),
+            host_id: host_id(),
+            hostname: env::var("HOSTNAME")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+        },
+    )
+    .map_err(|err| err.to_string())?;
+    let cadence = loop_config.cadence();
+    let telemetry_path = appliance_telemetry_state_path(&config.state_dir);
+
+    Ok(Some(thread::spawn(move || {
+        let mut telemetry_loop =
+            ApplianceTelemetryLoop::new(loop_config, LinuxProcTelemetryCollector::default());
+        let mut sink = FileBackedApplianceTelemetrySink::new(telemetry_path);
+        loop {
+            match telemetry_loop.collect_once(current_utc_timestamp()) {
+                Ok(sample_set) => {
+                    if let Err(error) = sink.record(&sample_set) {
+                        eprintln!("appliance telemetry write failed: {error}");
+                    }
+                }
+                Err(error) => eprintln!("appliance telemetry collection failed: {error}"),
+            }
+            thread::sleep(cadence);
+        }
+    })))
+}
+
+fn host_id() -> String {
+    env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "local-host".to_string())
+}
+
+fn current_utc_timestamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs() as libc::time_t;
+    let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+    let result = unsafe { libc::gmtime_r(&seconds, tm.as_mut_ptr()) };
+    if result.is_null() {
+        return "1970-01-01T00:00:00Z".to_string();
+    }
+    let tm = unsafe { tm.assume_init() };
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    )
 }
 
 fn garage_runtime_config(
@@ -123,7 +196,7 @@ impl DaemonArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{garage_runtime_config, DaemonArgs};
+    use super::{current_utc_timestamp, garage_runtime_config, host_id, DaemonArgs};
     use dasobjectstore_daemon::DaemonRuntimeConfig;
     use std::path::PathBuf;
 
@@ -169,5 +242,20 @@ mod tests {
             PathBuf::from("/srv/dasobjectstore/ssd/garage")
         );
         assert_eq!(garage.endpoint, "http://0.0.0.0:3900");
+    }
+
+    #[test]
+    fn daemon_timestamp_uses_utc_rfc3339_shape() {
+        let timestamp = current_utc_timestamp();
+
+        assert_eq!(timestamp.len(), 20);
+        assert!(timestamp.ends_with('Z'));
+        assert_eq!(&timestamp[4..5], "-");
+        assert_eq!(&timestamp[10..11], "T");
+    }
+
+    #[test]
+    fn daemon_host_id_is_nonblank() {
+        assert!(!host_id().trim().is_empty());
     }
 }

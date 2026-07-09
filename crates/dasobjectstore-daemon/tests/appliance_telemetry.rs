@@ -1,9 +1,15 @@
 use dasobjectstore_daemon::{
-    collect_linux_cpu_telemetry, collect_linux_memory_telemetry, parse_linux_cpu_snapshot,
-    ApplianceTelemetryCollectorError, LinuxProcTelemetryCollector,
+    appliance_telemetry_state_path, collect_linux_cpu_telemetry, collect_linux_memory_telemetry,
+    parse_linux_cpu_snapshot, validate_appliance_telemetry_cadence,
+    ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError,
+    ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError,
+    ApplianceTelemetryMissingReason, ApplianceTelemetrySink, ApplianceTelemetrySleeper,
+    ApplianceTelemetrySource, FileBackedApplianceTelemetrySink, LinuxCpuSnapshot,
+    LinuxHostTelemetrySample, LinuxProcTelemetryCollector, APPLIANCE_TELEMETRY_FILE_NAME,
 };
 use serde_json::json;
 use std::fs;
+use std::time::Duration;
 
 const PROC_STAT_1: &str = "\
 cpu  100 20 30 800 50 0 0 0 0 0
@@ -55,8 +61,8 @@ fn first_cpu_sample_reports_missing_usage_until_next_snapshot() {
 
     assert_eq!(telemetry.usage_percent, None);
     assert_eq!(
-        telemetry.missing_reason.as_deref(),
-        Some("initial_cpu_snapshot")
+        telemetry.missing_reason,
+        Some(ApplianceTelemetryMissingReason::DaemonStartup)
     );
 }
 
@@ -80,8 +86,8 @@ fn memory_telemetry_reports_missing_available_memory() {
     assert_eq!(telemetry.available_bytes, None);
     assert_eq!(telemetry.used_percent, None);
     assert_eq!(
-        telemetry.missing_reason.as_deref(),
-        Some("memavailable_missing")
+        telemetry.missing_reason,
+        Some(ApplianceTelemetryMissingReason::CollectorUnavailable)
     );
 }
 
@@ -100,6 +106,78 @@ fn cpu_memory_telemetry_serialize_with_schema_field_names() {
             "swap_used_bytes": 51200000u64,
             "missing_reason": null
         })
+    );
+}
+
+#[test]
+fn telemetry_cadence_accepts_initial_supported_values() {
+    validate_appliance_telemetry_cadence(6).expect("fast cadence accepted");
+    validate_appliance_telemetry_cadence(30).expect("normal cadence accepted");
+
+    assert_eq!(
+        validate_appliance_telemetry_cadence(5).expect_err("5s is not supported"),
+        ApplianceTelemetryLoopError::InvalidCadenceSeconds(5)
+    );
+}
+
+#[test]
+fn telemetry_loop_runs_repeated_collection_without_sleeping_in_tests() {
+    let config = ApplianceTelemetryLoopConfig::new(6, source()).expect("loop config");
+    let mut loop_runner = ApplianceTelemetryLoop::new(config, FakeCollector::new());
+    let mut sink = MemorySink::default();
+    let mut sleeper = RecordingSleeper::default();
+
+    let written = loop_runner
+        .run_iterations(
+            &mut sink,
+            &mut sleeper,
+            [
+                "2026-07-09T17:28:00Z".to_string(),
+                "2026-07-09T17:28:06Z".to_string(),
+            ],
+        )
+        .expect("loop iterations run");
+
+    assert_eq!(written, 2);
+    assert_eq!(loop_runner.samples_collected(), 2);
+    assert_eq!(
+        sleeper.sleeps,
+        vec![Duration::from_secs(6), Duration::from_secs(6)]
+    );
+    assert_eq!(sink.records.len(), 2);
+    assert_eq!(
+        sink.records[0]["samples"][0]["cpu"]["missing_reason"],
+        "daemon_startup"
+    );
+    assert_eq!(sink.records[1]["samples"][0]["cpu"]["usage_percent"], 50.0);
+}
+
+#[test]
+fn file_backed_sink_writes_current_schema_shaped_sample_set() {
+    let root = temp_root("appliance-telemetry-state");
+    let state_path = appliance_telemetry_state_path(&root);
+    let config = ApplianceTelemetryLoopConfig::new(30, source()).expect("loop config");
+    let mut loop_runner = ApplianceTelemetryLoop::new(config, FakeCollector::new());
+    let mut sink = FileBackedApplianceTelemetrySink::new(&state_path);
+
+    let sample_set = loop_runner
+        .collect_once("2026-07-09T17:29:00Z")
+        .expect("sample collected");
+    sink.record(&sample_set).expect("state written");
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("state reads"))
+            .expect("state is json");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert!(state_path.ends_with(APPLIANCE_TELEMETRY_FILE_NAME));
+    assert_eq!(
+        written["schema_version"],
+        "dasobjectstore.appliance_telemetry.v1"
+    );
+    assert_eq!(written["cadence_seconds"], 30.0);
+    assert_eq!(
+        written["samples"][0]["sessions"]["missing_reason"],
+        "not_configured"
     );
 }
 
@@ -136,4 +214,83 @@ fn temp_root(name: &str) -> std::path::PathBuf {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("temp root created");
     root
+}
+
+fn source() -> ApplianceTelemetrySource {
+    ApplianceTelemetrySource {
+        appliance_id: "fixture-appliance".to_string(),
+        host_id: "fixture-host".to_string(),
+        hostname: Some("fixture-hostname".to_string()),
+    }
+}
+
+#[derive(Default)]
+struct MemorySink {
+    records: Vec<serde_json::Value>,
+}
+
+impl ApplianceTelemetrySink for MemorySink {
+    fn record(
+        &mut self,
+        sample_set: &dasobjectstore_daemon::ApplianceTelemetrySampleSet,
+    ) -> Result<(), ApplianceTelemetryLoopError> {
+        self.records
+            .push(serde_json::to_value(sample_set).expect("sample serializes"));
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct RecordingSleeper {
+    sleeps: Vec<Duration>,
+}
+
+impl ApplianceTelemetrySleeper for RecordingSleeper {
+    fn sleep(&mut self, duration: Duration) {
+        self.sleeps.push(duration);
+    }
+}
+
+struct FakeCollector {
+    snapshots: Vec<LinuxCpuSnapshot>,
+}
+
+impl FakeCollector {
+    fn new() -> Self {
+        Self {
+            snapshots: vec![
+                LinuxCpuSnapshot {
+                    total_jiffies: 100,
+                    idle_jiffies: 90,
+                    logical_core_count: 2,
+                },
+                LinuxCpuSnapshot {
+                    total_jiffies: 200,
+                    idle_jiffies: 140,
+                    logical_core_count: 2,
+                },
+            ],
+        }
+    }
+}
+
+impl ApplianceHostTelemetryCollector for FakeCollector {
+    fn collect(
+        &mut self,
+        previous_cpu: Option<&LinuxCpuSnapshot>,
+    ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
+        let snapshot = self.snapshots.remove(0);
+        Ok(LinuxHostTelemetrySample {
+            cpu: collect_linux_cpu_telemetry(previous_cpu, &snapshot, "0.10 0.20 0.30 1/10 42"),
+            memory: ApplianceMemoryTelemetry {
+                total_bytes: Some(100),
+                available_bytes: Some(75),
+                used_percent: Some(25.0),
+                swap_total_bytes: Some(0),
+                swap_used_bytes: Some(0),
+                missing_reason: None,
+            },
+            cpu_snapshot: snapshot,
+        })
+    }
 }

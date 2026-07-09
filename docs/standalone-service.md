@@ -189,6 +189,11 @@ The initial telemetry state file is:
 /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json
 ```
 
+`dasobjectstored` owns telemetry collection. The packaged daemon configuration
+enables telemetry with a 30 second cadence by default; the initial supported
+cadences are 6 seconds for fast local diagnostics and 30 seconds for normal
+appliance operation.
+
 Writers SHALL update the file atomically by writing a schema-valid document to
 a temporary file in the same directory, fsyncing the file, applying final
 ownership and permissions, renaming it over the current state file, and fsyncing

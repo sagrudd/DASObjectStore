@@ -927,7 +927,7 @@ planning are tracked under Milestones 21 and 22.
   appliance-owned state tree, including file ownership, permissions, atomic
   write strategy, recovery from partial writes, and migration behavior for
   future schema versions.
-- [ ] Implement daemon-owned telemetry collection as a managed service loop
+- [x] Implement daemon-owned telemetry collection as a managed service loop
   rather than a Web/API side effect, with configurable sampling cadence and
   initial supported cadences around 6 seconds and 30 seconds.
 - [x] Add platform collectors for CPU and memory usage on supported Linux

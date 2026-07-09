@@ -1,3 +1,6 @@
+use super::appliance_telemetry::{
+    validate_appliance_telemetry_cadence, APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS,
+};
 use dasobjectstore_core::DEFAULT_PRODUCT_ROOT;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -41,6 +44,8 @@ pub struct DaemonRuntimeConfig {
     pub state_dir: PathBuf,
     pub log_dir: PathBuf,
     pub product_root: PathBuf,
+    #[serde(default)]
+    pub telemetry: DaemonTelemetryRuntimeConfig,
 }
 
 impl DaemonRuntimeConfig {
@@ -55,6 +60,7 @@ impl DaemonRuntimeConfig {
             state_dir: PathBuf::from(DEFAULT_DAEMON_STATE_DIR),
             log_dir: PathBuf::from(DEFAULT_DAEMON_LOG_DIR),
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
+            telemetry: DaemonTelemetryRuntimeConfig::default(),
         }
     }
 
@@ -69,6 +75,7 @@ impl DaemonRuntimeConfig {
             state_dir: PathBuf::from(LINUX_DAEMON_STATE_DIR),
             log_dir: PathBuf::from(LINUX_DAEMON_LOG_DIR),
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
+            telemetry: DaemonTelemetryRuntimeConfig::default(),
         }
     }
 
@@ -81,6 +88,7 @@ impl DaemonRuntimeConfig {
         validate_absolute_path("state_dir", &self.state_dir)?;
         validate_absolute_path("log_dir", &self.log_dir)?;
         validate_absolute_path("product_root", &self.product_root)?;
+        self.telemetry.validate()?;
 
         if self.socket_path.parent() != Some(self.runtime_dir.as_path()) {
             return Err(DaemonRuntimeConfigError::SocketOutsideRuntimeDir {
@@ -99,6 +107,29 @@ impl Default for DaemonRuntimeConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonTelemetryRuntimeConfig {
+    pub enabled: bool,
+    pub cadence_seconds: u64,
+}
+
+impl DaemonTelemetryRuntimeConfig {
+    pub fn validate(&self) -> Result<(), DaemonRuntimeConfigError> {
+        validate_appliance_telemetry_cadence(self.cadence_seconds).map_err(|_| {
+            DaemonRuntimeConfigError::InvalidTelemetryCadenceSeconds(self.cadence_seconds)
+        })
+    }
+}
+
+impl Default for DaemonTelemetryRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cadence_seconds: APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DaemonRuntimeConfigError {
     BlankField {
@@ -112,6 +143,7 @@ pub enum DaemonRuntimeConfigError {
         socket_path: PathBuf,
         runtime_dir: PathBuf,
     },
+    InvalidTelemetryCadenceSeconds(u64),
 }
 
 impl Display for DaemonRuntimeConfigError {
@@ -129,6 +161,10 @@ impl Display for DaemonRuntimeConfigError {
                 "daemon socket {} must live directly under runtime_dir {}",
                 socket_path.display(),
                 runtime_dir.display()
+            ),
+            Self::InvalidTelemetryCadenceSeconds(seconds) => write!(
+                formatter,
+                "unsupported telemetry cadence {seconds}s; supported cadences are 6s and 30s"
             ),
         }
     }
@@ -187,6 +223,8 @@ mod tests {
         assert_eq!(config.state_dir, PathBuf::from(DEFAULT_DAEMON_STATE_DIR));
         assert_eq!(config.log_dir, PathBuf::from(DEFAULT_DAEMON_LOG_DIR));
         assert_eq!(config.product_root, PathBuf::from(DEFAULT_PRODUCT_ROOT));
+        assert!(config.telemetry.enabled);
+        assert_eq!(config.telemetry.cadence_seconds, 30);
         config.validate().expect("default config is valid");
     }
 
@@ -236,6 +274,21 @@ mod tests {
             DaemonRuntimeConfigError::BlankField {
                 field: "service_user"
             }
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_telemetry_cadence() {
+        let mut config = DaemonRuntimeConfig::default_packaged();
+        config.telemetry.cadence_seconds = 5;
+
+        let err = config
+            .validate()
+            .expect_err("unsupported telemetry cadence rejected");
+
+        assert_eq!(
+            err,
+            DaemonRuntimeConfigError::InvalidTelemetryCadenceSeconds(5)
         );
     }
 }
