@@ -738,7 +738,7 @@ planning are tracked under Milestones 21 and 22.
   pairing challenge, approve after authenticated browser login, exchange for a
   remote upload session, revoke session, and renew an active session during
   long uploads.
-- [ ] Set the default remote upload session lifetime to eight hours and add
+- [x] Set the default remote upload session lifetime to eight hours and add
   renewal semantics that are safe for long-running ingress jobs without keeping
   passwords in memory longer than required.
 - [ ] Support standalone local-user authentication for easyconnect first, while

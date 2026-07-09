@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.59.0 - 2026-07-09
+
+- Set remote easyconnect upload sessions to an eight-hour default contract,
+  define renewal timing and token-rotation semantics, expose the policy through
+  daemon and remote-client contracts, and redact stored renewal tokens from
+  remote client support output.
+
 ## 0.58.0 - 2026-07-09
 
 - Add server-side remote easyconnect pairing/session API contracts and typed

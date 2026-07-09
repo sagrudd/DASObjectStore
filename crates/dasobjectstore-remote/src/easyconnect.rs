@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = 8448;
 pub const DEFAULT_PAIRING_TIMEOUT_SECS: u64 = 300;
+pub const DEFAULT_REMOTE_SESSION_LIFETIME_SECS: u64 = 8 * 60 * 60;
+pub const DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS: u64 = 60 * 60;
 pub const DEFAULT_LOCAL_CALLBACK_BIND: &str = "127.0.0.1:<ephemeral>";
 pub const EASYCONNECT_DISCOVERY_PATH: &str =
     "/products/dasobjectstore/api/v1/remote/easyconnect/discovery";
@@ -50,6 +52,8 @@ pub struct RemoteEasyconnectContract {
     pub local_callback_bind: String,
     pub local_callback_url: String,
     pub polling_url_template: String,
+    pub default_session_lifetime_seconds: u64,
+    pub session_renewal_lead_seconds: u64,
     pub lifecycle: Vec<RemoteEasyconnectLifecycleStep>,
     pub failure_states: Vec<RemoteEasyconnectFailureState>,
     pub cli_output: Vec<String>,
@@ -169,6 +173,8 @@ pub fn define_easyconnect_contract(
             .to_string(),
         "open the browser login URL without printing passwords or S3 credentials".to_string(),
         "wait for browser-approved pairing and exchange it for a remote upload session".to_string(),
+        "renew active upload sessions with daemon-issued renewal tokens, not stored passwords"
+            .to_string(),
         "persist only the issued remote session reference and non-secret appliance metadata"
             .to_string(),
     ];
@@ -182,6 +188,8 @@ pub fn define_easyconnect_contract(
         local_callback_bind,
         local_callback_url,
         polling_url_template,
+        default_session_lifetime_seconds: DEFAULT_REMOTE_SESSION_LIFETIME_SECS,
+        session_renewal_lead_seconds: DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS,
         lifecycle,
         failure_states,
         cli_output,
@@ -353,6 +361,11 @@ fn easyconnect_lifecycle() -> Vec<RemoteEasyconnectLifecycleStep> {
             "remote_cli",
             "Store non-secret session metadata and use daemon-issued routing for uploads.",
         ),
+        (
+            "session_renewal",
+            "remote_cli",
+            "Renew active upload sessions before expiry using the renewal token; do not keep or replay login passwords.",
+        ),
     ]
     .into_iter()
     .map(|(state, actor, message)| RemoteEasyconnectLifecycleStep {
@@ -399,6 +412,11 @@ fn easyconnect_failure_states() -> Vec<RemoteEasyconnectFailureState> {
             "session_exchange_denied",
             "The approved pairing could not be exchanged for a remote upload session.",
             false,
+        ),
+        (
+            "session_renewal_denied",
+            "The appliance rejected renewal of an active remote upload session.",
+            true,
         ),
         (
             "agent_disconnected",
@@ -542,7 +560,9 @@ mod tests {
         define_easyconnect_contract, parse_pairing_callback_request, query_value,
         run_easyconnect_pairing, BrowserLauncher, RemoteEasyconnectContractError,
         RemoteEasyconnectContractRequest, RemoteEasyconnectPairingError,
-        RemoteEasyconnectPairingOptions, DEFAULT_APPLIANCE_HTTPS_PORT, EASYCONNECT_CALLBACK_PATH,
+        RemoteEasyconnectPairingOptions, DEFAULT_APPLIANCE_HTTPS_PORT,
+        DEFAULT_REMOTE_SESSION_LIFETIME_SECS, DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS,
+        EASYCONNECT_CALLBACK_PATH,
     };
     use std::io::{Read, Write};
     use std::net::TcpStream;
@@ -570,10 +590,29 @@ mod tests {
             .lifecycle
             .iter()
             .any(|step| step.state == "session_exchange"));
+        assert_eq!(
+            contract.default_session_lifetime_seconds,
+            DEFAULT_REMOTE_SESSION_LIFETIME_SECS
+        );
+        assert_eq!(
+            contract.session_renewal_lead_seconds,
+            DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS
+        );
+        assert!(contract
+            .lifecycle
+            .iter()
+            .any(|step| step.state == "session_renewal"
+                && step
+                    .message
+                    .contains("do not keep or replay login passwords")));
         assert!(contract
             .failure_states
             .iter()
             .any(|failure| failure.code == "pairing_expired" && failure.retryable));
+        assert!(contract
+            .failure_states
+            .iter()
+            .any(|failure| failure.code == "session_renewal_denied" && failure.retryable));
         assert!(contract
             .cli_output
             .iter()

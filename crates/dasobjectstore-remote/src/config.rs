@@ -155,7 +155,10 @@ impl RemoteUploadSession {
             issued_at: self.issued_at.clone(),
             expires_at: self.expires_at.clone(),
             credentials: self.credentials.redacted(),
-            renewal: self.renewal.clone(),
+            renewal: self
+                .renewal
+                .as_ref()
+                .map(RemoteSessionRenewalMetadata::redacted),
         }
     }
 
@@ -190,7 +193,23 @@ pub struct RemoteSessionRenewalMetadata {
     pub renew_url: String,
     pub renew_after: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_renewed_at: Option<String>,
+}
+
+impl RemoteSessionRenewalMetadata {
+    pub fn redacted(&self) -> RedactedRemoteSessionRenewalMetadata {
+        RedactedRemoteSessionRenewalMetadata {
+            renew_url: self.renew_url.clone(),
+            renew_after: self.renew_after.clone(),
+            renewal_token: self
+                .renewal_token
+                .as_ref()
+                .map(|_| REDACTED_SECRET.to_string()),
+            last_renewed_at: self.last_renewed_at.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -230,7 +249,17 @@ pub struct RedactedRemoteUploadSession {
     pub expires_at: String,
     pub credentials: RedactedRemoteSessionCredentials,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub renewal: Option<RemoteSessionRenewalMetadata>,
+    pub renewal: Option<RedactedRemoteSessionRenewalMetadata>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RedactedRemoteSessionRenewalMetadata {
+    pub renew_url: String,
+    pub renew_after: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_renewed_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -454,6 +483,7 @@ mod tests {
                     renewal: Some(RemoteSessionRenewalMetadata {
                         renew_url: "https://192.168.1.192:8448/api/renew".to_string(),
                         renew_after: "2026-07-09T18:30:00Z".to_string(),
+                        renewal_token: Some("renewal-token-secret".to_string()),
                         last_renewed_at: None,
                     }),
                 }),
@@ -469,5 +499,6 @@ mod tests {
         assert!(!rendered.contains("SESSIONREFERENCE7890"));
         assert!(!rendered.contains("super-secret"));
         assert!(!rendered.contains("temporary-token"));
+        assert!(!rendered.contains("renewal-token-secret"));
     }
 }

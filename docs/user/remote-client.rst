@@ -80,6 +80,16 @@ ObjectStore grants, expiry time, and renewal metadata. Those credentials are
 intended for the paired ``dasobjectstore-remote`` process only and must not be
 pasted into terminal commands or support tickets.
 
+Remote upload sessions default to eight hours. The appliance advertises that
+default in discovery and the remote client treats renewal as an explicit
+session operation rather than a password replay. For the default eight-hour
+session, renewal becomes eligible one hour before expiry. Shorter test or
+operator-limited sessions become renewable halfway through their lifetime so a
+long upload can refresh credentials before interruption. Renewal uses a
+daemon-issued renewal token, rotates that token after a successful renewal, and
+does not require ``dasobjectstore-remote`` to keep the login password in memory
+after the browser-approved pairing has completed.
+
 Use ``--contract`` to inspect the readable product contract without launching a
 browser, or ``--json`` when another tool should consume the contract:
 
@@ -133,16 +143,17 @@ configuration file.
 
 The remote configuration file is also the planned storage location for
 easyconnect pairings. It can contain paired appliance records, issued remote
-upload session credentials, session expiry time, renewal metadata, and the
-selected default ObjectStore for each appliance. The file is written with
-owner-only permissions on Unix systems because active upload sessions may carry
-temporary S3 credentials.
+upload session credentials, session expiry time, renewal metadata, a
+secret-bearing renewal token, and the selected default ObjectStore for each
+appliance. The file is written with owner-only permissions on Unix systems
+because active upload sessions may carry temporary S3 credentials.
 
 Display commands redact secret-bearing fields. ``config show`` prints whether a
 credential helper, upload session, and renewal path are configured. ``config
 show --json`` emits a redacted JSON view suitable for support logs: session and
 access-key identifiers are shortened, secret keys and session tokens are
-replaced with ``<redacted>``, and raw helper output is never printed.
+replaced with ``<redacted>``, renewal tokens are redacted, and raw helper output
+is never printed.
 
 Updating the base endpoint with ``config set`` preserves paired appliance and
 session records. Pairings are removed only by future explicit pairing/session

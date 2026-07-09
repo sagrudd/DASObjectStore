@@ -11,6 +11,10 @@ pub const REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE: &str =
     "/api/v1/remote/easyconnect/sessions/{session_id}";
 pub const REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE: &str =
     "/api/v1/remote/easyconnect/sessions/{session_id}/renew";
+pub const REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS: u64 = 60;
+pub const REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS: u64 = 8 * 60 * 60;
+pub const REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
+pub const REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS: u64 = 60 * 60;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectDiscoveryRequest;
@@ -25,7 +29,31 @@ pub struct RemoteEasyconnectDiscoveryResponse {
     pub session_revoke_url_template: String,
     pub session_renew_url_template: String,
     pub default_session_lifetime_seconds: u64,
+    pub session_policy: RemoteEasyconnectSessionPolicy,
     pub auth_providers: Vec<RemoteEasyconnectAuthProvider>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectSessionPolicy {
+    pub default_lifetime_seconds: u64,
+    pub min_lifetime_seconds: u64,
+    pub max_lifetime_seconds: u64,
+    pub renewal_lead_seconds: u64,
+    pub renewal_requires_password_reauthentication: bool,
+    pub renewal_token_rotates: bool,
+}
+
+impl Default for RemoteEasyconnectSessionPolicy {
+    fn default() -> Self {
+        Self {
+            default_lifetime_seconds: REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+            min_lifetime_seconds: REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS,
+            max_lifetime_seconds: REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
+            renewal_lead_seconds: REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS,
+            renewal_requires_password_reauthentication: false,
+            renewal_token_rotates: true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -223,6 +251,21 @@ pub enum RemoteEasyconnectValidationError {
     GrantWithoutAccess { object_store: String },
 }
 
+pub fn resolve_remote_easyconnect_session_lifetime_seconds(
+    requested_seconds: Option<u64>,
+) -> Result<u64, RemoteEasyconnectValidationError> {
+    validate_requested_lifetime(requested_seconds)?;
+    Ok(requested_seconds.unwrap_or(REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS))
+}
+
+pub fn remote_easyconnect_renew_after_offset_seconds(
+    lifetime_seconds: u64,
+) -> Result<u64, RemoteEasyconnectValidationError> {
+    validate_requested_lifetime(Some(lifetime_seconds))?;
+    let lead_seconds = REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS.min(lifetime_seconds / 2);
+    Ok(lifetime_seconds.saturating_sub(lead_seconds).max(1))
+}
+
 impl std::fmt::Display for RemoteEasyconnectValidationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -289,7 +332,10 @@ fn validate_requested_lifetime(
     seconds: Option<u64>,
 ) -> Result<(), RemoteEasyconnectValidationError> {
     if let Some(seconds) = seconds {
-        if !(60..=86_400).contains(&seconds) {
+        if !(REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS
+            ..=REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS)
+            .contains(&seconds)
+        {
             return Err(RemoteEasyconnectValidationError::InvalidRequestedLifetime { seconds });
         }
     }
@@ -299,10 +345,13 @@ fn validate_requested_lifetime(
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
-        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
+        remote_easyconnect_renew_after_offset_seconds,
+        resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectSessionPolicy,
+        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+        REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+        REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
     };
 
     #[test]
@@ -347,6 +396,39 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn defaults_session_lifetime_to_eight_hours_and_renews_one_hour_before_expiry() {
+        let policy = RemoteEasyconnectSessionPolicy::default();
+
+        assert_eq!(
+            policy.default_lifetime_seconds,
+            REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS
+        );
+        assert_eq!(
+            resolve_remote_easyconnect_session_lifetime_seconds(None).expect("default resolves"),
+            28_800
+        );
+        assert_eq!(
+            resolve_remote_easyconnect_session_lifetime_seconds(Some(3_600))
+                .expect("requested resolves"),
+            3_600
+        );
+        assert_eq!(
+            remote_easyconnect_renew_after_offset_seconds(28_800).expect("renewal offset"),
+            25_200
+        );
+        assert!(!policy.renewal_requires_password_reauthentication);
+        assert!(policy.renewal_token_rotates);
+    }
+
+    #[test]
+    fn short_sessions_become_renewable_halfway_through() {
+        assert_eq!(
+            remote_easyconnect_renew_after_offset_seconds(60).expect("minimum lifetime valid"),
+            30
+        );
     }
 
     #[test]

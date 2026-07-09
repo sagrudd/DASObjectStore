@@ -125,6 +125,16 @@ fn write_easyconnect_contract(
         "Polling URL template: {}",
         contract.polling_url_template
     )?;
+    writeln!(
+        writer,
+        "Default session lifetime: {} seconds",
+        contract.default_session_lifetime_seconds
+    )?;
+    writeln!(
+        writer,
+        "Renewal lead time: {} seconds before expiry",
+        contract.session_renewal_lead_seconds
+    )?;
     writeln!(writer, "Lifecycle:")?;
     for step in &contract.lifecycle {
         writeln!(
