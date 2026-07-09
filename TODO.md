@@ -982,9 +982,12 @@ planning are tracked under Milestones 21 and 22.
   Completed by adding fixed-cadence Home telemetry refresh, decoding bounded
   daily throughput points, and rendering a fixed-viewBox SVG chart with stable
   axes, bounded labels, and an explicit empty-sample state.
-- [ ] Define reusable floundeR data contracts for Mnemosyne appliance
+- [x] Define reusable floundeR data contracts for Mnemosyne appliance
   telemetry: line charts with missing-data gaps, point/step summaries,
   capacity bands, per-disk IO traces, and small-multiple chart layouts.
+  Completed by adding the versioned Mnemosyne floundeR appliance telemetry
+  contract module with chart layout, axis, series, point-quality, missing
+  interval, capacity-band, per-device, and small-multiple DTOs.
 - [ ] Implement floundeR rendering support for scientifically correct missing
   intervals so absent samples, service restarts, unknown devices, and
   unavailable counters are shown as gaps or labelled missing intervals rather

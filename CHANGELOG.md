@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.66.0 - 2026-07-09
+
+- Add versioned Mnemosyne floundeR appliance telemetry data contracts covering
+  line charts with gaps, point and step summaries, capacity bands, per-disk IO
+  traces, small multiples, missing intervals, and per-device metadata.
+
 ## 0.65.0 - 2026-07-09
 
 - Add a stable Home throughput telemetry chart with fixed axes, bounded labels,

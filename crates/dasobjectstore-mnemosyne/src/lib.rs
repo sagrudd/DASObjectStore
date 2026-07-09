@@ -2,6 +2,7 @@
 
 pub mod binding;
 pub mod boundary;
+pub mod flounder_telemetry;
 pub mod host_boundary;
 pub mod host_mode;
 pub mod integrated_session;
@@ -25,6 +26,14 @@ pub use boundary::{
     synoptikon_object_store_boundary, ArtefactAuthority, HostMode, HostStorageBoundary,
     LocalRootPolicy, LocalRootTemplate, ObjectStorePolicy, RegistrationContract, SqlPolicy,
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
+};
+pub use flounder_telemetry::{
+    FlounderApplianceTelemetryContract, FlounderTelemetryAxis, FlounderTelemetryBand,
+    FlounderTelemetryChart, FlounderTelemetryChartLayout, FlounderTelemetryDevice,
+    FlounderTelemetryMissingInterval, FlounderTelemetryMissingReason, FlounderTelemetryPoint,
+    FlounderTelemetryPointQuality, FlounderTelemetrySeries, FlounderTelemetrySeriesRole,
+    FlounderTelemetrySmallMultiple, FlounderTelemetryUnit, FlounderTelemetryWindow,
+    FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,
