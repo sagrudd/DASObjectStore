@@ -8,6 +8,7 @@ mod local_admin;
 mod object_browser;
 mod object_download;
 mod performance_policy;
+mod remote_pairings;
 mod remote_sessions;
 mod remote_upload;
 mod service;
@@ -51,6 +52,14 @@ pub use performance_policy::{
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
+};
+pub use remote_pairings::{
+    remote_easyconnect_pairing_store_path, session_credentials_from_store_credentials,
+    FileBackedRemoteEasyconnectPairingStore, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError,
+    REMOTE_EASYCONNECT_PAIRING_DIR_NAME, REMOTE_EASYCONNECT_PAIRING_FILE_NAME,
+    REMOTE_EASYCONNECT_PAIRING_SCHEMA,
 };
 pub use remote_sessions::{
     remote_easyconnect_session_store_path, FileBackedRemoteEasyconnectPairedSessionStore,

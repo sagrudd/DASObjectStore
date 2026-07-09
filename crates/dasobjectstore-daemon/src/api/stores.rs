@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreInventoryRequest {
     pub include_policy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_easyconnect_session_id: Option<String>,
+    #[serde(default)]
+    pub remote_upload_writable_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -50,5 +54,19 @@ mod tests {
         assert_eq!(encoded["stores"][0]["writer_group"], "mnemosyne");
         assert_eq!(encoded["stores"][0]["public"], false);
         assert_eq!(encoded["stores"][0]["policy"]["class"], "ReproducibleCache");
+    }
+
+    #[test]
+    fn inventory_request_can_target_remote_upload_session() {
+        let request = super::StoreInventoryRequest {
+            include_policy: true,
+            remote_easyconnect_session_id: Some("session-1".to_string()),
+            remote_upload_writable_only: true,
+        };
+
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["remote_easyconnect_session_id"], "session-1");
+        assert_eq!(encoded["remote_upload_writable_only"], true);
     }
 }

@@ -886,7 +886,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Wire the persisted easyconnect paired-session store into daemon revoke
   and renew routes with persisted revocation, expiry extension, and renewal
   token rotation tests.
-- [ ] Wire the persisted easyconnect paired-session store into daemon
+- [x] Wire the persisted easyconnect paired-session store into daemon
   easyconnect create/exchange routes and remote-upload ObjectStore listing
   authorization.
 - [ ] Add tests for ObjectStore listing through a remote upload session,

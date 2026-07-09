@@ -10,11 +10,15 @@ use crate::api::{
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectDownloadRequest,
     ObjectFolderDownloadRequest, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
     RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, StoreInventoryItem, StoreInventoryRequest,
+    StoreInventoryResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -23,22 +27,28 @@ use crate::auth::{
 use crate::runtime::{
     default_endpoint_registry_path, default_hdd_root, default_ssd_root,
     provision_garage_store_registry, query_object_browser_metadata, read_object_browser_metadata,
-    remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
-    resolve_object_folder_download_with_hdd_root, submit_ingest_files_to_local_store_with_progress,
+    remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
+    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+    session_credentials_from_store_credentials, submit_ingest_files_to_local_store_with_progress,
     upsert_endpoint_inventory_record, AdminJobRegistry, DaemonIngestFilesRuntimeError,
     DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRenewalRequest,
+    FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
+    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
+    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
     RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry, ServiceCommandRunner,
-    SystemLocalAdminCommandRunner, DEFAULT_DAEMON_STATE_DIR,
+    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
+    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::store::ExportPolicy;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
 use dasobjectstore_object_service::{
-    default_store_registry_path, default_subobject_registry_path, read_store_registry,
-    read_subobject_registry, ObjectServiceError, ObjectServiceProviderId,
+    bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
+    generate_per_store_credentials, read_store_registry, read_subobject_registry,
+    ObjectServiceError, ObjectServiceProviderId, StoreCredentialRequest, SystemCredentialEntropy,
 };
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
@@ -53,6 +63,7 @@ pub struct DaemonRequestHandler<S, C> {
     subobject_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
     hdd_root_path: PathBuf,
+    remote_easyconnect_pairing_store_path: PathBuf,
     remote_easyconnect_session_store_path: PathBuf,
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
 }
@@ -71,6 +82,9 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            remote_easyconnect_pairing_store_path: remote_easyconnect_pairing_store_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             remote_easyconnect_session_store_path: remote_easyconnect_session_store_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -91,6 +105,9 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            remote_easyconnect_pairing_store_path: remote_easyconnect_pairing_store_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             remote_easyconnect_session_store_path: remote_easyconnect_session_store_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -120,6 +137,11 @@ where
 
     pub fn with_remote_easyconnect_session_store_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.remote_easyconnect_session_store_path = path.into();
+        self
+    }
+
+    pub fn with_remote_easyconnect_pairing_store_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.remote_easyconnect_pairing_store_path = path.into();
         self
     }
 
@@ -245,6 +267,15 @@ where
                 .cancel_admin_job(request, &self.clock.now_utc())
                 .map(DaemonApiResponse::CancelJob)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
+            DaemonApiRequest::StoreInventory(request) => {
+                match self.store_inventory_for_actor(request, actor) {
+                    Ok(response) => Ok(DaemonApiResponse::StoreInventory(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "store_inventory_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
             DaemonApiRequest::SubmitIngestFiles(request) => {
                 if let Some(actor) = actor {
                     if let Err(error) = self.authorize_ingest_files(actor, &request) {
@@ -335,6 +366,39 @@ where
                     ))),
                 }
             }
+            DaemonApiRequest::RemoteEasyconnectCreatePairing(request) => {
+                let created_at_utc = self.clock.now_utc();
+                match self.create_remote_easyconnect_pairing(request, &created_at_utc) {
+                    Ok(response) => Ok(DaemonApiResponse::RemoteEasyconnectCreatePairing(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_pairing_create_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
+            DaemonApiRequest::RemoteEasyconnectApprovePairing(request) => {
+                match self.approve_remote_easyconnect_pairing(request) {
+                    Ok(response) => {
+                        Ok(DaemonApiResponse::RemoteEasyconnectApprovePairing(response))
+                    }
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_pairing_approve_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
+            DaemonApiRequest::RemoteEasyconnectExchangePairing(request) => {
+                let exchanged_at_utc = self.clock.now_utc();
+                match self.exchange_remote_easyconnect_pairing(request, &exchanged_at_utc) {
+                    Ok(response) => Ok(DaemonApiResponse::RemoteEasyconnectExchangePairing(
+                        response,
+                    )),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_pairing_exchange_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
             DaemonApiRequest::RemoteEasyconnectRevokeSession(request) => {
                 let revoked_at_utc = self.clock.now_utc();
                 match self.revoke_remote_easyconnect_session(&request.session_id, &revoked_at_utc) {
@@ -407,6 +471,304 @@ where
                 ),
             ))),
         }
+    }
+
+    fn store_inventory_for_actor(
+        &self,
+        request: StoreInventoryRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<StoreInventoryResponse, ObjectServiceError> {
+        if let Some(session_id) = request.remote_easyconnect_session_id.as_deref() {
+            return self
+                .store_inventory_for_remote_easyconnect_session(&request, session_id)
+                .map_err(|error| ObjectServiceError::CommandFailed(error.to_string()));
+        }
+        let stores = read_store_registry(&self.store_registry_path)?;
+        let mut inventory = Vec::new();
+        for definition in stores {
+            let bucket_name = if definition.policy.export_policy == ExportPolicy::S3 {
+                Some(bucket_name_for_definition(&definition)?)
+            } else {
+                None
+            };
+            let mut access_policy = DaemonStoreAccessPolicy::new(definition.store_id.clone());
+            if let Some(reader_group) = &definition.reader_group {
+                access_policy = access_policy.with_reader_group(reader_group.clone());
+            }
+            if let Some(writer_group) = &definition.writer_group {
+                access_policy = access_policy.with_writer_group(writer_group.clone());
+            }
+            access_policy = access_policy.with_public_read(definition.public);
+            let visible = match actor {
+                Some(actor) => authorize_store_read(actor, &access_policy).is_ok(),
+                None => definition.public,
+            };
+            if !visible {
+                continue;
+            }
+            let mut policy = definition.policy.clone();
+            if !request.include_policy {
+                policy = dasobjectstore_core::store::StorePolicy::defaults_for(policy.class);
+            }
+            inventory.push(StoreInventoryItem {
+                store_id: definition.store_id,
+                policy,
+                bucket_name,
+                reader_group: definition.reader_group,
+                writer_group: definition.writer_group,
+                public: definition.public,
+                writable: definition.policy.export_policy == ExportPolicy::S3,
+            });
+        }
+
+        Ok(StoreInventoryResponse { stores: inventory })
+    }
+
+    fn store_inventory_for_remote_easyconnect_session(
+        &self,
+        request: &StoreInventoryRequest,
+        session_id: &str,
+    ) -> Result<StoreInventoryResponse, RemoteEasyconnectPairedSessionStoreError> {
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            &self.remote_easyconnect_session_store_path,
+        );
+        let session = session_store.get(session_id)?.ok_or_else(|| {
+            RemoteEasyconnectPairedSessionStoreError::SessionNotFound {
+                session_id: session_id.to_string(),
+            }
+        })?;
+        let actor = DaemonLocalActor::new(0).with_username(session.approved_actor.clone());
+        let stores = read_store_registry(&self.store_registry_path).map_err(|error| {
+            RemoteEasyconnectPairedSessionStoreError::Json {
+                path: self.store_registry_path.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        let mut inventory = Vec::new();
+        for definition in stores {
+            let Some(grant) = session
+                .object_stores
+                .iter()
+                .find(|grant| grant.object_store == definition.store_id.as_str())
+            else {
+                continue;
+            };
+            if request.remote_upload_writable_only {
+                session_store.authorize_write(
+                    session_id,
+                    definition.store_id.as_str(),
+                    &actor,
+                    &self.clock.now_utc(),
+                )?;
+            } else if !grant.can_read && !grant.can_write {
+                continue;
+            }
+            let bucket_name = if definition.policy.export_policy == ExportPolicy::S3 {
+                Some(bucket_name_for_definition(&definition).map_err(|error| {
+                    RemoteEasyconnectPairedSessionStoreError::Json {
+                        path: self.store_registry_path.clone(),
+                        message: error.to_string(),
+                    }
+                })?)
+            } else {
+                None
+            };
+            let mut policy = definition.policy.clone();
+            if !request.include_policy {
+                policy = dasobjectstore_core::store::StorePolicy::defaults_for(policy.class);
+            }
+            inventory.push(StoreInventoryItem {
+                store_id: definition.store_id,
+                policy,
+                bucket_name,
+                reader_group: definition.reader_group,
+                writer_group: definition.writer_group,
+                public: definition.public,
+                writable: definition.policy.export_policy == ExportPolicy::S3 && grant.can_write,
+            });
+        }
+
+        Ok(StoreInventoryResponse { stores: inventory })
+    }
+
+    fn create_remote_easyconnect_pairing(
+        &self,
+        request: RemoteEasyconnectCreatePairingRequest,
+        created_at_utc: &str,
+    ) -> Result<RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectPairingStoreError> {
+        let lifetime_seconds = resolve_remote_easyconnect_session_lifetime_seconds(
+            request.requested_session_lifetime_seconds,
+        )
+        .map_err(|error| RemoteEasyconnectPairingStoreError::Json {
+            path: self.remote_easyconnect_pairing_store_path.clone(),
+            message: error.to_string(),
+        })?;
+        let expires_at_utc = add_seconds_to_utc_timestamp(created_at_utc, lifetime_seconds)
+            .ok_or_else(|| RemoteEasyconnectPairingStoreError::Json {
+                path: self.remote_easyconnect_pairing_store_path.clone(),
+                message: format!(
+                    "daemon clock value {created_at_utc} is not a supported UTC timestamp"
+                ),
+            })?;
+        let pairing_id = stable_easyconnect_id("pairing", &request.client_name, created_at_utc);
+        let store = FileBackedRemoteEasyconnectPairingStore::new(
+            &self.remote_easyconnect_pairing_store_path,
+        );
+        store.upsert(RemoteEasyconnectPairingRecord {
+            pairing_id: pairing_id.clone(),
+            client_name: request.client_name,
+            callback_url: request.callback_url.clone(),
+            requested_object_store: request.requested_object_store,
+            requested_session_lifetime_seconds: request.requested_session_lifetime_seconds,
+            client_request_id: request.client_request_id,
+            created_at_utc: created_at_utc.to_string(),
+            expires_at_utc: expires_at_utc.clone(),
+            approval: None,
+            exchanged_at_utc: None,
+        })?;
+
+        Ok(RemoteEasyconnectCreatePairingResponse {
+            pairing_id: pairing_id.clone(),
+            browser_login_url: format!(
+                "/products/dasobjectstore/remote/easyconnect/login?pairing_id={pairing_id}"
+            ),
+            callback_url: request.callback_url,
+            expires_at_utc,
+            polling_url: format!("/api/v1/remote/easyconnect/pairings/{pairing_id}"),
+        })
+    }
+
+    fn approve_remote_easyconnect_pairing(
+        &self,
+        request: RemoteEasyconnectApprovePairingRequest,
+    ) -> Result<RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectPairingStoreError> {
+        let exchange_code = stable_easyconnect_id(
+            "exchange",
+            &request.approved_actor,
+            &request.approval_expires_at_utc,
+        );
+        let store = FileBackedRemoteEasyconnectPairingStore::new(
+            &self.remote_easyconnect_pairing_store_path,
+        );
+        let pairing = store.approve(RemoteEasyconnectPairingApproval {
+            pairing_id: request.pairing_id.clone(),
+            approved_actor: request.approved_actor,
+            auth_provider: request.auth_provider,
+            allowed_object_stores: request.allowed_object_stores,
+            approval_expires_at_utc: request.approval_expires_at_utc.clone(),
+            exchange_code: exchange_code.clone(),
+        })?;
+
+        Ok(RemoteEasyconnectApprovePairingResponse {
+            pairing_id: request.pairing_id,
+            exchange_code,
+            callback_url: pairing.callback_url,
+            expires_at_utc: request.approval_expires_at_utc,
+        })
+    }
+
+    fn exchange_remote_easyconnect_pairing(
+        &self,
+        request: RemoteEasyconnectExchangePairingRequest,
+        exchanged_at_utc: &str,
+    ) -> Result<RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectExchangeDispatchError>
+    {
+        let pairing_store = FileBackedRemoteEasyconnectPairingStore::new(
+            &self.remote_easyconnect_pairing_store_path,
+        );
+        let pairing = pairing_store
+            .exchange(RemoteEasyconnectPairingExchange {
+                pairing_id: request.pairing_id,
+                exchange_code: request.exchange_code,
+                exchanged_at_utc: exchanged_at_utc.to_string(),
+            })
+            .map_err(RemoteEasyconnectExchangeDispatchError::PairingStore)?;
+        let approval = pairing.approval.ok_or_else(|| {
+            RemoteEasyconnectExchangeDispatchError::PairingStore(
+                RemoteEasyconnectPairingStoreError::PairingNotApproved {
+                    pairing_id: pairing.pairing_id.clone(),
+                },
+            )
+        })?;
+        let lifetime_seconds = resolve_remote_easyconnect_session_lifetime_seconds(
+            pairing.requested_session_lifetime_seconds,
+        )
+        .map_err(
+            |error| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                message: error.to_string(),
+            },
+        )?;
+        let renew_after_offset = remote_easyconnect_renew_after_offset_seconds(lifetime_seconds)
+            .map_err(
+                |error| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                    message: error.to_string(),
+                },
+            )?;
+        let expires_at_utc = add_seconds_to_utc_timestamp(exchanged_at_utc, lifetime_seconds)
+            .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidClock {
+                value: exchanged_at_utc.to_string(),
+            })?;
+        let renew_after_utc = add_seconds_to_utc_timestamp(exchanged_at_utc, renew_after_offset)
+            .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidClock {
+                value: exchanged_at_utc.to_string(),
+            })?;
+        let first_grant = approval.allowed_object_stores.first().ok_or_else(|| {
+            RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                message: "approved pairing did not contain object store grants".to_string(),
+            }
+        })?;
+        let credential = generate_per_store_credentials(
+            &[StoreCredentialRequest {
+                store_id: StoreId::new(&first_grant.object_store).map_err(|error| {
+                    RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                        message: error.to_string(),
+                    }
+                })?,
+                bucket_name: first_grant.bucket.clone(),
+            }],
+            &mut SystemCredentialEntropy,
+        )
+        .map_err(RemoteEasyconnectExchangeDispatchError::ObjectService)?
+        .into_iter()
+        .next()
+        .expect("one credential request yields one credential");
+        let credentials = session_credentials_from_store_credentials(credential);
+        let session_id = stable_easyconnect_id("session", &pairing.pairing_id, exchanged_at_utc);
+        let renewal_token = rotated_easyconnect_renewal_token(&session_id, exchanged_at_utc);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            &self.remote_easyconnect_session_store_path,
+        );
+        session_store
+            .upsert(RemoteEasyconnectPairedSessionRecord {
+                session_id: session_id.clone(),
+                approved_actor: approval.approved_actor,
+                auth_provider: approval.auth_provider,
+                issued_at_utc: exchanged_at_utc.to_string(),
+                expires_at_utc: expires_at_utc.clone(),
+                renew_after_utc: renew_after_utc.clone(),
+                renewal_token: renewal_token.clone(),
+                credentials: credentials.clone(),
+                object_stores: approval.allowed_object_stores.clone(),
+                revoked_at_utc: None,
+            })
+            .map_err(RemoteEasyconnectExchangeDispatchError::SessionStore)?;
+
+        Ok(RemoteEasyconnectExchangePairingResponse {
+            appliance_id: "standalone-dasobjectstore".to_string(),
+            appliance_base_url: "/products/dasobjectstore/api".to_string(),
+            session: RemoteEasyconnectSession {
+                session_id: session_id.clone(),
+                issued_at_utc: exchanged_at_utc.to_string(),
+                expires_at_utc,
+                credentials,
+                renewal: RemoteEasyconnectSessionRenewal {
+                    renew_url: format!("/api/v1/remote/easyconnect/sessions/{session_id}/renew"),
+                    renew_after_utc,
+                    renewal_token,
+                },
+            },
+            object_stores: approval.allowed_object_stores,
+        })
     }
 
     fn authorize_ingest_files(
@@ -652,6 +1014,49 @@ impl Display for RemoteEasyconnectRenewalDispatchError {
 }
 
 impl std::error::Error for RemoteEasyconnectRenewalDispatchError {}
+
+#[derive(Debug)]
+enum RemoteEasyconnectExchangeDispatchError {
+    InvalidRequest { message: String },
+    InvalidClock { value: String },
+    PairingStore(RemoteEasyconnectPairingStoreError),
+    SessionStore(RemoteEasyconnectPairedSessionStoreError),
+    ObjectService(ObjectServiceError),
+}
+
+impl Display for RemoteEasyconnectExchangeDispatchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest { message } => formatter.write_str(message),
+            Self::InvalidClock { value } => write!(
+                formatter,
+                "daemon clock value {value} is not a supported UTC timestamp"
+            ),
+            Self::PairingStore(error) => Display::fmt(error, formatter),
+            Self::SessionStore(error) => Display::fmt(error, formatter),
+            Self::ObjectService(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for RemoteEasyconnectExchangeDispatchError {}
+
+fn stable_easyconnect_id(prefix: &str, subject: &str, timestamp: &str) -> String {
+    let mut suffix = String::new();
+    for character in subject.chars().chain(timestamp.chars()) {
+        if character.is_ascii_alphanumeric() {
+            suffix.push(character.to_ascii_lowercase());
+        } else if !suffix.ends_with('-') {
+            suffix.push('-');
+        }
+    }
+    let suffix = suffix.trim_matches('-');
+    if suffix.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}-{suffix}")
+    }
+}
 
 fn rotated_easyconnect_renewal_token(session_id: &str, renewed_at_utc: &str) -> String {
     let suffix = renewed_at_utc
@@ -1360,7 +1765,7 @@ impl DaemonClock for SystemDaemonClock {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs())
             .unwrap_or_default();
-        format!("unix-{seconds}")
+        format_utc_timestamp(seconds as i64)
     }
 }
 
@@ -1486,20 +1891,22 @@ mod tests {
         ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
         ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
-        admin_job_registry_path, remote_easyconnect_session_store_path,
-        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
+        admin_job_registry_path, remote_easyconnect_pairing_store_path,
+        remote_easyconnect_session_store_path, DaemonIngestFilesRuntimeError,
+        DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
         FileBackedRemoteEasyconnectPairedSessionStore, LocalAdminRuntimeError,
         LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
         RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
@@ -2805,20 +3212,134 @@ mod tests {
     }
 
     #[test]
+    fn daemon_easyconnect_pairing_exchange_persists_session() {
+        let root = temp_root("remote-easyconnect-pairing-exchange");
+        let pairing_store_path = remote_easyconnect_pairing_store_path(&root);
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_remote_easyconnect_pairing_store_path(&pairing_store_path)
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let create = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectCreatePairing(
+                RemoteEasyconnectCreatePairingRequest {
+                    client_name: "macbook-pro".to_string(),
+                    callback_url: "http://127.0.0.1:49321/callback".to_string(),
+                    requested_object_store: Some("zymo_fecal_2025.05".to_string()),
+                    requested_session_lifetime_seconds: Some(28_800),
+                    client_request_id: Some("request-1".to_string()),
+                },
+            ))
+            .expect("create handled");
+        let DaemonApiResponse::RemoteEasyconnectCreatePairing(create) = create else {
+            panic!("expected create pairing response");
+        };
+        let grant = paired_session("session-template")
+            .object_stores
+            .into_iter()
+            .next()
+            .expect("session fixture grant");
+
+        let approve = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectApprovePairing(
+                RemoteEasyconnectApprovePairingRequest {
+                    pairing_id: create.pairing_id.clone(),
+                    approved_actor: "stephen".to_string(),
+                    auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+                    allowed_object_stores: vec![grant],
+                    approval_expires_at_utc: "2026-07-09T16:30:00Z".to_string(),
+                },
+            ))
+            .expect("approve handled");
+        let DaemonApiResponse::RemoteEasyconnectApprovePairing(approve) = approve else {
+            panic!("expected approve pairing response");
+        };
+
+        let exchange = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectExchangePairing(
+                RemoteEasyconnectExchangePairingRequest {
+                    pairing_id: create.pairing_id,
+                    exchange_code: approve.exchange_code,
+                    client_request_id: Some("request-2".to_string()),
+                },
+            ))
+            .expect("exchange handled");
+        let DaemonApiResponse::RemoteEasyconnectExchangePairing(exchange) = exchange else {
+            panic!("expected exchange pairing response");
+        };
+
+        assert_eq!(exchange.session.issued_at_utc, "2026-07-09T16:20:00Z");
+        assert_eq!(exchange.session.expires_at_utc, "2026-07-10T00:20:00Z");
+        assert!(exchange
+            .session
+            .credentials
+            .access_key_id
+            .starts_with("DOS"));
+        assert!(!exchange.session.credentials.secret_access_key.is_empty());
+        assert_eq!(exchange.object_stores[0].object_store, "zymo_fecal_2025.05");
+        let stored = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path)
+            .get(&exchange.session.session_id)
+            .expect("session store read")
+            .expect("session persisted");
+        assert_eq!(stored.approved_actor, "stephen");
+        assert_eq!(stored.object_stores.len(), 1);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_store_inventory_can_filter_by_easyconnect_session_write_grants() {
+        let root = temp_root("remote-easyconnect-inventory");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo_fecal_2025.05", Some("mnemosyne"));
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path);
+        session_store
+            .upsert(paired_session("session-1"))
+            .expect("session stored");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path)
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
+                include_policy: true,
+                remote_easyconnect_session_id: Some("session-1".to_string()),
+                remote_upload_writable_only: true,
+            }))
+            .expect("request handled");
+
+        let DaemonApiResponse::StoreInventory(response) = response else {
+            panic!("expected store inventory response");
+        };
+        assert_eq!(response.stores.len(), 1);
+        assert_eq!(response.stores[0].store_id.as_str(), "zymo_fecal_2025.05");
+        assert!(response.stores[0].writable);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn reports_unwired_commands_as_api_errors() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
 
         let response = handler
-            .handle(DaemonApiRequest::StoreInventory(
-                StoreInventoryRequest::default(),
+            .handle(DaemonApiRequest::RemoteEasyconnectDiscovery(
+                Default::default(),
             ))
             .expect("request handled");
 
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error) if error.code == "not_implemented"
-                && error.message.contains("store_inventory")
+                && error.message.contains("remote_easyconnect_discovery")
         ));
     }
 

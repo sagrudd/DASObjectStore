@@ -34,6 +34,9 @@ agreement before landing.
 - Wire daemon remote easyconnect session revocation and renewal commands to the
   persisted paired-session store, including expiry extension and rotated
   renewal-token responses.
+- Add daemon-backed remote easyconnect pairing create, approve, and exchange
+  handling that persists paired sessions and filters ObjectStore inventory
+  through persisted remote-upload session grants.
 - Add remote-client easyconnect regression coverage for successful, denied, and
   expired pairing callbacks, paired upload sessions, renewal metadata states,
   and local rejection of expired sessions before stored credentials are used.
