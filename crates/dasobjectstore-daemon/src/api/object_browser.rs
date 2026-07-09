@@ -3,6 +3,7 @@ use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::ObjectState;
 use dasobjectstore_core::object_type::ObjectType;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 pub const OBJECT_BROWSER_MAX_PAGE_LIMIT: u16 = 500;
 
@@ -14,6 +15,35 @@ pub struct ObjectBrowserRequest {
     pub sort: ObjectBrowserSort,
     pub page: ObjectBrowserPageRequest,
     pub include_placement: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectDownloadRequest {
+    pub endpoint: StoreId,
+    pub object_id: ObjectId,
+}
+
+impl ObjectDownloadRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.endpoint.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "endpoint" });
+        }
+        if self.object_id.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "object_id" });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectDownloadResponse {
+    pub endpoint: StoreId,
+    pub store_id: StoreId,
+    pub object_id: ObjectId,
+    pub file_name: String,
+    pub source_disk_id: DiskId,
+    pub source_path: PathBuf,
+    pub size_bytes: u64,
 }
 
 impl ObjectBrowserRequest {
@@ -161,8 +191,8 @@ mod tests {
         ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserFileNode,
         ObjectBrowserFolderNode, ObjectBrowserPageRequest, ObjectBrowserPlacement,
         ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
-        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
-        OBJECT_BROWSER_MAX_PAGE_LIMIT,
+        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
+        ObjectDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
     };
     use crate::api::DaemonRequestValidationError;
     use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -189,6 +219,34 @@ mod tests {
         assert_eq!(encoded["endpoint"], "ena");
         assert_eq!(encoded["sort"], "modified_desc");
         assert_eq!(encoded["page"]["limit"], 50);
+    }
+
+    #[test]
+    fn object_download_request_and_response_serialize_stably() {
+        let request = ObjectDownloadRequest {
+            endpoint: StoreId::new("ena").expect("store id"),
+            object_id: ObjectId::new("ENA/Xenognostikon/metadata.tsv").expect("object id"),
+        };
+
+        request.validate().expect("request is valid");
+        let encoded = serde_json::to_value(&request).expect("request serializes");
+
+        assert_eq!(encoded["endpoint"], "ena");
+        assert_eq!(encoded["object_id"], "ENA/Xenognostikon/metadata.tsv");
+
+        let response = ObjectDownloadResponse {
+            endpoint: StoreId::new("ena").expect("store id"),
+            store_id: StoreId::new("ena").expect("store id"),
+            object_id: request.object_id,
+            file_name: "metadata.tsv".to_string(),
+            source_disk_id: DiskId::new("disk-a").expect("disk id"),
+            source_path: "/srv/dasobjectstore/hdd/disk-a/objects/aa/object/payload".into(),
+            size_bytes: 512,
+        };
+        let encoded = serde_json::to_value(response).expect("response serializes");
+
+        assert_eq!(encoded["file_name"], "metadata.tsv");
+        assert_eq!(encoded["size_bytes"], 512);
     }
 
     #[test]

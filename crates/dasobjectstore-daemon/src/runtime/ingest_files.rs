@@ -1173,7 +1173,7 @@ pub(crate) fn default_ssd_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SSD_ROOT))
 }
 
-fn default_hdd_root() -> PathBuf {
+pub(crate) fn default_hdd_root() -> PathBuf {
     std::env::var_os(HDD_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_HDD_ROOT))
@@ -1212,7 +1212,7 @@ fn read_device_marker(path: &Path) -> Result<String, io::Error> {
     fs::read_to_string(path.join(".dasobjectstore").join("device.env"))
 }
 
-fn discover_managed_hdd_roots(
+pub(crate) fn discover_managed_hdd_roots(
     hdd_root: &Path,
 ) -> Result<Vec<DiskCopyRoot>, DaemonIngestFilesRuntimeError> {
     let mut roots = Vec::new();

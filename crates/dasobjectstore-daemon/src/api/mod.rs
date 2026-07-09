@@ -59,7 +59,8 @@ pub use object_browser::{
     ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserFileNode, ObjectBrowserFolderNode,
     ObjectBrowserPageRequest, ObjectBrowserPlacement, ObjectBrowserPlacementLocation,
     ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-    ObjectBrowserResponse, ObjectBrowserSort, OBJECT_BROWSER_MAX_PAGE_LIMIT,
+    ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
+    OBJECT_BROWSER_MAX_PAGE_LIMIT,
 };
 pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
@@ -91,6 +92,7 @@ pub enum DaemonApiRequest {
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     ObjectBrowser(ObjectBrowserRequest),
+    ObjectDownload(ObjectDownloadRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
@@ -111,6 +113,7 @@ impl DaemonApiRequest {
                 .validate()
                 .map_err(create_object_store_validation_error),
             Self::ObjectBrowser(request) => request.validate(),
+            Self::ObjectDownload(request) => request.validate(),
             Self::UpsertEndpointInventory(request) => request
                 .validate()
                 .map_err(endpoint_inventory_validation_error),
@@ -147,6 +150,7 @@ pub enum DaemonApiResponse {
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     ObjectBrowser(ObjectBrowserResponse),
+    ObjectDownload(ObjectDownloadResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
@@ -311,13 +315,13 @@ mod tests {
         DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonJobCancelRequest,
         DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest, DaemonServiceLifecycleRequest,
         DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceStatusRequest,
-        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort,
+        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
-    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_object_service::ObjectServiceProviderId;
 
     #[test]
@@ -496,6 +500,20 @@ mod tests {
         assert_eq!(encoded["command"], "object_browser");
         assert_eq!(encoded["payload"]["prefix"], "ENA/Xenognostikon");
         assert_eq!(encoded["payload"]["page"]["limit"], 100);
+    }
+
+    #[test]
+    fn object_download_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::ObjectDownload(ObjectDownloadRequest {
+            endpoint: StoreId::new("ena").expect("store id"),
+            object_id: ObjectId::new("ena/raw/metadata.tsv").expect("object id"),
+        });
+
+        request.validate().expect("request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "object_download");
+        assert_eq!(encoded["payload"]["object_id"], "ena/raw/metadata.tsv");
     }
 
     #[test]

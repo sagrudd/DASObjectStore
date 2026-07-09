@@ -6,6 +6,7 @@ mod endpoint_registry;
 mod ingest_files;
 mod local_admin;
 mod object_browser;
+mod object_download;
 mod performance_policy;
 mod service;
 
@@ -25,7 +26,7 @@ pub use endpoint_registry::{
     EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,
     ENDPOINT_REGISTRY_SCHEMA,
 };
-pub(crate) use ingest_files::default_ssd_root;
+pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,
     DaemonFileIngestSummary, DaemonIngestFilesRuntimeError,
@@ -40,6 +41,7 @@ pub use object_browser::{
     query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,
     ObjectBrowserMetadataReadError, ObjectBrowserQueryError,
 };
+pub(crate) use object_download::resolve_object_download_with_hdd_root;
 pub use performance_policy::{
     authoritative_performance_recommendation_path, read_authoritative_ingest_policy,
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,

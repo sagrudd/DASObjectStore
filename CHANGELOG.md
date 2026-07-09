@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.54.18 - 2026-07-09
 
+- Add daemon-authorized individual ObjectStore file download resolution and a
+  standalone Web API route that streams verified settled HDD copies with safe
+  download headers.
 - Compact the visible DASObjectStore performance report metadata and early
   recommendation tables so long identifiers, hashes, paths, and quantitative
   values do not overflow formal PDF table bounds.

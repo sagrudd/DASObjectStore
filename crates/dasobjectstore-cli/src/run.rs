@@ -5592,6 +5592,14 @@ fn humanize_report_token(value: &str) -> String {
         .split(['_', '-'])
         .filter(|part| !part.is_empty())
         .map(|part| {
+            match part.to_ascii_lowercase().as_str() {
+                "das" => return "DAS".to_string(),
+                "hdd" => return "HDD".to_string(),
+                "id" => return "ID".to_string(),
+                "io" => return "IO".to_string(),
+                "ssd" => return "SSD".to_string(),
+                _ => {}
+            }
             let mut chars = part.chars();
             match chars.next() {
                 Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
@@ -5600,6 +5608,17 @@ fn humanize_report_token(value: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn friendly_file_order(value: &str) -> String {
+    match value {
+        "fifo" => "FIFO".to_string(),
+        "size_asc" => "Size ascending".to_string(),
+        "size_desc" => "Size descending".to_string(),
+        "time_asc" => "Oldest first".to_string(),
+        "time_desc" => "Newest first".to_string(),
+        other => humanize_report_token(other),
+    }
 }
 
 fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &Path) -> String {
@@ -5639,7 +5658,7 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
     output.push_str(&format!(
         "| File order | `{}` |\n",
         json_string(artifact, &["recommendation", "file_order"])
-            .map(|value| value.replace('_', " "))
+            .map(|value| friendly_file_order(&value))
             .unwrap_or_else(|| "not recorded".to_string())
     ));
     output.push_str(&format!(
@@ -5664,6 +5683,7 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
         .unwrap_or_else(|| "not recorded".to_string())
     ));
     if let Some(rows) = json_array(artifact, &["recommendation", "rationale"]) {
+        output.push_str("### Rationale\n\n");
         for row in rows.iter().filter_map(Value::as_str) {
             output.push_str(&format!("- {row}\n"));
         }
@@ -6796,7 +6816,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
     output.push_str(&format!(
         "- Recommended strategy: {} with `{}` order at {} HDD worker(s), observed aggregate {}/s\n",
         humanize_report_token(report.recommendation.strategy.as_str()),
-        report.recommendation.file_order.as_str().replace('_', " "),
+        friendly_file_order(report.recommendation.file_order.as_str()),
         report.recommendation.hdd_concurrency,
         format_bytes_compact(report.recommendation.aggregate_bytes_per_second)
     ));

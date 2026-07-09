@@ -7,7 +7,7 @@ use crate::api::{
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectBrowserRequest,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectDownloadRequest,
     PrepareEnclosureRequest, PrepareEnclosureResponse, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
@@ -16,13 +16,13 @@ use crate::auth::{
     DaemonStoreAccessPolicy,
 };
 use crate::runtime::{
-    default_endpoint_registry_path, default_ssd_root, provision_garage_store_registry,
-    query_object_browser_metadata, read_object_browser_metadata,
-    submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
-    AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    default_endpoint_registry_path, default_hdd_root, default_ssd_root,
+    provision_garage_store_registry, query_object_browser_metadata, read_object_browser_metadata,
+    resolve_object_download_with_hdd_root, submit_ingest_files_to_local_store_with_progress,
+    upsert_endpoint_inventory_record, AdminJobRegistry, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, GarageServiceController, LocalAdminRuntimeError,
+    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
+    ObjectBrowserQueryError, ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
@@ -42,6 +42,7 @@ pub struct DaemonRequestHandler<S, C> {
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
+    hdd_root_path: PathBuf,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -57,6 +58,7 @@ where
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
+            hdd_root_path: default_hdd_root(),
         }
     }
 
@@ -72,6 +74,7 @@ where
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
+            hdd_root_path: default_hdd_root(),
         }
     }
 
@@ -87,6 +90,11 @@ where
 
     pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
         self.live_sqlite_path = live_sqlite_path.into();
+        self
+    }
+
+    pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
+        self.hdd_root_path = hdd_root_path.into();
         self
     }
 
@@ -226,7 +234,7 @@ where
                 }
             }
             DaemonApiRequest::ObjectBrowser(request) => {
-                let store_id = match self.authorize_object_browser(actor, &request) {
+                let store_id = match self.authorize_endpoint_read(actor, &request.endpoint) {
                     Ok(store_id) => store_id,
                     Err(error) => {
                         return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -247,6 +255,29 @@ where
                 query_object_browser_metadata(&request, &entries)
                     .map(DaemonApiResponse::ObjectBrowser)
                     .map_err(Into::into)
+            }
+            DaemonApiRequest::ObjectDownload(request) => {
+                let store_id = match self.authorize_object_download(actor, &request) {
+                    Ok(store_id) => store_id,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            error.code(),
+                            error.to_string(),
+                        )));
+                    }
+                };
+                match resolve_object_download_with_hdd_root(
+                    &self.live_sqlite_path,
+                    &self.hdd_root_path,
+                    &store_id,
+                    &request,
+                ) {
+                    Ok(response) => Ok(DaemonApiResponse::ObjectDownload(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    ))),
+                }
             }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
@@ -289,14 +320,14 @@ where
         Ok(())
     }
 
-    fn authorize_object_browser(
+    fn authorize_endpoint_read(
         &self,
         actor: Option<&DaemonLocalActor>,
-        request: &ObjectBrowserRequest,
+        endpoint: &StoreId,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
         let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
         let store_id = resolve_authorization_store_id(
-            &request.endpoint,
+            endpoint,
             &self.store_registry_path,
             &self.subobject_registry_path,
         )
@@ -320,6 +351,14 @@ where
         policy = policy.with_public_read(store.public);
         authorize_store_read(actor, &policy)?;
         Ok(store_id)
+    }
+
+    fn authorize_object_download(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        request: &ObjectDownloadRequest,
+    ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        self.authorize_endpoint_read(actor, &request.endpoint)
     }
 
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
@@ -1039,6 +1078,7 @@ impl DaemonApiRequest {
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::ObjectBrowser(_) => "object_browser",
+            Self::ObjectDownload(_) => "object_download",
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
@@ -1064,18 +1104,19 @@ mod tests {
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
         ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-        ObjectBrowserSort, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
-        UpsertEndpointInventoryResponse, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        ObjectBrowserSort, ObjectDownloadRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
         FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
     };
-    use dasobjectstore_core::ids::{IngestJobId, PoolId, StoreId};
+    use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
@@ -1085,7 +1126,7 @@ mod tests {
     use rusqlite::{params, Connection};
     use std::cell::RefCell;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     #[test]
@@ -1910,6 +1951,54 @@ mod tests {
     }
 
     #[test]
+    fn daemon_object_download_allows_reader_group_without_writer_membership() {
+        let root = temp_root("download-reader-allowed");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "ena",
+            Some("readers"),
+            Some("mnemosyne"),
+            false,
+        );
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let hdd_root = root.join("hdd");
+        let disk_root = hdd_root.join("qnap-1057");
+        write_hdd_marker(&disk_root, "qnap-1057");
+        let source_path = disk_root.join("ena/raw/sample.fastq.gz");
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source parent");
+        fs::write(&source_path, b"download payload").expect("write source");
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite)
+                .with_hdd_root_path(hdd_root);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("reader")
+            .with_groups(["readers"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectDownload(ObjectDownloadRequest {
+                    endpoint: StoreId::new("ena").expect("store id"),
+                    object_id: ObjectId::new("ena/raw/sample.fastq.gz").expect("object id"),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        let DaemonApiResponse::ObjectDownload(response) = response else {
+            panic!("expected object download response");
+        };
+        assert_eq!(response.file_name, "sample.fastq.gz");
+        assert_eq!(response.source_path, source_path);
+        assert_eq!(response.size_bytes, b"download payload".len() as u64);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn daemon_object_browser_allows_public_store_for_authenticated_actor() {
         let root = temp_root("browser-public-allowed");
         let (store_registry, subobject_registry) =
@@ -2242,6 +2331,16 @@ mod tests {
                 ],
             )
             .expect("placement inserts");
+    }
+
+    fn write_hdd_marker(root: &Path, disk_id: &str) {
+        let marker_dir = root.join(".dasobjectstore");
+        fs::create_dir_all(&marker_dir).expect("marker dir");
+        fs::write(
+            marker_dir.join("device.env"),
+            format!("role=hdd:{disk_id}\n"),
+        )
+        .expect("marker");
     }
 
     #[derive(Default)]

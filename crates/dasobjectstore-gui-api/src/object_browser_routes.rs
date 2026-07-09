@@ -1,17 +1,24 @@
 use crate::{AuthRouteError, AuthenticatedGuiActor, LocalAuthStore};
 use axum::{
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{
+        header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
+    response::Response,
     routing::get,
     Extension, Json, Router,
 };
-use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::ids::{ObjectId, StoreId};
 use dasobjectstore_daemon::{
     DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserPageRequest,
-    ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, UnixSocketDaemonTransport,
+    ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
+    ObjectDownloadResponse, UnixSocketDaemonTransport,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio_util::io::ReaderStream;
 
 pub fn standalone_object_browser_router(auth_store: LocalAuthStore) -> Router {
     standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState::system(
@@ -26,6 +33,10 @@ pub(crate) fn standalone_object_browser_router_with_state(
         .route(
             "/api/v1/object-stores/{endpoint}/browser",
             get(object_store_browser),
+        )
+        .route(
+            "/api/v1/object-stores/{endpoint}/objects/download/{*object_id}",
+            get(object_store_object_download),
         )
         .layer(Extension(state.auth_store.clone()))
         .with_state(state)
@@ -53,6 +64,11 @@ pub(crate) trait StandaloneObjectBrowserClient: Send + Sync {
         &self,
         request: ObjectBrowserRequest,
     ) -> Result<ObjectBrowserResponse, StandaloneObjectBrowserClientError>;
+
+    fn object_download(
+        &self,
+        request: ObjectDownloadRequest,
+    ) -> Result<ObjectDownloadResponse, StandaloneObjectBrowserClientError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,6 +110,15 @@ impl StandaloneObjectBrowserClient for DaemonStandaloneObjectBrowserClient {
     ) -> Result<ObjectBrowserResponse, StandaloneObjectBrowserClientError> {
         self.client
             .object_browser(request)
+            .map_err(object_browser_client_error)
+    }
+
+    fn object_download(
+        &self,
+        request: ObjectDownloadRequest,
+    ) -> Result<ObjectDownloadResponse, StandaloneObjectBrowserClientError> {
+        self.client
+            .object_download(request)
             .map_err(object_browser_client_error)
     }
 }
@@ -138,6 +163,47 @@ async fn object_store_browser(
         .map_err(|err| route_error(err.status, err.code, err.message))
 }
 
+async fn object_store_object_download(
+    State(state): State<StandaloneObjectBrowserRouteState>,
+    _actor: AuthenticatedGuiActor,
+    Path((endpoint, object_id)): Path<(String, String)>,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let request = object_download_request(endpoint, object_id)?;
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_download_request",
+            err.to_string(),
+        )
+    })?;
+    let download = state
+        .object_browser_client
+        .as_ref()
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::NOT_IMPLEMENTED,
+                "daemon_object_download_unavailable",
+                "daemon ObjectStore download contract is not available",
+            )
+        })?
+        .object_download(request)
+        .map_err(|err| route_error(err.status, err.code, err.message))?;
+
+    let file = tokio::fs::File::open(&download.source_path)
+        .await
+        .map_err(|err| {
+            route_error(
+                StatusCode::CONFLICT,
+                "object_download_unavailable",
+                format!("object download source could not be opened: {err}"),
+            )
+        })?;
+    let body = Body::from_stream(ReaderStream::new(file));
+    let mut response = Response::new(body);
+    *response.headers_mut() = object_download_headers(&download)?;
+    Ok(response)
+}
+
 fn object_browser_request(
     endpoint: String,
     query: ObjectBrowserQuery,
@@ -162,6 +228,83 @@ fn object_browser_request(
         },
         include_placement: query.include_placement.unwrap_or(false),
     })
+}
+
+fn object_download_request(
+    endpoint: String,
+    object_id: String,
+) -> Result<ObjectDownloadRequest, (StatusCode, Json<AuthRouteError>)> {
+    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_download_request",
+            err.to_string(),
+        )
+    })?;
+    let object_id = ObjectId::new(required_field(
+        "object_id",
+        object_id.trim_start_matches('/').to_string(),
+    )?)
+    .map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_download_request",
+            err.to_string(),
+        )
+    })?;
+    Ok(ObjectDownloadRequest {
+        endpoint,
+        object_id,
+    })
+}
+
+fn object_download_headers(
+    download: &ObjectDownloadResponse,
+) -> Result<HeaderMap, (StatusCode, Json<AuthRouteError>)> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&download.size_bytes.to_string()).map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_object_download_response",
+                err.to_string(),
+            )
+        })?,
+    );
+    headers.insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&content_disposition(&download.file_name)).map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_object_download_response",
+                err.to_string(),
+            )
+        })?,
+    );
+    Ok(headers)
+}
+
+fn content_disposition(file_name: &str) -> String {
+    let escaped = file_name
+        .chars()
+        .filter_map(|character| match character {
+            '"' | '\\' | '/' | '\r' | '\n' => Some('_'),
+            character if character.is_control() => None,
+            character => Some(character),
+        })
+        .collect::<String>();
+    let file_name = if escaped.trim().is_empty() {
+        "object"
+    } else {
+        escaped.trim()
+    };
+    format!("attachment; filename=\"{file_name}\"")
 }
 
 fn parse_object_browser_sort(
@@ -204,7 +347,7 @@ fn object_browser_client_error(err: DaemonClientError) -> StandaloneObjectBrowse
     match err {
         DaemonClientError::RequestValidation(_) => StandaloneObjectBrowserClientError {
             status: StatusCode::BAD_REQUEST,
-            code: "invalid_object_browser_request".to_string(),
+            code: "invalid_daemon_object_request".to_string(),
             message,
         },
         DaemonClientError::Api(api_error)
@@ -219,11 +362,27 @@ fn object_browser_client_error(err: DaemonClientError) -> StandaloneObjectBrowse
                 message,
             }
         }
+        DaemonClientError::Api(api_error) => {
+            let status = daemon_error_status(&api_error.code);
+            StandaloneObjectBrowserClientError {
+                status,
+                code: api_error.code,
+                message,
+            }
+        }
         _ => StandaloneObjectBrowserClientError {
             status: StatusCode::BAD_GATEWAY,
-            code: "daemon_object_browser_failed".to_string(),
+            code: "daemon_object_request_failed".to_string(),
             message,
         },
+    }
+}
+
+fn daemon_error_status(code: &str) -> StatusCode {
+    match code {
+        "object_download_not_found" => StatusCode::NOT_FOUND,
+        "object_download_unavailable" => StatusCode::CONFLICT,
+        _ => StatusCode::BAD_GATEWAY,
     }
 }
 
@@ -255,7 +414,8 @@ mod tests {
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_daemon::{
         ObjectBrowserFileNode, ObjectBrowserPageRequest, ObjectBrowserReadinessState,
-        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
+        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
+        ObjectDownloadResponse,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -393,6 +553,92 @@ mod tests {
         cleanup(&root);
     }
 
+    #[tokio::test]
+    async fn object_download_route_streams_authorized_daemon_source() {
+        let root = temp_root("object-download");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let source_path = root.join("objects").join("payload");
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source parent");
+        fs::write(&source_path, b"download payload").expect("write source");
+        let client = recording_browser_client();
+        client.set_download(ObjectDownloadResponse {
+            endpoint: StoreId::new("ena").expect("store id"),
+            store_id: StoreId::new("ena").expect("store id"),
+            object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
+            file_name: "metadata.tsv".to_string(),
+            source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id"),
+            source_path,
+            size_bytes: b"download payload".len() as u64,
+        });
+        let app = test_router(auth_store, client.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/metadata.tsv")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()["content-disposition"],
+            "attachment; filename=\"metadata.tsv\""
+        );
+        assert_eq!(response.headers()["content-length"], "16");
+        assert_eq!(
+            client.download_requests(),
+            vec![ObjectDownloadRequest {
+                endpoint: StoreId::new("ena").expect("store id"),
+                object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
+            }]
+        );
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        assert_eq!(&body[..], b"download payload");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn object_download_route_surfaces_daemon_permission_denial() {
+        let root = temp_root("object-download-denied");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = Arc::new(RecordingObjectBrowserClient::with_error(
+            StandaloneObjectBrowserClientError::forbidden(
+                "current user cannot read ObjectStore ena",
+            ),
+        ));
+        let app = test_router(auth_store, client);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/metadata.tsv")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "daemon_object_browser_denied");
+
+        cleanup(&root);
+    }
+
     fn test_router(
         auth_store: LocalAuthStore,
         client: Arc<RecordingObjectBrowserClient>,
@@ -422,6 +668,8 @@ mod tests {
     #[derive(Default)]
     struct RecordingObjectBrowserClient {
         requests: Mutex<Vec<ObjectBrowserRequest>>,
+        download_requests: Mutex<Vec<ObjectDownloadRequest>>,
+        download: Mutex<Option<ObjectDownloadResponse>>,
         error: Option<StandaloneObjectBrowserClientError>,
     }
 
@@ -429,12 +677,25 @@ mod tests {
         fn with_error(error: StandaloneObjectBrowserClientError) -> Self {
             Self {
                 requests: Mutex::new(Vec::new()),
+                download_requests: Mutex::new(Vec::new()),
+                download: Mutex::new(None),
                 error: Some(error),
             }
         }
 
         fn requests(&self) -> Vec<ObjectBrowserRequest> {
             self.requests.lock().expect("requests lock").clone()
+        }
+
+        fn download_requests(&self) -> Vec<ObjectDownloadRequest> {
+            self.download_requests
+                .lock()
+                .expect("download requests lock")
+                .clone()
+        }
+
+        fn set_download(&self, download: ObjectDownloadResponse) {
+            *self.download.lock().expect("download lock") = Some(download);
         }
     }
 
@@ -471,6 +732,28 @@ mod tests {
                 next_cursor: None,
                 total_entries: Some(1),
             })
+        }
+
+        fn object_download(
+            &self,
+            request: ObjectDownloadRequest,
+        ) -> Result<ObjectDownloadResponse, StandaloneObjectBrowserClientError> {
+            self.download_requests
+                .lock()
+                .expect("download requests lock")
+                .push(request);
+            if let Some(error) = &self.error {
+                return Err(error.clone());
+            }
+            self.download
+                .lock()
+                .expect("download lock")
+                .clone()
+                .ok_or_else(|| StandaloneObjectBrowserClientError {
+                    status: StatusCode::NOT_FOUND,
+                    code: "object_download_not_found".to_string(),
+                    message: "test download response not configured".to_string(),
+                })
         }
     }
 

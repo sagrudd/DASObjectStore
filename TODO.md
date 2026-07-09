@@ -684,9 +684,11 @@ planning are tracked under Milestones 21 and 22.
   metadata through the daemon request handler.
 - [x] Add first-class public/read group fields to store policy/registry data
   and apply them to ObjectBrowser metadata authorization.
-- [ ] Reuse ObjectBrowser public/read/write policy for file and folder download
-  authorization when download routes are implemented.
-- [ ] Implement individual file download routes that stream from the selected
+- [x] Reuse ObjectBrowser public/read/write policy for individual file download
+  authorization.
+- [ ] Reuse ObjectBrowser public/read/write policy for folder archive download
+  authorization when folder download routes are implemented.
+- [x] Implement individual file download routes that stream from the selected
   settled copy, report content length where known, use safe content-disposition
   headers, and fail clearly for missing, unsettled, degraded, or unauthorized
   objects.
