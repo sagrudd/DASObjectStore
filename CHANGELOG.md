@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.20 - 2026-07-09
+
+- Promote performance recommendation rationale into its own report section so
+  it does not visually crowd the recommendation table in formal PDFs.
+
 ## 0.54.19 - 2026-07-09
 
 - Add explicit spacing before performance report rationale text so the
