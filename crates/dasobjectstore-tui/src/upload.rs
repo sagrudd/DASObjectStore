@@ -181,7 +181,8 @@ where
                         Constraint::Length(8),
                         Constraint::Length(3),
                         Constraint::Length(8),
-                        Constraint::Min(5),
+                        Constraint::Length(6),
+                        Constraint::Min(6),
                     ])
                     .split(frame.area());
 
@@ -240,6 +241,17 @@ where
                         .block(Block::default().borders(Borders::ALL).title("Queues"))
                         .wrap(Wrap { trim: true }),
                     chunks[3],
+                );
+
+                let landing_lines = event
+                    .as_ref()
+                    .map(active_hdd_landing_lines)
+                    .unwrap_or_else(|| vec![Line::from("Active landing: waiting for daemon")]);
+                frame.render_widget(
+                    Paragraph::new(landing_lines)
+                        .block(Block::default().borders(Borders::ALL).title("HDD Landing"))
+                        .wrap(Wrap { trim: true }),
+                    chunks[4],
                 );
             })
             .map(|_| ())
@@ -337,12 +349,60 @@ fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'sta
 }
 
 fn queue_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
-    vec![
+    let mut lines = vec![
         Line::from(queue_label(event)),
         Line::from(format!("SSD pressure: {}", ssd_pressure_label(event))),
         Line::from(format!("SSD settling: {}", ssd_settling_label(event))),
         Line::from(format!("HDD migration: {}", hdd_migration_label(event))),
-    ]
+    ];
+    if let Some(telemetry) = event.telemetry {
+        lines.push(Line::from(format!(
+            "HDD workers: active {}, idle {}",
+            telemetry.workers.hdd_write.active, telemetry.workers.hdd_write.idle
+        )));
+    }
+    lines
+}
+
+fn active_hdd_landing_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
+    if event.active_hdd_transfers.is_empty() {
+        return vec![Line::from("Active landing: idle")];
+    }
+
+    std::iter::once(Line::from("Active landing:"))
+        .chain(event.active_hdd_transfers.iter().take(8).map(|transfer| {
+            let phase = if transfer.bytes_done >= transfer.bytes_total && transfer.bytes_total > 0 {
+                format!(
+                    "settling; avg {}",
+                    format_rate_label(transfer.bytes_per_second)
+                )
+            } else if transfer.bytes_done == 0 {
+                "copying".to_string()
+            } else {
+                format_rate_label(transfer.bytes_per_second)
+            };
+            Line::from(format!(
+                "file {}/{} copy {} -> {}: {}/{} @ {} {}",
+                transfer.file_index,
+                transfer
+                    .files_total
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "?".to_string()),
+                transfer.copy_number,
+                transfer.disk_id,
+                format_size_label(transfer.bytes_done),
+                format_size_label(transfer.bytes_total),
+                phase,
+                transfer.relative_path
+            ))
+        }))
+        .chain((event.active_hdd_transfers.len() > 8).then(|| {
+            Line::from(format!(
+                "... {} more active transfer(s)",
+                event.active_hdd_transfers.len() - 8
+            ))
+        }))
+        .collect()
 }
 
 fn stage_label(stage: &DaemonIngestStage) -> String {
@@ -514,9 +574,10 @@ mod tests {
     use super::{UploadTui, UploadTuiContext};
     use dasobjectstore_core::ids::{DiskId, IngestJobId, StoreId};
     use dasobjectstore_daemon::{
-        DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestQueueDepths,
-        DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
-        DaemonIngestWorkerTelemetry, DaemonSsdPressure, SubmitIngestFilesResponse,
+        DaemonIngestHddActiveTransfer, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
+        DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry,
+        DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry, DaemonSsdPressure,
+        SubmitIngestFilesResponse,
     };
     use std::path::PathBuf;
 
@@ -562,6 +623,18 @@ mod tests {
                 },
                 ..DaemonIngestTelemetry::default()
             }),
+            active_hdd_transfers: vec![DaemonIngestHddActiveTransfer {
+                file_index: 2,
+                files_total: Some(9),
+                object_id: dasobjectstore_core::ids::ObjectId::new("zymo/read-2.pod5")
+                    .expect("object id"),
+                relative_path: "raw/read-2.pod5".to_string(),
+                disk_id: DiskId::new("qnap-1057").expect("disk id"),
+                copy_number: 1,
+                bytes_done: 512 * 1024 * 1024,
+                bytes_total: 2 * 1024 * 1024 * 1024,
+                bytes_per_second: 128 * 1024 * 1024,
+            }],
             resource_policy: None,
             message: Some("copying".to_string()),
         };
@@ -581,12 +654,17 @@ mod tests {
         assert!(queues.contains("SSD pressure: high - source ingress may pause"));
         assert!(queues.contains("SSD settling: active"));
         assert!(queues.contains("HDD migration: 512.0 MiB/2.0 GiB"));
+        assert!(queues.contains("HDD workers: active 1, idle 0"));
         assert!(speed.contains("current 180.0 MiB/s, avg 512.0 MiB/s"));
+        let landing = format!("{:?}", super::active_hdd_landing_lines(&event));
+        assert!(landing.contains(
+            "file 2/9 copy 1 -> qnap-1057: 512.0 MiB/2.0 GiB @ 128.0 MiB/s raw/read-2.pod5"
+        ));
 
         let mut tui = UploadTui::start_with_fixed_viewport(
             &mut output,
             context,
-            ratatui::layout::Rect::new(0, 0, 100, 28),
+            ratatui::layout::Rect::new(0, 0, 100, 34),
         )
         .expect("tui starts");
         tui.render_progress(event).expect("progress renders");
@@ -600,6 +678,8 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
         assert!(output.contains("DASObjectStore Upload"));
         assert!(output.contains("hdd-copy:disk-a:1"));
+        assert!(output.contains("qnap-1057"));
+        assert!(output.contains("raw/read-2.pod5"));
         assert!(output.contains("Final response: job=ingest-files-1"));
     }
 }

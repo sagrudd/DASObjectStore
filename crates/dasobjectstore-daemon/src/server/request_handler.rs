@@ -3960,6 +3960,7 @@ mod tests {
                 current_object_id: None,
                 ssd_pressure: None,
                 telemetry: None,
+                active_hdd_transfers: Vec::new(),
                 resource_policy: None,
                 message: Some("queued".to_string()),
             })?;

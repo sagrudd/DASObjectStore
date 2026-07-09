@@ -14833,6 +14833,7 @@ mod tests {
                     current_object_id: None,
                     ssd_pressure: Some(DaemonSsdPressure::AcceptingWrites),
                     telemetry: None,
+                    active_hdd_transfers: Vec::new(),
                     resource_policy: None,
                     message: None,
                 })?;
@@ -14945,6 +14946,7 @@ mod tests {
             current_object_id: None,
             ssd_pressure: Some(DaemonSsdPressure::AcceptingWrites),
             telemetry: None,
+            active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: None,
         };

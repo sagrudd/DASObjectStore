@@ -266,6 +266,8 @@ pub struct DaemonIngestProgressEvent {
     pub ssd_pressure: Option<DaemonSsdPressure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<DaemonIngestTelemetry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_hdd_transfers: Vec<DaemonIngestHddActiveTransfer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource_policy: Option<DaemonIngestResourcePolicy>,
     pub message: Option<String>,
@@ -290,6 +292,19 @@ pub enum DaemonIngestStage {
     Complete,
     Failed,
     Cancelled,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonIngestHddActiveTransfer {
+    pub file_index: u64,
+    pub files_total: Option<u64>,
+    pub object_id: ObjectId,
+    pub relative_path: String,
+    pub disk_id: DiskId,
+    pub copy_number: u8,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub bytes_per_second: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -672,6 +687,7 @@ mod tests {
             current_object_id: Some(ObjectId::new("zymo/sample.fastq.gz").expect("object id")),
             ssd_pressure: Some(DaemonSsdPressure::AcceptingWrites),
             telemetry: None,
+            active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: None,
         };

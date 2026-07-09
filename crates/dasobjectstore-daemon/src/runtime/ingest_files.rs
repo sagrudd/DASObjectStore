@@ -1,6 +1,6 @@
 use crate::api::{
-    DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestQueueDepths,
-    DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
+    DaemonIngestHddActiveTransfer, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
+    DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
     DaemonIngestWorkerTelemetry, DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
@@ -25,6 +25,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Instant;
 
 const SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
 const HDD_ROOT_ENV: &str = "DASOBJECTSTORE_HDD_ROOT";
@@ -69,6 +70,7 @@ struct FileIngestEntry {
     relative_path: PathBuf,
     object_id: ObjectId,
     size_bytes: u64,
+    file_index: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -166,6 +168,7 @@ impl LocalFileIngestExecutor {
             current_object_id: None,
             ssd_pressure: None,
             telemetry: None,
+            active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: Some(format!(
                 "planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s), landing mode {}",
@@ -194,6 +197,7 @@ impl LocalFileIngestExecutor {
                 current_object_id: None,
                 ssd_pressure: None,
                 telemetry: None,
+                active_hdd_transfers: Vec::new(),
                 resource_policy: None,
                 message: Some("dry run complete; no files imported".to_string()),
             })?;
@@ -371,6 +375,7 @@ impl LocalFileIngestExecutor {
             current_object_id: None,
             ssd_pressure: Some(state.ssd_pressure),
             telemetry: Some(state.telemetry()),
+            active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: Some("file ingest complete".to_string()),
         })?;
@@ -501,6 +506,7 @@ impl LocalFileIngestExecutor {
             current_object_id: None,
             ssd_pressure: Some(state.ssd_pressure),
             telemetry: Some(state.telemetry()),
+            active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: Some("direct-to-HDD local file ingest complete".to_string()),
         })?;
@@ -773,6 +779,20 @@ struct PipelineProgressState {
     hdd_queued: u32,
     ssd_pressure: DaemonSsdPressure,
     progress_offsets: BTreeMap<(ObjectId, String), u64>,
+    active_hdd_transfers: BTreeMap<(ObjectId, DiskId, u8), ActiveHddTransferState>,
+}
+
+#[derive(Debug)]
+struct ActiveHddTransferState {
+    file_index: u64,
+    files_total: u64,
+    object_id: ObjectId,
+    relative_path: String,
+    disk_id: DiskId,
+    copy_number: u8,
+    bytes_done: u64,
+    bytes_total: u64,
+    started_at: Instant,
 }
 
 impl PipelineProgressState {
@@ -796,6 +816,7 @@ impl PipelineProgressState {
             hdd_queued: 0,
             ssd_pressure: DaemonSsdPressure::AcceptingWrites,
             progress_offsets: BTreeMap::new(),
+            active_hdd_transfers: BTreeMap::new(),
         }
     }
 
@@ -815,7 +836,58 @@ impl PipelineProgressState {
             self.completed_source_bytes = self
                 .completed_source_bytes
                 .saturating_add(current_source.saturating_sub(previous_source));
+        } else if let ObjectPutProgressStage::HddCopy {
+            disk_id,
+            copy_number,
+        } = &progress.stage
+        {
+            if let Ok(disk_id) = DiskId::new(disk_id.clone()) {
+                let key = (progress.object_id.clone(), disk_id.clone(), *copy_number);
+                let transfer = self.active_hdd_transfers.entry(key).or_insert_with(|| {
+                    ActiveHddTransferState {
+                        file_index: entry.file_index,
+                        files_total: self.total_files,
+                        object_id: entry.object_id.clone(),
+                        relative_path: entry.relative_path.to_string_lossy().to_string(),
+                        disk_id,
+                        copy_number: *copy_number,
+                        bytes_done: 0,
+                        bytes_total: entry.size_bytes,
+                        started_at: Instant::now(),
+                    }
+                });
+                transfer.bytes_done = current.min(entry.size_bytes);
+            }
         }
+    }
+
+    fn remove_active_hdd_transfers_for_entry(&mut self, entry: &FileIngestEntry) {
+        self.active_hdd_transfers
+            .retain(|(object_id, _, _), _| object_id != &entry.object_id);
+    }
+
+    fn active_hdd_transfer_records(&self) -> Vec<DaemonIngestHddActiveTransfer> {
+        let now = Instant::now();
+        self.active_hdd_transfers
+            .values()
+            .map(|transfer| {
+                let elapsed = now
+                    .duration_since(transfer.started_at)
+                    .as_secs_f64()
+                    .max(0.001);
+                DaemonIngestHddActiveTransfer {
+                    file_index: transfer.file_index,
+                    files_total: Some(transfer.files_total),
+                    object_id: transfer.object_id.clone(),
+                    relative_path: transfer.relative_path.clone(),
+                    disk_id: transfer.disk_id.clone(),
+                    copy_number: transfer.copy_number,
+                    bytes_done: transfer.bytes_done,
+                    bytes_total: transfer.bytes_total,
+                    bytes_per_second: (transfer.bytes_done as f64 / elapsed).round() as u64,
+                }
+            })
+            .collect()
     }
 
     fn source_pending(&self) -> u32 {
@@ -1090,6 +1162,7 @@ fn wait_for_ssd_admission(
                     current_object_id: None,
                     ssd_pressure: Some(state.ssd_pressure),
                     telemetry: Some(state.telemetry()),
+                    active_hdd_transfers: state.active_hdd_transfer_records(),
                     resource_policy: None,
                     message: Some(format!(
                         "SSD pressure {:?}; pausing source ingress while HDD settlement drains",
@@ -1172,9 +1245,10 @@ fn drain_hdd_settlement_events(
                     stage_bytes_total: Some(entry.size_bytes),
                     files_done: state.completed_files,
                     files_total: Some(state.total_files),
-                    current_object_id: Some(entry.object_id),
+                    current_object_id: Some(entry.object_id.clone()),
                     ssd_pressure: Some(state.ssd_pressure),
                     telemetry: Some(state.telemetry()),
+                    active_hdd_transfers: state.active_hdd_transfer_records(),
                     resource_policy: None,
                     message: Some(format!(
                         "syncing staged SSD payload: {}",
@@ -1212,9 +1286,10 @@ fn drain_hdd_settlement_events(
                     stage_bytes_total: Some(entry.size_bytes),
                     files_done: state.completed_files,
                     files_total: Some(state.total_files),
-                    current_object_id: Some(entry.object_id),
+                    current_object_id: Some(entry.object_id.clone()),
                     ssd_pressure: Some(state.ssd_pressure),
                     telemetry: Some(state.telemetry()),
+                    active_hdd_transfers: state.active_hdd_transfer_records(),
                     resource_policy: None,
                     message: Some(format!(
                         "SSD payload synced and queued for HDD settlement: {}",
@@ -1244,6 +1319,7 @@ fn drain_hdd_settlement_events(
                     current_object_id: Some(entry.object_id),
                     ssd_pressure: Some(state.ssd_pressure),
                     telemetry: Some(state.telemetry()),
+                    active_hdd_transfers: state.active_hdd_transfer_records(),
                     resource_policy: None,
                     message: Some(format!(
                         "HDD settlement started: {}",
@@ -1267,6 +1343,7 @@ fn drain_hdd_settlement_events(
             HddSettlementEvent::Settled { entry } => {
                 state.hdd_active = state.hdd_active.saturating_sub(1);
                 state.completed_files = state.completed_files.saturating_add(1);
+                let active_hdd_transfers = state.active_hdd_transfer_records();
                 progress(DaemonIngestProgressEvent {
                     job_id: job_id.clone(),
                     endpoint: endpoint.clone(),
@@ -1283,15 +1360,17 @@ fn drain_hdd_settlement_events(
                     stage_bytes_total: Some(entry.size_bytes),
                     files_done: state.completed_files,
                     files_total: Some(state.total_files),
-                    current_object_id: Some(entry.object_id),
+                    current_object_id: Some(entry.object_id.clone()),
                     ssd_pressure: Some(state.ssd_pressure),
                     telemetry: Some(state.telemetry()),
+                    active_hdd_transfers,
                     resource_policy: None,
                     message: Some(format!(
                         "file settled: {}",
                         entry.relative_path.to_string_lossy()
                     )),
                 })?;
+                state.remove_active_hdd_transfers_for_entry(&entry);
             }
             HddSettlementEvent::Failed { error } => return Err(error.into()),
         }
@@ -1326,6 +1405,7 @@ fn direct_source_read_progress_event(
         current_object_id: Some(entry.object_id.clone()),
         ssd_pressure: Some(state.ssd_pressure),
         telemetry: Some(state.telemetry()),
+        active_hdd_transfers: state.active_hdd_transfer_records(),
         resource_policy: None,
         message: Some(format!(
             "hashing source for direct HDD ingest: {}",
@@ -1357,6 +1437,7 @@ fn object_progress_event(
         current_object_id: Some(entry.object_id.clone()),
         ssd_pressure: Some(state.ssd_pressure),
         telemetry: Some(state.telemetry()),
+        active_hdd_transfers: state.active_hdd_transfer_records(),
         resource_policy: None,
         message: Some(stage_message_for_object_progress(progress, entry)),
     }
@@ -1599,6 +1680,9 @@ fn collect_ingest_files(
     let mut files = Vec::new();
     collect_ingest_files_into(root, root, object_prefix, &mut files)?;
     files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    for (index, file) in files.iter_mut().enumerate() {
+        file.file_index = index as u64 + 1;
+    }
 
     Ok(files)
 }
@@ -1629,6 +1713,7 @@ fn collect_ingest_files_into(
                 source_path: path,
                 relative_path,
                 size_bytes: metadata.len(),
+                file_index: 0,
             });
         }
     }
@@ -2003,6 +2088,7 @@ mod tests {
             relative_path: PathBuf::from("a.fastq.gz"),
             object_id: ObjectId::new("store/a.fastq.gz").expect("object id"),
             size_bytes: 100,
+            file_index: 1,
         };
 
         state.apply_object_progress(
@@ -2034,6 +2120,15 @@ mod tests {
         assert_eq!(telemetry.workers.hdd_write.active, 1);
         assert_eq!(telemetry.workers.hdd_write.idle, 2);
         assert_eq!(telemetry.pressure.ssd, DaemonSsdPressure::High);
+        let active = state.active_hdd_transfer_records();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].file_index, 1);
+        assert_eq!(active[0].files_total, Some(10));
+        assert_eq!(active[0].disk_id.as_str(), "disk-a");
+        assert_eq!(active[0].copy_number, 1);
+        assert_eq!(active[0].bytes_done, 25);
+        assert_eq!(active[0].bytes_total, 100);
+        assert_eq!(active[0].relative_path, "a.fastq.gz");
     }
 
     #[test]

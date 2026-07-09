@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.61.2 - 2026-07-09
+
+- Add active HDD transfer telemetry to daemon ingest progress events, including
+  file index, target disk, copy number, transferred bytes, total bytes, and
+  transfer rate for each active HDD settlement worker.
+- Render an HDD Landing pane in the upload/direct-import TUI so server-local
+  direct imports expose the same per-disk active transfer visibility expected
+  from benchmark runs.
+- Show HDD worker active/idle counts in the upload TUI queue summary to make
+  ``--hdd-workers`` concurrency visible during live imports.
+
 ## 0.61.1 - 2026-07-09
 
 - Decouple Garage Docker Compose rendering from static ObjectStore bucket lists
