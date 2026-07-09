@@ -930,7 +930,7 @@ planning are tracked under Milestones 21 and 22.
 - [ ] Implement daemon-owned telemetry collection as a managed service loop
   rather than a Web/API side effect, with configurable sampling cadence and
   initial supported cadences around 6 seconds and 30 seconds.
-- [ ] Add platform collectors for CPU and memory usage on supported Linux
+- [x] Add platform collectors for CPU and memory usage on supported Linux
   appliance hosts, with unit tests using fixture `/proc` or command-output data
   rather than relying on live host state.
 - [ ] Add per-enclosure disk capacity collection for every disk physically

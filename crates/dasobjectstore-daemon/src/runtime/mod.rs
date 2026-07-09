@@ -1,6 +1,7 @@
 //! Runtime configuration for the managed daemon.
 
 mod admin_jobs;
+mod appliance_telemetry;
 mod config;
 mod endpoint_registry;
 mod ingest_files;
@@ -16,6 +17,11 @@ mod service;
 pub use admin_jobs::{
     admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,
     ADMIN_JOB_REGISTRY_DIR_NAME, ADMIN_JOB_REGISTRY_FILE_NAME, ADMIN_JOB_REGISTRY_SCHEMA,
+};
+pub use appliance_telemetry::{
+    collect_linux_cpu_telemetry, collect_linux_memory_telemetry, parse_linux_cpu_snapshot,
+    ApplianceCpuTelemetry, ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError,
+    LinuxCpuSnapshot, LinuxHostTelemetrySample, LinuxProcTelemetryCollector,
 };
 pub use config::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DEFAULT_DAEMON_CONFIG_PATH,
