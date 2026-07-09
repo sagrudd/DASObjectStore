@@ -372,6 +372,7 @@ impl RemoteUploadS3ByteTransfer for RemoteUploadAwsCliByteTransfer<'_> {
             .record_progress(RemoteUploadS3TransferProgressUpdate {
                 bytes_done: self.plan.source_bytes,
                 updated_at_utc: self.plan.progress_updated_at_utc.clone(),
+                telemetry: None,
                 message: self
                     .plan
                     .progress_message
@@ -636,6 +637,15 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
         update: RemoteUploadS3TransferProgressUpdate,
     ) -> Result<DaemonJobEvent, DaemonServiceRuntimeError> {
         let bytes_done = update.bytes_done.min(self.source_bytes);
+        let message = remote_upload_progress_message(
+            update.message.unwrap_or_else(|| {
+                format!(
+                    "remote upload S3 transfer running for {}",
+                    self.object_store
+                )
+            }),
+            update.telemetry.as_ref(),
+        );
         let job = DaemonJobSummary {
             job_id: self.job_id.clone(),
             kind: DaemonJobKind::RemoteUpload,
@@ -646,12 +656,7 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
                 work_bytes_total: self.source_bytes,
                 work_units_done: 0,
                 work_units_total: 1,
-                message: update.message.or_else(|| {
-                    Some(format!(
-                        "remote upload S3 transfer running for {}",
-                        self.object_store
-                    ))
-                }),
+                message: Some(message),
             },
             submitted_at_utc: self.submitted_at_utc.clone(),
             updated_at_utc: update.updated_at_utc,
@@ -673,7 +678,33 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
 pub struct RemoteUploadS3TransferProgressUpdate {
     pub bytes_done: u64,
     pub updated_at_utc: String,
+    pub telemetry: Option<RemoteUploadProgressTelemetry>,
     pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RemoteUploadProgressTelemetry {
+    pub source_scan_count: Option<u64>,
+    pub staged_bytes: Option<u64>,
+    pub s3_bytes_per_second: Option<u64>,
+    pub ssd_queue_depth: Option<u32>,
+    pub hdd_landing_queue_depth: Option<u32>,
+    pub active_hdd_writers: Option<u16>,
+    pub verification_state: Option<String>,
+    pub session_renewal_status: Option<String>,
+}
+
+impl RemoteUploadProgressTelemetry {
+    pub fn is_empty(&self) -> bool {
+        self.source_scan_count.is_none()
+            && self.staged_bytes.is_none()
+            && self.s3_bytes_per_second.is_none()
+            && self.ssd_queue_depth.is_none()
+            && self.hdd_landing_queue_depth.is_none()
+            && self.active_hdd_writers.is_none()
+            && self.verification_state.is_none()
+            && self.session_renewal_status.is_none()
+    }
 }
 
 impl RemoteUploadS3TransferJobSummary {
@@ -780,6 +811,45 @@ fn daemon_job_event_for_summary(job: DaemonJobSummary) -> DaemonJobEvent {
         DaemonJobState::Complete => DaemonJobEvent::Complete(job),
         DaemonJobState::Failed => DaemonJobEvent::Failed(job),
         _ => DaemonJobEvent::Progress(job),
+    }
+}
+
+fn remote_upload_progress_message(
+    base: String,
+    telemetry: Option<&RemoteUploadProgressTelemetry>,
+) -> String {
+    let Some(telemetry) = telemetry.filter(|telemetry| !telemetry.is_empty()) else {
+        return base;
+    };
+    let mut fields = Vec::new();
+    if let Some(value) = telemetry.source_scan_count {
+        fields.push(format!("source_files={value}"));
+    }
+    if let Some(value) = telemetry.staged_bytes {
+        fields.push(format!("staged_bytes={value}"));
+    }
+    if let Some(value) = telemetry.s3_bytes_per_second {
+        fields.push(format!("s3_bytes_per_second={value}"));
+    }
+    if let Some(value) = telemetry.ssd_queue_depth {
+        fields.push(format!("ssd_queue_depth={value}"));
+    }
+    if let Some(value) = telemetry.hdd_landing_queue_depth {
+        fields.push(format!("hdd_landing_queue_depth={value}"));
+    }
+    if let Some(value) = telemetry.active_hdd_writers {
+        fields.push(format!("active_hdd_writers={value}"));
+    }
+    if let Some(value) = non_blank(telemetry.verification_state.as_deref()) {
+        fields.push(format!("verification_state={value}"));
+    }
+    if let Some(value) = non_blank(telemetry.session_renewal_status.as_deref()) {
+        fields.push(format!("session_renewal_status={value}"));
+    }
+    if fields.is_empty() {
+        base
+    } else {
+        format!("{base} | {}", fields.join(" "))
     }
 }
 
@@ -1219,11 +1289,11 @@ mod tests {
         RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupRuntime,
         RemoteUploadCancellationCleanupRuntimeConfig, RemoteUploadCancellationCleanupScope,
         RemoteUploadCancellationCleanupWorker, RemoteUploadMultipartAbortConfig,
-        RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
-        RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressReporter,
-        RemoteUploadS3TransferProgressUpdate, RemoteUploadS3TransferWorker,
-        RemoteUploadS3TransferWorkerRequest,
+        RemoteUploadProgressTelemetry, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
+        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
+        RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
+        RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
         DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonJobEvent, DaemonJobKind,
@@ -1744,6 +1814,7 @@ mod tests {
                     .record_progress(RemoteUploadS3TransferProgressUpdate {
                         bytes_done: 21,
                         updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                        telemetry: None,
                         message: Some("uploaded 21 bytes".to_string()),
                     })
                     .expect("progress recorded");
@@ -1777,6 +1848,49 @@ mod tests {
         assert_eq!(status.job.state, DaemonJobState::Complete);
         assert_eq!(status.job.progress.work_bytes_done, 42);
         assert_eq!(report.runtime_after.active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_records_structured_remote_upload_telemetry_in_progress_message() {
+        let root = temp_root("remote-upload-worker-telemetry-progress");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+
+        let report = worker
+            .run_with_progress(worker_request("remote-upload-job-032"), |progress| {
+                progress
+                    .record_progress(RemoteUploadS3TransferProgressUpdate {
+                        bytes_done: 21,
+                        updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                        telemetry: Some(RemoteUploadProgressTelemetry {
+                            source_scan_count: Some(246),
+                            staged_bytes: Some(16),
+                            s3_bytes_per_second: Some(8),
+                            ssd_queue_depth: Some(3),
+                            hdd_landing_queue_depth: Some(5),
+                            active_hdd_writers: Some(7),
+                            verification_state: Some("pending".to_string()),
+                            session_renewal_status: Some("renewal_not_required".to_string()),
+                        }),
+                        message: Some("uploaded 21 bytes".to_string()),
+                    })
+                    .expect("progress recorded");
+                Ok::<(), &'static str>(())
+            })
+            .expect("worker completed");
+
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event");
+        };
+        assert_eq!(
+            progress_job.progress.message.as_deref(),
+            Some(
+                "uploaded 21 bytes | source_files=246 staged_bytes=16 s3_bytes_per_second=8 ssd_queue_depth=3 hdd_landing_queue_depth=5 active_hdd_writers=7 verification_state=pending session_renewal_status=renewal_not_required"
+            )
+        );
 
         cleanup(&root);
     }
@@ -2399,6 +2513,7 @@ mod tests {
                 .record_progress(RemoteUploadS3TransferProgressUpdate {
                     bytes_done: self.bytes_done,
                     updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                    telemetry: None,
                     message: Some(format!(
                         "typed byte transfer copied {} bytes",
                         self.bytes_done

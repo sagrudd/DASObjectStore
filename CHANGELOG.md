@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Add a typed daemon remote-upload progress telemetry payload covering source
+  scan count, staged bytes, S3 transfer rate, SSD/HDD queue depths, active HDD
+  writers, verification state, and session-renewal status.
 - Add a concrete daemon remote-upload cancellation cleanup runtime for managed
   SSD stage cleanup, local session/pairing/browser-handoff state cleanup, and
   AWS CLI multipart aborts with managed-root path containment checks.

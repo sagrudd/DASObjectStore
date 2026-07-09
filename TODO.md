@@ -848,9 +848,13 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add concrete cleanup workers for partial SSD-staged objects, failed S3
   multipart uploads, abandoned sessions, expired pairings, and interrupted
   browser handoff records.
-- [ ] Extend daemon progress/events so remote uploads show source scan count,
-  staged bytes, S3 transfer rate, SSD queue depth, HDD landing queue depth,
-  active per-HDD writers, verification state, and session-renewal status.
+- [x] Add a typed daemon remote-upload progress telemetry payload for source
+  scan count, staged bytes, S3 transfer rate, SSD queue depth, HDD landing
+  queue depth, active per-HDD writers, verification state, and session-renewal
+  status.
+- [ ] Wire remote upload source scanning, SSD staging, S3 transfer, HDD landing,
+  verification, and session-renewal producers to populate the daemon progress
+  telemetry payload.
 - [ ] Add Web progress rendering for remote uploads that remains accurate when
   the browser refreshes, disconnects, or reconnects while the paired CLI agent
   continues transfer.

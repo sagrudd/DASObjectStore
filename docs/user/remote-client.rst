@@ -357,6 +357,12 @@ CLI transfer adapter for S3-compatible object-service intake. That adapter
 runs the configured ``aws s3`` command through the daemon command-runner
 boundary, keeps redacted display arguments separate from execution arguments,
 and records completion bytes through the common remote-upload progress model.
+Progress updates now have a typed telemetry payload for source scan count,
+staged bytes, S3 transfer rate, SSD queue depth, HDD landing queue depth,
+active per-HDD writers, verification state, and session-renewal status. Until
+the source scanner, SSD stager, HDD landing, verification, and session-renewal
+workers are fully wired, those fields appear only when a producer supplies
+them.
 The runtime job executor constructs the remote-upload job and AWS CLI transfer
 from one easyconnect job request, then runs that job through the same
 admission-gated worker used by lower-level transfer adapters. The daemon API
