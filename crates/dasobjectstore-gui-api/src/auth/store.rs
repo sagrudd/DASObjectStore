@@ -12,9 +12,13 @@ use prosopikon_core::{
     SessionCheckResponse as ProsopikonSessionCheckResponse,
     SessionTokenRecord as ProsopikonSessionTokenRecord, UserSummary as ProsopikonUserSummary,
 };
+use std::ffi::OsString;
 use std::fmt::{self, Display};
 use std::io;
 use std::path::{Path, PathBuf};
+
+pub const DASOBJECTSTORE_AUTH_ROOT_ENV: &str = "DASOBJECTSTORE_AUTH_ROOT";
+pub const DEFAULT_DASOBJECTSTORE_AUTH_ROOT: &str = "/var/lib/dasobjectstore/auth";
 
 #[derive(Clone, Debug)]
 pub struct LocalAuthStore {
@@ -24,7 +28,9 @@ pub struct LocalAuthStore {
 impl LocalAuthStore {
     pub fn default_standalone() -> Self {
         Self {
-            inner: ProsopikonAuthStore::default_system(),
+            inner: ProsopikonAuthStore::new(standalone_auth_root_from_env(std::env::var_os(
+                DASOBJECTSTORE_AUTH_ROOT_ENV,
+            ))),
         }
     }
 
@@ -180,6 +186,13 @@ impl LocalAuthStore {
         self.inner
             .save_registry(&registry)
             .map_err(LocalAuthStoreError::from)
+    }
+}
+
+fn standalone_auth_root_from_env(root_env: Option<OsString>) -> PathBuf {
+    match root_env {
+        Some(root) if !root.is_empty() => PathBuf::from(root),
+        _ => PathBuf::from(DEFAULT_DASOBJECTSTORE_AUTH_ROOT),
     }
 }
 
@@ -369,6 +382,43 @@ fn logout_response_from_prosopikon(response: ProsopikonLogoutResponse) -> Logout
     LogoutResponse {
         username: response.username,
         disconnected: response.disconnected,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        standalone_auth_root_from_env, DASOBJECTSTORE_AUTH_ROOT_ENV,
+        DEFAULT_DASOBJECTSTORE_AUTH_ROOT,
+    };
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn standalone_auth_root_defaults_to_dasobjectstore_state_directory() {
+        assert_eq!(
+            standalone_auth_root_from_env(None),
+            PathBuf::from(DEFAULT_DASOBJECTSTORE_AUTH_ROOT)
+        );
+    }
+
+    #[test]
+    fn standalone_auth_root_ignores_empty_environment_value() {
+        assert_eq!(
+            standalone_auth_root_from_env(Some(OsString::new())),
+            PathBuf::from(DEFAULT_DASOBJECTSTORE_AUTH_ROOT)
+        );
+    }
+
+    #[test]
+    fn standalone_auth_root_can_be_overridden_for_non_packaged_runs() {
+        let override_root = PathBuf::from("/tmp/dasobjectstore-auth-test");
+
+        assert_eq!(
+            standalone_auth_root_from_env(Some(override_root.clone().into_os_string())),
+            override_root
+        );
+        assert_eq!(DASOBJECTSTORE_AUTH_ROOT_ENV, "DASOBJECTSTORE_AUTH_ROOT");
     }
 }
 

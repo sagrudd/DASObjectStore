@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.5 - 2026-07-09
+
+- Fix packaged standalone Web login by storing the Prosopikon-backed
+  DASObjectStore local auth registry under the writable appliance state
+  directory, ``/var/lib/dasobjectstore/auth``, instead of Prosopikon's
+  product-level default root.
+
 ## 0.60.4 - 2026-07-09
 
 - Add a typed daemon remote-upload byte-transfer adapter so concrete
