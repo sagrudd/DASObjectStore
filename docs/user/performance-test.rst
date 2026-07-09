@@ -448,7 +448,7 @@ The PDF report includes:
 
 * a scenario summary;
 * the exact reproduction command;
-* a JSON reproduction payload;
+* concise reproducibility provenance for the retained JSON artifact;
 * median SSD write and read throughput;
 * the recommended ingress strategy, redundancy setting, and HDD worker count;
 * SSD-only, SSD-first pipeline, and direct-HDD scenario summaries;
@@ -464,9 +464,9 @@ The PDF report includes:
 The command also writes:
 
 * ``<report>.qr.svg`` as the reproduction QR SVG artifact;
-* ``<report-stem>-*.svg`` quantitative bar-chart artifacts embedded into the
+* ``<report-stem>-*.png`` quantitative bar-chart artifacts embedded into the
   PDF report by the formal renderer;
-* ``<report-stem>-io-*.svg`` per-run IO line-chart artifacts embedded into the
+* ``<report-stem>-io-*.png`` per-run IO line-chart artifacts embedded into the
   PDF report by the formal renderer;
 * a temporary Markdown source under ``--tmp-dir`` only while rendering the PDF.
 

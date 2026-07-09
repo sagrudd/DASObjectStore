@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.24 - 2026-07-09
+
+- Render DASObjectStore performance report figures as container-generated
+  ggplot2 PNG assets and embed them in the formal Grammateus PDF instead of
+  printing chart alt text or raw benchmark JSON.
+
 ## 0.54.23 - 2026-07-09
 
 - Add the Web ObjectStores browser panel with authenticated daemon-backed

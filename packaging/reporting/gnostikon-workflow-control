@@ -10,6 +10,7 @@ gnostikon-workflow-control compatibility wrapper for DASObjectStore reporting.
 
 Supported commands:
   render-report-pdf        Render Markdown to PDF through Grammateus.
+  render-performance-plots Render DASObjectStore performance plot PNGs.
   prewarm-report-provider  Validate the containerized Grammateus provider.
   --version | version      Print wrapper version.
 USAGE
@@ -234,9 +235,252 @@ run_prewarm_report_provider() {
     "set -eu; grammateus_markdown_pdf --help >/dev/null; Rscript -e 'pkgs <- c(\"ggplot2\", \"jsonlite\", \"scales\", \"svglite\", \"viridisLite\", \"floundeR\"); missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing)) stop(paste(\"missing R packages:\", paste(missing, collapse = \", \"))); library(floundeR); caps <- floundeR::flounder_rust_capabilities(required = TRUE); if (!isTRUE(caps\$compiled_support)) stop(\"floundeR compiled support is unavailable\"); cat(\"grammateus report provider prewarmed\\n\")'"
 }
 
+run_render_performance_plots() {
+  local input_json=""
+  local output_dir=""
+  local output_stem=""
+  local provider="container"
+  local container_runtime="$runtime_default"
+  local container_image="$image_default"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input-json)
+        require_value "$1" "${2:-}"
+        input_json="$2"
+        shift 2
+        ;;
+      --output-dir)
+        require_value "$1" "${2:-}"
+        output_dir="$2"
+        shift 2
+        ;;
+      --output-stem)
+        require_value "$1" "${2:-}"
+        output_stem="$2"
+        shift 2
+        ;;
+      --provider)
+        require_value "$1" "${2:-}"
+        provider="$2"
+        shift 2
+        ;;
+      --container-runtime)
+        require_value "$1" "${2:-}"
+        container_runtime="$2"
+        shift 2
+        ;;
+      --container-image)
+        require_value "$1" "${2:-}"
+        container_image="$2"
+        shift 2
+        ;;
+      *)
+        printf 'unsupported render-performance-plots option: %s\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$input_json" || -z "$output_dir" || -z "$output_stem" ]]; then
+    printf 'render-performance-plots requires --input-json, --output-dir, and --output-stem\n' >&2
+    exit 2
+  fi
+  if [[ "$provider" != "container" ]]; then
+    printf 'unsupported plot provider: %s\n' "$provider" >&2
+    exit 2
+  fi
+  ensure_report_provider_image "$container_runtime" "$container_image"
+  mkdir -p "$output_dir"
+
+  local script_path input_dir resolved_output_dir
+  script_path="$output_dir/dasobjectstore-performance-plots.R"
+  input_dir="$(cd "$(dirname "$input_json")" && pwd -P)"
+  resolved_output_dir="$(cd "$output_dir" && pwd -P)"
+
+  cat >"$script_path" <<'RSCRIPT'
+args <- commandArgs(trailingOnly = TRUE)
+kv <- list()
+for (i in seq(1, length(args), by = 2)) {
+  kv[[sub("^--", "", args[[i]])]] <- args[[i + 1]]
+}
+input_json <- kv[["input-json"]]
+output_dir <- kv[["output-dir"]]
+output_stem <- kv[["output-stem"]]
+
+suppressPackageStartupMessages({
+  library(jsonlite)
+  library(ggplot2)
+  library(scales)
+})
+
+artifact <- jsonlite::fromJSON(input_json, simplifyVector = FALSE)
+plot_data <- artifact$plot_data
+theme_das <- function() {
+  theme_minimal(base_size = 10) +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      legend.position = "bottom",
+      panel.grid.minor = element_blank(),
+      axis.title.y = element_text(margin = margin(r = 8)),
+      axis.title.x = element_text(margin = margin(t = 8))
+    )
+}
+dataset <- function(name) {
+  rows <- plot_data[[name]]
+  if (is.null(rows) || length(rows) == 0) {
+    return(data.frame())
+  }
+  jsonlite::fromJSON(jsonlite::toJSON(rows, auto_unbox = TRUE), flatten = TRUE)
+}
+scenario_label <- function(df) {
+  paste(df$scenario, df$file_order, paste0("c", df$hdd_concurrency), paste0("r", df$redundancy))
+}
+safe_label <- function(value) {
+  gsub("[ /]", "-", value)
+}
+write_bar <- function(dataset_name, suffix, title, y_label) {
+  df <- dataset(dataset_name)
+  if (!nrow(df)) {
+    return(invisible(FALSE))
+  }
+  df$scenario_label <- scenario_label(df)
+  df$scenario_label <- factor(df$scenario_label, levels = rev(unique(df$scenario_label)))
+  p <- ggplot(df, aes(x = scenario_label, y = value, fill = scenario)) +
+    geom_col(width = 0.72, color = "grey25", linewidth = 0.15) +
+    coord_flip() +
+    labs(title = title, x = "Tested strategy", y = y_label, fill = "Scenario") +
+    scale_y_continuous(labels = label_number(accuracy = 1)) +
+    theme_das()
+  ggsave(
+    filename = file.path(output_dir, paste0(output_stem, "-", suffix, ".png")),
+    plot = p,
+    width = 8.2,
+    height = max(4.0, 1.6 + (0.32 * nrow(df))),
+    dpi = 170,
+    bg = "white"
+  )
+  invisible(TRUE)
+}
+write_disk_rates <- function() {
+  df <- dataset("per_disk_hdd_write_rate")
+  if (!nrow(df)) {
+    return(invisible(FALSE))
+  }
+  df$scenario_label <- paste(
+    df$scenario,
+    df$file_order,
+    paste0("c", df$hdd_concurrency),
+    df$disk_id
+  )
+  df$scenario_label <- factor(df$scenario_label, levels = rev(unique(df$scenario_label)))
+  p <- ggplot(df, aes(x = scenario_label, y = write_mib_per_second, fill = disk_id)) +
+    geom_col(width = 0.72, color = "grey25", linewidth = 0.15) +
+    coord_flip() +
+    labs(
+      title = "Per-disk HDD write rate",
+      x = "Scenario and disk",
+      y = "HDD write rate (MiB/s)",
+      fill = "Disk"
+    ) +
+    scale_y_continuous(labels = label_number(accuracy = 1)) +
+    theme_das()
+  ggsave(
+    filename = file.path(output_dir, paste0(output_stem, "-per-disk-write-rate.png")),
+    plot = p,
+    width = 8.2,
+    height = max(4.0, 1.4 + (0.23 * nrow(df))),
+    dpi = 170,
+    bg = "white"
+  )
+  invisible(TRUE)
+}
+write_io <- function() {
+  df <- dataset("io_time_series")
+  if (!nrow(df)) {
+    return(invisible(FALSE))
+  }
+  df$scenario_label <- scenario_label(df)
+  for (label in unique(df$scenario_label)) {
+    sub <- df[df$scenario_label == label, , drop = FALSE]
+    long <- rbind(
+      data.frame(
+        elapsed_second = sub$elapsed_second,
+        device_label = sub$device_label,
+        direction = "read",
+        rate_mib_per_second = sub$read_mib_per_second
+      ),
+      data.frame(
+        elapsed_second = sub$elapsed_second,
+        device_label = sub$device_label,
+        direction = "write",
+        rate_mib_per_second = sub$write_mib_per_second
+      )
+    )
+    long <- long[is.finite(long$rate_mib_per_second) & long$rate_mib_per_second > 0, , drop = FALSE]
+    if (!nrow(long)) {
+      next
+    }
+    p <- ggplot(
+      long,
+      aes(
+        x = elapsed_second,
+        y = rate_mib_per_second,
+        color = device_label,
+        linetype = direction,
+        group = interaction(device_label, direction)
+      )
+    ) +
+      geom_line(linewidth = 0.35, alpha = 0.9) +
+      labs(
+        title = paste("Per-second IO rates:", label),
+        x = "Elapsed time (s)",
+        y = "IO rate (MiB/s)",
+        color = "Device",
+        linetype = "Direction"
+      ) +
+      scale_y_continuous(labels = label_number(accuracy = 1)) +
+      theme_das()
+    ggsave(
+      filename = file.path(output_dir, paste0(output_stem, "-io-", safe_label(label), ".png")),
+      plot = p,
+      width = 8.2,
+      height = 4.8,
+      dpi = 170,
+      bg = "white"
+    )
+  }
+  invisible(TRUE)
+}
+
+write_bar("landing_rate_by_strategy", "landing-rate", "Landing rate by strategy", "Aggregate landing rate (MiB/s)")
+write_bar("elapsed_seconds_by_strategy", "elapsed-time", "Elapsed time by strategy", "Elapsed time (s)")
+write_bar("hdd_write_volume_by_strategy", "hdd-write-volume", "Physical HDD write volume by strategy", "Physical HDD write volume (GiB)")
+write_bar("hdd_write_operations_by_strategy", "hdd-write-operations", "HDD write operations by strategy", "HDD write operations")
+write_disk_rates()
+write_io()
+RSCRIPT
+
+  local -a docker_args=(run --rm --entrypoint Rscript --mount "$(bind_mount "$input_dir")")
+  if [[ "$resolved_output_dir" != "$input_dir" ]]; then
+    docker_args+=(--mount "$(bind_mount "$resolved_output_dir")")
+  fi
+  docker_args+=(
+    "$container_image"
+    "$script_path"
+    --input-json "$input_json"
+    --output-dir "$resolved_output_dir"
+    --output-stem "$output_stem"
+  )
+  "$container_runtime" "${docker_args[@]}"
+}
+
 case "$command" in
   render-report-pdf)
     run_render_report_pdf "$@"
+    ;;
+  render-performance-plots)
+    run_render_performance_plots "$@"
     ;;
   prewarm-report-provider)
     run_prewarm_report_provider "$@"

@@ -929,24 +929,26 @@ fn run_performance_test(
         reproduction_payload_sha256,
         qr_status,
     };
-    write_performance_chart_svgs(&performance_report)?;
-    let report = render_performance_report(performance_report.clone());
-    if let Some(parent) = report_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if let Some(parent) = markdown_source_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let performance_json = render_performance_json(&performance_report);
     if let Some(parent) = json_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let performance_json = render_performance_json(&performance_report);
     fs::write(&json_path, &performance_json)?;
     if let Some(authoritative_path) = &performance_report.authoritative_path {
         if let Some(parent) = authoritative_path.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::write(authoritative_path, &performance_json)?;
+    }
+    let performance_artifact = serde_json::from_str::<Value>(&performance_json)
+        .map_err(|err| CliError::CommandFailed(format!("performance JSON did not parse: {err}")))?;
+    write_performance_chart_svgs_from_json(&performance_artifact, &report_path)?;
+    let report = render_performance_report(performance_report.clone());
+    if let Some(parent) = report_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = markdown_source_path.parent() {
+        fs::create_dir_all(parent)?;
     }
     fs::write(&markdown_source_path, &report)?;
     write_pdf_report(&markdown_source_path, &report_path, &performance_report)?;
@@ -5873,70 +5875,39 @@ fn write_performance_chart_svgs_from_json(
     artifact: &Value,
     pdf_path: &Path,
 ) -> Result<(), CliError> {
-    let artifacts = performance_chart_artifacts_from_pdf_path(pdf_path);
-    let chart_specs = [
-        ("landing_rate_by_strategy", "value"),
-        ("elapsed_seconds_by_strategy", "value"),
-        ("hdd_write_volume_by_strategy", "value"),
-        ("hdd_write_operations_by_strategy", "value"),
-    ];
-    for (artifact_meta, (dataset, value_key)) in artifacts.iter().take(4).zip(chart_specs) {
-        if let Some(parent) = artifact_meta.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let rows = json_array(artifact, &["plot_data", dataset])
-            .into_iter()
-            .flatten()
-            .map(|row| {
-                (
-                    json_plot_label(row),
-                    json_f64(row, &[value_key]).unwrap_or_default(),
-                )
-            })
-            .collect::<Vec<_>>();
-        fs::write(
-            &artifact_meta.path,
-            render_svg_bar_chart(&artifact_meta.title, "Tested strategy", dataset, &rows),
-        )?;
+    let json_path = json_string(artifact, &["run", "artifacts", "json_path"])
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            CliError::CommandFailed(
+                "performance chart rendering requires run.artifacts.json_path".to_string(),
+            )
+        })?;
+    let output_dir = pdf_path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(output_dir)?;
+    let output_stem = pdf_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("performance-report");
+    let status = ProcessCommand::new(report_renderer_command())
+        .arg("render-performance-plots")
+        .arg("--provider")
+        .arg("container")
+        .arg("--input-json")
+        .arg(&json_path)
+        .arg("--output-dir")
+        .arg(output_dir)
+        .arg("--output-stem")
+        .arg(output_stem)
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(CliError::CommandFailed(format!(
+            "formal performance plot rendering failed with status {status}; install/repair the DASObjectStore packaged report renderer, Docker/container runtime, and the Grammateus report provider"
+        ))),
+        Err(error) => Err(CliError::CommandFailed(format!(
+            "formal performance plot rendering requires the DASObjectStore packaged report renderer or an external gnostikon-workflow-control command with Grammateus support plus a Docker/container runtime: {error}"
+        ))),
     }
-    if let Some(artifact_meta) = artifacts.get(4) {
-        let rows = json_array(artifact, &["plot_data", "per_disk_hdd_write_rate"])
-            .into_iter()
-            .flatten()
-            .map(|row| {
-                (
-                    format!(
-                        "{} {} c{} {}",
-                        json_string(row, &["scenario"]).unwrap_or_else(|| "unknown".to_string()),
-                        json_string(row, &["file_order"]).unwrap_or_else(|| "order".to_string()),
-                        json_u64(row, &["hdd_concurrency"]).unwrap_or_default(),
-                        json_string(row, &["disk_id"]).unwrap_or_else(|| "disk".to_string())
-                    ),
-                    json_f64(row, &["write_mib_per_second"]).unwrap_or_default(),
-                )
-            })
-            .collect::<Vec<_>>();
-        fs::write(
-            &artifact_meta.path,
-            render_svg_bar_chart(
-                &artifact_meta.title,
-                "Scenario and disk",
-                "HDD write rate (MiB/s)",
-                &rows,
-            ),
-        )?;
-    }
-    for io_artifact in performance_io_chart_artifacts_from_json(artifact, pdf_path) {
-        if let Some(parent) = io_artifact.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let samples = io_samples_from_json_for_label(artifact, &io_artifact.title);
-        fs::write(
-            &io_artifact.path,
-            render_svg_io_line_chart(&io_artifact.title, &samples),
-        )?;
-    }
-    Ok(())
 }
 
 fn json_plot_label(row: &Value) -> String {
@@ -5965,7 +5936,7 @@ fn performance_chart_artifacts_from_pdf_path(pdf_path: &Path) -> Vec<Performance
     .into_iter()
     .map(|(title, suffix)| PerformanceChartArtifact {
         title: title.to_string(),
-        path: parent.join(format!("{base}-{suffix}.svg")),
+        path: parent.join(format!("{base}-{suffix}.png")),
     })
     .collect()
 }
@@ -5991,32 +5962,9 @@ fn performance_io_chart_artifacts_from_json(
         .map(|label| PerformanceChartArtifact {
             title: format!("Per-second IO rates: {label}"),
             path: parent.join(format!(
-                "{base}-io-{}.svg",
+                "{base}-io-{}.png",
                 label.replace(' ', "-").replace('/', "-")
             )),
-        })
-        .collect()
-}
-
-fn io_samples_from_json_for_label(artifact: &Value, title: &str) -> Vec<PerformanceIoSample> {
-    let label = title.trim_start_matches("Per-second IO rates: ");
-    json_array(artifact, &["plot_data", "io_time_series"])
-        .into_iter()
-        .flatten()
-        .filter(|row| json_plot_label(row) == label)
-        .map(|row| PerformanceIoSample {
-            elapsed_second: json_u64(row, &["elapsed_second"]).unwrap_or_default(),
-            device_label: json_string(row, &["device_label"])
-                .unwrap_or_else(|| "device".to_string()),
-            device_name: json_string(row, &["device_name"]).unwrap_or_else(|| "device".to_string()),
-            read_bytes_per_second: (json_f64(row, &["read_mib_per_second"]).unwrap_or_default()
-                * 1024.0
-                * 1024.0)
-                .round() as u64,
-            write_bytes_per_second: (json_f64(row, &["write_mib_per_second"]).unwrap_or_default()
-                * 1024.0
-                * 1024.0)
-                .round() as u64,
         })
         .collect()
 }
@@ -6930,7 +6878,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
     }
 
     output.push_str("\n## Quantitative Plot Data\n\n");
-    output.push_str("The JSON artifact includes tidy bar-chart and IO time-series rows under `plot_data` for scientifically labelled Grammateus/floundeR plots. The report bundle also includes deterministic SVG bar charts and per-run IO line charts rendered from the same benchmark rows.\n\n");
+    output.push_str("The JSON artifact includes tidy bar-chart and IO time-series rows under `plot_data` for scientifically labelled Grammateus/floundeR plots. The report bundle includes ggplot2 PNG bar charts and per-run IO line charts rendered from the same benchmark rows.\n\n");
     for artifact in performance_chart_artifacts(&report) {
         output.push_str(&format!(
             "![{}]({})\n\n",
@@ -6991,7 +6939,7 @@ fn performance_chart_artifacts(report: &PerformanceReport) -> Vec<PerformanceCha
     .into_iter()
     .map(|(title, suffix)| PerformanceChartArtifact {
         title: title.to_string(),
-        path: parent.join(format!("{base}-{suffix}.svg")),
+        path: parent.join(format!("{base}-{suffix}.png")),
     })
     .collect()
 }
@@ -7012,12 +6960,13 @@ fn performance_io_chart_artifacts(report: &PerformanceReport) -> Vec<Performance
             let suffix = scenario_label.replace(' ', "-");
             PerformanceChartArtifact {
                 title: format!("Per-second IO rates: {scenario_label}"),
-                path: parent.join(format!("{base}-io-{suffix}.svg")),
+                path: parent.join(format!("{base}-io-{suffix}.png")),
             }
         })
         .collect()
 }
 
+#[allow(dead_code)]
 fn write_performance_chart_svgs(report: &PerformanceReport) -> Result<(), CliError> {
     let artifacts = performance_chart_artifacts(report);
     for artifact in &artifacts {
