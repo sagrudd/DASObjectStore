@@ -49,6 +49,12 @@ pub struct HomeDashboardResponse {
     pub mounted_enclosures: Vec<DasEnclosureCardResponse>,
     pub throughput_7d: ThroughputSummaryResponse,
     #[serde(default)]
+    pub disk_io: DiskIoSummaryResponse,
+    #[serde(default)]
+    pub cpu_usage: CpuUsageSummaryResponse,
+    #[serde(default)]
+    pub active_users: ActiveUsersSummaryResponse,
+    #[serde(default)]
     pub ingest: Option<IngestQueueSummaryResponse>,
     #[serde(default)]
     pub destage: Option<DestageQueueSummaryResponse>,
@@ -605,6 +611,83 @@ pub struct ThroughputSummaryResponse {
     pub ingest_tib: String,
     pub avg_read_mib_s: u32,
     pub avg_write_mib_s: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct DiskIoSummaryResponse {
+    pub available: bool,
+    pub read_mib_s: u32,
+    pub write_mib_s: u32,
+    pub read_ops_s: u32,
+    pub write_ops_s: u32,
+    pub busiest_disk_id: Option<String>,
+    pub state: String,
+    pub message: Option<String>,
+}
+
+impl Default for DiskIoSummaryResponse {
+    fn default() -> Self {
+        Self {
+            available: false,
+            read_mib_s: 0,
+            write_mib_s: 0,
+            read_ops_s: 0,
+            write_ops_s: 0,
+            busiest_disk_id: None,
+            state: "unavailable".to_string(),
+            message: Some("Disk IO telemetry is not available yet.".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct CpuUsageSummaryResponse {
+    pub available: bool,
+    pub usage_percent: Option<u8>,
+    pub load_average_1m: Option<String>,
+    pub logical_core_count: Option<u64>,
+    pub state: String,
+    pub message: Option<String>,
+}
+
+impl Default for CpuUsageSummaryResponse {
+    fn default() -> Self {
+        Self {
+            available: false,
+            usage_percent: None,
+            load_average_1m: None,
+            logical_core_count: None,
+            state: "unavailable".to_string(),
+            message: Some("CPU telemetry is not available yet.".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ActiveUsersSummaryResponse {
+    pub available: bool,
+    pub active_sessions: u64,
+    pub distinct_logged_in_users: u64,
+    pub administrator_sessions: u64,
+    pub operator_sessions: u64,
+    pub remote_agent_sessions: u64,
+    pub state: String,
+    pub message: Option<String>,
+}
+
+impl Default for ActiveUsersSummaryResponse {
+    fn default() -> Self {
+        Self {
+            available: false,
+            active_sessions: 0,
+            distinct_logged_in_users: 0,
+            administrator_sessions: 0,
+            operator_sessions: 0,
+            remote_agent_sessions: 0,
+            state: "unavailable".to_string(),
+            message: Some("Session telemetry is not available yet.".to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -1599,6 +1682,34 @@ mod tests {
                 "avg_write_mib_s": 240,
                 "daily": []
             },
+            "disk_io": {
+                "available": true,
+                "read_mib_s": 120,
+                "write_mib_s": 240,
+                "read_ops_s": 10,
+                "write_ops_s": 20,
+                "busiest_disk_id": "qnap-1057",
+                "state": "nominal",
+                "message": null
+            },
+            "cpu_usage": {
+                "available": true,
+                "usage_percent": 42,
+                "load_average_1m": "0.84",
+                "logical_core_count": 8,
+                "state": "nominal",
+                "message": null
+            },
+            "active_users": {
+                "available": true,
+                "active_sessions": 3,
+                "distinct_logged_in_users": 2,
+                "administrator_sessions": 1,
+                "operator_sessions": 1,
+                "remote_agent_sessions": 1,
+                "state": "nominal",
+                "message": null
+            },
             "memory_stress": {
                 "state": "nominal",
                 "pressure_percent": 10,
@@ -1646,6 +1757,9 @@ mod tests {
         assert_eq!(decoded.drives.total, 7);
         assert_eq!(decoded.capacity.free_tib, "87.5");
         assert_eq!(decoded.throughput_7d.avg_write_mib_s, 240);
+        assert_eq!(decoded.disk_io.write_mib_s, 240);
+        assert_eq!(decoded.cpu_usage.usage_percent, Some(42));
+        assert_eq!(decoded.active_users.distinct_logged_in_users, 2);
         assert!(decoded.object_service.remote_ready);
         assert_eq!(decoded.object_service.port, 3900);
     }

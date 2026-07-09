@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.63.0 - 2026-07-09
+
+- Add telemetry-backed Home dashboard cards for Disk IO, CPU usage, and
+  logged-in users, with explicit unavailable states when daemon appliance
+  telemetry has not been written yet.
+
 ## 0.62.5 - 2026-07-09
 
 - Skip strict direct-import duplicates before HDD copy even when a previous

@@ -1,9 +1,10 @@
 use crate::dashboard::{
-    CapacitySummaryView, CreateObjectStoreAffordanceView, DasEnclosureCardView,
-    DashboardHealthStateView, DashboardWarning, DriveCountSummaryView, EnclosureConnectionView,
+    ActiveUsersSummaryView, CapacitySummaryView, CpuUsageSummaryView,
+    CreateObjectStoreAffordanceView, DasEnclosureCardView, DashboardHealthStateView,
+    DashboardWarning, DiskIoSummaryView, DriveCountSummaryView, EnclosureConnectionView,
     HealthSummaryView, HomeDashboardView, MemoryStressStateView, MemoryStressView,
-    ObjectServiceStatusView, SmartWarningView, SmartWarningsSummaryView, ThroughputDayView,
-    ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    ObjectServiceStatusView, SmartWarningView, SmartWarningsSummaryView, TelemetryCardStateView,
+    ThroughputDayView, ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 use crate::object_stores_aggregator::registry_object_store_cards;
 use dasobjectstore_daemon::{
@@ -162,6 +163,22 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
             ));
             ThroughputSummaryView::bootstrap_fixture()
         });
+    let disk_io = telemetry
+        .as_ref()
+        .and_then(telemetry_disk_io_summary)
+        .unwrap_or_else(|| {
+            DiskIoSummaryView::unavailable("Disk IO telemetry is not available yet.")
+        });
+    let cpu_usage = telemetry
+        .as_ref()
+        .and_then(telemetry_cpu_usage_summary)
+        .unwrap_or_else(|| CpuUsageSummaryView::unavailable("CPU telemetry is not available yet."));
+    let active_users = telemetry
+        .as_ref()
+        .and_then(telemetry_active_users_summary)
+        .unwrap_or_else(|| {
+            ActiveUsersSummaryView::unavailable("Session telemetry is not available yet.")
+        });
 
     let warning_count = source_warnings.len() + smart_warnings.len();
     let health_state = if warning_count == 0 {
@@ -188,6 +205,9 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         capacity,
         mounted_enclosures,
         throughput_7d,
+        disk_io,
+        cpu_usage,
+        active_users,
         ingest: None,
         destage: None,
         object_service,
@@ -748,6 +768,115 @@ fn telemetry_throughput_7d(
     })
 }
 
+fn telemetry_disk_io_summary(
+    sample_set: &ApplianceTelemetrySampleSet,
+) -> Option<DiskIoSummaryView> {
+    let latest = latest_telemetry_sample(sample_set)?;
+    let mut read_bytes = 0.0;
+    let mut write_bytes = 0.0;
+    let mut read_ops = 0.0;
+    let mut write_ops = 0.0;
+    let mut busiest_disk = None::<(String, f64)>;
+    let mut saw_value = false;
+
+    for disk_io in &latest.disk_io {
+        let read = finite_nonnegative(disk_io.read_bytes_per_second).unwrap_or(0.0);
+        let write = finite_nonnegative(disk_io.write_bytes_per_second).unwrap_or(0.0);
+        let disk_total = read + write;
+        if disk_io.read_bytes_per_second.is_some() || disk_io.write_bytes_per_second.is_some() {
+            saw_value = true;
+            read_bytes += read;
+            write_bytes += write;
+            if busiest_disk
+                .as_ref()
+                .is_none_or(|(_, current)| disk_total > *current)
+            {
+                busiest_disk = Some((disk_io.disk_id.clone(), disk_total));
+            }
+        }
+        if let Some(value) = finite_nonnegative(disk_io.read_operations_per_second) {
+            saw_value = true;
+            read_ops += value;
+        }
+        if let Some(value) = finite_nonnegative(disk_io.write_operations_per_second) {
+            saw_value = true;
+            write_ops += value;
+        }
+    }
+
+    saw_value.then(|| DiskIoSummaryView {
+        available: true,
+        read_mib_s: mib_per_second(read_bytes.round() as u64),
+        write_mib_s: mib_per_second(write_bytes.round() as u64),
+        read_ops_s: rounded_u32(read_ops),
+        write_ops_s: rounded_u32(write_ops),
+        busiest_disk_id: busiest_disk.map(|(disk_id, _)| disk_id),
+        state: TelemetryCardStateView::Nominal,
+        message: None,
+    })
+}
+
+fn telemetry_cpu_usage_summary(
+    sample_set: &ApplianceTelemetrySampleSet,
+) -> Option<CpuUsageSummaryView> {
+    let latest = latest_telemetry_sample(sample_set)?;
+    let usage_percent = latest.cpu.usage_percent.and_then(percent_float_u8);
+    let load_average_1m = latest
+        .cpu
+        .load_average_1m
+        .filter(|value| value.is_finite())
+        .map(|value| format!("{:.2}", value.max(0.0)));
+    if usage_percent.is_none()
+        && load_average_1m.is_none()
+        && latest.cpu.logical_core_count.is_none()
+    {
+        return None;
+    }
+    let state = match usage_percent.unwrap_or(0) {
+        0..=69 => TelemetryCardStateView::Nominal,
+        70..=84 => TelemetryCardStateView::Elevated,
+        85..=94 => TelemetryCardStateView::High,
+        _ => TelemetryCardStateView::High,
+    };
+
+    Some(CpuUsageSummaryView {
+        available: true,
+        usage_percent,
+        load_average_1m,
+        logical_core_count: latest.cpu.logical_core_count,
+        state,
+        message: None,
+    })
+}
+
+fn telemetry_active_users_summary(
+    sample_set: &ApplianceTelemetrySampleSet,
+) -> Option<ActiveUsersSummaryView> {
+    let latest = latest_telemetry_sample(sample_set)?;
+    let sessions = &latest.sessions;
+    if sessions.web_active_sessions.is_none()
+        && sessions.remote_agent_active_sessions.is_none()
+        && sessions.distinct_logged_in_users.is_none()
+        && sessions.administrator_sessions.is_none()
+        && sessions.operator_sessions.is_none()
+    {
+        return None;
+    }
+    let web = sessions.web_active_sessions.unwrap_or(0);
+    let remote = sessions.remote_agent_active_sessions.unwrap_or(0);
+
+    Some(ActiveUsersSummaryView {
+        available: true,
+        active_sessions: web.saturating_add(remote),
+        distinct_logged_in_users: sessions.distinct_logged_in_users.unwrap_or(0),
+        administrator_sessions: sessions.administrator_sessions.unwrap_or(0),
+        operator_sessions: sessions.operator_sessions.unwrap_or(0),
+        remote_agent_sessions: remote,
+        state: TelemetryCardStateView::Nominal,
+        message: None,
+    })
+}
+
 fn latest_telemetry_sample(
     sample_set: &ApplianceTelemetrySampleSet,
 ) -> Option<&ApplianceTelemetrySample> {
@@ -789,6 +918,16 @@ fn percent_float_u8(value: f64) -> Option<u8> {
     value
         .is_finite()
         .then(|| value.clamp(0.0, 100.0).round() as u8)
+}
+
+fn finite_nonnegative(value: Option<f64>) -> Option<f64> {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| value.max(0.0))
+}
+
+fn rounded_u32(value: f64) -> u32 {
+    value.round().clamp(0.0, f64::from(u32::MAX)) as u32
 }
 
 fn mean_rate(values: &[f64]) -> u64 {
@@ -1149,6 +1288,16 @@ mod tests {
         assert_eq!(view.throughput_7d.avg_read_mib_s, 10);
         assert_eq!(view.throughput_7d.avg_write_mib_s, 20);
         assert_eq!(view.throughput_7d.daily.len(), 1);
+        assert!(view.disk_io.available);
+        assert_eq!(view.disk_io.read_mib_s, 10);
+        assert_eq!(view.disk_io.write_mib_s, 20);
+        assert_eq!(view.disk_io.busiest_disk_id.as_deref(), Some("qnap-1057"));
+        assert!(view.cpu_usage.available);
+        assert_eq!(view.cpu_usage.usage_percent, Some(12));
+        assert_eq!(view.cpu_usage.logical_core_count, Some(2));
+        assert!(view.active_users.available);
+        assert_eq!(view.active_users.active_sessions, 1);
+        assert_eq!(view.active_users.distinct_logged_in_users, 1);
     }
 
     fn healthy_object_service_status() -> ObjectServiceStatusView {

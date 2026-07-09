@@ -317,6 +317,71 @@ pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetr
             &format!("{} days", view.throughput_7d.window_days),
         ),
         DashboardMetric::new(
+            "Disk IO",
+            if view.disk_io.available {
+                format!("{} MiB/s write", view.disk_io.write_mib_s)
+            } else {
+                "Unavailable".to_string()
+            },
+            if view.disk_io.available {
+                format!(
+                    "{} MiB/s read; {} write ops/s; {} read ops/s",
+                    view.disk_io.read_mib_s, view.disk_io.write_ops_s, view.disk_io.read_ops_s
+                )
+            } else {
+                view.disk_io
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "Disk IO telemetry is not available yet.".to_string())
+            },
+            &view.disk_io.state,
+        ),
+        DashboardMetric::new(
+            "CPU",
+            view.cpu_usage
+                .usage_percent
+                .map(|percent| format!("{percent}%"))
+                .unwrap_or_else(|| "Unavailable".to_string()),
+            if view.cpu_usage.available {
+                format!(
+                    "load {}; {} logical core(s)",
+                    view.cpu_usage
+                        .load_average_1m
+                        .as_deref()
+                        .unwrap_or("unknown"),
+                    view.cpu_usage.logical_core_count.unwrap_or(0)
+                )
+            } else {
+                view.cpu_usage
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "CPU telemetry is not available yet.".to_string())
+            },
+            &view.cpu_usage.state,
+        ),
+        DashboardMetric::new(
+            "Logged-in users",
+            if view.active_users.available {
+                view.active_users.distinct_logged_in_users.to_string()
+            } else {
+                "Unavailable".to_string()
+            },
+            if view.active_users.available {
+                format!(
+                    "{} active session(s); {} admin; {} remote",
+                    view.active_users.active_sessions,
+                    view.active_users.administrator_sessions,
+                    view.active_users.remote_agent_sessions
+                )
+            } else {
+                view.active_users
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "Session telemetry is not available yet.".to_string())
+            },
+            &view.active_users.state,
+        ),
+        DashboardMetric::new(
             "S3 service",
             if view.object_service.remote_ready {
                 view.object_service
@@ -1761,6 +1826,9 @@ fn home_dashboard_loading_cards() -> Vec<&'static str> {
         "DAS enclosures",
         "Capacity",
         "7-day throughput",
+        "Disk IO",
+        "CPU",
+        "Logged-in users",
         "S3 service",
         "Memory stress",
         "SMART warnings",
@@ -7906,9 +7974,11 @@ mod tests {
             ".dos-object-browser-placement {\n  display: inline-flex;\n  max-width: 220px;"
         ));
         assert!(css.contains("@media (max-width: 980px)"));
-        assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"));
+        assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders,"));
+        assert!(css.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"));
         assert!(css.contains("@media (max-width: 640px)"));
-        assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders {\n    grid-template-columns: 1fr;"));
+        assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders,"));
+        assert!(css.contains("grid-template-columns: 1fr;"));
     }
 
     #[test]
@@ -8083,6 +8153,34 @@ mod tests {
                 "avg_read_mib_s": 120,
                 "avg_write_mib_s": 240
             },
+            "disk_io": {
+                "available": true,
+                "read_mib_s": 120,
+                "write_mib_s": 240,
+                "read_ops_s": 10,
+                "write_ops_s": 20,
+                "busiest_disk_id": "qnap-1057",
+                "state": "nominal",
+                "message": null
+            },
+            "cpu_usage": {
+                "available": true,
+                "usage_percent": 42,
+                "load_average_1m": "0.84",
+                "logical_core_count": 8,
+                "state": "nominal",
+                "message": null
+            },
+            "active_users": {
+                "available": true,
+                "active_sessions": 3,
+                "distinct_logged_in_users": 2,
+                "administrator_sessions": 1,
+                "operator_sessions": 1,
+                "remote_agent_sessions": 1,
+                "state": "nominal",
+                "message": null
+            },
             "memory_stress": {
                 "state": "elevated",
                 "pressure_percent": 71,
@@ -8131,6 +8229,15 @@ mod tests {
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "Capacity" && metric.value == "87.5 TiB free"));
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "Disk IO" && metric.value == "240 MiB/s write"));
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "CPU" && metric.value == "42%"));
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "Logged-in users" && metric.value == "2"));
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "ObjectStores" && metric.value == "1"));

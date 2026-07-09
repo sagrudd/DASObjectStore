@@ -228,8 +228,11 @@ by default, honours ``DASOBJECTSTORE_SSD_ROOT`` and
 registry through the same registry model used by the CLI and daemon. When
 daemon appliance telemetry is present, the Capacity, seven-day Throughput, and
 Memory Stress cards prefer that telemetry so the cards match the daemon-owned
-view of managed disks, IO rates, and host memory pressure. Operators can
-override that telemetry source with
+view of managed disks, IO rates, and host memory pressure. The Home page also
+shows telemetry-backed Disk IO, CPU, and Logged-in users cards when appliance
+samples are available; those cards report explicit unavailable telemetry state
+instead of bootstrap values when the daemon has not produced samples yet.
+Operators can override that telemetry source with
 ``DASOBJECTSTORE_WEB_APPLIANCE_TELEMETRY_PATH``. If appliance telemetry is not
 available, the aggregator falls back to filesystem capacity, the optional
 seven-day throughput JSON input at

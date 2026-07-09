@@ -18,14 +18,15 @@ pub use ingest_queue::{
     IngestJobStateView, IngestProgressView, IngestQueueJobView, IngestQueueView, QueuePressureView,
 };
 pub use redesign::{
-    AddEnclosureAffordanceView, CapacitySummaryView, CreateObjectStoreAffordanceView,
-    CreateObjectStoreDefaultsView, CreateObjectStoreFieldView, DasEnclosureCardView,
-    DasEnclosureDetailView, DashboardHealthStateView, DriveCountSummaryView,
-    EnclosureConnectionView, EnclosureDriveSlotView, EnclosuresPageView, HealthSummaryView,
-    HomeDashboardView, MemoryStressStateView, MemoryStressView, ObjectServiceStatusView,
-    ObjectStoreCardView, ObjectStoresPageView, SmartWarningView, SmartWarningsSummaryView,
-    StorageGroupView, StoreClassOptionView, ThroughputDayView, ThroughputSummaryView,
-    WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    ActiveUsersSummaryView, AddEnclosureAffordanceView, CapacitySummaryView, CpuUsageSummaryView,
+    CreateObjectStoreAffordanceView, CreateObjectStoreDefaultsView, CreateObjectStoreFieldView,
+    DasEnclosureCardView, DasEnclosureDetailView, DashboardHealthStateView, DiskIoSummaryView,
+    DriveCountSummaryView, EnclosureConnectionView, EnclosureDriveSlotView, EnclosuresPageView,
+    HealthSummaryView, HomeDashboardView, MemoryStressStateView, MemoryStressView,
+    ObjectServiceStatusView, ObjectStoreCardView, ObjectStoresPageView, SmartWarningView,
+    SmartWarningsSummaryView, StorageGroupView, StoreClassOptionView, TelemetryCardStateView,
+    ThroughputDayView, ThroughputSummaryView, WriterPolicyReadinessView,
+    REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

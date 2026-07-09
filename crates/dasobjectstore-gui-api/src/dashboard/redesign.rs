@@ -12,6 +12,9 @@ pub struct HomeDashboardView {
     pub capacity: CapacitySummaryView,
     pub mounted_enclosures: Vec<DasEnclosureCardView>,
     pub throughput_7d: ThroughputSummaryView,
+    pub disk_io: DiskIoSummaryView,
+    pub cpu_usage: CpuUsageSummaryView,
+    pub active_users: ActiveUsersSummaryView,
     pub ingest: Option<IngestQueueView>,
     pub destage: Option<DestageQueueView>,
     pub object_service: ObjectServiceStatusView,
@@ -50,6 +53,15 @@ impl HomeDashboardView {
             },
             mounted_enclosures: Vec::new(),
             throughput_7d: ThroughputSummaryView::bootstrap_fixture(),
+            disk_io: DiskIoSummaryView::unavailable(
+                "Disk IO telemetry is pending daemon integration.",
+            ),
+            cpu_usage: CpuUsageSummaryView::unavailable(
+                "CPU telemetry is pending daemon integration.",
+            ),
+            active_users: ActiveUsersSummaryView::unavailable(
+                "Session telemetry is pending daemon integration.",
+            ),
             ingest: None,
             destage: None,
             object_service: ObjectServiceStatusView {
@@ -156,6 +168,92 @@ pub struct ThroughputDayView {
     pub read_tib: String,
     pub written_tib: String,
     pub ingest_tib: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TelemetryCardStateView {
+    Nominal,
+    Elevated,
+    High,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DiskIoSummaryView {
+    pub available: bool,
+    pub read_mib_s: u32,
+    pub write_mib_s: u32,
+    pub read_ops_s: u32,
+    pub write_ops_s: u32,
+    pub busiest_disk_id: Option<String>,
+    pub state: TelemetryCardStateView,
+    pub message: Option<String>,
+}
+
+impl DiskIoSummaryView {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            read_mib_s: 0,
+            write_mib_s: 0,
+            read_ops_s: 0,
+            write_ops_s: 0,
+            busiest_disk_id: None,
+            state: TelemetryCardStateView::Unavailable,
+            message: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CpuUsageSummaryView {
+    pub available: bool,
+    pub usage_percent: Option<u8>,
+    pub load_average_1m: Option<String>,
+    pub logical_core_count: Option<u64>,
+    pub state: TelemetryCardStateView,
+    pub message: Option<String>,
+}
+
+impl CpuUsageSummaryView {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            usage_percent: None,
+            load_average_1m: None,
+            logical_core_count: None,
+            state: TelemetryCardStateView::Unavailable,
+            message: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ActiveUsersSummaryView {
+    pub available: bool,
+    pub active_sessions: u64,
+    pub distinct_logged_in_users: u64,
+    pub administrator_sessions: u64,
+    pub operator_sessions: u64,
+    pub remote_agent_sessions: u64,
+    pub state: TelemetryCardStateView,
+    pub message: Option<String>,
+}
+
+impl ActiveUsersSummaryView {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            active_sessions: 0,
+            distinct_logged_in_users: 0,
+            administrator_sessions: 0,
+            operator_sessions: 0,
+            remote_agent_sessions: 0,
+            state: TelemetryCardStateView::Unavailable,
+            message: Some(message.into()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
