@@ -867,7 +867,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add Web progress rendering for remote uploads that remains accurate when
   the browser refreshes, disconnects, or reconnects while the paired CLI agent
   continues transfer.
-- [ ] Add remote CLI progress rendering for easyconnect uploads using the same
+- [x] Add remote CLI progress rendering for easyconnect uploads using the same
   daemon job/event model as normal CLI ingest and embedded TUI views.
 - [ ] Add tests for easyconnect pairing success, expired pairing, denied login,
   revoked session, eight-hour expiry, renewal during active upload, and

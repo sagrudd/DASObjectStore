@@ -20,7 +20,7 @@ use crate::s3::{
     AwsS3CredentialSource, RemoteS3Error,
 };
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonJobEvent,
+    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonJobEvent, DaemonJobSummary,
     RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadProgressTelemetry,
     UnixSocketDaemonTransport, DEFAULT_DAEMON_SOCKET_FILE_NAME, LINUX_DAEMON_RUNTIME_DIR,
@@ -327,7 +327,7 @@ fn run_upload(
             args.source(),
             source_inventory,
         )?;
-        write_daemon_upload_response(&response, writer)?;
+        write_daemon_upload_response(&response, args.progress(), writer)?;
         return Ok(());
     }
     let output = execute_aws_plan(&plan, credentials.as_ref())?;
@@ -430,14 +430,19 @@ fn redacted_upload_display_args(plan: &crate::s3::AwsS3CommandPlan, source: &Pat
 
 fn write_daemon_upload_response(
     response: &RemoteEasyconnectSubmitAwsCliUploadResponse,
+    render_progress: bool,
     writer: &mut impl Write,
 ) -> Result<(), std::io::Error> {
     writeln!(writer, "Daemon remote upload job submitted")?;
-    if let Some(event) = &response.running_event {
-        write_daemon_job_event("Running", event, writer)?;
+    if render_progress {
+        if let Some(event) = &response.running_event {
+            write_daemon_job_event("Running", event, writer)?;
+        }
     }
-    for event in &response.progress_events {
-        write_daemon_job_event("Progress", event, writer)?;
+    if render_progress {
+        for event in &response.progress_events {
+            write_daemon_job_event("Progress", event, writer)?;
+        }
     }
     write_daemon_job_event("Final", &response.final_event, writer)?;
     Ok(())
@@ -452,14 +457,7 @@ fn write_daemon_job_event(
         DaemonJobEvent::Progress(job)
         | DaemonJobEvent::Complete(job)
         | DaemonJobEvent::Failed(job) => {
-            writeln!(
-                writer,
-                "{label}: {} {:?} {}/{} bytes",
-                job.job_id.as_str(),
-                job.state,
-                job.progress.work_bytes_done,
-                job.progress.work_bytes_total
-            )
+            writeln!(writer, "{label}: {}", daemon_job_progress_line(job))
         }
         DaemonJobEvent::Accepted(job) => {
             writeln!(writer, "{label}: {} accepted", job.job_id.as_str())
@@ -468,6 +466,45 @@ fn write_daemon_job_event(
             writeln!(writer, "{label}: {} cancelled", job.job_id.as_str())
         }
     }
+}
+
+fn daemon_job_progress_line(job: &DaemonJobSummary) -> String {
+    let percent = job
+        .progress
+        .percent_complete()
+        .map(|value| format!("{value:>3}%"))
+        .unwrap_or_else(|| " n/a".to_string());
+    let units = if job.progress.work_units_total > 0 {
+        format!(
+            " units={}/{}",
+            job.progress.work_units_done, job.progress.work_units_total
+        )
+    } else {
+        String::new()
+    };
+    let stage = if job.progress.stage.trim().is_empty() {
+        "stage=unknown".to_string()
+    } else {
+        format!("stage={}", job.progress.stage)
+    };
+    let message = job
+        .failure_message
+        .as_ref()
+        .or(job.progress.message.as_ref())
+        .map(|message| format!(" message={message:?}"))
+        .unwrap_or_default();
+
+    format!(
+        "{} state={:?} {} bytes={}/{}{} {}{}",
+        job.job_id.as_str(),
+        job.state,
+        percent,
+        job.progress.work_bytes_done,
+        job.progress.work_bytes_total,
+        units,
+        stage,
+        message
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -719,8 +756,8 @@ impl From<RemoteS3Error> for RemoteRunError {
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_upload_with_credentials, resolve_upload_route, run, source_inventory,
-        submit_upload_plan_to_daemon, write_daemon_upload_response,
+        daemon_job_progress_line, plan_upload_with_credentials, resolve_upload_route, run,
+        source_inventory, submit_upload_plan_to_daemon, write_daemon_upload_response,
     };
     use crate::auth::RemoteAuthAuthority;
     use crate::cli::RemoteCli;
@@ -891,27 +928,7 @@ mod tests {
         let transport = InProcessDaemonTransport::new(|request| {
             seen.borrow_mut().push(request);
             Ok(DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(
-                RemoteEasyconnectSubmitAwsCliUploadResponse {
-                    running_event: None,
-                    progress_events: Vec::new(),
-                    final_event: DaemonJobEvent::Complete(DaemonJobSummary {
-                        job_id: DaemonJobId::new("remote-upload-test-1").expect("job id"),
-                        kind: DaemonJobKind::RemoteUpload,
-                        state: DaemonJobState::Complete,
-                        progress: DaemonJobProgress {
-                            stage: "remote_s3_transfer_complete".to_string(),
-                            work_bytes_done: 4,
-                            work_bytes_total: 4,
-                            work_units_done: 1,
-                            work_units_total: 1,
-                            message: None,
-                        },
-                        submitted_at_utc: "2026-07-09T14:52:00Z".to_string(),
-                        updated_at_utc: "2026-07-09T14:52:01Z".to_string(),
-                        actor: Some("stephen".to_string()),
-                        failure_message: None,
-                    }),
-                },
+                daemon_upload_response(),
             ))
         });
         let client = DaemonClient::new(transport);
@@ -926,7 +943,7 @@ mod tests {
         )
         .expect("daemon submit succeeds");
         let mut rendered = Vec::new();
-        write_daemon_upload_response(&response, &mut rendered).expect("render response");
+        write_daemon_upload_response(&response, true, &mut rendered).expect("render response");
 
         let seen_requests = seen.borrow();
         let [DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(request)] =
@@ -970,7 +987,44 @@ mod tests {
         let rendered = String::from_utf8(rendered).expect("utf8 output");
         assert!(rendered.contains("Daemon remote upload job submitted"));
         assert!(rendered.contains("remote-upload-test-1"));
+        assert!(rendered.contains("Progress: remote-upload-test-1 state=Running  50% bytes=2/4"));
+        assert!(rendered.contains("units=1/2"));
+        assert!(rendered.contains("stage=remote_s3_transfer_running"));
+        assert!(rendered.contains("message=\"copied 2 bytes\""));
         std::fs::remove_dir_all(root).expect("cleanup source");
+    }
+
+    #[test]
+    fn daemon_upload_progress_renderer_reports_stage_percent_units_and_message() {
+        let line = daemon_job_progress_line(&daemon_job(
+            DaemonJobState::Running,
+            "remote_s3_transfer_running",
+            512,
+            1024,
+            3,
+            9,
+            Some("remote upload copied 512 bytes"),
+            None,
+        ));
+
+        assert_eq!(
+            line,
+            "remote-upload-test-1 state=Running  50% bytes=512/1024 units=3/9 stage=remote_s3_transfer_running message=\"remote upload copied 512 bytes\""
+        );
+    }
+
+    #[test]
+    fn daemon_upload_response_can_suppress_intermediate_progress_rows() {
+        let response = daemon_upload_response();
+        let mut rendered = Vec::new();
+
+        write_daemon_upload_response(&response, false, &mut rendered).expect("render response");
+
+        let rendered = String::from_utf8(rendered).expect("utf8 output");
+        assert!(rendered.contains("Daemon remote upload job submitted"));
+        assert!(!rendered.contains("Running:"));
+        assert!(!rendered.contains("Progress:"));
+        assert!(rendered.contains("Final: remote-upload-test-1 state=Complete 100% bytes=4/4"));
     }
 
     fn paired_config() -> RemoteConfig {
@@ -1012,6 +1066,70 @@ mod tests {
                     renewal: None,
                 }),
             }],
+        }
+    }
+
+    fn daemon_upload_response() -> RemoteEasyconnectSubmitAwsCliUploadResponse {
+        RemoteEasyconnectSubmitAwsCliUploadResponse {
+            running_event: Some(DaemonJobEvent::Progress(daemon_job(
+                DaemonJobState::Running,
+                "remote_s3_transfer_running",
+                0,
+                4,
+                0,
+                2,
+                Some("remote upload started"),
+                None,
+            ))),
+            progress_events: vec![DaemonJobEvent::Progress(daemon_job(
+                DaemonJobState::Running,
+                "remote_s3_transfer_running",
+                2,
+                4,
+                1,
+                2,
+                Some("copied 2 bytes"),
+                None,
+            ))],
+            final_event: DaemonJobEvent::Complete(daemon_job(
+                DaemonJobState::Complete,
+                "remote_s3_transfer_complete",
+                4,
+                4,
+                2,
+                2,
+                None,
+                None,
+            )),
+        }
+    }
+
+    fn daemon_job(
+        state: DaemonJobState,
+        stage: &str,
+        work_bytes_done: u64,
+        work_bytes_total: u64,
+        work_units_done: u64,
+        work_units_total: u64,
+        message: Option<&str>,
+        failure_message: Option<&str>,
+    ) -> DaemonJobSummary {
+        DaemonJobSummary {
+            job_id: DaemonJobId::new("remote-upload-test-1").expect("job id"),
+            kind: DaemonJobKind::RemoteUpload,
+            state,
+            progress: DaemonJobProgress {
+                stage: stage.to_string(),
+                work_bytes_done,
+                work_bytes_total,
+                work_units_done,
+                work_units_total,
+                message: message.map(str::to_string),
+            },
+            submitted_at_utc: "2026-07-09T14:52:00Z".to_string(),
+            updated_at_utc: "2026-07-09T14:52:01Z".to_string(),
+            actor: Some("stephen".to_string()),
+            failure_message: failure_message.map(str::to_string),
         }
     }
 

@@ -312,6 +312,12 @@ the daemon over its local socket. The daemon owns admission control, remote S3
 transfer capacity, SSD pressure gating, HDD landing queue accounting,
 verification queue accounting, and final job persistence. Use
 ``--daemon-socket`` only when testing a non-default local daemon socket.
+The remote client renders the daemon job events returned by this route using
+the same job model as local ingest: running/progress/final rows include the
+daemon job id, state, percent complete when the daemon has a byte total, byte
+counters, unit counters, stage, and daemon message or failure text. Use
+``--no-progress`` to suppress intermediate running/progress rows while still
+printing the terminal daemon result.
 
 Remote upload plans include the appliance backpressure contract. The default
 contract limits remote S3 transfer concurrency to two, multipart part

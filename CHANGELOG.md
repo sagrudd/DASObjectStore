@@ -8,6 +8,10 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Render remote easyconnect daemon upload job events in
+  ``dasobjectstore-remote upload --submit-to-daemon`` with percent, byte/unit
+  counters, stage, and daemon message/failure details, while allowing
+  ``--no-progress`` to suppress intermediate rows.
 - Render daemon-recorded remote-upload progress in Web Activity task rows so
   browser refresh, disconnect, and reconnect recover current transfer stage,
   byte counters, percent complete, and daemon messages from persisted job state.
