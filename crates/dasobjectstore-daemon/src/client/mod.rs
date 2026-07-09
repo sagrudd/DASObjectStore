@@ -20,6 +20,12 @@ use crate::api::{
     IngestJobStatusRequest, IngestJobStatusResponse, ObjectBrowserRequest, ObjectBrowserResponse,
     ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
     ObjectFolderDownloadResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
     StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
@@ -282,6 +288,66 @@ where
             response => Err(unexpected("assign_local_user_to_local_group", response)),
         }
     }
+
+    pub fn remote_easyconnect_discovery(
+        &self,
+        request: RemoteEasyconnectDiscoveryRequest,
+    ) -> Result<RemoteEasyconnectDiscoveryResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectDiscovery(request))? {
+            DaemonApiResponse::RemoteEasyconnectDiscovery(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_discovery", response)),
+        }
+    }
+
+    pub fn remote_easyconnect_create_pairing(
+        &self,
+        request: RemoteEasyconnectCreatePairingRequest,
+    ) -> Result<RemoteEasyconnectCreatePairingResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectCreatePairing(request))? {
+            DaemonApiResponse::RemoteEasyconnectCreatePairing(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_create_pairing", response)),
+        }
+    }
+
+    pub fn remote_easyconnect_approve_pairing(
+        &self,
+        request: RemoteEasyconnectApprovePairingRequest,
+    ) -> Result<RemoteEasyconnectApprovePairingResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectApprovePairing(request))? {
+            DaemonApiResponse::RemoteEasyconnectApprovePairing(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_approve_pairing", response)),
+        }
+    }
+
+    pub fn remote_easyconnect_exchange_pairing(
+        &self,
+        request: RemoteEasyconnectExchangePairingRequest,
+    ) -> Result<RemoteEasyconnectExchangePairingResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectExchangePairing(request))? {
+            DaemonApiResponse::RemoteEasyconnectExchangePairing(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_exchange_pairing", response)),
+        }
+    }
+
+    pub fn remote_easyconnect_revoke_session(
+        &self,
+        request: RemoteEasyconnectRevokeSessionRequest,
+    ) -> Result<RemoteEasyconnectRevokeSessionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectRevokeSession(request))? {
+            DaemonApiResponse::RemoteEasyconnectRevokeSession(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_revoke_session", response)),
+        }
+    }
+
+    pub fn remote_easyconnect_renew_session(
+        &self,
+        request: RemoteEasyconnectRenewSessionRequest,
+    ) -> Result<RemoteEasyconnectRenewSessionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectRenewSession(request))? {
+            DaemonApiResponse::RemoteEasyconnectRenewSession(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_renew_session", response)),
+        }
+    }
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -316,6 +382,16 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
+        DaemonApiResponse::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
+        DaemonApiResponse::RemoteEasyconnectCreatePairing(_) => "remote_easyconnect_create_pairing",
+        DaemonApiResponse::RemoteEasyconnectApprovePairing(_) => {
+            "remote_easyconnect_approve_pairing"
+        }
+        DaemonApiResponse::RemoteEasyconnectExchangePairing(_) => {
+            "remote_easyconnect_exchange_pairing"
+        }
+        DaemonApiResponse::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
+        DaemonApiResponse::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }
@@ -338,7 +414,8 @@ mod tests {
         ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
         ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
+        PrepareEnclosureResponse, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectCreatePairingResponse, StoreInventoryRequest, StoreInventoryResponse,
         SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
@@ -658,6 +735,40 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::CreateObjectStore(_)]
+        ));
+    }
+
+    #[test]
+    fn remote_easyconnect_create_pairing_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::RemoteEasyconnectCreatePairing(
+                RemoteEasyconnectCreatePairingResponse {
+                    pairing_id: "pair-1".to_string(),
+                    browser_login_url: "https://192.168.1.192:8448/products/dasobjectstore/remote/easyconnect/login?pairing_id=pair-1".to_string(),
+                    callback_url: "http://127.0.0.1:49321/callback".to_string(),
+                    expires_at_utc: "2026-07-09T12:10:00Z".to_string(),
+                    polling_url: "https://192.168.1.192:8448/api/v1/remote/easyconnect/pairings/pair-1".to_string(),
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
+                client_name: "macbook".to_string(),
+                callback_url: "http://127.0.0.1:49321/callback".to_string(),
+                requested_object_store: Some("zymo_fecal_2025.05".to_string()),
+                requested_session_lifetime_seconds: Some(28_800),
+                client_request_id: Some("request-1".to_string()),
+            })
+            .expect("create pairing response");
+
+        assert_eq!(response.pairing_id, "pair-1");
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::RemoteEasyconnectCreatePairing(_)]
         ));
     }
 

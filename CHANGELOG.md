@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.58.0 - 2026-07-09
+
+- Add server-side remote easyconnect pairing/session API contracts and typed
+  daemon client methods for discovery, pairing creation, browser approval,
+  session exchange, revocation, and renewal.
+
 ## 0.57.0 - 2026-07-09
 
 - Implement the client-side ``dasobjectstore-remote easyconnect`` browser

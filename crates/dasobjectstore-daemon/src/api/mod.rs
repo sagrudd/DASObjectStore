@@ -8,6 +8,7 @@ mod jobs;
 mod local_admin;
 mod object_browser;
 mod object_store;
+mod remote_easyconnect;
 mod service;
 mod stores;
 
@@ -67,6 +68,20 @@ pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
     OBJECT_STORE_CREATE_CONFIRMATION,
 };
+pub use remote_easyconnect::{
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectObjectStoreGrant,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DISCOVERY_ROUTE,
+    REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE,
+    REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSIONS_ROUTE,
+    REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
+};
 pub use service::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
@@ -98,6 +113,12 @@ pub enum DaemonApiRequest {
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
+    RemoteEasyconnectDiscovery(RemoteEasyconnectDiscoveryRequest),
+    RemoteEasyconnectCreatePairing(RemoteEasyconnectCreatePairingRequest),
+    RemoteEasyconnectApprovePairing(RemoteEasyconnectApprovePairingRequest),
+    RemoteEasyconnectExchangePairing(RemoteEasyconnectExchangePairingRequest),
+    RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionRequest),
+    RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionRequest),
 }
 
 impl DaemonApiRequest {
@@ -126,12 +147,28 @@ impl DaemonApiRequest {
             Self::AssignLocalUserToLocalGroup(request) => {
                 request.validate().map_err(local_admin_validation_error)
             }
+            Self::RemoteEasyconnectCreatePairing(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
+            Self::RemoteEasyconnectApprovePairing(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
+            Self::RemoteEasyconnectExchangePairing(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
+            Self::RemoteEasyconnectRevokeSession(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
+            Self::RemoteEasyconnectRenewSession(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
             | Self::IngestJobStatus(_)
             | Self::JobList(_)
             | Self::JobStatus(_)
-            | Self::ServiceStatus(_) => Ok(()),
+            | Self::ServiceStatus(_)
+            | Self::RemoteEasyconnectDiscovery(_) => Ok(()),
         }
     }
 }
@@ -158,8 +195,44 @@ pub enum DaemonApiResponse {
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
+    RemoteEasyconnectDiscovery(RemoteEasyconnectDiscoveryResponse),
+    RemoteEasyconnectCreatePairing(RemoteEasyconnectCreatePairingResponse),
+    RemoteEasyconnectApprovePairing(RemoteEasyconnectApprovePairingResponse),
+    RemoteEasyconnectExchangePairing(RemoteEasyconnectExchangePairingResponse),
+    RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionResponse),
+    RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
+}
+
+fn remote_easyconnect_validation_error(
+    err: RemoteEasyconnectValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        RemoteEasyconnectValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        RemoteEasyconnectValidationError::InvalidUrl { field, value } => {
+            DaemonRequestValidationError::UnsupportedFieldValue { field, value }
+        }
+        RemoteEasyconnectValidationError::InvalidRequestedLifetime { seconds } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "requested_session_lifetime_seconds",
+                value: seconds.to_string(),
+            }
+        }
+        RemoteEasyconnectValidationError::EmptyObjectStoreGrants => {
+            DaemonRequestValidationError::BlankField {
+                field: "allowed_object_stores",
+            }
+        }
+        RemoteEasyconnectValidationError::GrantWithoutAccess { object_store } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "allowed_object_stores.access",
+                value: object_store,
+            }
+        }
+    }
 }
 
 fn endpoint_inventory_validation_error(
@@ -321,9 +394,13 @@ mod tests {
         DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceStatusRequest,
         ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
         UpsertEndpointInventoryRequest, ENCLOSURE_PREPARE_CONFIRMATION,
         ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -559,6 +636,111 @@ mod tests {
         assert_eq!(encoded["command"], "upsert_endpoint_inventory");
         assert_eq!(encoded["payload"]["endpoint_id"], "nas-staging");
         assert_eq!(encoded["payload"]["kind"], "dasobjectstore_nfs");
+    }
+
+    #[test]
+    fn remote_easyconnect_commands_use_stable_command_names() {
+        let discovery = DaemonApiRequest::RemoteEasyconnectDiscovery(Default::default());
+        let create =
+            DaemonApiRequest::RemoteEasyconnectCreatePairing(create_easyconnect_pairing_request());
+        let exchange = DaemonApiRequest::RemoteEasyconnectExchangePairing(
+            RemoteEasyconnectExchangePairingRequest {
+                pairing_id: "pair-1".to_string(),
+                exchange_code: "exchange-code".to_string(),
+                client_request_id: Some("request-2".to_string()),
+            },
+        );
+        let revoke = DaemonApiRequest::RemoteEasyconnectRevokeSession(
+            RemoteEasyconnectRevokeSessionRequest {
+                session_id: "session-1".to_string(),
+                reason: Some("operator requested revocation".to_string()),
+            },
+        );
+        let renew =
+            DaemonApiRequest::RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionRequest {
+                session_id: "session-1".to_string(),
+                renewal_token: "renewal-token".to_string(),
+                requested_lifetime_seconds: Some(28_800),
+            });
+
+        let discovery = serde_json::to_value(discovery).expect("discovery serializes");
+        let create = serde_json::to_value(create).expect("create serializes");
+        let exchange = serde_json::to_value(exchange).expect("exchange serializes");
+        let revoke = serde_json::to_value(revoke).expect("revoke serializes");
+        let renew = serde_json::to_value(renew).expect("renew serializes");
+
+        assert_eq!(discovery["command"], "remote_easyconnect_discovery");
+        assert_eq!(create["command"], "remote_easyconnect_create_pairing");
+        assert_eq!(
+            create["payload"]["callback_url"],
+            "http://127.0.0.1:49321/callback"
+        );
+        assert_eq!(exchange["command"], "remote_easyconnect_exchange_pairing");
+        assert_eq!(revoke["command"], "remote_easyconnect_revoke_session");
+        assert_eq!(renew["command"], "remote_easyconnect_renew_session");
+        assert_eq!(
+            REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+            "/api/v1/remote/easyconnect/pairings/exchange"
+        );
+    }
+
+    #[test]
+    fn remote_easyconnect_validation_rejects_bad_pairing_contract() {
+        let request = DaemonApiRequest::RemoteEasyconnectCreatePairing(
+            RemoteEasyconnectCreatePairingRequest {
+                client_name: "macbook".to_string(),
+                callback_url: "127.0.0.1:49321/callback".to_string(),
+                requested_object_store: None,
+                requested_session_lifetime_seconds: Some(1),
+                client_request_id: None,
+            },
+        );
+
+        let err = request.validate().expect_err("invalid callback rejected");
+
+        assert!(matches!(
+            err,
+            crate::api::DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "callback_url",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn remote_easyconnect_approval_validates_object_store_grants() {
+        let request = DaemonApiRequest::RemoteEasyconnectApprovePairing(
+            crate::api::RemoteEasyconnectApprovePairingRequest {
+                pairing_id: "pair-1".to_string(),
+                approved_actor: "stephen".to_string(),
+                auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+                allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                    object_store: "zymo_fecal_2025.05".to_string(),
+                    bucket: "dos-zymo-fecal-2025-05".to_string(),
+                    can_read: true,
+                    can_write: true,
+                    writer_group: Some("mnemosyne".to_string()),
+                    object_type: "fastq".to_string(),
+                }],
+                approval_expires_at_utc: "2026-07-09T12:10:00Z".to_string(),
+            },
+        );
+
+        request.validate().expect("approval request validates");
+        let encoded = serde_json::to_value(request).expect("approval serializes");
+
+        assert_eq!(encoded["command"], "remote_easyconnect_approve_pairing");
+        assert_eq!(encoded["payload"]["auth_provider"], "standalone_local_user");
+    }
+
+    fn create_easyconnect_pairing_request() -> RemoteEasyconnectCreatePairingRequest {
+        RemoteEasyconnectCreatePairingRequest {
+            client_name: "macbook".to_string(),
+            callback_url: "http://127.0.0.1:49321/callback".to_string(),
+            requested_object_store: Some("zymo_fecal_2025.05".to_string()),
+            requested_session_lifetime_seconds: Some(28_800),
+            client_request_id: Some("request-1".to_string()),
+        }
     }
 
     #[test]

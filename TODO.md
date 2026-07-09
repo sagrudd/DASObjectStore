@@ -734,7 +734,7 @@ planning are tracked under Milestones 21 and 22.
   authentication page for a host such as `192.168.1.192` and waits for a
   one-time pairing result without requiring the user to paste passwords or S3
   keys into the terminal.
-- [ ] Add server-side pairing/session API contracts for remote agents: create
+- [x] Add server-side pairing/session API contracts for remote agents: create
   pairing challenge, approve after authenticated browser login, exchange for a
   remote upload session, revoke session, and renew an active session during
   long uploads.

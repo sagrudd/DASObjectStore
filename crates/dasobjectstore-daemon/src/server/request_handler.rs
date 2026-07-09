@@ -1116,6 +1116,12 @@ impl DaemonApiRequest {
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
+            Self::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
+            Self::RemoteEasyconnectCreatePairing(_) => "remote_easyconnect_create_pairing",
+            Self::RemoteEasyconnectApprovePairing(_) => "remote_easyconnect_approve_pairing",
+            Self::RemoteEasyconnectExchangePairing(_) => "remote_easyconnect_exchange_pairing",
+            Self::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
+            Self::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
         }
     }
 }

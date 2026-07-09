@@ -65,6 +65,21 @@ Server-side session exchange is the next implementation stage. Until that API
 is available, successful output states that the browser-approved callback was
 received and that session exchange is not yet implemented in the build.
 
+The server-side easyconnect contract is defined as stable daemon/API DTOs for
+the following operations:
+
+* discovery of appliance pairing capabilities;
+* pairing challenge creation for a loopback callback URL;
+* browser-authenticated pairing approval;
+* exchange of the one-time pairing code for a remote upload session;
+* explicit session revocation; and
+* renewal of an active session during long uploads.
+
+Session exchange responses carry temporary S3 credentials, accessible
+ObjectStore grants, expiry time, and renewal metadata. Those credentials are
+intended for the paired ``dasobjectstore-remote`` process only and must not be
+pasted into terminal commands or support tickets.
+
 Use ``--contract`` to inspect the readable product contract without launching a
 browser, or ``--json`` when another tool should consume the contract:
 
