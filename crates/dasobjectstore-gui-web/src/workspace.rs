@@ -8895,6 +8895,51 @@ mod tests {
     }
 
     #[test]
+    fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
+        let source = include_str!("workspace.rs");
+        let css = include_str!("../styles.css");
+
+        assert!(source.contains("<div class=\"dos-metric-grid\">"));
+        assert!(source.contains("home_dashboard_metrics(view).into_iter().map(render_metric_card)"));
+        assert!(source.contains("render_home_throughput_chart(view)"));
+        assert!(source.contains("<section class=\"dos-card dos-home-chart-card\""));
+        assert!(source.contains("<div class=\"dos-home-chart-frame\">"));
+        assert!(source.contains("class=\"dos-home-throughput-chart\""));
+        assert!(source.contains("viewBox={format!"));
+        assert!(source.contains("HOME_THROUGHPUT_CHART_WIDTH"));
+        assert!(source.contains("HOME_THROUGHPUT_CHART_HEIGHT"));
+        assert!(source.contains("<polyline class=\"dos-chart-line\" points={polyline} />"));
+        assert!(source.contains("class=\"dos-chart-point\""));
+        assert!(source.contains("class=\"dos-chart-empty\""));
+        assert!(source.contains("dos-home-telemetry-toolbar"));
+        assert!(source.contains("dos-window-segments"));
+
+        assert!(css.contains(".dos-metric-grid,\n.dos-store-grid,\n.dos-attention-grid,"));
+        assert!(css.contains("grid-template-columns: repeat(4, minmax(0, 1fr));"));
+        assert!(css.contains(".dos-card {\n  min-height: 140px;"));
+        assert!(css.contains(".dos-metric-card strong,\n.dos-enclosure-card strong,"));
+        assert!(css.contains("overflow-wrap: anywhere;"));
+        assert!(css.contains(".dos-home-telemetry-toolbar {\n  display: flex;\n  flex-wrap: wrap;"));
+        assert!(css.contains(".dos-window-segments {\n  display: flex;\n  flex-wrap: wrap;"));
+        assert!(css.contains(".dos-window-segment {\n  min-height: 32px;"));
+        assert!(css.contains(".dos-home-chart-card {\n  min-height: 280px;"));
+        assert!(css.contains(".dos-home-chart-frame {\n  height: 210px;\n  overflow: hidden;"));
+        assert!(css.contains(
+            ".dos-home-throughput-chart {\n  display: block;\n  width: 100%;\n  height: 210px;"
+        ));
+        assert!(css.contains(".dos-chart-axis {\n  stroke: #70828a;"));
+        assert!(css.contains("vector-effect: non-scaling-stroke;"));
+        assert!(css.contains(".dos-chart-label,\n.dos-chart-empty {\n  fill: #56666d;"));
+        assert!(css.contains("@media (max-width: 980px)"));
+        assert!(css.contains(".dos-metric-grid,\n  .dos-store-grid,\n  .dos-activity-grid {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"));
+        assert!(css.contains("@media (max-width: 640px)"));
+        assert!(css.contains(
+            ".dos-metric-grid,\n  .dos-store-grid,\n  .dos-activity-grid,\n  .dos-activity-queues,"
+        ));
+        assert!(css.contains("grid-template-columns: 1fr;"));
+    }
+
+    #[test]
     fn home_dashboard_attention_surfaces_capacity_enclosure_and_store_signals() {
         let payload = serde_json::json!({
             "schema_version": "dasobjectstore.web_redesign.v1",

@@ -1008,9 +1008,12 @@ planning are tracked under Milestones 21 and 22.
   telemetry cards, non-default telemetry windows, per-disk IO identity, sparse
   and unavailable telemetry states, and invalid/missing throughput chart
   samples.
-- [ ] Add screenshot or DOM regression coverage proving the Home telemetry
+- [x] Add screenshot or DOM regression coverage proving the Home telemetry
   cards and charts do not jitter, overlap, or resize unexpectedly across
   desktop and mobile layouts.
+  Completed by adding a Home telemetry DOM/CSS regression contract test that
+  pins the metric grid, time-window controls, fixed SVG chart frame, chart
+  labels/points, text wrapping, and desktop/mobile responsive breakpoints.
 - [ ] Update `docs/user/web-interface.rst` with the Home telemetry cards,
   time-window control, missing-data interpretation, update cadence, and
   administrator/operator expectations.
