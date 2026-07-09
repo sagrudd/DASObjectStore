@@ -15,6 +15,8 @@ pub const REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE: &str =
     "/api/v1/remote/easyconnect/sessions/{session_id}";
 pub const REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE: &str =
     "/api/v1/remote/easyconnect/sessions/{session_id}/renew";
+pub const REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE: &str =
+    "/v1/dasobjectstore/remote/uploads/handoffs";
 pub const REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS: u64 = 60;
 pub const REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS: u64 = 8 * 60 * 60;
 pub const REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
@@ -287,6 +289,147 @@ impl RemoteEasyconnectObjectStoreAccessPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEasyconnectUploadHandoffMode {
+    LoopbackPost,
+    BrowserMediated,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEasyconnectUploadHandoffState {
+    ConfirmationRequired,
+    ReadyForAgent,
+    AgentUnreachable,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadSelectionEntry {
+    pub display_path: String,
+    pub size_bytes: u64,
+}
+
+impl RemoteEasyconnectUploadSelectionEntry {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        require_non_blank("selected_files.display_path", &self.display_path)?;
+        if display_path_is_absolute(&self.display_path) {
+            return Err(
+                RemoteEasyconnectValidationError::AbsoluteUploadSelectionPath {
+                    display_path: self.display_path.clone(),
+                },
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadHandoffRequest {
+    pub session_id: String,
+    pub object_store: String,
+    pub bucket: String,
+    pub local_agent_base_url: String,
+    pub selected_files: Vec<RemoteEasyconnectUploadSelectionEntry>,
+    pub total_bytes: u64,
+    pub browser_origin: String,
+    pub client_request_id: Option<String>,
+}
+
+impl RemoteEasyconnectUploadHandoffRequest {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        require_non_blank("session_id", &self.session_id)?;
+        require_non_blank("object_store", &self.object_store)?;
+        require_non_blank("bucket", &self.bucket)?;
+        require_loopback_http_url("local_agent_base_url", &self.local_agent_base_url)?;
+        require_http_url("browser_origin", &self.browser_origin)?;
+        validate_optional_non_blank("client_request_id", self.client_request_id.as_deref())?;
+        if self.selected_files.is_empty() {
+            return Err(RemoteEasyconnectValidationError::EmptyUploadSelection);
+        }
+        let mut selected_bytes = 0_u64;
+        for file in &self.selected_files {
+            file.validate()?;
+            selected_bytes = selected_bytes.saturating_add(file.size_bytes);
+        }
+        if selected_bytes != self.total_bytes {
+            return Err(
+                RemoteEasyconnectValidationError::UploadSelectionByteMismatch {
+                    expected: selected_bytes,
+                    actual: self.total_bytes,
+                },
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadHandoffResponse {
+    pub handoff_id: String,
+    pub mode: RemoteEasyconnectUploadHandoffMode,
+    pub state: RemoteEasyconnectUploadHandoffState,
+    pub local_agent_handoff_url: String,
+    pub confirmation_phrase: String,
+    pub path_privacy: String,
+    pub message: String,
+    pub failure_states: Vec<RemoteEasyconnectUploadHandoffFailure>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadHandoffFailure {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
+pub fn plan_remote_easyconnect_upload_handoff(
+    request: RemoteEasyconnectUploadHandoffRequest,
+) -> Result<RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectValidationError> {
+    request.validate()?;
+    let handoff_id = request
+        .client_request_id
+        .clone()
+        .unwrap_or_else(|| format!("handoff-{}", request.session_id));
+    let base_url = request.local_agent_base_url.trim_end_matches('/');
+    Ok(RemoteEasyconnectUploadHandoffResponse {
+        handoff_id,
+        mode: RemoteEasyconnectUploadHandoffMode::LoopbackPost,
+        state: RemoteEasyconnectUploadHandoffState::ConfirmationRequired,
+        local_agent_handoff_url: format!("{base_url}{REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE}"),
+        confirmation_phrase: format!("confirm upload to {}", request.object_store),
+        path_privacy: "browser sends relative display paths and byte counts only; absolute local paths stay with the paired dasobjectstore-remote agent".to_string(),
+        message: "Browser selection metadata is ready for explicit user confirmation before the local agent performs byte transfer.".to_string(),
+        failure_states: remote_upload_handoff_failure_states(),
+    })
+}
+
+fn remote_upload_handoff_failure_states() -> Vec<RemoteEasyconnectUploadHandoffFailure> {
+    vec![
+        RemoteEasyconnectUploadHandoffFailure {
+            code: "agent_unreachable".to_string(),
+            message: "The browser could not reach the paired dasobjectstore-remote loopback agent."
+                .to_string(),
+            retryable: true,
+        },
+        RemoteEasyconnectUploadHandoffFailure {
+            code: "confirmation_cancelled".to_string(),
+            message:
+                "The user cancelled the upload before the local agent received transfer authority."
+                    .to_string(),
+            retryable: true,
+        },
+        RemoteEasyconnectUploadHandoffFailure {
+            code: "path_privacy_violation".to_string(),
+            message:
+                "The handoff attempted to send absolute source paths through the browser contract."
+                    .to_string(),
+            retryable: false,
+        },
+    ]
+}
+
 pub fn remote_easyconnect_object_store_grants_for_actor(
     actor: &DaemonLocalActor,
     stores: &[RemoteEasyconnectObjectStoreAccessPolicy],
@@ -317,9 +460,13 @@ pub fn remote_easyconnect_object_store_grants_for_actor(
 pub enum RemoteEasyconnectValidationError {
     BlankField { field: &'static str },
     InvalidUrl { field: &'static str, value: String },
+    InvalidLoopbackUrl { field: &'static str, value: String },
     InvalidRequestedLifetime { seconds: u64 },
     EmptyObjectStoreGrants,
     GrantWithoutAccess { object_store: String },
+    EmptyUploadSelection,
+    AbsoluteUploadSelectionPath { display_path: String },
+    UploadSelectionByteMismatch { expected: u64, actual: u64 },
 }
 
 pub fn resolve_remote_easyconnect_session_lifetime_seconds(
@@ -347,6 +494,10 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
                     "{field} must be an http or https URL, got {value}"
                 )
             }
+            Self::InvalidLoopbackUrl { field, value } => write!(
+                formatter,
+                "{field} must be a loopback http URL for the paired local agent, got {value}"
+            ),
             Self::InvalidRequestedLifetime { seconds } => write!(
                 formatter,
                 "requested session lifetime must be between 60 and 86400 seconds, got {seconds}"
@@ -357,6 +508,17 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
             Self::GrantWithoutAccess { object_store } => write!(
                 formatter,
                 "object store grant for {object_store} must allow read or write access"
+            ),
+            Self::EmptyUploadSelection => {
+                formatter.write_str("remote upload handoff requires at least one selected file")
+            }
+            Self::AbsoluteUploadSelectionPath { display_path } => write!(
+                formatter,
+                "remote upload handoff display path must be relative for privacy, got {display_path}"
+            ),
+            Self::UploadSelectionByteMismatch { expected, actual } => write!(
+                formatter,
+                "remote upload handoff selected file bytes total {expected}, got declared total {actual}"
             ),
         }
     }
@@ -399,6 +561,29 @@ fn require_http_url(
     }
 }
 
+fn require_loopback_http_url(
+    field: &'static str,
+    value: &str,
+) -> Result<(), RemoteEasyconnectValidationError> {
+    require_non_blank(field, value)?;
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("http://127.0.0.1:")
+        || lower.starts_with("http://localhost:")
+        || lower.starts_with("http://[::1]:")
+    {
+        Ok(())
+    } else {
+        Err(RemoteEasyconnectValidationError::InvalidLoopbackUrl {
+            field,
+            value: value.to_string(),
+        })
+    }
+}
+
+fn display_path_is_absolute(value: &str) -> bool {
+    value.starts_with('/') || value.starts_with('\\') || value.as_bytes().get(1) == Some(&b':')
+}
+
 fn validate_requested_lifetime(
     seconds: Option<u64>,
 ) -> Result<(), RemoteEasyconnectValidationError> {
@@ -416,12 +601,14 @@ fn validate_requested_lifetime(
 #[cfg(test)]
 mod tests {
     use super::{
-        remote_easyconnect_object_store_grants_for_actor,
+        plan_remote_easyconnect_upload_handoff, remote_easyconnect_object_store_grants_for_actor,
         remote_easyconnect_renew_after_offset_seconds,
         resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
         RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectSessionPolicy, RemoteEasyconnectValidationError,
+        RemoteEasyconnectSessionPolicy, RemoteEasyconnectUploadHandoffMode,
+        RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffState,
+        RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
         REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
         REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
     };
@@ -629,6 +816,83 @@ mod tests {
         assert!(grants[0].can_write);
     }
 
+    #[test]
+    fn plans_loopback_remote_upload_handoff_with_confirmation_and_privacy() {
+        let response =
+            plan_remote_easyconnect_upload_handoff(upload_handoff_request()).expect("handoff plan");
+
+        assert_eq!(response.handoff_id, "handoff-1");
+        assert_eq!(
+            response.mode,
+            RemoteEasyconnectUploadHandoffMode::LoopbackPost
+        );
+        assert_eq!(
+            response.state,
+            RemoteEasyconnectUploadHandoffState::ConfirmationRequired
+        );
+        assert_eq!(
+            response.local_agent_handoff_url,
+            "http://127.0.0.1:49329/v1/dasobjectstore/remote/uploads/handoffs"
+        );
+        assert_eq!(
+            response.confirmation_phrase,
+            "confirm upload to zymo_fecal_2025.05"
+        );
+        assert!(response.path_privacy.contains("relative display paths"));
+        assert!(response
+            .failure_states
+            .iter()
+            .any(|failure| failure.code == "agent_unreachable" && failure.retryable));
+    }
+
+    #[test]
+    fn rejects_non_loopback_remote_upload_handoff_url() {
+        let mut request = upload_handoff_request();
+        request.local_agent_base_url = "https://192.168.1.23:49329".to_string();
+
+        let err = plan_remote_easyconnect_upload_handoff(request)
+            .expect_err("non-loopback handoff rejected");
+
+        assert!(matches!(
+            err,
+            RemoteEasyconnectValidationError::InvalidLoopbackUrl {
+                field: "local_agent_base_url",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_or_inconsistent_remote_upload_selection() {
+        let mut empty = upload_handoff_request();
+        empty.selected_files.clear();
+        assert!(matches!(
+            plan_remote_easyconnect_upload_handoff(empty).expect_err("empty selection rejected"),
+            RemoteEasyconnectValidationError::EmptyUploadSelection
+        ));
+
+        let mut mismatch = upload_handoff_request();
+        mismatch.total_bytes = 99;
+        assert!(matches!(
+            plan_remote_easyconnect_upload_handoff(mismatch).expect_err("byte mismatch rejected"),
+            RemoteEasyconnectValidationError::UploadSelectionByteMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_absolute_browser_display_paths_for_privacy() {
+        let mut request = upload_handoff_request();
+        request.selected_files[0].display_path = "/Users/stephen/private.fastq.gz".to_string();
+
+        let err = plan_remote_easyconnect_upload_handoff(request)
+            .expect_err("absolute source path rejected");
+
+        assert!(matches!(
+            err,
+            RemoteEasyconnectValidationError::AbsoluteUploadSelectionPath { .. }
+        ));
+    }
+
     fn store(object_store: &str, bucket: &str) -> RemoteEasyconnectObjectStoreAccessPolicy {
         RemoteEasyconnectObjectStoreAccessPolicy {
             object_store: object_store.to_string(),
@@ -639,6 +903,28 @@ mod tests {
             public_read: false,
             writable: true,
             object_type: "fastq".to_string(),
+        }
+    }
+
+    fn upload_handoff_request() -> RemoteEasyconnectUploadHandoffRequest {
+        RemoteEasyconnectUploadHandoffRequest {
+            session_id: "session-1".to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            bucket: "dos-zymo-fecal-2025-05".to_string(),
+            local_agent_base_url: "http://127.0.0.1:49329".to_string(),
+            selected_files: vec![
+                RemoteEasyconnectUploadSelectionEntry {
+                    display_path: "zymo/raw/r1.fastq.gz".to_string(),
+                    size_bytes: 1024,
+                },
+                RemoteEasyconnectUploadSelectionEntry {
+                    display_path: "zymo/raw/r2.fastq.gz".to_string(),
+                    size_bytes: 2048,
+                },
+            ],
+            total_bytes: 3072,
+            browser_origin: "https://192.168.1.192:8448".to_string(),
+            client_request_id: Some("handoff-1".to_string()),
         }
     }
 

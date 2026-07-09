@@ -69,7 +69,7 @@ pub use object_store::{
     OBJECT_STORE_CREATE_CONFIRMATION,
 };
 pub use remote_easyconnect::{
-    remote_easyconnect_object_store_grants_for_actor,
+    plan_remote_easyconnect_upload_handoff, remote_easyconnect_object_store_grants_for_actor,
     remote_easyconnect_renew_after_offset_seconds,
     resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectAuthProvider,
@@ -80,9 +80,12 @@ pub use remote_easyconnect::{
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
     RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
-    RemoteEasyconnectSessionRenewal, RemoteEasyconnectValidationError,
+    RemoteEasyconnectSessionRenewal, RemoteEasyconnectUploadHandoffFailure,
+    RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
+    RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
+    RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
     REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_DISCOVERY_ROUTE,
-    REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
+    REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE, REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
     REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
     REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS, REMOTE_EASYCONNECT_SESSIONS_ROUTE,
@@ -221,6 +224,9 @@ fn remote_easyconnect_validation_error(
         RemoteEasyconnectValidationError::InvalidUrl { field, value } => {
             DaemonRequestValidationError::UnsupportedFieldValue { field, value }
         }
+        RemoteEasyconnectValidationError::InvalidLoopbackUrl { field, value } => {
+            DaemonRequestValidationError::UnsupportedFieldValue { field, value }
+        }
         RemoteEasyconnectValidationError::InvalidRequestedLifetime { seconds } => {
             DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "requested_session_lifetime_seconds",
@@ -232,10 +238,27 @@ fn remote_easyconnect_validation_error(
                 field: "allowed_object_stores",
             }
         }
+        RemoteEasyconnectValidationError::EmptyUploadSelection => {
+            DaemonRequestValidationError::BlankField {
+                field: "selected_files",
+            }
+        }
         RemoteEasyconnectValidationError::GrantWithoutAccess { object_store } => {
             DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "allowed_object_stores.access",
                 value: object_store,
+            }
+        }
+        RemoteEasyconnectValidationError::AbsoluteUploadSelectionPath { display_path } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "selected_files.display_path",
+                value: display_path,
+            }
+        }
+        RemoteEasyconnectValidationError::UploadSelectionByteMismatch { expected, actual } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "total_bytes",
+                value: format!("expected {expected}, got {actual}"),
             }
         }
     }

@@ -752,7 +752,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add a polished drag-and-drop file/folder upload panel to the remote-upload
   page, using browser filesystem metadata for selection while delegating actual
   byte transfer to the paired `dasobjectstore-remote` process.
-- [ ] Define the browser-to-local-agent coordination mechanism for drag/drop
+- [x] Define the browser-to-local-agent coordination mechanism for drag/drop
   selections, including local loopback or browser-mediated handoff, explicit
   user confirmation, path privacy, and clear errors when the paired agent is not
   reachable.

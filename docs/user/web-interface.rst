@@ -704,10 +704,15 @@ filesystem metadata is used to summarize the selected target, file count,
 folder count, total bytes, largest file, and representative paths before any
 transfer begins. The browser does not perform the byte transfer itself:
 confirmed uploads are handed to the paired ``dasobjectstore-remote`` local
-agent so appliance S3 credentials do not need to be exposed in browser UI. The
-local-agent coordination mechanism is still a reserved workflow, so the panel
-is currently a selection and confirmation-preparation surface rather than an
-active transfer control.
+agent so appliance S3 credentials do not need to be exposed in browser UI.
+
+The handoff contract is loopback-only by default. The browser prepares relative
+display paths and byte counts, validates the selected ObjectStore, and requires
+an explicit confirmation phrase such as ``confirm upload to <ObjectStore>``
+before posting the handoff manifest to the paired local agent. Absolute local
+paths are intentionally excluded from the browser contract. If the agent is not
+reachable, the page must report an ``agent_unreachable`` state and keep the
+selection available for retry or cancellation.
 
 Bioinformatics Workspace
 ------------------------

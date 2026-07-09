@@ -7,7 +7,7 @@ pub mod runtime;
 pub mod server;
 
 pub use api::{
-    remote_easyconnect_object_store_grants_for_actor,
+    plan_remote_easyconnect_upload_handoff, remote_easyconnect_object_store_grants_for_actor,
     remote_easyconnect_renew_after_offset_seconds,
     resolve_remote_easyconnect_session_lifetime_seconds, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
@@ -57,12 +57,16 @@ pub use api::{
     RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
     RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
-    RemoteEasyconnectSessionRenewal, RemoteEasyconnectValidationError, StoreInventoryItem,
+    RemoteEasyconnectSessionRenewal, RemoteEasyconnectUploadHandoffFailure,
+    RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
+    RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
+    RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError, StoreInventoryItem,
     StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_BROWSER_MAX_PAGE_LIMIT,
     OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
-    REMOTE_EASYCONNECT_DISCOVERY_ROUTE, REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
+    REMOTE_EASYCONNECT_DISCOVERY_ROUTE, REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE,
+    REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
     REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
     REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS, REMOTE_EASYCONNECT_SESSIONS_ROUTE,

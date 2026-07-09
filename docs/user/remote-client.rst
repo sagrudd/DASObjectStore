@@ -137,6 +137,26 @@ Expected failure states include unreachable discovery URL, untrusted appliance
 identity, callback bind failure, browser launch failure, denied login, expired
 pairing, denied session exchange, and local agent disconnection.
 
+Browser-To-Agent Upload Handoff
+-------------------------------
+
+After easyconnect login, the appliance Web ``Remote Upload`` page can prepare a
+browser-to-local-agent handoff for selected files or folders. The handoff uses
+a loopback ``dasobjectstore-remote`` endpoint such as
+``http://127.0.0.1:<port>/v1/dasobjectstore/remote/uploads/handoffs``. The
+browser sends only the target ObjectStore, derived bucket, selected relative
+display paths, byte counts, and a client handoff identifier. Absolute local
+paths stay private to the remote computer and are not part of the browser
+payload.
+
+The local agent must require explicit user confirmation before it accepts
+transfer authority. The confirmation phrase is derived from the ObjectStore,
+for example ``confirm upload to zymo_fecal_2025.05``. If the loopback agent is
+not reachable, the browser reports ``agent_unreachable`` and allows the user to
+retry after restarting ``dasobjectstore-remote``. If the user cancels before
+confirmation, no transfer authority or appliance credentials are handed to the
+agent.
+
 Configure a Remote Host
 -----------------------
 

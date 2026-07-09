@@ -99,6 +99,7 @@ fn ingest_request(client_request_id: &str) -> SubmitIngestFilesRequest {
         object_type: ObjectType::Naive,
         copies: Some(1),
         conflict_policy: DaemonIngestConflictPolicy::Strict,
+        hdd_workers: None,
         dry_run: false,
         client_request_id: Some(client_request_id.to_string()),
     }
