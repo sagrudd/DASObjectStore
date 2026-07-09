@@ -306,7 +306,10 @@ count and queue depths used by this decision, so clients should treat
 ``pause_new_transfers`` and ``reject_new_transfers`` as authoritative. Daemon
 upload workers reserve S3 intake capacity with a transfer permit and release it
 when the transfer completes or fails. The shared worker wrapper checks admission
-before invoking transfer code, so blocked intake does not start partially.
+before invoking transfer code, so blocked intake does not start partially. The
+daemon job wrapper carries the remote upload job id, target ObjectStore, source
+byte count, final outcome, and runtime queue snapshot back to the future job
+registry/event stream.
 
 Credential Helper Contract
 --------------------------

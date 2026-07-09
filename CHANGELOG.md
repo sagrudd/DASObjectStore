@@ -8,6 +8,10 @@ agreement before landing.
 
 ## 0.60.3 - 2026-07-09
 
+- Add a daemon remote-upload S3 transfer job wrapper that records job identity,
+  target ObjectStore, source bytes, admission/transfer outcome, and runtime
+  queue state while enforcing the central admission gate before transfer code
+  runs.
 - Include Prosopikon in ``make pull`` sibling repository discovery and add a
   Web packaging preflight that verifies the local Prosopikon checkout exposes
   the required ``auth`` and ``pam`` features before Trunk starts, avoiding the

@@ -5,7 +5,10 @@ use crate::api::{
 use dasobjectstore_core::remote_upload::{
     RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
 };
-use std::sync::{Arc, Mutex};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 #[derive(Debug, Default)]
 pub struct RemoteUploadAdmissionGate {
@@ -92,6 +95,35 @@ impl RemoteUploadAdmissionGate {
         result
     }
 
+    pub fn run_s3_transfer_job<E>(
+        self: &Arc<Self>,
+        job: RemoteUploadS3TransferJob,
+        transfer: impl FnOnce() -> Result<(), E>,
+    ) -> RemoteUploadS3TransferJobSummary
+    where
+        E: fmt::Display,
+    {
+        let outcome = match self.run_s3_transfer(job.policy, job.ssd_pressure, transfer) {
+            Ok(()) => RemoteUploadS3TransferJobOutcome::Completed,
+            Err(RemoteUploadS3TransferRunError::Admission(decision)) => {
+                RemoteUploadS3TransferJobOutcome::NotAdmitted(decision)
+            }
+            Err(RemoteUploadS3TransferRunError::Transfer(error)) => {
+                RemoteUploadS3TransferJobOutcome::Failed {
+                    error: error.to_string(),
+                }
+            }
+        };
+
+        RemoteUploadS3TransferJobSummary {
+            job_id: job.job_id,
+            object_store: job.object_store,
+            source_bytes: job.source_bytes,
+            outcome,
+            runtime_after: self.snapshot(),
+        }
+    }
+
     fn try_begin_s3_transfer_inner(
         &self,
         policy: RemoteUploadBackpressurePolicy,
@@ -156,6 +188,31 @@ pub struct RemoteUploadQueueDepths {
     pub verification_queue_depth: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadS3TransferJob {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+    pub policy: RemoteUploadBackpressurePolicy,
+    pub ssd_pressure: DaemonSsdPressure,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadS3TransferJobSummary {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+    pub outcome: RemoteUploadS3TransferJobOutcome,
+    pub runtime_after: RemoteUploadRuntimeSnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RemoteUploadS3TransferJobOutcome {
+    Completed,
+    Failed { error: String },
+    NotAdmitted(RemoteEasyconnectUploadAdmissionDecision),
+}
+
 fn admission_decision_for_state(
     policy: RemoteUploadBackpressurePolicy,
     ssd_pressure: DaemonSsdPressure,
@@ -173,7 +230,10 @@ fn admission_decision_for_state(
 
 #[cfg(test)]
 mod tests {
-    use super::{RemoteUploadAdmissionGate, RemoteUploadQueueDepths};
+    use super::{
+        RemoteUploadAdmissionGate, RemoteUploadQueueDepths, RemoteUploadS3TransferJob,
+        RemoteUploadS3TransferJobOutcome,
+    };
     use crate::api::{DaemonSsdPressure, RemoteEasyconnectUploadBackpressureReason};
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
@@ -340,5 +400,87 @@ mod tests {
         let snapshot = gate.finish_s3_transfer();
 
         assert_eq!(snapshot.active_s3_transfers, 0);
+    }
+
+    #[test]
+    fn s3_transfer_job_runs_through_gate_and_reports_completion() {
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let mut called = false;
+
+        let summary = gate.run_s3_transfer_job(
+            transfer_job(RemoteUploadBackpressurePolicy::default()),
+            || {
+                called = true;
+                assert_eq!(gate.snapshot().active_s3_transfers, 1);
+                Ok::<(), &'static str>(())
+            },
+        );
+
+        assert!(called);
+        assert_eq!(summary.job_id, "remote-upload-job-001");
+        assert_eq!(summary.object_store, "zymo_fecal_2025.05");
+        assert_eq!(summary.source_bytes, 42);
+        assert_eq!(summary.outcome, RemoteUploadS3TransferJobOutcome::Completed);
+        assert_eq!(summary.runtime_after.active_s3_transfers, 0);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+    }
+
+    #[test]
+    fn s3_transfer_job_reports_transfer_failure_and_releases_capacity() {
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+
+        let summary = gate.run_s3_transfer_job(
+            transfer_job(RemoteUploadBackpressurePolicy::default()),
+            || {
+                assert_eq!(gate.snapshot().active_s3_transfers, 1);
+                Err::<(), _>("multipart upload failed")
+            },
+        );
+
+        assert_eq!(
+            summary.outcome,
+            RemoteUploadS3TransferJobOutcome::Failed {
+                error: "multipart upload failed".to_string()
+            }
+        );
+        assert_eq!(summary.runtime_after.active_s3_transfers, 0);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+    }
+
+    #[test]
+    fn s3_transfer_job_reports_admission_failure_without_running_transfer() {
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let policy = RemoteUploadBackpressurePolicy::default();
+        let _first = gate
+            .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
+            .expect("first transfer admitted");
+        let _second = gate
+            .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
+            .expect("second transfer admitted");
+
+        let summary = gate
+            .run_s3_transfer_job(transfer_job(policy), || -> Result<(), &'static str> {
+                panic!("blocked job transfer must not execute")
+            });
+
+        let RemoteUploadS3TransferJobOutcome::NotAdmitted(decision) = summary.outcome else {
+            panic!("expected admission failure");
+        };
+        assert_eq!(
+            decision.action,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+        );
+        assert_eq!(summary.runtime_after.active_s3_transfers, 2);
+        assert_eq!(gate.snapshot().active_s3_transfers, 2);
+    }
+
+    fn transfer_job(policy: RemoteUploadBackpressurePolicy) -> RemoteUploadS3TransferJob {
+        RemoteUploadS3TransferJob {
+            job_id: "remote-upload-job-001".to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            policy,
+            ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+        }
     }
 }

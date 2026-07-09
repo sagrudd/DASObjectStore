@@ -803,9 +803,13 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add a daemon remote-upload S3 transfer execution wrapper that refuses
   blocked admission before invoking transfer code and releases capacity after
   success or failure.
+- [x] Add a daemon remote-upload S3 transfer job wrapper that carries job
+  identity, target ObjectStore, source bytes, admission/transfer outcome, and
+  runtime queue state while enforcing the central admission gate.
 - [ ] Wire the daemon runtime remote-upload admission gate into concrete upload
-  workers/jobs so SSD staging, S3/object-service intake, HDD landing workers,
-  and verification cannot grow without bounds.
+  byte-transfer workers, daemon job registry, progress events, and HDD/verify
+  queue observers so SSD staging, S3/object-service intake, HDD landing
+  workers, and verification cannot grow without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
   expired pairings, and interrupted browser tabs.
