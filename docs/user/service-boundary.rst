@@ -46,6 +46,11 @@ and writes the current JSON state under:
 The telemetry directory is daemon-owned state; operators and Web/API readers
 should treat the JSON file as read-only and use supported interfaces as they are
 added.
+When managed HDD roots contain ``.dasobjectstore/device.env`` markers with
+``role=hdd:<disk-id>``, the daemon records their capacity in the same telemetry
+sample. Marker fields such as ``label``, ``device``, ``filesystem``, and
+``enclosure_id`` are preserved when present so operator surfaces can group disk
+capacity by enclosure as the hardware registry matures.
 
 Packaged installations restrict the socket directory and socket file to the
 ``dasobjectstore`` group. A local user must be in this transport group before

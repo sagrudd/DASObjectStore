@@ -1,5 +1,6 @@
 use dasobjectstore_daemon::{
-    appliance_telemetry_state_path, collect_linux_cpu_telemetry, collect_linux_memory_telemetry,
+    appliance_telemetry_state_path, collect_linux_cpu_telemetry,
+    collect_linux_disk_capacity_telemetry, collect_linux_memory_telemetry,
     parse_linux_cpu_snapshot, validate_appliance_telemetry_cadence,
     ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError,
     ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError,
@@ -107,6 +108,45 @@ fn cpu_memory_telemetry_serialize_with_schema_field_names() {
             "missing_reason": null
         })
     );
+}
+
+#[test]
+fn disk_capacity_telemetry_reads_managed_hdd_root_markers() {
+    let root = temp_root("appliance-telemetry-hdd-capacity");
+    let hdd_root = root.join("hdd");
+    let disk_root = hdd_root.join("disk-a");
+    fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
+    fs::write(
+        disk_root.join(".dasobjectstore/device.env"),
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\ndevice=/dev/disk/by-id/fixture-a\nfilesystem=ext4\n",
+    )
+    .expect("device marker written");
+
+    let (enclosures, disks) =
+        collect_linux_disk_capacity_telemetry(&hdd_root).expect("capacity telemetry");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].disk_id, "qnap-a");
+    assert_eq!(disks[0].label.as_deref(), Some("QNAP bay 1"));
+    assert!(disks[0].mount_path.ends_with("/hdd/disk-a"));
+    assert_eq!(disks[0].role, "hdd");
+    assert_eq!(disks[0].enclosure_id.as_deref(), Some("qnap-tl-d800c-01"));
+    assert_eq!(
+        disks[0].device_path.as_deref(),
+        Some("/dev/disk/by-id/fixture-a")
+    );
+    assert_eq!(disks[0].filesystem.as_deref(), Some("ext4"));
+    assert!(disks[0].total_bytes.unwrap_or_default() > 0);
+    assert!(disks[0].available_bytes.unwrap_or_default() > 0);
+    assert!(disks[0].used_percent.is_some());
+    assert_eq!(disks[0].missing_reason, None);
+
+    assert_eq!(enclosures.len(), 1);
+    assert_eq!(enclosures[0].enclosure_id, "qnap-tl-d800c-01");
+    assert_eq!(enclosures[0].disk_ids, vec!["qnap-a".to_string()]);
+    assert_eq!(enclosures[0].total_bytes, disks[0].total_bytes);
+    assert_eq!(enclosures[0].available_bytes, disks[0].available_bytes);
 }
 
 #[test]
@@ -290,6 +330,8 @@ impl ApplianceHostTelemetryCollector for FakeCollector {
                 swap_used_bytes: Some(0),
                 missing_reason: None,
             },
+            enclosures: Vec::new(),
+            disks: Vec::new(),
             cpu_snapshot: snapshot,
         })
     }

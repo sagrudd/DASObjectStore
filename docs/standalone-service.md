@@ -193,6 +193,12 @@ The initial telemetry state file is:
 enables telemetry with a 30 second cadence by default; the initial supported
 cadences are 6 seconds for fast local diagnostics and 30 seconds for normal
 appliance operation.
+Each sample includes CPU, memory, and managed HDD capacity data when
+`/srv/dasobjectstore/hdd/<disk-id>/.dasobjectstore/device.env` declares
+`role=hdd:<disk-id>`. The collector preserves disk ID, label, mount path,
+role, filesystem, device marker data, and marker-provided `enclosure_id` values
+so Web/API readers can group capacity by enclosure when that association is
+available.
 
 Writers SHALL update the file atomically by writing a schema-valid document to
 a temporary file in the same directory, fsyncing the file, applying final

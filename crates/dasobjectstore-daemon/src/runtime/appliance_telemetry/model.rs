@@ -39,6 +39,8 @@ pub struct LinuxCpuSnapshot {
 pub struct LinuxHostTelemetrySample {
     pub cpu: ApplianceCpuTelemetry,
     pub memory: ApplianceMemoryTelemetry,
+    pub enclosures: Vec<ApplianceEnclosureTelemetry>,
+    pub disks: Vec<ApplianceDiskCapacityTelemetry>,
     pub cpu_snapshot: LinuxCpuSnapshot,
 }
 
@@ -66,9 +68,40 @@ pub struct ApplianceTelemetrySample {
     pub missing_data: Vec<ApplianceTelemetryMissingDataMarker>,
     pub cpu: ApplianceCpuTelemetry,
     pub memory: ApplianceMemoryTelemetry,
-    pub enclosures: Vec<serde_json::Value>,
-    pub disks: Vec<serde_json::Value>,
+    pub enclosures: Vec<ApplianceEnclosureTelemetry>,
+    pub disks: Vec<ApplianceDiskCapacityTelemetry>,
     pub sessions: ApplianceSessionTelemetry,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplianceEnclosureTelemetry {
+    pub enclosure_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub disk_ids: Vec<String>,
+    pub total_bytes: Option<u64>,
+    pub available_bytes: Option<u64>,
+    pub used_percent: Option<f64>,
+    pub missing_reason: Option<ApplianceTelemetryMissingReason>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplianceDiskCapacityTelemetry {
+    pub disk_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub mount_path: String,
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enclosure_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filesystem: Option<String>,
+    pub total_bytes: Option<u64>,
+    pub available_bytes: Option<u64>,
+    pub used_percent: Option<f64>,
+    pub missing_reason: Option<ApplianceTelemetryMissingReason>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -114,6 +147,7 @@ pub struct ApplianceSessionTelemetry {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplianceTelemetryCollectorError {
     Io { path: PathBuf, message: String },
+    InvalidDeviceMarker { path: PathBuf, message: String },
     InvalidProcStat(String),
 }
 
@@ -122,7 +156,12 @@ impl fmt::Display for ApplianceTelemetryCollectorError {
         match self {
             Self::Io { path, message } => write!(
                 formatter,
-                "read Linux telemetry file {}: {message}",
+                "read Linux telemetry path {}: {message}",
+                path.display()
+            ),
+            Self::InvalidDeviceMarker { path, message } => write!(
+                formatter,
+                "invalid DASObjectStore device marker {}: {message}",
                 path.display()
             ),
             Self::InvalidProcStat(message) => write!(formatter, "invalid /proc/stat: {message}"),

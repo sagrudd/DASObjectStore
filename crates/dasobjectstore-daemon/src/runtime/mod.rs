@@ -20,9 +20,10 @@ pub use admin_jobs::{
 };
 pub use appliance_telemetry::{
     appliance_sample_set, appliance_telemetry_state_path, collect_linux_cpu_telemetry,
-    collect_linux_memory_telemetry, parse_linux_cpu_snapshot, validate_appliance_telemetry_cadence,
-    ApplianceCpuTelemetry, ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry,
-    ApplianceSessionTelemetry, ApplianceTelemetryCollectionQuality,
+    collect_linux_disk_capacity_telemetry, collect_linux_memory_telemetry,
+    parse_linux_cpu_snapshot, validate_appliance_telemetry_cadence, ApplianceCpuTelemetry,
+    ApplianceDiskCapacityTelemetry, ApplianceEnclosureTelemetry, ApplianceHostTelemetryCollector,
+    ApplianceMemoryTelemetry, ApplianceSessionTelemetry, ApplianceTelemetryCollectionQuality,
     ApplianceTelemetryCollectorError, ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig,
     ApplianceTelemetryLoopError, ApplianceTelemetryMissingDataMarker,
     ApplianceTelemetryMissingReason, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
@@ -31,6 +32,7 @@ pub use appliance_telemetry::{
     LinuxProcTelemetryCollector, ThreadApplianceTelemetrySleeper, APPLIANCE_TELEMETRY_DIR_NAME,
     APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS, APPLIANCE_TELEMETRY_FILE_NAME,
     APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS, APPLIANCE_TELEMETRY_SCHEMA_VERSION,
+    DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT,
 };
 pub use config::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonTelemetryRuntimeConfig,

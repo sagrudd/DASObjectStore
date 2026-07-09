@@ -934,8 +934,13 @@ planning are tracked under Milestones 21 and 22.
   appliance hosts, with unit tests using fixture `/proc` or command-output data
   rather than relying on live host state.
 - [ ] Add per-enclosure disk capacity collection for every disk physically
-  associated with known DAS enclosures, preserving disk ID, label, mount path,
-  role, and enclosure association in each sample.
+  associated with known DAS enclosures:
+  - [x] Collect capacity for managed HDD roots declared by
+    `.dasobjectstore/device.env`, preserving disk ID, label, mount path, role,
+    filesystem/device marker data, and any marker-provided enclosure ID.
+  - [ ] Tie capacity samples to the future physical enclosure/bay registry so
+    every disk physically associated with a known DAS enclosure carries the
+    authoritative enclosure association in each sample.
 - [ ] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
   read operations/s, write operations/s, queue or await signals where available,
   and explicit missing-counter reasons when the host cannot provide a metric.

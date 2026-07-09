@@ -225,16 +225,29 @@ pub fn appliance_sample_set(
         &host.cpu.missing_reason,
     );
     push_optional_missing_marker(&mut missing_data, "memory", &host.memory.missing_reason);
-    missing_data.push(ApplianceTelemetryMissingDataMarker {
-        path: "enclosures".to_string(),
-        reason: ApplianceTelemetryMissingReason::NotConfigured,
-        detail: Some("enclosure telemetry collector is not wired yet".to_string()),
-    });
-    missing_data.push(ApplianceTelemetryMissingDataMarker {
-        path: "disks".to_string(),
-        reason: ApplianceTelemetryMissingReason::NotConfigured,
-        detail: Some("disk capacity and IO collectors are tracked separately".to_string()),
-    });
+    if host.disks.is_empty() {
+        missing_data.push(ApplianceTelemetryMissingDataMarker {
+            path: "disks.capacity".to_string(),
+            reason: ApplianceTelemetryMissingReason::DeviceMissing,
+            detail: Some("no managed HDD roots with DASObjectStore markers were found".to_string()),
+        });
+    }
+    if host.enclosures.is_empty() {
+        missing_data.push(ApplianceTelemetryMissingDataMarker {
+            path: "enclosures".to_string(),
+            reason: ApplianceTelemetryMissingReason::NotConfigured,
+            detail: Some(
+                "physical enclosure association is pending marker or bay-registry data".to_string(),
+            ),
+        });
+    }
+    for disk in &host.disks {
+        push_optional_missing_marker(
+            &mut missing_data,
+            &format!("disks.{}.capacity", disk.disk_id),
+            &disk.missing_reason,
+        );
+    }
     missing_data.push(ApplianceTelemetryMissingDataMarker {
         path: "sessions".to_string(),
         reason: ApplianceTelemetryMissingReason::NotConfigured,
@@ -252,8 +265,8 @@ pub fn appliance_sample_set(
         missing_data,
         cpu: host.cpu,
         memory: host.memory,
-        enclosures: Vec::new(),
-        disks: Vec::new(),
+        enclosures: host.enclosures,
+        disks: host.disks,
         sessions: ApplianceSessionTelemetry {
             web_active_sessions: None,
             remote_agent_active_sessions: None,
