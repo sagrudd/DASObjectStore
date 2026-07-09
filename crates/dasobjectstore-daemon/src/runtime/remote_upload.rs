@@ -2256,6 +2256,129 @@ mod tests {
     }
 
     #[test]
+    fn multipart_fake_records_part_progress_and_aborts_after_interruption() {
+        let root = temp_root("remote-upload-worker-multipart-interrupted");
+        let stage_root = root.join("ssd-stage");
+        std::fs::create_dir_all(stage_root.join("remote-upload-job-036"))
+            .expect("stage dir created");
+        std::fs::write(
+            stage_root.join("remote-upload-job-036").join("part-0002"),
+            b"partial",
+        )
+        .expect("stage part written");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let runner = FakeRemoteUploadCommandRunner::default();
+        let cleanup_worker = RemoteUploadCancellationCleanupRuntime::new(
+            cleanup_runtime_config(
+                &root,
+                Some(RemoteUploadMultipartAbortConfig {
+                    program: "aws".to_string(),
+                    endpoint_url: "http://127.0.0.1:3900".to_string(),
+                    bucket: "dos-zymo-fecal-2025-05".to_string(),
+                    object_key: "raw/PAW10254/reads.fastq.gz".to_string(),
+                    environment: vec![(
+                        "AWS_SESSION_TOKEN".to_string(),
+                        "temporary-session".to_string(),
+                    )],
+                }),
+            ),
+            &runner,
+        );
+        let cleanup_plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-036".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 16,
+                staged_object_prefix: Some("remote-upload-job-036".to_string()),
+                multipart_upload_id: Some("multipart-036".to_string()),
+                session_id: None,
+                pairing_id: None,
+                browser_handoff_id: None,
+                reason: Some("multipart transfer interrupted".to_string()),
+            });
+
+        let report = worker
+            .run_with_cleanup_on_failure(
+                worker_request("remote-upload-job-036"),
+                cleanup_plan,
+                &cleanup_worker,
+                |progress| {
+                    progress
+                        .record_progress(RemoteUploadS3TransferProgressUpdate {
+                            bytes_done: 8,
+                            updated_at_utc: "2026-07-09T14:10:20Z".to_string(),
+                            telemetry: None,
+                            message: Some("multipart part 1 uploaded".to_string()),
+                        })
+                        .expect("first part progress recorded");
+                    progress
+                        .record_progress(RemoteUploadS3TransferProgressUpdate {
+                            bytes_done: 12,
+                            updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                            telemetry: None,
+                            message: Some("multipart part 2 interrupted".to_string()),
+                        })
+                        .expect("second part progress recorded");
+                    Err::<(), _>("multipart transfer interrupted after part 2")
+                },
+            )
+            .expect("interrupted multipart upload reported");
+
+        assert_eq!(report.progress_events.len(), 2);
+        let DaemonJobEvent::Progress(second_part) = &report.progress_events[1] else {
+            panic!("expected multipart progress event");
+        };
+        assert_eq!(second_part.progress.work_bytes_done, 12);
+        assert!(second_part
+            .progress
+            .message
+            .as_deref()
+            .expect("progress message")
+            .contains("multipart part 2 interrupted"));
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(final_job.progress.stage, "remote_s3_transfer_failed");
+        assert_eq!(
+            final_job.failure_message.as_deref(),
+            Some("multipart transfer interrupted after part 2")
+        );
+        let cleanup_report = report.cleanup_report.expect("cleanup report");
+        assert!(cleanup_report.completed());
+        assert_eq!(cleanup_report.action_reports.len(), 2);
+        assert!(!stage_root.join("remote-upload-job-036").exists());
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].args,
+            [
+                "--endpoint-url",
+                "http://127.0.0.1:3900",
+                "s3api",
+                "abort-multipart-upload",
+                "--bucket",
+                "dos-zymo-fecal-2025-05",
+                "--key",
+                "raw/PAW10254/reads.fastq.gz",
+                "--upload-id",
+                "multipart-036"
+            ]
+        );
+        assert_eq!(
+            calls[0].environment,
+            [(
+                "AWS_SESSION_TOKEN".to_string(),
+                "temporary-session".to_string()
+            )]
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn failed_paired_upload_cleans_session_state_after_renewal_progress() {
         let root = temp_root("remote-upload-paired-session-cleanup");
         let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));

@@ -895,7 +895,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add tests for browser/agent coordination, drag/drop folder expansion,
   local path privacy, agent unreachable state, and user cancellation before
   transfer begins.
-- [ ] Add S3 upload integration tests or fakes for multipart transfer,
+- [x] Add S3 upload integration tests or fakes for multipart transfer,
   interrupted transfer cleanup, credential expiry, and derived store/bucket
   routing.
 - [ ] Add daemon ingest policy tests proving remote/Web/S3 origins stage to SSD
