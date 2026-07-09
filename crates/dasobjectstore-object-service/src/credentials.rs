@@ -5,12 +5,28 @@ use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt;
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 const ACCESS_KEY_RANDOM_BYTES: usize = 10;
 const SECRET_KEY_RANDOM_BYTES: usize = 32;
+pub const GARAGE_CREDENTIAL_REGISTRY_ENV: &str = "DASOBJECTSTORE_GARAGE_CREDENTIAL_REGISTRY_PATH";
+
+#[cfg(target_os = "macos")]
+const DEFAULT_GARAGE_CREDENTIAL_REGISTRY_PATH: &str =
+    "/usr/local/var/lib/dasobjectstore/object-service/garage-credentials.json";
+#[cfg(not(target_os = "macos"))]
+const DEFAULT_GARAGE_CREDENTIAL_REGISTRY_PATH: &str =
+    "/var/lib/dasobjectstore/object-service/garage-credentials.json";
+
+#[cfg(unix)]
+const CREDENTIAL_REGISTRY_DIR_MODE: u32 = 0o700;
+#[cfg(unix)]
+const CREDENTIAL_REGISTRY_FILE_MODE: u32 = 0o600;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoreCredentialRequest {
@@ -97,6 +113,96 @@ impl fmt::Debug for SecretAccessKey {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ManagedCredentialRegistry {
+    pub format_version: u16,
+    pub updated_at_utc: String,
+    pub credentials: Vec<ManagedStoreCredentialRecord>,
+    #[serde(default)]
+    pub audit: Vec<ManagedCredentialAuditEvent>,
+}
+
+impl ManagedCredentialRegistry {
+    pub fn empty(updated_at_utc: impl Into<String>) -> Self {
+        Self {
+            format_version: 1,
+            updated_at_utc: updated_at_utc.into(),
+            credentials: Vec::new(),
+            audit: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ManagedStoreCredentialRecord {
+    pub store_id: StoreId,
+    pub bucket_name: String,
+    pub credential_reference: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub issued_at_utc: String,
+    pub rotated_at_utc: Option<String>,
+    pub revision: u32,
+}
+
+impl ManagedStoreCredentialRecord {
+    fn from_credential(
+        credential: StoreServiceCredential,
+        issued_at_utc: impl Into<String>,
+        revision: u32,
+    ) -> Self {
+        Self {
+            store_id: credential.store_id,
+            bucket_name: credential.bucket_name,
+            credential_reference: credential.credential_reference,
+            access_key_id: credential.access_key_id,
+            secret_access_key: credential.secret_access_key.expose_secret().to_string(),
+            issued_at_utc: issued_at_utc.into(),
+            rotated_at_utc: None,
+            revision,
+        }
+    }
+
+    fn to_credential(&self) -> StoreServiceCredential {
+        StoreServiceCredential {
+            store_id: self.store_id.clone(),
+            bucket_name: self.bucket_name.clone(),
+            credential_reference: self.credential_reference.clone(),
+            access_key_id: self.access_key_id.clone(),
+            secret_access_key: SecretAccessKey(self.secret_access_key.clone()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ManagedCredentialAuditEvent {
+    pub at_utc: String,
+    pub store_id: StoreId,
+    pub bucket_name: String,
+    pub action: ManagedCredentialAuditAction,
+    pub access_key_id: String,
+    pub previous_access_key_id: Option<String>,
+    pub credential_reference: String,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedCredentialAuditAction {
+    Issued,
+    Reused,
+    Rotated,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedCredentialResolution {
+    pub registry_path: PathBuf,
+    pub credentials: Vec<StoreServiceCredential>,
+    pub issued: usize,
+    pub reused: usize,
+    pub rotated: usize,
+}
+
 pub trait CredentialEntropy {
     fn fill(&mut self, bytes: &mut [u8]) -> Result<(), ObjectServiceError>;
 }
@@ -127,6 +233,107 @@ pub fn generate_per_store_credentials(
         .collect()
 }
 
+pub fn default_garage_credential_registry_path() -> PathBuf {
+    std::env::var_os(GARAGE_CREDENTIAL_REGISTRY_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_GARAGE_CREDENTIAL_REGISTRY_PATH))
+}
+
+pub fn resolve_managed_store_credentials(
+    registry_path: impl AsRef<Path>,
+    requests: &[StoreCredentialRequest],
+    now_utc: impl AsRef<str>,
+    rotate_existing: bool,
+    entropy: &mut impl CredentialEntropy,
+) -> Result<ManagedCredentialResolution, ObjectServiceError> {
+    validate_requests(requests)?;
+    let registry_path = registry_path.as_ref();
+    let now_utc = now_utc.as_ref();
+    reject_blank("now_utc", now_utc)?;
+
+    let mut registry = read_managed_credential_registry(registry_path, now_utc)?;
+    let mut credentials = Vec::with_capacity(requests.len());
+    let mut issued = 0;
+    let mut reused = 0;
+    let mut rotated = 0;
+
+    for request in requests {
+        let existing_index = registry
+            .credentials
+            .iter()
+            .position(|record| record.store_id == request.store_id);
+        match existing_index {
+            Some(index) if !rotate_existing => {
+                validate_record_matches_request(&registry.credentials[index], request)?;
+                let record = registry.credentials[index].clone();
+                credentials.push(record.to_credential());
+                reused += 1;
+                registry.audit.push(audit_event(
+                    now_utc,
+                    request,
+                    ManagedCredentialAuditAction::Reused,
+                    record.access_key_id,
+                    None,
+                    "reused persisted Garage credential",
+                ));
+            }
+            Some(index) => {
+                validate_record_matches_request(&registry.credentials[index], request)?;
+                let previous_access_key_id = registry.credentials[index].access_key_id.clone();
+                let revision = registry.credentials[index].revision.saturating_add(1);
+                let credential = generate_store_credential(request, entropy)?;
+                let record = ManagedStoreCredentialRecord::from_credential(
+                    credential.clone(),
+                    now_utc,
+                    revision,
+                );
+                registry.credentials[index] = ManagedStoreCredentialRecord {
+                    rotated_at_utc: Some(now_utc.to_string()),
+                    ..record.clone()
+                };
+                credentials.push(credential);
+                rotated += 1;
+                registry.audit.push(audit_event(
+                    now_utc,
+                    request,
+                    ManagedCredentialAuditAction::Rotated,
+                    record.access_key_id,
+                    Some(previous_access_key_id),
+                    "rotated persisted Garage credential",
+                ));
+            }
+            None => {
+                let credential = generate_store_credential(request, entropy)?;
+                let record =
+                    ManagedStoreCredentialRecord::from_credential(credential.clone(), now_utc, 1);
+                registry.credentials.push(record.clone());
+                credentials.push(credential);
+                issued += 1;
+                registry.audit.push(audit_event(
+                    now_utc,
+                    request,
+                    ManagedCredentialAuditAction::Issued,
+                    record.access_key_id,
+                    None,
+                    "issued persisted Garage credential",
+                ));
+            }
+        }
+    }
+
+    registry.updated_at_utc = now_utc.to_string();
+    validate_managed_credential_registry(&registry)?;
+    write_managed_credential_registry(registry_path, &registry)?;
+
+    Ok(ManagedCredentialResolution {
+        registry_path: registry_path.to_path_buf(),
+        credentials,
+        issued,
+        reused,
+        rotated,
+    })
+}
+
 pub fn write_credential_reference_manifest(
     path: impl AsRef<Path>,
     manifest: &CredentialReferenceManifest,
@@ -136,6 +343,57 @@ pub fn write_credential_reference_manifest(
     })?;
     serde_json::to_writer_pretty(file, manifest).map_err(|error| {
         ObjectServiceError::CommandFailed(format!("write credential reference manifest: {error}"))
+    })
+}
+
+pub fn read_managed_credential_registry(
+    path: impl AsRef<Path>,
+    now_utc: impl Into<String>,
+) -> Result<ManagedCredentialRegistry, ObjectServiceError> {
+    let path = path.as_ref();
+    match File::open(path) {
+        Ok(file) => serde_json::from_reader(file).map_err(|error| {
+            ObjectServiceError::InvalidConfiguration(format!(
+                "read managed credential registry {}: {error}",
+                path.display()
+            ))
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(ManagedCredentialRegistry::empty(now_utc))
+        }
+        Err(error) => Err(ObjectServiceError::CommandFailed(format!(
+            "open managed credential registry {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+pub fn write_managed_credential_registry(
+    path: impl AsRef<Path>,
+    registry: &ManagedCredentialRegistry,
+) -> Result<(), ObjectServiceError> {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            ObjectServiceError::CommandFailed(format!(
+                "create managed credential registry directory {}: {error}",
+                parent.display()
+            ))
+        })?;
+        restrict_credential_registry_dir(parent)?;
+    }
+
+    let file = create_private_credential_registry_file(path).map_err(|error| {
+        ObjectServiceError::CommandFailed(format!(
+            "create managed credential registry {}: {error}",
+            path.display()
+        ))
+    })?;
+    serde_json::to_writer_pretty(file, registry).map_err(|error| {
+        ObjectServiceError::CommandFailed(format!(
+            "write managed credential registry {}: {error}",
+            path.display()
+        ))
     })
 }
 
@@ -165,6 +423,94 @@ fn validate_requests(requests: &[StoreCredentialRequest]) -> Result<(), ObjectSe
     }
 
     Ok(())
+}
+
+fn validate_record_matches_request(
+    record: &ManagedStoreCredentialRecord,
+    request: &StoreCredentialRequest,
+) -> Result<(), ObjectServiceError> {
+    if record.bucket_name != request.bucket_name {
+        return Err(ObjectServiceError::InvalidConfiguration(format!(
+            "stored Garage credential for store {} is bound to bucket {}, but registry requests {}",
+            request.store_id, record.bucket_name, request.bucket_name
+        )));
+    }
+    if record.credential_reference != credential_reference_for_store(&request.store_id) {
+        return Err(ObjectServiceError::InvalidConfiguration(format!(
+            "stored Garage credential reference for store {} is inconsistent",
+            request.store_id
+        )));
+    }
+    reject_blank("access_key_id", &record.access_key_id)?;
+    reject_blank("secret_access_key", &record.secret_access_key)?;
+    Ok(())
+}
+
+fn validate_managed_credential_registry(
+    registry: &ManagedCredentialRegistry,
+) -> Result<(), ObjectServiceError> {
+    if registry.format_version != 1 {
+        return Err(ObjectServiceError::InvalidConfiguration(format!(
+            "unsupported managed credential registry version: {}",
+            registry.format_version
+        )));
+    }
+    reject_blank("updated_at_utc", &registry.updated_at_utc)?;
+    let mut store_ids = BTreeSet::new();
+    let mut bucket_names = BTreeSet::new();
+    let mut access_key_ids = BTreeSet::new();
+    for record in &registry.credentials {
+        reject_blank("bucket_name", &record.bucket_name)?;
+        reject_blank("credential_reference", &record.credential_reference)?;
+        reject_blank("access_key_id", &record.access_key_id)?;
+        reject_blank("secret_access_key", &record.secret_access_key)?;
+        reject_blank("issued_at_utc", &record.issued_at_utc)?;
+        if record.revision == 0 {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "managed credential revision must be greater than zero for store {}",
+                record.store_id
+            )));
+        }
+        if !store_ids.insert(record.store_id.as_str()) {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "duplicate managed credential for store: {}",
+                record.store_id
+            )));
+        }
+        if !bucket_names.insert(record.bucket_name.as_str()) {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "duplicate managed credential bucket: {}",
+                record.bucket_name
+            )));
+        }
+        if !access_key_ids.insert(record.access_key_id.as_str()) {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "duplicate managed credential access key id: {}",
+                record.access_key_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn audit_event(
+    now_utc: &str,
+    request: &StoreCredentialRequest,
+    action: ManagedCredentialAuditAction,
+    access_key_id: String,
+    previous_access_key_id: Option<String>,
+    message: impl Into<String>,
+) -> ManagedCredentialAuditEvent {
+    ManagedCredentialAuditEvent {
+        at_utc: now_utc.to_string(),
+        store_id: request.store_id.clone(),
+        bucket_name: request.bucket_name.clone(),
+        action,
+        access_key_id,
+        previous_access_key_id,
+        credential_reference: credential_reference_for_store(&request.store_id),
+        message: message.into(),
+    }
 }
 
 fn generate_store_credential(
@@ -199,6 +545,33 @@ fn reject_blank(field: &str, value: &str) -> Result<(), ObjectServiceError> {
     Ok(())
 }
 
+fn create_private_credential_registry_file(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    #[cfg(unix)]
+    options.mode(CREDENTIAL_REGISTRY_FILE_MODE);
+
+    options.open(path)
+}
+
+fn restrict_credential_registry_dir(path: &Path) -> Result<(), ObjectServiceError> {
+    #[cfg(unix)]
+    {
+        fs::set_permissions(
+            path,
+            fs::Permissions::from_mode(CREDENTIAL_REGISTRY_DIR_MODE),
+        )
+        .map_err(|error| {
+            ObjectServiceError::CommandFailed(format!(
+                "restrict managed credential registry directory {}: {error}",
+                path.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 fn hex_lower(bytes: &[u8]) -> String {
     const TABLE: &[u8; 16] = b"0123456789abcdef";
     hex_encode(bytes, TABLE)
@@ -221,9 +594,10 @@ fn hex_encode(bytes: &[u8], table: &[u8; 16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        generate_per_store_credentials, write_credential_reference_manifest, CredentialEntropy,
-        CredentialReferenceManifest, ObjectServiceError, StoreCredentialReference,
-        StoreCredentialRequest,
+        generate_per_store_credentials, read_managed_credential_registry,
+        resolve_managed_store_credentials, write_credential_reference_manifest, CredentialEntropy,
+        CredentialReferenceManifest, ManagedCredentialAuditAction, ObjectServiceError,
+        StoreCredentialReference, StoreCredentialRequest,
     };
     use dasobjectstore_core::ids::StoreId;
     use std::fs;
@@ -324,6 +698,94 @@ mod tests {
     }
 
     #[test]
+    fn managed_registry_persists_and_reuses_credentials() {
+        let path = temp_registry_path("managed-credentials-reuse");
+        let first = resolve_managed_store_credentials(
+            &path,
+            &[request("generated", "generated-data")],
+            "2026-07-09T10:00:00Z",
+            false,
+            &mut FixedEntropy::new(),
+        )
+        .expect("credential issued");
+        let first_access_key = first.credentials[0].access_key_id.clone();
+        let first_secret = first.credentials[0]
+            .secret_access_key
+            .expose_secret()
+            .to_string();
+
+        let second = resolve_managed_store_credentials(
+            &path,
+            &[request("generated", "generated-data")],
+            "2026-07-09T10:05:00Z",
+            false,
+            &mut FixedEntropy::new(),
+        )
+        .expect("credential reused");
+
+        assert_eq!(first.issued, 1);
+        assert_eq!(second.reused, 1);
+        assert_eq!(second.credentials[0].access_key_id, first_access_key);
+        assert_eq!(
+            second.credentials[0].secret_access_key.expose_secret(),
+            first_secret
+        );
+        let registry =
+            read_managed_credential_registry(&path, "unused").expect("registry reads back");
+        fs::remove_file(&path).expect("temp registry removed");
+        assert_eq!(registry.credentials.len(), 1);
+        assert_eq!(registry.audit.len(), 2);
+        assert_eq!(
+            registry.audit[0].action,
+            ManagedCredentialAuditAction::Issued
+        );
+        assert_eq!(
+            registry.audit[1].action,
+            ManagedCredentialAuditAction::Reused
+        );
+    }
+
+    #[test]
+    fn managed_registry_rotates_credentials_only_when_requested() {
+        let path = temp_registry_path("managed-credentials-rotate");
+        let mut entropy = FixedEntropy::new();
+        let first = resolve_managed_store_credentials(
+            &path,
+            &[request("generated", "generated-data")],
+            "2026-07-09T10:00:00Z",
+            false,
+            &mut entropy,
+        )
+        .expect("credential issued");
+        let first_access_key = first.credentials[0].access_key_id.clone();
+
+        let rotated = resolve_managed_store_credentials(
+            &path,
+            &[request("generated", "generated-data")],
+            "2026-07-09T10:10:00Z",
+            true,
+            &mut entropy,
+        )
+        .expect("credential rotated");
+
+        assert_eq!(rotated.rotated, 1);
+        assert_ne!(rotated.credentials[0].access_key_id, first_access_key);
+        let registry =
+            read_managed_credential_registry(&path, "unused").expect("registry reads back");
+        fs::remove_file(&path).expect("temp registry removed");
+        assert_eq!(registry.credentials[0].revision, 2);
+        assert_eq!(registry.audit.len(), 2);
+        assert_eq!(
+            registry.audit[1].action,
+            ManagedCredentialAuditAction::Rotated
+        );
+        assert_eq!(
+            registry.audit[1].previous_access_key_id.as_deref(),
+            Some(first_access_key.as_str())
+        );
+    }
+
+    #[test]
     fn rejects_duplicate_store_requests() {
         let mut entropy = FixedEntropy::new();
 
@@ -372,6 +834,16 @@ mod tests {
             std::process::id(),
             unique_suffix()
         ))
+    }
+
+    fn temp_registry_path(name: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "dasobjectstore-{name}-{}-{}",
+                std::process::id(),
+                unique_suffix()
+            ))
+            .join("registry.json")
     }
 
     fn unique_suffix() -> u128 {

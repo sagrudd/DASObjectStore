@@ -7517,15 +7517,36 @@ fn run_service_provision(
     let response = client.service_provision(DaemonServiceProvisionRequest {
         provider_id: args.provider(),
         dry_run: args.dry_run(),
+        rotate_credentials: args.rotate_credentials(),
         client_request_id: None,
     })?;
 
     writeln!(writer, "Object service provisioning submitted")?;
     writeln!(writer, "Provider: {}", response.provider_id)?;
     writeln!(writer, "Registry: {}", response.registry_path)?;
+    writeln!(
+        writer,
+        "Credential registry: {}",
+        response.credential_registry_path
+    )?;
     writeln!(writer, "Stores: {}", response.stores)?;
     writeln!(writer, "Buckets: {}", response.buckets)?;
     writeln!(writer, "Garage commands: {}", response.commands)?;
+    writeln!(
+        writer,
+        "Credentials issued: {}",
+        response.credentials_issued
+    )?;
+    writeln!(
+        writer,
+        "Credentials reused: {}",
+        response.credentials_reused
+    )?;
+    writeln!(
+        writer,
+        "Credentials rotated: {}",
+        response.credentials_rotated
+    )?;
     writeln!(writer, "Dry run: {}", response.accepted.dry_run)?;
     writeln!(writer, "Job: {}", response.accepted.job_id)?;
     writeln!(

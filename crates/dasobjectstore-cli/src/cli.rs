@@ -1844,6 +1844,9 @@ pub(crate) struct ServiceProvisionArgs {
     /// Show the provisioning plan counts without applying Garage bucket/key changes.
     #[arg(long)]
     dry_run: bool,
+    /// Rotate persisted Garage credentials before applying bucket/key grants.
+    #[arg(long)]
+    rotate_credentials: bool,
 }
 
 impl ServiceProvisionArgs {
@@ -1853,6 +1856,10 @@ impl ServiceProvisionArgs {
 
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
+    }
+
+    pub(crate) fn rotate_credentials(&self) -> bool {
+        self.rotate_credentials
     }
 }
 
@@ -2635,6 +2642,29 @@ mod tests {
             ServiceCommand::Provision(provision) => {
                 assert_eq!(provision.provider().name(), "garage");
                 assert!(provision.dry_run());
+                assert!(!provision.rotate_credentials());
+            }
+            _ => panic!("expected provision command"),
+        }
+    }
+
+    #[test]
+    fn parses_service_provision_rotate_credentials() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "provision",
+            "--rotate-credentials",
+        ])
+        .expect("service provision parses");
+
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command");
+        };
+        match args.command() {
+            ServiceCommand::Provision(provision) => {
+                assert!(provision.rotate_credentials());
+                assert!(!provision.dry_run());
             }
             _ => panic!("expected provision command"),
         }

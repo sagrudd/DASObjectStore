@@ -11,8 +11,9 @@ use crate::api::{
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
 use dasobjectstore_object_service::{
-    generate_per_store_credentials, plan_garage_provisioning, plan_store_service_layout,
-    read_store_registry, ObjectServiceError, ObjectServiceProviderId, ServiceState,
+    default_garage_credential_registry_path, generate_per_store_credentials,
+    plan_garage_provisioning, plan_store_service_layout, read_store_registry,
+    resolve_managed_store_credentials, ObjectServiceError, ObjectServiceProviderId, ServiceState,
     StoreServiceCredential, SystemCredentialEntropy,
 };
 use serde_json::Value;
@@ -195,9 +196,13 @@ pub struct GarageProvisioningSummary {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GarageStoreRegistryProvisioningSummary {
     pub registry_path: PathBuf,
+    pub credential_registry_path: PathBuf,
     pub stores: usize,
     pub buckets: usize,
     pub commands: usize,
+    pub credentials_issued: usize,
+    pub credentials_reused: usize,
+    pub credentials_rotated: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -385,15 +390,57 @@ pub fn provision_garage_store_registry<R>(
     controller: &GarageServiceController<R>,
     registry_path: impl Into<PathBuf>,
     dry_run: bool,
+    rotate_credentials: bool,
+    accepted_at_utc: &str,
+) -> Result<GarageStoreRegistryProvisioningSummary, DaemonServiceRuntimeError>
+where
+    R: ServiceCommandRunner,
+{
+    provision_garage_store_registry_with_credentials_path(
+        controller,
+        registry_path,
+        default_garage_credential_registry_path(),
+        dry_run,
+        rotate_credentials,
+        accepted_at_utc,
+    )
+}
+
+fn provision_garage_store_registry_with_credentials_path<R>(
+    controller: &GarageServiceController<R>,
+    registry_path: impl Into<PathBuf>,
+    credential_registry_path: impl Into<PathBuf>,
+    dry_run: bool,
+    rotate_credentials: bool,
+    accepted_at_utc: &str,
 ) -> Result<GarageStoreRegistryProvisioningSummary, DaemonServiceRuntimeError>
 where
     R: ServiceCommandRunner,
 {
     let registry_path = registry_path.into();
+    let credential_registry_path = credential_registry_path.into();
     let definitions = read_store_registry(&registry_path)?;
     let layout = plan_store_service_layout(&definitions)?;
     let mut entropy = SystemCredentialEntropy;
-    let credentials = generate_per_store_credentials(&layout.credential_requests, &mut entropy)?;
+    let (credentials, credentials_issued, credentials_reused, credentials_rotated) = if dry_run {
+        let credentials =
+            generate_per_store_credentials(&layout.credential_requests, &mut entropy)?;
+        (credentials, 0, 0, 0)
+    } else {
+        let resolution = resolve_managed_store_credentials(
+            &credential_registry_path,
+            &layout.credential_requests,
+            accepted_at_utc,
+            rotate_credentials,
+            &mut entropy,
+        )?;
+        (
+            resolution.credentials,
+            resolution.issued,
+            resolution.reused,
+            resolution.rotated,
+        )
+    };
     let summary = if dry_run {
         let plan = plan_garage_provisioning(&credentials)?;
         GarageProvisioningSummary {
@@ -407,9 +454,13 @@ where
 
     Ok(GarageStoreRegistryProvisioningSummary {
         registry_path,
+        credential_registry_path,
         stores: summary.stores,
         buckets: summary.buckets,
         commands: summary.commands,
+        credentials_issued,
+        credentials_reused,
+        credentials_rotated,
     })
 }
 
@@ -732,31 +783,87 @@ mod tests {
     #[test]
     fn provision_store_registry_dry_run_counts_registry_bindings_without_commands() {
         let registry_path = write_store_registry();
+        let credential_registry_path = temp_root().join("garage-credentials.json");
         let runner = super::FakeRunner::with_stdout("");
         let controller = GarageServiceController::new(config(), runner);
 
-        let summary = super::provision_garage_store_registry(&controller, &registry_path, true)
-            .expect("registry provision planned");
+        let summary = super::provision_garage_store_registry_with_credentials_path(
+            &controller,
+            &registry_path,
+            &credential_registry_path,
+            true,
+            false,
+            "2026-07-09T10:00:00Z",
+        )
+        .expect("registry provision planned");
 
         assert_eq!(summary.registry_path, registry_path);
+        assert_eq!(summary.credential_registry_path, credential_registry_path);
         assert_eq!(summary.stores, 1);
         assert_eq!(summary.buckets, 1);
         assert_eq!(summary.commands, 3);
+        assert_eq!(summary.credentials_issued, 0);
+        assert_eq!(summary.credentials_reused, 0);
+        assert_eq!(summary.credentials_rotated, 0);
         assert!(controller.runner.calls.borrow().is_empty());
     }
 
     #[test]
     fn provision_store_registry_executes_commands_from_registry_bindings() {
         let registry_path = write_store_registry();
+        let credential_registry_path = temp_root().join("garage-credentials.json");
         let runner = super::FakeRunner::with_stdout("");
         let controller = GarageServiceController::new(config(), runner);
 
-        let summary = super::provision_garage_store_registry(&controller, &registry_path, false)
-            .expect("registry provisioned");
+        let summary = super::provision_garage_store_registry_with_credentials_path(
+            &controller,
+            &registry_path,
+            &credential_registry_path,
+            false,
+            false,
+            "2026-07-09T10:00:00Z",
+        )
+        .expect("registry provisioned");
 
         assert_eq!(summary.stores, 1);
         assert_eq!(summary.commands, 3);
+        assert_eq!(summary.credentials_issued, 1);
+        assert_eq!(summary.credentials_reused, 0);
+        assert_eq!(summary.credentials_rotated, 0);
         assert_eq!(controller.runner.calls.borrow().len(), 3);
+    }
+
+    #[test]
+    fn provision_store_registry_reuses_persisted_credentials_on_repeated_runs() {
+        let registry_path = write_store_registry();
+        let credential_registry_path = temp_root().join("garage-credentials.json");
+        let runner = super::FakeRunner::with_stdout("");
+        let controller = GarageServiceController::new(config(), runner);
+
+        let first = super::provision_garage_store_registry_with_credentials_path(
+            &controller,
+            &registry_path,
+            &credential_registry_path,
+            false,
+            false,
+            "2026-07-09T10:00:00Z",
+        )
+        .expect("registry provisioned");
+        let second = super::provision_garage_store_registry_with_credentials_path(
+            &controller,
+            &registry_path,
+            &credential_registry_path,
+            false,
+            false,
+            "2026-07-09T10:10:00Z",
+        )
+        .expect("registry provisioned again");
+
+        assert_eq!(first.credentials_issued, 1);
+        assert_eq!(first.credentials_reused, 0);
+        assert_eq!(second.credentials_issued, 0);
+        assert_eq!(second.credentials_reused, 1);
+        assert_eq!(controller.runner.calls.borrow().len(), 6);
     }
 
     fn config() -> GarageServiceRuntimeConfig {

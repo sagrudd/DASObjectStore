@@ -76,6 +76,25 @@ many stores, buckets, and Garage admin commands would be applied. Avoid manual
 ``docker compose exec garage /garage ...`` flows for routine ObjectStore
 creation; they bypass DASObjectStore's registry and credential custody model.
 
+Provisioning stores Garage credentials in a daemon-owned managed registry at
+``/var/lib/dasobjectstore/object-service/garage-credentials.json`` on Linux.
+The directory is installed with mode ``0700`` and the registry file is written
+with mode ``0600`` because it contains S3 secret keys. Re-running
+``dasobjectstore service provision`` reuses the persisted credential for each
+ObjectStore and records an audit event instead of minting a new key.
+
+Rotate the persisted store-scoped Garage credentials only when there is a clear
+operational reason:
+
+.. code-block:: console
+
+   dasobjectstore service provision --provider garage --rotate-credentials
+
+Rotation persists the newly issued access key and secret, records the previous
+access key in the audit trail, and reapplies Garage bucket/key grants. The CLI
+prints credential counts for issued, reused, and rotated credentials, but it
+never prints S3 secret material.
+
 Credential handling
 -------------------
 

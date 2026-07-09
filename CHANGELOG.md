@@ -6,6 +6,20 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.62.0 - 2026-07-09
+
+- Persist Garage store-scoped credentials in a daemon-owned managed registry
+  with private file permissions and auditable issued, reused, and rotated
+  events.
+- Reuse persisted Garage credentials during repeated ``dasobjectstore service
+  provision`` runs instead of minting replacement keys from the ObjectStore
+  registry every time.
+- Add ``dasobjectstore service provision --rotate-credentials`` for explicit
+  credential rotation, with provisioning output that reports credential registry
+  path and issued/reused/rotated counts without exposing S3 secret material.
+- Package the protected object-service state directory for DEB/RPM installs and
+  document the credential custody and rotation workflow for S3 uploads.
+
 ## 0.61.2 - 2026-07-09
 
 - Add active HDD transfer telemetry to daemon ingest progress events, including

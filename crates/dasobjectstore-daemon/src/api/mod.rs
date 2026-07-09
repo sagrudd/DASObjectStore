@@ -500,6 +500,7 @@ mod tests {
         let provision = DaemonApiRequest::ServiceProvision(DaemonServiceProvisionRequest {
             provider_id: ObjectServiceProviderId::Garage,
             dry_run: true,
+            rotate_credentials: false,
             client_request_id: None,
         });
 
@@ -883,6 +884,7 @@ mod tests {
         let request = DaemonApiRequest::ServiceProvision(DaemonServiceProvisionRequest {
             provider_id: ObjectServiceProviderId::Rustfs,
             dry_run: false,
+            rotate_credentials: false,
             client_request_id: None,
         });
 

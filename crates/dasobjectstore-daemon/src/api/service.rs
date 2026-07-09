@@ -57,6 +57,8 @@ impl DaemonServiceLifecycleRequest {
 pub struct DaemonServiceProvisionRequest {
     pub provider_id: ObjectServiceProviderId,
     pub dry_run: bool,
+    #[serde(default)]
+    pub rotate_credentials: bool,
     pub client_request_id: Option<String>,
 }
 
@@ -91,9 +93,13 @@ pub struct DaemonServiceProvisionResponse {
     pub accepted: DaemonJobAcceptedResponse,
     pub provider_id: ObjectServiceProviderId,
     pub registry_path: String,
+    pub credential_registry_path: String,
     pub stores: usize,
     pub buckets: usize,
     pub commands: usize,
+    pub credentials_issued: usize,
+    pub credentials_reused: usize,
+    pub credentials_rotated: usize,
 }
 
 impl DaemonServiceProvisionResponse {
@@ -103,9 +109,13 @@ impl DaemonServiceProvisionResponse {
         dry_run: bool,
         provider_id: ObjectServiceProviderId,
         registry_path: impl Into<String>,
+        credential_registry_path: impl Into<String>,
         stores: usize,
         buckets: usize,
         commands: usize,
+        credentials_issued: usize,
+        credentials_reused: usize,
+        credentials_rotated: usize,
     ) -> Self {
         Self {
             accepted: DaemonJobAcceptedResponse {
@@ -116,9 +126,13 @@ impl DaemonServiceProvisionResponse {
             },
             provider_id,
             registry_path: registry_path.into(),
+            credential_registry_path: credential_registry_path.into(),
             stores,
             buckets,
             commands,
+            credentials_issued,
+            credentials_reused,
+            credentials_rotated,
         }
     }
 }
@@ -220,6 +234,7 @@ mod tests {
         let request = DaemonServiceProvisionRequest {
             provider_id: ObjectServiceProviderId::Rustfs,
             dry_run: false,
+            rotate_credentials: false,
             client_request_id: None,
         };
 
@@ -255,14 +270,21 @@ mod tests {
             true,
             ObjectServiceProviderId::Garage,
             "/etc/dasobjectstore/stores.json",
+            "/var/lib/dasobjectstore/object-service/garage-credentials.json",
             2,
             2,
             6,
+            1,
+            1,
+            0,
         );
 
         assert_eq!(response.accepted.kind, DaemonJobKind::ServiceOperation);
         assert_eq!(response.buckets, 2);
         assert_eq!(response.commands, 6);
+        assert_eq!(response.credentials_issued, 1);
+        assert_eq!(response.credentials_reused, 1);
+        assert_eq!(response.credentials_rotated, 0);
         assert!(response.accepted.dry_run);
     }
 }

@@ -12,10 +12,14 @@ pub mod subobject;
 
 pub use compose::{render_compose, ComposeServiceConfig};
 pub use credentials::{
-    credential_reference_for_store, generate_per_store_credentials,
-    write_credential_reference_manifest, CredentialEntropy, CredentialReferenceManifest,
-    SecretAccessKey, StoreCredentialReference, StoreCredentialRequest, StoreServiceCredential,
-    SystemCredentialEntropy,
+    credential_reference_for_store, default_garage_credential_registry_path,
+    generate_per_store_credentials, read_managed_credential_registry,
+    resolve_managed_store_credentials, write_credential_reference_manifest,
+    write_managed_credential_registry, CredentialEntropy, CredentialReferenceManifest,
+    ManagedCredentialAuditAction, ManagedCredentialAuditEvent, ManagedCredentialRegistry,
+    ManagedCredentialResolution, ManagedStoreCredentialRecord, SecretAccessKey,
+    StoreCredentialReference, StoreCredentialRequest, StoreServiceCredential,
+    SystemCredentialEntropy, GARAGE_CREDENTIAL_REGISTRY_ENV,
 };
 pub use garage::{
     GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH,

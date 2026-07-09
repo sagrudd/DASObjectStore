@@ -640,9 +640,13 @@ mod tests {
                     true,
                     ObjectServiceProviderId::Garage,
                     "/etc/dasobjectstore/stores.json",
+                    "/var/lib/dasobjectstore/object-service/garage-credentials.json",
                     1,
                     1,
                     3,
+                    0,
+                    1,
+                    0,
                 ),
             ))
         });
@@ -652,6 +656,7 @@ mod tests {
             .service_provision(DaemonServiceProvisionRequest {
                 provider_id: ObjectServiceProviderId::Garage,
                 dry_run: true,
+                rotate_credentials: false,
                 client_request_id: Some("request-1".to_string()),
             })
             .expect("service provision response");

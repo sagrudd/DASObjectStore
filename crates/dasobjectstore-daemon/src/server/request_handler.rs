@@ -1466,8 +1466,13 @@ fn daemon_job_summary_from_service_provision(
         response.accepted.dry_run,
         None,
         format!(
-            "provisioned {} store(s), {} bucket(s), {} command(s)",
-            response.stores, response.buckets, response.commands
+            "provisioned {} store(s), {} bucket(s), {} command(s), credentials issued/reused/rotated {}/{}/{}",
+            response.stores,
+            response.buckets,
+            response.commands,
+            response.credentials_issued,
+            response.credentials_reused,
+            response.credentials_rotated
         ),
     )
 }
@@ -1641,8 +1646,13 @@ where
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError> {
         request.validate()?;
-        let summary =
-            provision_garage_store_registry(self, default_store_registry_path(), request.dry_run)?;
+        let summary = provision_garage_store_registry(
+            self,
+            default_store_registry_path(),
+            request.dry_run,
+            request.rotate_credentials,
+            accepted_at_utc,
+        )?;
         let job_id_value = format!(
             "service-provision-{}",
             accepted_at_utc
@@ -1664,9 +1674,16 @@ where
             request.dry_run,
             ObjectServiceProviderId::Garage,
             summary.registry_path.to_string_lossy().to_string(),
+            summary
+                .credential_registry_path
+                .to_string_lossy()
+                .to_string(),
             summary.stores,
             summary.buckets,
             summary.commands,
+            summary.credentials_issued,
+            summary.credentials_reused,
+            summary.credentials_rotated,
         ))
     }
 
@@ -2057,6 +2074,7 @@ mod tests {
                 DaemonServiceProvisionRequest {
                     provider_id: ObjectServiceProviderId::Garage,
                     dry_run: true,
+                    rotate_credentials: false,
                     client_request_id: Some("request-1".to_string()),
                 },
             ))
@@ -3837,9 +3855,13 @@ mod tests {
                 request.dry_run,
                 ObjectServiceProviderId::Garage,
                 "/etc/dasobjectstore/stores.json",
+                "/var/lib/dasobjectstore/object-service/garage-credentials.json",
                 1,
                 1,
                 3,
+                0,
+                1,
+                0,
             ))
         }
 
