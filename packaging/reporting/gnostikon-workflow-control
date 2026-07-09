@@ -194,7 +194,7 @@ run_render_report_pdf() {
   if [[ "$output_dir" != "$input_dir" ]]; then
     docker_args+=(--mount "$(bind_mount "$output_dir")")
   fi
-  docker_args+=("$container_image" grammateus_markdown_pdf "${grammateus_args[@]}")
+  docker_args+=("$container_image" "${grammateus_args[@]}")
   exec "$container_runtime" "${docker_args[@]}"
 }
 

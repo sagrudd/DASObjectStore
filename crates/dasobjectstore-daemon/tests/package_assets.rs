@@ -143,6 +143,10 @@ fn package_installs_das_owned_report_renderer_wrapper() {
     assert_contains(REPORTING_WRAPPER, "sudo usermod -aG docker dasobjectstore");
     assert_contains(REPORTING_WRAPPER, "grammateus_markdown_pdf");
     assert_contains(REPORTING_WRAPPER, "docker_args=(run --rm");
+    assert_contains(
+        REPORTING_WRAPPER,
+        "docker_args+=(\"$container_image\" \"${grammateus_args[@]}\")",
+    );
     assert_contains(MAKEFILE, "report-provider");
     assert_contains(MAKEFILE, "grammateus_report_provider");
     assert_contains(

@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.15 - 2026-07-09
+
+- Fix the packaged Grammateus report wrapper to invoke the
+  ``grammateus/report:0.8.1`` provider image through its configured
+  ``grammateus_markdown_pdf`` entrypoint instead of passing a duplicate command
+  argument.
+
 ## 0.54.14 - 2026-07-09
 
 - Declare Docker Buildx as a formal report-provider dependency because the
