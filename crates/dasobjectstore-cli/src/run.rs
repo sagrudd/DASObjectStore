@@ -27,13 +27,12 @@ use self::disk_prepare::{
 use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
-    write_host_connection_status, write_ingest_direct_import_report, write_ingest_status,
-    write_lockdown_das_report, write_nas_nfs_endpoint_validation_report,
-    write_object_export_report, write_object_inspect_summary, write_object_put_report,
-    write_pool_import_report, write_pool_inspect_summary, write_pool_repair_dry_run,
-    write_prepare_das_report, write_pretty_report, write_remote_s3_upload_plan,
-    write_store_create_report, write_store_delete_report, write_store_drain_report,
-    write_store_list_report,
+    write_host_connection_status, write_ingest_status, write_lockdown_das_report,
+    write_nas_nfs_endpoint_validation_report, write_object_export_report,
+    write_object_inspect_summary, write_object_put_report, write_pool_import_report,
+    write_pool_inspect_summary, write_pool_repair_dry_run, write_prepare_das_report,
+    write_pretty_report, write_remote_s3_upload_plan, write_store_create_report,
+    write_store_delete_report, write_store_drain_report, write_store_list_report,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -48,26 +47,25 @@ use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_core::DEFAULT_STANDALONE_CONFIG_PATH;
 use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
-    DaemonClientTransport, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
-    DaemonRuntimeConfig, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UnixSocketDaemonTransport, DEFAULT_DAEMON_STATE_DIR,
+    DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
+    DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UnixSocketDaemonTransport, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_gui_api::StandaloneServerConfig;
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, delete_store, drain_ingest_queue, drain_store,
-    export_settled_object, force_retire_disk, import_dirty_pool_read_only,
-    import_reproducible_object_direct_to_hdd, inspect_pool_metadata, measure_ssd_capacity,
-    put_object_ssd_first, put_object_ssd_first_with_progress, read_disk_drain_plan,
-    read_disk_replacement_plan, read_ingest_queue_for_store, read_object_inspect,
-    read_store_contents, request_disk_retirement, DestagePriorityPolicy, DirectHddImportError,
-    DirectHddImportRequest, DiskCopyRoot, DiskDrainError, DiskRetirementError,
-    IngestQueueDrainError, IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueReadError,
-    IngestQueueSnapshot, ObjectExportError, ObjectExportRequest, ObjectInspectError,
-    ObjectPutError, ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, PoolInspectError,
-    ReadOnlyAttachError, ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy,
-    SsdCapacityPolicyError, StoreCleanupError, StoreContentsObject, StoreContentsReadError,
-    StoreContentsRequest, StoreContentsSnapshot, StoreDeleteRequest, StoreDrainRequest,
-    LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
+    export_settled_object, force_retire_disk, import_dirty_pool_read_only, inspect_pool_metadata,
+    measure_ssd_capacity, put_object_ssd_first, put_object_ssd_first_with_progress,
+    read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue_for_store,
+    read_object_inspect, read_store_contents, request_disk_retirement, DestagePriorityPolicy,
+    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
+    IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueReadError, IngestQueueSnapshot,
+    ObjectExportError, ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
+    ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
+    ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
+    StoreCleanupError, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
+    StoreContentsSnapshot, StoreDeleteRequest, StoreDrainRequest, LIVE_SQLITE_FILE_NAME,
+    METADATA_DIR_NAME,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -9711,7 +9709,18 @@ where
 {
     let request = build_daemon_ingest_files_request(args);
     if args.tui() {
-        return run_ingest_files_with_tui(args, client, request, writer);
+        return run_ingest_submission_with_tui(
+            client,
+            request,
+            writer,
+            UploadTuiContext {
+                endpoint: args.endpoint().as_str().to_string(),
+                source_path: args.source().to_path_buf(),
+                object_type: args.object_type().to_string(),
+                conflict_policy: args.conflict_policy().to_string(),
+                dry_run: args.dry_run(),
+            },
+        );
     }
     let started_at = Instant::now();
     let response = client.submit_ingest_files_with_progress_and_heartbeat(
@@ -9722,31 +9731,31 @@ where
         },
         || Ok(()),
     )?;
-    write_daemon_ingest_submission(args, &response, writer)?;
+    write_daemon_ingest_submission(
+        args.endpoint(),
+        args.source(),
+        args.object_type(),
+        args.copies(),
+        args.conflict_policy(),
+        args.dry_run(),
+        &response,
+        writer,
+    )?;
 
     Ok(())
 }
 
-fn run_ingest_files_with_tui<T>(
-    args: &IngestFilesArgs,
+fn run_ingest_submission_with_tui<T>(
     client: &DaemonClient<T>,
     request: SubmitIngestFilesRequest,
     writer: &mut impl Write,
+    context: UploadTuiContext,
 ) -> Result<(), CliError>
 where
     T: DaemonClientTransport,
 {
     let interrupt_guard = UploadInterruptGuard::install();
-    let tui = start_upload_tui(
-        writer,
-        UploadTuiContext {
-            endpoint: args.endpoint().as_str().to_string(),
-            source_path: args.source().to_path_buf(),
-            object_type: args.object_type().to_string(),
-            conflict_policy: args.conflict_policy().to_string(),
-            dry_run: args.dry_run(),
-        },
-    )?;
+    let tui = start_upload_tui(writer, context)?;
     let tui = RefCell::new(tui);
     let response = match client.submit_ingest_files_with_progress_and_heartbeat(
         request,
@@ -9804,6 +9813,20 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
         copies: args.copies(),
         hdd_workers: args.hdd_workers(),
         ingress_origin: DaemonIngressOrigin::LocalServer,
+        conflict_policy: args.conflict_policy(),
+        dry_run: args.dry_run(),
+        client_request_id: None,
+    }
+}
+
+fn build_daemon_direct_import_request(args: &IngestDirectImportArgs) -> SubmitIngestFilesRequest {
+    SubmitIngestFilesRequest {
+        endpoint: args.endpoint().clone(),
+        source_path: args.source().to_path_buf(),
+        object_type: args.object_type(),
+        copies: args.copies(),
+        hdd_workers: args.hdd_workers(),
+        ingress_origin: DaemonIngressOrigin::LocalServerDirectImport,
         conflict_policy: args.conflict_policy(),
         dry_run: args.dry_run(),
         client_request_id: None,
@@ -9943,19 +9966,24 @@ fn path_arg(path: &Path) -> String {
 }
 
 fn write_daemon_ingest_submission(
-    args: &IngestFilesArgs,
+    endpoint: &StoreId,
+    source: &Path,
+    object_type: dasobjectstore_core::object_type::ObjectType,
+    copies: Option<u8>,
+    conflict_policy: DaemonIngestConflictPolicy,
+    dry_run: bool,
     response: &SubmitIngestFilesResponse,
     writer: &mut impl Write,
 ) -> Result<(), io::Error> {
     writeln!(writer, "Daemon ingest job submitted")?;
-    writeln!(writer, "Endpoint: {}", args.endpoint())?;
-    writeln!(writer, "Source: {}", args.source().to_string_lossy())?;
-    writeln!(writer, "Object type: {}", args.object_type())?;
-    if let Some(copies) = args.copies() {
+    writeln!(writer, "Endpoint: {endpoint}")?;
+    writeln!(writer, "Source: {}", source.to_string_lossy())?;
+    writeln!(writer, "Object type: {object_type}")?;
+    if let Some(copies) = copies {
         writeln!(writer, "Copies override: {copies}")?;
     }
-    writeln!(writer, "Conflict policy: {}", args.conflict_policy())?;
-    writeln!(writer, "Dry run: {}", args.dry_run())?;
+    writeln!(writer, "Conflict policy: {conflict_policy}")?;
+    writeln!(writer, "Dry run: {dry_run}")?;
     writeln!(writer, "Job: {}", response.job_id)?;
     writeln!(writer, "Accepted at UTC: {}", response.accepted_at_utc)
 }
@@ -10696,44 +10724,58 @@ fn run_ingest_direct_import(
     args: &IngestDirectImportArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    if args.hdd_workers() == Some(0) {
-        return Err(CliError::CommandFailed(
-            "HDD worker count must be greater than zero".to_string(),
-        ));
-    }
-    let file = File::open(args.policy_file())?;
-    let policy: StorePolicy = serde_json::from_reader(file)?;
-    let mut request = DirectHddImportRequest::new(
-        args.object_id().clone(),
-        args.disk_id().clone(),
-        args.source(),
-        args.destination(),
-        args.expected_sha256(),
-        policy,
-        RiskPolicy {
-            allow_direct_to_hdd_import: args.allow_direct_to_hdd_import(),
-            ..RiskPolicy::default()
-        },
-        ActionConfirmation::new(args.confirm()),
-    );
-    if let Some(source_uri) = args.source_uri() {
-        request = request.with_source_uri(source_uri);
-    }
-    request = request.with_object_type(args.object_type());
+    prepare_source_access_for_packaged_daemon(args.source())?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+    run_ingest_direct_import_with_client(args, &client, writer)?;
+    writeln!(writer, "Daemon socket: {}", config.socket_path.display())?;
 
-    let report = import_reproducible_object_direct_to_hdd(&request)?;
-    if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &report)?;
-        writer.write_all(b"\n")?;
-    } else {
-        write_ingest_direct_import_report(&report, writer)?;
-        if let Some(workers) = args.hdd_workers() {
-            writeln!(
-                writer,
-                "HDD workers requested: {workers} (single-object direct import uses one active HDD writer)"
-            )?;
-        }
+    Ok(())
+}
+
+fn run_ingest_direct_import_with_client<T>(
+    args: &IngestDirectImportArgs,
+    client: &DaemonClient<T>,
+    writer: &mut impl Write,
+) -> Result<(), CliError>
+where
+    T: DaemonClientTransport,
+{
+    let request = build_daemon_direct_import_request(args);
+    if args.tui() {
+        return run_ingest_submission_with_tui(
+            client,
+            request,
+            writer,
+            UploadTuiContext {
+                endpoint: args.endpoint().as_str().to_string(),
+                source_path: args.source().to_path_buf(),
+                object_type: args.object_type().to_string(),
+                conflict_policy: args.conflict_policy().to_string(),
+                dry_run: args.dry_run(),
+            },
+        );
     }
+
+    let started_at = Instant::now();
+    let response = client.submit_ingest_files_with_progress_and_heartbeat(
+        request,
+        |event| {
+            write_daemon_ingest_progress(writer, &event, started_at)
+                .map_err(|err| DaemonClientError::Transport(err.to_string()))
+        },
+        || Ok(()),
+    )?;
+    write_daemon_ingest_submission(
+        args.endpoint(),
+        args.source(),
+        args.object_type(),
+        args.copies(),
+        args.conflict_policy(),
+        args.dry_run(),
+        &response,
+        writer,
+    )?;
 
     Ok(())
 }
@@ -10974,7 +11016,6 @@ pub(crate) enum CliError {
     DiskPrepare(PrepareDasError),
     DaemonClient(DaemonClientError),
     DiskRetirement(DiskRetirementError),
-    DirectHddImport(DirectHddImportError),
     ObjectExport(ObjectExportError),
     ObjectInspect(ObjectInspectError),
     ObjectPut(ObjectPutError),
@@ -11024,7 +11065,6 @@ impl Display for CliError {
             Self::DiskPrepare(err) => write!(formatter, "{err}"),
             Self::DaemonClient(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
-            Self::DirectHddImport(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
             Self::ObjectInspect(err) => write!(formatter, "{err}"),
             Self::ObjectPut(err) => write!(formatter, "{err}"),
@@ -11128,12 +11168,6 @@ impl From<DaemonClientError> for CliError {
 impl From<DiskRetirementError> for CliError {
     fn from(err: DiskRetirementError) -> Self {
         Self::DiskRetirement(err)
-    }
-}
-
-impl From<DirectHddImportError> for CliError {
-    fn from(err: DirectHddImportError) -> Self {
-        Self::DirectHddImport(err)
     }
 }
 
@@ -11268,12 +11302,13 @@ mod tests {
     use dasobjectstore_core::ids::{DiskId, IngestJobId, PoolId, StoreId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
     use dasobjectstore_core::store::{
-        CapacityBehavior, IngestMode, StoreClass, StorePolicy, StorePolicyValidationError,
+        CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
     };
     use dasobjectstore_daemon::{
         DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonClientError,
         DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
-        DaemonIngestStage, DaemonSsdPressure, InProcessDaemonTransport, SubmitIngestFilesResponse,
+        DaemonIngestStage, DaemonIngressOrigin, DaemonSsdPressure, InProcessDaemonTransport,
+        SubmitIngestFilesResponse,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -12582,7 +12617,7 @@ mod tests {
             report.contains("Scenario: generated workload, 1 files, 1.0 MiB logical source total; file selection `random`; file order(s) `fifo`, `size_desc`.")
         );
         assert!(report.contains("- Run id: `perf-test-run`"));
-        assert!(report.contains("- Reproduce with: `dasobjectstore performance-test"));
+        assert!(report.contains("- Reproduce with: command recorded in the JSON artifact."));
         assert!(report.contains(
             "- Recommended strategy: ssd-overlap-drain with `size_desc` order at 2 HDD worker(s)"
         ));
@@ -14686,11 +14721,12 @@ mod tests {
         let Some(crate::cli::IngestCommand::Files(files)) = args.command() else {
             panic!("expected ingest files command");
         };
-        let transport = InProcessDaemonTransport::new(|request| {
+        let expected_source = source_root.clone();
+        let transport = InProcessDaemonTransport::new(move |request| {
             match request {
                 DaemonApiRequest::SubmitIngestFiles(request) => {
                     assert_eq!(request.endpoint.as_str(), "zymo_fecal_2025.05");
-                    assert_eq!(request.source_path, source_root);
+                    assert_eq!(request.source_path, expected_source);
                     assert_eq!(
                         request.object_type,
                         dasobjectstore_core::object_type::ObjectType::Fastq
@@ -15155,90 +15191,72 @@ mod tests {
     }
 
     #[test]
-    fn ingest_direct_import_writes_verified_reproducible_object() {
-        let root = temp_root("ingest-direct-import");
-        fs::create_dir_all(&root).expect("create temp root");
-        let source_path = root.join("downloads").join("reference.fa.zst");
-        let destination_path = root.join("hdd-a").join("objects").join("reference.fa.zst");
-        let policy_file = root.join("reproducible-cache.json");
-        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source dir");
-        fs::write(&source_path, b"public reference payload").expect("write source payload");
-        write_policy_file(&policy_file, &direct_reproducible_policy());
+    fn ingest_direct_import_submits_materially_equivalent_daemon_request() {
+        let source_root = PathBuf::from("/home/stephen/zymo_fecal_2025.05");
         let cli = Cli::try_parse_from([
             "dasobjectstore",
             "ingest",
             "direct-import",
-            "object-a",
-            "--disk-id",
-            "disk-a",
+            "zymo_fecal_2025.05",
             "--source",
-            source_path.to_str().expect("utf8 source path"),
+            source_root.to_str().expect("utf8 source path"),
             "--object-type",
-            "ena_sra",
-            "--destination",
-            destination_path.to_str().expect("utf8 destination path"),
-            "--expected-sha256",
-            "c13ac914d37ad9fd216d274f2fbeb0b936ac9275e27ff7003831701ccad71def",
-            "--source-uri",
-            "https://example.invalid/reference.fa.zst",
-            "--policy-file",
-            policy_file.to_str().expect("utf8 policy path"),
-            "--allow-direct-to-hdd-import",
-            "--confirm",
-            "confirm direct-to-hdd import",
+            "pod5",
+            "--copies",
+            "2",
+            "--hdd-workers",
+            "5",
+            "--force",
         ])
         .expect("direct import parses");
+        let Some(crate::cli::Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        let Some(crate::cli::IngestCommand::DirectImport(import)) = args.command() else {
+            panic!("expected direct-import command");
+        };
+        let transport = InProcessDaemonTransport::new(|request| {
+            match request {
+                DaemonApiRequest::SubmitIngestFiles(request) => {
+                    assert_eq!(request.endpoint.as_str(), "zymo_fecal_2025.05");
+                    assert_eq!(request.source_path, source_root);
+                    assert_eq!(
+                        request.object_type,
+                        dasobjectstore_core::object_type::ObjectType::Pod5
+                    );
+                    assert_eq!(request.copies, Some(2));
+                    assert_eq!(request.hdd_workers, Some(5));
+                    assert_eq!(
+                        request.ingress_origin,
+                        DaemonIngressOrigin::LocalServerDirectImport
+                    );
+                    assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
+                    assert!(!request.dry_run);
+                }
+                _ => panic!("expected submit ingest files request"),
+            }
+            Ok(DaemonApiResponse::SubmitIngestFiles(
+                SubmitIngestFilesResponse {
+                    job_id: IngestJobId::new("job-direct").expect("job id"),
+                    accepted_at_utc: "2026-07-09T14:16:12Z".to_string(),
+                    dry_run: false,
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
         let mut output = Vec::new();
 
-        run(&cli, &mut output).expect("direct import runs");
+        super::run_ingest_direct_import_with_client(import, &client, &mut output)
+            .expect("direct import daemon submission runs");
 
         let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("Direct-to-HDD import complete"));
-        assert!(output.contains("Object: object-a"));
-        assert!(output.contains("Object type: ena_sra"));
-        assert!(output.contains("Warning: SSD ingest was bypassed"));
-        assert_eq!(
-            fs::read(&destination_path).expect("read destination"),
-            b"public reference payload"
-        );
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
-    }
-
-    #[test]
-    fn ingest_direct_import_requires_risk_allowance() {
-        let root = temp_root("ingest-direct-import-risk");
-        fs::create_dir_all(&root).expect("create temp root");
-        let source_path = root.join("source");
-        let policy_file = root.join("policy.json");
-        fs::write(&source_path, b"public reference payload").expect("write source payload");
-        write_policy_file(&policy_file, &direct_reproducible_policy());
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "direct-import",
-            "object-a",
-            "--disk-id",
-            "disk-a",
-            "--source",
-            source_path.to_str().expect("utf8 source path"),
-            "--destination",
-            root.join("dest").to_str().expect("utf8 destination path"),
-            "--expected-sha256",
-            "c13ac914d37ad9fd216d274f2fbeb0b936ac9275e27ff7003831701ccad71def",
-            "--policy-file",
-            policy_file.to_str().expect("utf8 policy path"),
-            "--confirm",
-            "confirm direct-to-hdd import",
-        ])
-        .expect("direct import parses");
-        let mut output = Vec::new();
-
-        let err = run(&cli, &mut output).expect_err("risk allowance required");
-
-        assert!(matches!(err, CliError::DirectHddImport(_)));
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
+        assert!(output.contains("Daemon ingest job submitted"));
+        assert!(output.contains("Endpoint: zymo_fecal_2025.05"));
+        assert!(output.contains("Source: /home/stephen/zymo_fecal_2025.05"));
+        assert!(output.contains("Object type: pod5"));
+        assert!(output.contains("Copies override: 2"));
+        assert!(output.contains("Conflict policy: force"));
+        assert!(output.contains("Job: job-direct"));
     }
 
     #[test]
@@ -15882,12 +15900,6 @@ mod tests {
     fn write_policy_file(path: &Path, policy: &StorePolicy) {
         let file = File::create(path).expect("create policy file");
         serde_json::to_writer_pretty(file, policy).expect("write policy file");
-    }
-
-    fn direct_reproducible_policy() -> StorePolicy {
-        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
-        policy.ingest_mode = IngestMode::DirectToHdd;
-        policy
     }
 
     fn write_store_definitions_file(path: &Path, definitions: Vec<StoreServiceDefinition>) {

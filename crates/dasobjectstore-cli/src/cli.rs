@@ -1256,7 +1256,7 @@ pub(crate) enum IngestCommand {
     Queue(IngestQueueArgs),
     /// Cancel active queued ingest jobs for a store.
     DrainQueue(IngestDrainQueueArgs),
-    /// Import a reproducible object directly to HDD, bypassing SSD ingest.
+    /// Import a directory tree of files into a store directly to HDD, bypassing SSD ingest.
     DirectImport(IngestDirectImportArgs),
 }
 
@@ -1586,50 +1586,41 @@ impl IngestDrainQueueArgs {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct IngestDirectImportArgs {
-    /// Object identifier to assign to the imported object.
-    object_id: ObjectId,
-    /// Disk receiving this direct import copy.
-    #[arg(long)]
-    disk_id: DiskId,
-    /// Local source file to import.
+    /// Store or SubObject endpoint receiving the imported files.
+    endpoint: StoreId,
+    /// Mounted source directory containing files to import.
     #[arg(long)]
     source: PathBuf,
-    /// Logical object type assigned to this direct import.
+    /// Logical object type assigned to imported files.
     #[arg(long, default_value_t = ObjectType::Naive)]
     object_type: ObjectType,
-    /// Final HDD destination path to write.
+    /// Override the store policy copy count for this import.
     #[arg(long)]
-    destination: PathBuf,
-    /// Expected SHA-256 content hash for the source object.
-    #[arg(long)]
-    expected_sha256: String,
-    /// Optional public source URL, accession, or provenance URI.
-    #[arg(long)]
-    source_uri: Option<String>,
-    /// JSON store policy file; must be reproducible_cache with direct-to-HDD ingest.
-    #[arg(long)]
-    policy_file: PathBuf,
-    /// Allow bypassing SSD ingest for this import.
-    #[arg(long)]
-    allow_direct_to_hdd_import: bool,
-    /// HDD writer worker count for direct-import planning.
+    copies: Option<u8>,
+    /// HDD writer worker count; defaults to max(managed HDD count minus two, two),
+    /// capped by available HDDs.
     #[arg(long)]
     hdd_workers: Option<usize>,
-    /// Required confirmation phrase: confirm direct-to-hdd import.
+    /// Reuse an existing object only when its recorded checksum matches the incoming file.
+    #[arg(long, conflicts_with_all = ["lazy", "force"])]
+    strict: bool,
+    /// Reuse an existing object when the object path and file size match.
+    #[arg(long, conflicts_with_all = ["strict", "force"])]
+    lazy: bool,
+    /// Always ingest every file as a new stored version/payload.
+    #[arg(long, conflicts_with_all = ["strict", "lazy"])]
+    force: bool,
+    /// Render the upload context and daemon progress view while the upload runs.
     #[arg(long)]
-    confirm: String,
-    /// Emit import report as JSON.
+    tui: bool,
+    /// Show the planned file set without importing.
     #[arg(long)]
-    json: bool,
+    dry_run: bool,
 }
 
 impl IngestDirectImportArgs {
-    pub(crate) fn object_id(&self) -> &ObjectId {
-        &self.object_id
-    }
-
-    pub(crate) fn disk_id(&self) -> &DiskId {
-        &self.disk_id
+    pub(crate) fn endpoint(&self) -> &StoreId {
+        &self.endpoint
     }
 
     pub(crate) fn source(&self) -> &Path {
@@ -1640,36 +1631,30 @@ impl IngestDirectImportArgs {
         self.object_type
     }
 
-    pub(crate) fn destination(&self) -> &Path {
-        &self.destination
-    }
-
-    pub(crate) fn expected_sha256(&self) -> &str {
-        &self.expected_sha256
-    }
-
-    pub(crate) fn source_uri(&self) -> Option<&str> {
-        self.source_uri.as_deref()
-    }
-
-    pub(crate) fn policy_file(&self) -> &Path {
-        &self.policy_file
-    }
-
-    pub(crate) fn allow_direct_to_hdd_import(&self) -> bool {
-        self.allow_direct_to_hdd_import
+    pub(crate) fn copies(&self) -> Option<u8> {
+        self.copies
     }
 
     pub(crate) fn hdd_workers(&self) -> Option<usize> {
         self.hdd_workers
     }
 
-    pub(crate) fn confirm(&self) -> &str {
-        &self.confirm
+    pub(crate) fn conflict_policy(&self) -> DaemonIngestConflictPolicy {
+        if self.force {
+            DaemonIngestConflictPolicy::Force
+        } else if self.lazy {
+            DaemonIngestConflictPolicy::Lazy
+        } else {
+            DaemonIngestConflictPolicy::Strict
+        }
     }
 
-    pub(crate) fn json(&self) -> bool {
-        self.json
+    pub(crate) fn tui(&self) -> bool {
+        self.tui
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
     }
 }
 
@@ -2996,27 +2981,18 @@ mod tests {
             "dasobjectstore",
             "ingest",
             "direct-import",
-            "object-a",
-            "--disk-id",
-            "disk-a",
+            "zymo_fecal_2025.05",
             "--source",
-            "/tmp/downloads/reference.fa.zst",
+            "/home/stephen/zymo_fecal_2025.05",
             "--object-type",
-            "ena_sra",
-            "--destination",
-            "/mnt/disk-a/objects/reference.fa.zst",
-            "--expected-sha256",
-            "abc123",
-            "--source-uri",
-            "https://example.invalid/reference.fa.zst",
-            "--policy-file",
-            "/tmp/reproducible-cache.json",
-            "--allow-direct-to-hdd-import",
+            "pod5",
+            "--copies",
+            "2",
             "--hdd-workers",
             "5",
-            "--confirm",
-            "confirm direct-to-hdd import",
-            "--json",
+            "--lazy",
+            "--tui",
+            "--dry-run",
         ])
         .expect("ingest direct-import parses");
 
@@ -3025,30 +3001,17 @@ mod tests {
         };
         match args.command() {
             Some(IngestCommand::DirectImport(import)) => {
-                assert_eq!(import.object_id().as_str(), "object-a");
-                assert_eq!(import.disk_id().as_str(), "disk-a");
+                assert_eq!(import.endpoint().as_str(), "zymo_fecal_2025.05");
                 assert_eq!(
                     import.source(),
-                    Path::new("/tmp/downloads/reference.fa.zst")
+                    Path::new("/home/stephen/zymo_fecal_2025.05")
                 );
-                assert_eq!(import.object_type(), ObjectType::EnaSra);
-                assert_eq!(
-                    import.destination(),
-                    Path::new("/mnt/disk-a/objects/reference.fa.zst")
-                );
-                assert_eq!(import.expected_sha256(), "abc123");
-                assert_eq!(
-                    import.source_uri(),
-                    Some("https://example.invalid/reference.fa.zst")
-                );
-                assert_eq!(
-                    import.policy_file(),
-                    Path::new("/tmp/reproducible-cache.json")
-                );
-                assert!(import.allow_direct_to_hdd_import());
+                assert_eq!(import.object_type(), ObjectType::Pod5);
+                assert_eq!(import.copies(), Some(2));
                 assert_eq!(import.hdd_workers(), Some(5));
-                assert_eq!(import.confirm(), "confirm direct-to-hdd import");
-                assert!(import.json());
+                assert_eq!(import.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
+                assert!(import.tui());
+                assert!(import.dry_run());
             }
             _ => panic!("expected direct-import command"),
         }

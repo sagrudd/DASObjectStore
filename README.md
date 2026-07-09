@@ -157,26 +157,22 @@ SSD stays fast. At the high watermark, destage/settlement is prioritized over
 lower-priority ingest. At the critical watermark, destage is urgent and normal
 ingest should pause or reject non-critical work.
 
-CLI-managed public imports may bypass SSD ingest for reproducible objects with
-an expected digest and source URL. The command accepts `--hdd-workers` for
-alignment with ingest-worker planning, but the current reproducible-object
-direct import writes a single verified object copy to the requested HDD:
+Server-local imports can bypass SSD ingest with the `direct-import` command.
+The command intentionally mirrors `ingest files`; the operational difference is
+that the daemon reads the local source tree and lands files directly on managed
+HDDs rather than staging them on SSD first:
 
 ```bash
-dasobjectstore ingest direct-import <object-id> \
-  --disk-id <disk-id> \
-  --source <downloaded-file> \
-  --destination <hdd-object-path> \
-  --expected-sha256 <sha256> \
-  --source-uri <url-or-accession> \
-  --policy-file <reproducible-cache-direct-policy.json> \
+dasobjectstore ingest direct-import <store-or-subobject-endpoint> \
+  --source <source-directory> \
+  --object-type <object-type> \
+  --copies <n> \
   --hdd-workers <n> \
-  --allow-direct-to-hdd-import \
-  --confirm "confirm direct-to-hdd import"
+  --strict
 ```
 
-That bypass is intentionally not the normal S3/API write path. It is limited to
-reproducible cache data because it bypasses SSD capture and acknowledgement.
+Remote S3/API and Web uploads remain SSD-first so the appliance can absorb
+network ingress before managed HDD settlement.
 
 ## Portability
 

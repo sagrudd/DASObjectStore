@@ -8,6 +8,7 @@ use std::fmt::{self, Display};
 pub enum IngressOrigin {
     #[default]
     LocalServer,
+    LocalServerDirectImport,
     RemoteS3,
     WebUpload,
     Synoptikon,
@@ -17,7 +18,9 @@ pub enum IngressOrigin {
 impl IngressOrigin {
     pub fn landing_mode(self) -> IngressLandingMode {
         match self {
-            Self::LocalServer => IngressLandingMode::DirectToHddWhenPolicyAllows,
+            Self::LocalServer | Self::LocalServerDirectImport => {
+                IngressLandingMode::DirectToHddWhenPolicyAllows
+            }
             Self::RemoteS3 | Self::WebUpload | Self::Synoptikon | Self::Mneion => {
                 IngressLandingMode::SsdFirst
             }
@@ -33,6 +36,7 @@ impl Display for IngressOrigin {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::LocalServer => "local_server",
+            Self::LocalServerDirectImport => "local_server_direct_import",
             Self::RemoteS3 => "remote_s3",
             Self::WebUpload => "web_upload",
             Self::Synoptikon => "synoptikon",
@@ -67,6 +71,10 @@ mod tests {
             IngressOrigin::LocalServer.landing_mode(),
             IngressLandingMode::DirectToHddWhenPolicyAllows
         );
+        assert_eq!(
+            IngressOrigin::LocalServerDirectImport.landing_mode(),
+            IngressLandingMode::DirectToHddWhenPolicyAllows
+        );
 
         for origin in [
             IngressOrigin::RemoteS3,
@@ -79,10 +87,16 @@ mod tests {
         }
 
         assert!(!IngressOrigin::LocalServer.requires_ssd_staging());
+        assert!(!IngressOrigin::LocalServerDirectImport.requires_ssd_staging());
     }
 
     #[test]
     fn uses_stable_snake_case_wire_names() {
+        assert_eq!(
+            serde_json::to_value(IngressOrigin::LocalServerDirectImport)
+                .expect("origin serializes"),
+            serde_json::json!("local_server_direct_import")
+        );
         assert_eq!(
             serde_json::to_value(IngressOrigin::RemoteS3).expect("origin serializes"),
             serde_json::json!("remote_s3")

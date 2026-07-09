@@ -227,30 +227,27 @@ Write acknowledgement policy SHALL be configurable per store:
 The store policy model represents these modes as `AfterSsdIngest` and
 `AfterHddPlacement`.
 
-DASObjectStore SHALL support CLI-managed direct-to-HDD imports as an initial bypass
-for massive public or otherwise reproducible datasets.
+DASObjectStore SHALL support CLI-managed direct-to-HDD imports for massive
+server-local datasets where SSD staging is undesirable.
 
-Direct-to-HDD import SHALL initially be limited to `reproducible_cache` stores
-whose policy explicitly uses `DirectToHdd` ingest.
+Direct-to-HDD import SHALL use the same endpoint, source-tree, object-type,
+copy-count, conflict-policy, progress, TUI, and dry-run semantics as normal
+file ingest.
 
-Direct-to-HDD import SHALL require an expected SHA-256 content hash before
-writing to HDD.
+Direct-to-HDD import SHALL be an explicit server-local CLI route and SHALL NOT
+silently fall back to SSD staging.
 
-Direct-to-HDD import SHOULD record source metadata such as URL, accession, or
-provenance URI when available so lost cache objects can be redownloaded or
-rehydrated.
+Direct-to-HDD import SHALL calculate content hashes as part of the daemon-owned
+copy process without requiring a separate source-side hash argument.
 
 Direct-to-HDD bypass SHALL NOT be the default S3/API write path.
 
-Direct-to-HDD command documentation SHALL state adjacent to the command that the
-path bypasses SSD capture and is only appropriate for reproducible objects with
-known source metadata and expected digests.
+Direct-to-HDD command documentation SHALL state adjacent to the command that
+remote S3/API and Web uploads remain SSD-first while server-local imports may
+land directly on HDD when policy permits.
 
-Risky bypass behavior SHALL require both policy allowance and action-time
-confirmation.
-
-Direct-to-HDD import SHALL write to the selected HDD destination, verify the
-result against the expected hash, and only then report the import as successful.
+Direct-to-HDD import SHALL write to daemon-selected managed HDD destinations,
+verify the resulting copies, and only then report the import as successful.
 
 ## 11. Object Lifecycle Requirements
 

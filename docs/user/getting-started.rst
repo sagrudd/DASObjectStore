@@ -27,8 +27,8 @@ The MVP assumes:
   read/export workflows.
 * A DAS pool has one mandatory SSD ingest device and one or more HDD capacity
   members.
-* Normal writes are SSD-first. Direct-to-HDD import is reserved for
-  reproducible public datasets with known hashes.
+* Remote S3/API and Web writes are SSD-first. Server-local CLI direct-import
+  bypasses SSD staging and lands directly onto managed HDDs.
 * Store metadata is mirrored to the DAS SSD when a known SSD root is present so
   the DAS can be moved between hosts.
 
@@ -58,4 +58,3 @@ List store commands:
 List object store classes by asking for defaults. The class names are:
 ``reproducible_cache``, ``generated_data``, ``critical_metadata``,
 ``export_bundle``, and ``ingest_staging``.
-

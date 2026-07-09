@@ -61,8 +61,9 @@ Class Summary
 Important Defaults
 ------------------
 
-All current classes use ``ssd_first`` ingest by default. Direct-to-HDD import is
-not the normal S3/API write path.
+Remote S3/API and Web uploads are SSD-first. Server-local CLI imports may use
+``dasobjectstore ingest direct-import`` to bypass SSD staging and land directly
+onto managed HDDs.
 
 Protected classes are ``generated_data``, ``critical_metadata``, and
 ``export_bundle``. Protected classes cannot use direct-to-HDD ingest, immediate
@@ -73,4 +74,3 @@ massive public datasets where local loss is acceptable if the source and hash
 are known.
 
 Copy counts are currently limited to 1, 2, or 3.
-

@@ -6,6 +6,20 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.61.0 - 2026-07-09
+
+- Rework ``dasobjectstore ingest direct-import`` so it materially mirrors
+  ``ingest files`` for endpoint, source directory, object type, copies,
+  ``--hdd-workers``, conflict policy, ``--tui``, and ``--dry-run`` options,
+  while submitting an explicit daemon local direct-to-HDD ingress origin.
+- Remove the legacy single-object direct-import CLI shape that required
+  ``--disk-id``, ``--destination``, ``--expected-sha256``, ``--policy-file``,
+  and a confirmation phrase.
+- Add a stable ``local_server_direct_import`` ingress-origin wire value so the
+  daemon cannot silently route explicit direct imports through SSD staging.
+- Update README and user/reference documentation for server-local direct-HDD
+  directory imports and remove stale direct-import JSON output documentation.
+
 ## 0.60.9 - 2026-07-09
 
 - Simplify Web Local Access group creation and user-to-group mapping by removing

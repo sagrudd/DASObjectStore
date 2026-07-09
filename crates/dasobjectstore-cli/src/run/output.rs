@@ -5,10 +5,10 @@ use super::{
 };
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use dasobjectstore_metadata::{
-    DestagePriorityPolicy, DirectHddImportReport, DiskDrainAction, DiskDrainObjectSummary,
-    DiskDrainPlanSummary, DiskReplacementPlanSummary, DiskRetirementReport, ObjectExportReport,
-    ObjectInspectSummary, ObjectPutReport, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity,
-    SsdCapacityPolicy, SsdPressure, StoreDrainReport,
+    DestagePriorityPolicy, DiskDrainAction, DiskDrainObjectSummary, DiskDrainPlanSummary,
+    DiskReplacementPlanSummary, DiskRetirementReport, ObjectExportReport, ObjectInspectSummary,
+    ObjectPutReport, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity, SsdCapacityPolicy,
+    SsdPressure, StoreDrainReport,
 };
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
@@ -57,32 +57,6 @@ pub(super) fn write_ingest_status(
         policy.critical_watermark_percent
     )?;
     writeln!(writer, "Minimum free bytes: {}", policy.minimum_free_bytes)
-}
-
-pub(super) fn write_ingest_direct_import_report(
-    report: &DirectHddImportReport,
-    writer: &mut impl Write,
-) -> Result<(), io::Error> {
-    writeln!(writer, "Direct-to-HDD import complete")?;
-    writeln!(writer, "Object: {}", report.object_id)?;
-    writeln!(writer, "Object type: {}", report.object_type)?;
-    writeln!(writer, "Disk: {}", report.disk_id)?;
-    writeln!(writer, "Source: {}", report.source_path.to_string_lossy())?;
-    if let Some(source_uri) = &report.source_uri {
-        writeln!(writer, "Source URI: {source_uri}")?;
-    }
-    writeln!(
-        writer,
-        "Destination: {}",
-        report.destination_path.to_string_lossy()
-    )?;
-    writeln!(writer, "Bytes written: {}", report.bytes_written)?;
-    writeln!(
-        writer,
-        "Content hash: {}:{}",
-        report.content_hash_algorithm, report.content_hash
-    )?;
-    writeln!(writer, "Warning: {}", report.warning)
 }
 
 pub(super) fn write_pool_inspect_summary(

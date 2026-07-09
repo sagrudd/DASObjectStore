@@ -529,6 +529,10 @@ mod tests {
             DaemonIngressOrigin::LocalServer.landing_mode(),
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
         );
+        assert_eq!(
+            DaemonIngressOrigin::LocalServerDirectImport.landing_mode(),
+            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+        );
         for origin in [
             DaemonIngressOrigin::RemoteS3,
             DaemonIngressOrigin::WebUpload,
@@ -539,10 +543,16 @@ mod tests {
             assert!(origin.requires_ssd_staging());
         }
         assert!(!DaemonIngressOrigin::LocalServer.requires_ssd_staging());
+        assert!(!DaemonIngressOrigin::LocalServerDirectImport.requires_ssd_staging());
     }
 
     #[test]
     fn ingress_origin_policy_names_are_stable_snake_case() {
+        assert_eq!(
+            serde_json::to_value(DaemonIngressOrigin::LocalServerDirectImport)
+                .expect("origin serializes"),
+            "local_server_direct_import"
+        );
         assert_eq!(
             serde_json::to_value(DaemonIngressOrigin::RemoteS3).expect("origin serializes"),
             "remote_s3"

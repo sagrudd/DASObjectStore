@@ -96,26 +96,21 @@ Normal writes use SSD-first ingest:
 4. The object becomes SSD-eviction-eligible after policy-satisfying copies are
    verified.
 
-Large public downloads may use a CLI-managed direct-to-HDD path when the store
-policy and action-time confirmation allow it. That bypass is only appropriate
-for reproducible objects with an expected digest and source metadata. It is not
-the default write path for generated data.
+Large server-local datasets may use a CLI-managed direct-to-HDD path. The
+command mirrors `ingest files` and accepts a folder tree; it differs by
+bypassing SSD staging and landing the imported files directly onto managed HDDs.
 
 ```bash
-dasobjectstore ingest direct-import ensembl-release-113-human-genome \
-  --disk-id disk-a \
-  --source /downloads/homo_sapiens/genome.fa.zst \
-  --destination /mnt/disk-a/objects/public_reference_cache/ensembl/release-113/homo_sapiens/genome.fa.zst \
-  --expected-sha256 <sha256> \
-  --source-uri https://example.org/ensembl/release-113/homo_sapiens/genome.fa.zst \
-  --policy-file policies/public-reference-cache-direct.json \
-  --allow-direct-to-hdd-import \
-  --confirm "confirm direct-to-hdd import"
+dasobjectstore ingest direct-import ensembl-release-113 \
+  --source /downloads/homo_sapiens/release-113 \
+  --object-type ena_sra \
+  --hdd-workers 5 \
+  --strict
 ```
 
-The direct path writes the object once to the selected HDD destination, verifies
-the resulting bytes against the expected hash, and reports the bypass warning in
-the command output. Metadata commit and object-service exposure can then build
+The direct path computes hashes during the daemon-managed copy process and
+settles policy-satisfying HDD copies without first writing payloads to SSD.
+Metadata commit and object-service exposure can then build
 on the verified import report.
 
 ## Disk Failure Behavior

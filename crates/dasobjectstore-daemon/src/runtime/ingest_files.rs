@@ -1121,6 +1121,9 @@ fn landing_mode_for_ingest(
     policy: &StorePolicy,
     origin: DaemonIngressOrigin,
 ) -> DaemonIngressLandingMode {
+    if origin == DaemonIngressOrigin::LocalServerDirectImport {
+        return DaemonIngressLandingMode::DirectToHddWhenPolicyAllows;
+    }
     match (origin.landing_mode(), policy.ingest_mode) {
         (DaemonIngressLandingMode::DirectToHddWhenPolicyAllows, IngestMode::DirectToHdd) => {
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
@@ -1894,6 +1897,15 @@ mod tests {
         assert_eq!(
             landing_mode_for_ingest(&policy, DaemonIngressOrigin::WebUpload),
             DaemonIngressLandingMode::SsdFirst
+        );
+
+        let ssd_first_policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        assert_eq!(
+            landing_mode_for_ingest(
+                &ssd_first_policy,
+                DaemonIngressOrigin::LocalServerDirectImport
+            ),
+            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
         );
     }
 
