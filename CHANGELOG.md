@@ -16,6 +16,9 @@ agreement before landing.
 - Add remote-upload runtime regression coverage for failed paired uploads that
   report active-upload renewal progress, clean abandoned session state, release
   S3 admission capacity, and preserve failed daemon job status.
+- Add a file-backed remote easyconnect paired-session store for daemon runtime
+  persistence with revocation, renewal token rotation, expiry, actor matching,
+  and per-ObjectStore write authorization coverage.
 - Add remote-client easyconnect regression coverage for successful, denied, and
   expired pairing callbacks, paired upload sessions, renewal metadata states,
   and local rejection of expired sessions before stored credentials are used.

@@ -8,6 +8,7 @@ mod local_admin;
 mod object_browser;
 mod object_download;
 mod performance_policy;
+mod remote_sessions;
 mod remote_upload;
 mod service;
 
@@ -50,6 +51,13 @@ pub use performance_policy::{
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
+};
+pub use remote_sessions::{
+    remote_easyconnect_session_store_path, FileBackedRemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    REMOTE_EASYCONNECT_SESSION_DIR_NAME, REMOTE_EASYCONNECT_SESSION_FILE_NAME,
+    REMOTE_EASYCONNECT_SESSION_SCHEMA,
 };
 pub use remote_upload::{
     plan_remote_upload_cancellation_cleanup, record_remote_upload_s3_transfer_job,

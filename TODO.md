@@ -880,9 +880,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add remote-upload runtime tests proving a failed paired upload can report
   active-upload renewal progress, clean abandoned session state, release S3
   admission capacity, and preserve the failed daemon job record.
-- [ ] Add a first-class persisted easyconnect paired-session store and tests for
-  revoked paired upload sessions, renewal during active upload, and standalone
-  local-user permission checks beyond auth-context admission.
+- [x] Add a first-class persisted easyconnect paired-session store with tests
+  for revocation, renewal token rotation, expiry, actor matching, and
+  per-ObjectStore write permission checks.
+- [ ] Wire the persisted easyconnect paired-session store into daemon
+  easyconnect session create/exchange/revoke/renew routes and remote-upload
+  ObjectStore listing authorization.
 - [ ] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.
