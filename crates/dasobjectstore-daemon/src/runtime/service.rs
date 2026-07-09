@@ -168,6 +168,16 @@ pub trait ServiceCommandRunner {
     ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
         self.run(program, args)
     }
+
+    fn run_with_display_args_and_env(
+        &self,
+        program: &str,
+        args: &[String],
+        display_args: &[String],
+        _environment: &[(String, String)],
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        self.run_with_display_args(program, args, display_args)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -208,12 +218,24 @@ impl ServiceCommandRunner for SystemServiceCommandRunner {
         args: &[String],
         display_args: &[String],
     ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
-        let output = Command::new(program).args(args).output().map_err(|error| {
-            DaemonServiceRuntimeError::CommandIo {
+        self.run_with_display_args_and_env(program, args, display_args, &[])
+    }
+
+    fn run_with_display_args_and_env(
+        &self,
+        program: &str,
+        args: &[String],
+        display_args: &[String],
+        environment: &[(String, String)],
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        let output = Command::new(program)
+            .args(args)
+            .envs(environment.iter().map(|(name, value)| (name, value)))
+            .output()
+            .map_err(|error| DaemonServiceRuntimeError::CommandIo {
                 program: program.to_string(),
                 message: error.to_string(),
-            }
-        })?;
+            })?;
         if !output.status.success() {
             return Err(DaemonServiceRuntimeError::CommandFailed {
                 program: program.to_string(),

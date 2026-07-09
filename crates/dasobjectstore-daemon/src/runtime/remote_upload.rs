@@ -288,6 +288,7 @@ pub struct RemoteUploadAwsCliTransferPlan {
     pub program: String,
     pub args: Vec<String>,
     pub display_args: Vec<String>,
+    pub environment: Vec<(String, String)>,
     pub source_bytes: u64,
     pub progress_updated_at_utc: String,
     pub progress_message: Option<String>,
@@ -304,6 +305,7 @@ impl RemoteUploadAwsCliTransferPlan {
             program: program.into(),
             display_args: args.clone(),
             args,
+            environment: Vec::new(),
             source_bytes,
             progress_updated_at_utc: progress_updated_at_utc.into(),
             progress_message: None,
@@ -312,6 +314,11 @@ impl RemoteUploadAwsCliTransferPlan {
 
     pub fn with_display_args(mut self, display_args: Vec<String>) -> Self {
         self.display_args = display_args;
+        self
+    }
+
+    pub fn with_environment(mut self, environment: Vec<(String, String)>) -> Self {
+        self.environment = environment;
         self
     }
 
@@ -353,7 +360,12 @@ impl RemoteUploadS3ByteTransfer for RemoteUploadAwsCliByteTransfer<'_> {
     ) -> Result<(), RemoteUploadS3ByteTransferError> {
         self.plan.validate()?;
         self.runner
-            .run_with_display_args(&self.plan.program, &self.plan.args, &self.plan.display_args)
+            .run_with_display_args_and_env(
+                &self.plan.program,
+                &self.plan.args,
+                &self.plan.display_args,
+                &self.plan.environment,
+            )
             .map_err(|error| RemoteUploadS3ByteTransferError::new(error.to_string()))?;
         progress
             .record_progress(RemoteUploadS3TransferProgressUpdate {
@@ -380,6 +392,7 @@ pub struct RemoteEasyconnectAwsCliUploadJobRequest {
     pub program: String,
     pub args: Vec<String>,
     pub display_args: Vec<String>,
+    pub environment: Vec<(String, String)>,
     pub submitted_at_utc: String,
     pub started_at_utc: String,
     pub finished_at_utc: String,
@@ -413,7 +426,8 @@ pub fn run_remote_easyconnect_aws_cli_upload_job(
         request.source_bytes,
         request.progress_updated_at_utc,
     )
-    .with_display_args(request.display_args);
+    .with_display_args(request.display_args)
+    .with_environment(request.environment);
     if let Some(message) = request.progress_message {
         transfer_plan = transfer_plan.with_progress_message(message);
     }
@@ -1432,6 +1446,10 @@ mod tests {
             "/data/reads.fastq.gz".to_string(),
             "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
         ])
+        .with_environment(vec![(
+            "AWS_ACCESS_KEY_ID".to_string(),
+            "AKIAEXAMPLE".to_string(),
+        )])
         .with_progress_message("aws CLI transfer copied 42 bytes");
         let transfer = RemoteUploadAwsCliByteTransfer::new(plan, &runner);
 
@@ -1444,6 +1462,10 @@ mod tests {
         assert_eq!(calls[0].program, "aws");
         assert_eq!(calls[0].args[1], "http://127.0.0.1:3900");
         assert_eq!(calls[0].display_args[1], "<redacted>");
+        assert_eq!(
+            calls[0].environment,
+            [("AWS_ACCESS_KEY_ID".to_string(), "AKIAEXAMPLE".to_string())]
+        );
         assert_eq!(report.progress_events.len(), 1);
         let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
             panic!("expected completion progress event");
@@ -1584,6 +1606,7 @@ mod tests {
         program: String,
         args: Vec<String>,
         display_args: Vec<String>,
+        environment: Vec<(String, String)>,
     }
 
     impl ServiceCommandRunner for FakeRemoteUploadCommandRunner {
@@ -1601,10 +1624,21 @@ mod tests {
             args: &[String],
             display_args: &[String],
         ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+            self.run_with_display_args_and_env(program, args, display_args, &[])
+        }
+
+        fn run_with_display_args_and_env(
+            &self,
+            program: &str,
+            args: &[String],
+            display_args: &[String],
+            environment: &[(String, String)],
+        ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
             self.calls.borrow_mut().push(FakeRemoteUploadCommandCall {
                 program: program.to_string(),
                 args: args.to_vec(),
                 display_args: display_args.to_vec(),
+                environment: environment.to_vec(),
             });
             if self.fail {
                 return Err(DaemonServiceRuntimeError::CommandFailed {
@@ -1666,6 +1700,7 @@ mod tests {
                 "<source-redacted>".to_string(),
                 "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
             ],
+            environment: vec![("AWS_ACCESS_KEY_ID".to_string(), "AKIAEXAMPLE".to_string())],
             submitted_at_utc: "2026-07-09T14:10:00Z".to_string(),
             started_at_utc: "2026-07-09T14:10:05Z".to_string(),
             finished_at_utc: "2026-07-09T14:11:00Z".to_string(),

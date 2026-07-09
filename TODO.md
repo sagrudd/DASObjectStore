@@ -833,7 +833,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add the daemon API DTOs, typed daemon client helper, and request-handler
   route that submit easyconnect AWS CLI upload jobs into the daemon runtime
   executor.
-- [ ] Wire the remote client/local-agent easyconnect upload command to call the
+- [x] Wire the remote client/local-agent easyconnect upload command to call the
   daemon submit route so SSD staging, S3/object-service intake, HDD landing
   workers, and verification cannot grow without bounds end-to-end.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of

@@ -893,6 +893,7 @@ mod tests {
                 program: "aws".to_string(),
                 args: vec!["s3".to_string(), "cp".to_string()],
                 display_args: vec!["s3".to_string(), "cp".to_string()],
+                environment: Vec::new(),
                 progress_message: Some("completed".to_string()),
             })
             .expect("upload submit response");

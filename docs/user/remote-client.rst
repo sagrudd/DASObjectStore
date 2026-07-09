@@ -295,6 +295,24 @@ For folders, ``dasobjectstore-remote`` uses ``aws s3 sync``. For files, it uses
      --prefix experiments/run-001 \
      --dry-run
 
+When the local agent is running on the DAS appliance, or on a host where the
+source path is readable by ``dasobjectstored``, submit the upload through the
+daemon instead of executing the AWS CLI directly:
+
+.. code-block:: console
+
+   dasobjectstore-remote upload zymo_fecal_2025.05 \
+     --source /srv/incoming/run-001 \
+     --prefix experiments/run-001 \
+     --submit-to-daemon
+
+This path sends the planned AWS command, source byte count, backpressure
+policy, redacted display arguments, and temporary AWS session environment to
+the daemon over its local socket. The daemon owns admission control, remote S3
+transfer capacity, SSD pressure gating, HDD landing queue accounting,
+verification queue accounting, and final job persistence. Use
+``--daemon-socket`` only when testing a non-default local daemon socket.
+
 Remote upload plans include the appliance backpressure contract. The default
 contract limits remote S3 transfer concurrency to two, multipart part
 concurrency to two, browser handoff metadata to 100,000 files or 8 TiB, SSD

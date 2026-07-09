@@ -797,6 +797,7 @@ version = "0.60.6"
 dependencies = [
  "clap",
  "dasobjectstore-core",
+ "dasobjectstore-daemon",
  "rpassword",
  "serde",
  "serde_json",

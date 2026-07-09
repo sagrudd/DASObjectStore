@@ -75,13 +75,14 @@ pub use remote_easyconnect::{
     remote_easyconnect_renew_after_offset_seconds,
     resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
+    RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectObjectStoreAccessPolicy,
+    RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
     RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
     RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
@@ -277,6 +278,12 @@ fn remote_easyconnect_validation_error(
         RemoteEasyconnectValidationError::EmptyAwsCliArgs => {
             DaemonRequestValidationError::BlankField { field: "args" }
         }
+        RemoteEasyconnectValidationError::InvalidAwsCliEnvironmentVariable { name } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "environment.name",
+                value: name,
+            }
+        }
     }
 }
 
@@ -441,13 +448,13 @@ mod tests {
         ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
-        UpsertEndpointInventoryRequest, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
-        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
@@ -732,6 +739,10 @@ mod tests {
                 program: "aws".to_string(),
                 args: vec!["s3".to_string(), "cp".to_string()],
                 display_args: vec!["s3".to_string(), "cp".to_string()],
+                environment: vec![RemoteEasyconnectAwsCliEnvironmentVariable {
+                    name: "AWS_ACCESS_KEY_ID".to_string(),
+                    value: "AKIAEXAMPLE".to_string(),
+                }],
                 progress_message: None,
             },
         );

@@ -423,6 +423,8 @@ pub struct RemoteEasyconnectSubmitAwsCliUploadRequest {
     pub program: String,
     pub args: Vec<String>,
     pub display_args: Vec<String>,
+    #[serde(default)]
+    pub environment: Vec<RemoteEasyconnectAwsCliEnvironmentVariable>,
     pub progress_message: Option<String>,
 }
 
@@ -434,7 +436,29 @@ impl RemoteEasyconnectSubmitAwsCliUploadRequest {
         if self.args.is_empty() {
             return Err(RemoteEasyconnectValidationError::EmptyAwsCliArgs);
         }
+        for variable in &self.environment {
+            variable.validate()?;
+        }
         validate_optional_non_blank("progress_message", self.progress_message.as_deref())?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectAwsCliEnvironmentVariable {
+    pub name: String,
+    pub value: String,
+}
+
+impl RemoteEasyconnectAwsCliEnvironmentVariable {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        if self.name.trim().is_empty() || self.name.contains('=') {
+            return Err(
+                RemoteEasyconnectValidationError::InvalidAwsCliEnvironmentVariable {
+                    name: self.name.clone(),
+                },
+            );
+        }
         Ok(())
     }
 }
@@ -619,6 +643,7 @@ pub enum RemoteEasyconnectValidationError {
     AbsoluteUploadSelectionPath { display_path: String },
     UploadSelectionByteMismatch { expected: u64, actual: u64 },
     EmptyAwsCliArgs,
+    InvalidAwsCliEnvironmentVariable { name: String },
 }
 
 pub fn resolve_remote_easyconnect_session_lifetime_seconds(
@@ -675,6 +700,10 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
             Self::EmptyAwsCliArgs => {
                 formatter.write_str("remote easyconnect AWS CLI upload requires command arguments")
             }
+            Self::InvalidAwsCliEnvironmentVariable { name } => write!(
+                formatter,
+                "remote easyconnect AWS CLI environment variable name is invalid: {name}"
+            ),
         }
     }
 }

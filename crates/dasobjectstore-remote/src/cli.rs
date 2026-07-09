@@ -279,6 +279,12 @@ pub struct UploadArgs {
     /// Suppress AWS progress output.
     #[arg(long)]
     no_progress: bool,
+    /// Submit the AWS upload job to a local dasobjectstored daemon instead of executing AWS locally.
+    #[arg(long)]
+    submit_to_daemon: bool,
+    /// Local daemon socket used with --submit-to-daemon.
+    #[arg(long)]
+    daemon_socket: Option<PathBuf>,
 }
 
 impl UploadArgs {
@@ -304,6 +310,14 @@ impl UploadArgs {
 
     pub fn progress(&self) -> bool {
         !self.no_progress
+    }
+
+    pub fn submit_to_daemon(&self) -> bool {
+        self.submit_to_daemon
+    }
+
+    pub fn daemon_socket(&self) -> Option<&Path> {
+        self.daemon_socket.as_deref()
     }
 }
 

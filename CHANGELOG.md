@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.6 - 2026-07-09
 
+- Wire ``dasobjectstore-remote upload --submit-to-daemon`` through the typed
+  easyconnect daemon upload route, including source-byte accounting, redacted
+  display arguments, and AWS session environment handoff.
 - Add a typed daemon API, client helper, and request-handler route for
   easyconnect AWS CLI remote-upload jobs so submissions reach the
   admission-gated runtime executor.

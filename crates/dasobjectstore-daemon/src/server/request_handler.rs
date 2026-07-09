@@ -912,6 +912,11 @@ fn remote_easyconnect_aws_cli_upload_job_request(
         program: request.program,
         args: request.args,
         display_args: request.display_args,
+        environment: request
+            .environment
+            .into_iter()
+            .map(|variable| (variable.name, variable.value))
+            .collect(),
         submitted_at_utc: accepted_at_utc.to_string(),
         started_at_utc: accepted_at_utc.to_string(),
         finished_at_utc: accepted_at_utc.to_string(),
@@ -1249,9 +1254,10 @@ mod tests {
         ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, PrepareEnclosureResponse,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -2437,6 +2443,10 @@ mod tests {
                         "<source-redacted>".to_string(),
                         "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
                     ],
+                    environment: vec![RemoteEasyconnectAwsCliEnvironmentVariable {
+                        name: "AWS_ACCESS_KEY_ID".to_string(),
+                        value: "AKIAEXAMPLE".to_string(),
+                    }],
                     progress_message: Some("completed".to_string()),
                 },
             ))
@@ -2460,7 +2470,8 @@ mod tests {
                 "remote-upload-job-1".to_string(),
                 "zymo_fecal_2025.05".to_string(),
                 42,
-                "aws".to_string()
+                "aws".to_string(),
+                1
             )]
         );
 
@@ -2713,7 +2724,7 @@ mod tests {
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         create_object_store_calls: RefCell<Vec<(String, String, bool)>>,
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
-        remote_upload_calls: RefCell<Vec<(String, String, u64, String)>>,
+        remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize)>>,
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
@@ -2784,6 +2795,7 @@ mod tests {
                 request.object_store.clone(),
                 request.source_bytes,
                 request.program.clone(),
+                request.environment.len(),
             ));
             let job = DaemonJobSummary {
                 job_id: DaemonJobId::new(request.job_id.clone())

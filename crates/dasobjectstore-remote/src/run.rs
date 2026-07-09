@@ -19,10 +19,16 @@ use crate::s3::{
     execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload_with_credentials,
     AwsS3CredentialSource, RemoteS3Error,
 };
+use dasobjectstore_daemon::{
+    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonJobEvent,
+    RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, UnixSocketDaemonTransport,
+    DEFAULT_DAEMON_SOCKET_FILE_NAME, LINUX_DAEMON_RUNTIME_DIR,
+};
 use std::fmt;
 use std::io::Write;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
@@ -306,12 +312,187 @@ fn run_upload(
         writeln!(writer, "{}", plan.display_command())?;
         return Ok(());
     }
+    if args.submit_to_daemon() {
+        let source_bytes = source_bytes(args.source())?;
+        let socket_path = args
+            .daemon_socket()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_daemon_socket_path);
+        let client = DaemonClient::new(UnixSocketDaemonTransport::new(socket_path));
+        let response = submit_upload_plan_to_daemon(
+            &client,
+            &route,
+            &plan,
+            credentials.as_ref(),
+            args.source(),
+            source_bytes,
+        )?;
+        write_daemon_upload_response(&response, writer)?;
+        return Ok(());
+    }
     let output = execute_aws_plan(&plan, credentials.as_ref())?;
     if !output.trim().is_empty() {
         writer.write_all(output.as_bytes())?;
     }
     writeln!(writer, "Upload complete")?;
     Ok(())
+}
+
+fn submit_upload_plan_to_daemon<T: DaemonClientTransport>(
+    client: &DaemonClient<T>,
+    route: &RemoteUploadRoute,
+    plan: &crate::s3::AwsS3CommandPlan,
+    credentials: Option<&RemoteS3Credentials>,
+    source: &Path,
+    source_bytes: u64,
+) -> Result<RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteRunError> {
+    client
+        .remote_easyconnect_submit_aws_cli_upload(build_daemon_upload_request(
+            generated_upload_job_id(),
+            route,
+            plan,
+            credentials,
+            source,
+            source_bytes,
+        ))
+        .map_err(RemoteRunError::Daemon)
+}
+
+fn build_daemon_upload_request(
+    job_id: String,
+    route: &RemoteUploadRoute,
+    plan: &crate::s3::AwsS3CommandPlan,
+    credentials: Option<&RemoteS3Credentials>,
+    source: &Path,
+    source_bytes: u64,
+) -> RemoteEasyconnectSubmitAwsCliUploadRequest {
+    RemoteEasyconnectSubmitAwsCliUploadRequest {
+        job_id,
+        object_store: route.object_store.clone(),
+        source_bytes,
+        policy: plan.backpressure_policy,
+        ssd_pressure: dasobjectstore_daemon::DaemonSsdPressure::AcceptingWrites,
+        program: plan.program.clone(),
+        args: plan.args.clone(),
+        display_args: redacted_upload_display_args(plan, source),
+        environment: daemon_upload_environment(credentials),
+        progress_message: Some(format!(
+            "easyconnect upload submitted {} bytes",
+            source_bytes
+        )),
+    }
+}
+
+fn daemon_upload_environment(
+    credentials: Option<&RemoteS3Credentials>,
+) -> Vec<RemoteEasyconnectAwsCliEnvironmentVariable> {
+    let Some(credentials) = credentials else {
+        return Vec::new();
+    };
+    let mut environment = vec![
+        RemoteEasyconnectAwsCliEnvironmentVariable {
+            name: "AWS_ACCESS_KEY_ID".to_string(),
+            value: credentials.access_key_id.clone(),
+        },
+        RemoteEasyconnectAwsCliEnvironmentVariable {
+            name: "AWS_SECRET_ACCESS_KEY".to_string(),
+            value: credentials.secret_access_key.clone(),
+        },
+    ];
+    if let Some(session_token) = &credentials.session_token {
+        environment.push(RemoteEasyconnectAwsCliEnvironmentVariable {
+            name: "AWS_SESSION_TOKEN".to_string(),
+            value: session_token.clone(),
+        });
+    }
+    environment
+}
+
+fn redacted_upload_display_args(plan: &crate::s3::AwsS3CommandPlan, source: &Path) -> Vec<String> {
+    let source_arg = source.display().to_string();
+    plan.args
+        .iter()
+        .map(|arg| {
+            if arg == &source_arg {
+                "<source-redacted>".to_string()
+            } else {
+                arg.clone()
+            }
+        })
+        .collect()
+}
+
+fn write_daemon_upload_response(
+    response: &RemoteEasyconnectSubmitAwsCliUploadResponse,
+    writer: &mut impl Write,
+) -> Result<(), std::io::Error> {
+    writeln!(writer, "Daemon remote upload job submitted")?;
+    if let Some(event) = &response.running_event {
+        write_daemon_job_event("Running", event, writer)?;
+    }
+    for event in &response.progress_events {
+        write_daemon_job_event("Progress", event, writer)?;
+    }
+    write_daemon_job_event("Final", &response.final_event, writer)?;
+    Ok(())
+}
+
+fn write_daemon_job_event(
+    label: &str,
+    event: &DaemonJobEvent,
+    writer: &mut impl Write,
+) -> Result<(), std::io::Error> {
+    match event {
+        DaemonJobEvent::Progress(job)
+        | DaemonJobEvent::Complete(job)
+        | DaemonJobEvent::Failed(job) => {
+            writeln!(
+                writer,
+                "{label}: {} {:?} {}/{} bytes",
+                job.job_id.as_str(),
+                job.state,
+                job.progress.work_bytes_done,
+                job.progress.work_bytes_total
+            )
+        }
+        DaemonJobEvent::Accepted(job) => {
+            writeln!(writer, "{label}: {} accepted", job.job_id.as_str())
+        }
+        DaemonJobEvent::Cancelled(job) => {
+            writeln!(writer, "{label}: {} cancelled", job.job_id.as_str())
+        }
+    }
+}
+
+fn source_bytes(path: &Path) -> Result<u64, RemoteRunError> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        return Err(RemoteRunError::UploadRouting(format!(
+            "{} is neither a regular file nor a directory",
+            path.display()
+        )));
+    }
+    let mut total = 0_u64;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        total = total.saturating_add(source_bytes(&entry.path())?);
+    }
+    Ok(total)
+}
+
+fn default_daemon_socket_path() -> PathBuf {
+    PathBuf::from(LINUX_DAEMON_RUNTIME_DIR).join(DEFAULT_DAEMON_SOCKET_FILE_NAME)
+}
+
+fn generated_upload_job_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("remote-upload-{}-{nanos}", std::process::id())
 }
 
 #[derive(Clone, Debug)]
@@ -437,6 +618,7 @@ pub enum RemoteRunError {
     EasyconnectPairing(RemoteEasyconnectPairingError),
     Auth(RemoteAuthError),
     S3(RemoteS3Error),
+    Daemon(DaemonClientError),
     UploadRouting(String),
 }
 
@@ -450,6 +632,7 @@ impl fmt::Display for RemoteRunError {
             Self::EasyconnectPairing(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
+            Self::Daemon(error) => write!(formatter, "{error}"),
             Self::UploadRouting(message) => formatter.write_str(message),
         }
     }
@@ -501,7 +684,10 @@ impl From<RemoteS3Error> for RemoteRunError {
 
 #[cfg(test)]
 mod tests {
-    use super::run;
+    use super::{
+        plan_upload_with_credentials, resolve_upload_route, run, source_bytes,
+        submit_upload_plan_to_daemon, write_daemon_upload_response,
+    };
     use crate::auth::RemoteAuthAuthority;
     use crate::cli::RemoteCli;
     use crate::config::{
@@ -509,6 +695,12 @@ mod tests {
         RemotePairedAppliance, RemoteSessionCredentials, RemoteUploadSession,
     };
     use clap::Parser;
+    use dasobjectstore_daemon::{
+        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonJobEvent, DaemonJobId,
+        DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobSummary,
+        InProcessDaemonTransport, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    };
+    use std::cell::RefCell;
 
     #[test]
     fn config_show_json_redacts_paired_session_credentials() {
@@ -637,6 +829,92 @@ mod tests {
             .contains("choose a writable ObjectStore name"));
         std::fs::remove_dir_all(root).expect("cleanup source");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn paired_upload_can_submit_aws_plan_to_daemon_with_session_environment() {
+        let config = paired_config();
+        let root = temp_source_root("upload-daemon-submit");
+        std::fs::create_dir_all(&root).expect("create source");
+        let source = root.join("reads.fastq.gz");
+        std::fs::write(&source, b"ACGT").expect("write source");
+        let route =
+            resolve_upload_route(&config, "zymo_fecal_2025.05").expect("paired route resolves");
+        let credentials = route.credentials.clone();
+        let plan = plan_upload_with_credentials(
+            &config,
+            &route.bucket,
+            &source,
+            Some("raw/PAW10254"),
+            None,
+            false,
+            true,
+            route.credential_source,
+        )
+        .expect("upload plan");
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(
+                RemoteEasyconnectSubmitAwsCliUploadResponse {
+                    running_event: None,
+                    progress_events: Vec::new(),
+                    final_event: DaemonJobEvent::Complete(DaemonJobSummary {
+                        job_id: DaemonJobId::new("remote-upload-test-1").expect("job id"),
+                        kind: DaemonJobKind::RemoteUpload,
+                        state: DaemonJobState::Complete,
+                        progress: DaemonJobProgress {
+                            stage: "remote_s3_transfer_complete".to_string(),
+                            work_bytes_done: 4,
+                            work_bytes_total: 4,
+                            work_units_done: 1,
+                            work_units_total: 1,
+                            message: None,
+                        },
+                        submitted_at_utc: "2026-07-09T14:52:00Z".to_string(),
+                        updated_at_utc: "2026-07-09T14:52:01Z".to_string(),
+                        actor: Some("stephen".to_string()),
+                        failure_message: None,
+                    }),
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = submit_upload_plan_to_daemon(
+            &client,
+            &route,
+            &plan,
+            credentials.as_ref(),
+            &source,
+            source_bytes(&source).expect("source bytes"),
+        )
+        .expect("daemon submit succeeds");
+        let mut rendered = Vec::new();
+        write_daemon_upload_response(&response, &mut rendered).expect("render response");
+
+        let seen_requests = seen.borrow();
+        let [DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(request)] =
+            seen_requests.as_slice()
+        else {
+            panic!("expected daemon upload submit request");
+        };
+        assert_eq!(request.object_store, "zymo_fecal_2025.05");
+        assert_eq!(request.source_bytes, 4);
+        assert!(request
+            .display_args
+            .iter()
+            .any(|arg| arg == "<source-redacted>"));
+        assert_eq!(request.environment.len(), 3);
+        assert!(request
+            .environment
+            .iter()
+            .any(|variable| variable.name == "AWS_SECRET_ACCESS_KEY"
+                && variable.value == "super-secret"));
+        let rendered = String::from_utf8(rendered).expect("utf8 output");
+        assert!(rendered.contains("Daemon remote upload job submitted"));
+        assert!(rendered.contains("remote-upload-test-1"));
+        std::fs::remove_dir_all(root).expect("cleanup source");
     }
 
     fn paired_config() -> RemoteConfig {
