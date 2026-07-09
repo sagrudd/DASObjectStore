@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.8 - 2026-07-09
+
+- Include Garage bootstrap environment variables in rendered production Compose
+  YAML so the selected Garage image can start with ``--default-bucket`` using a
+  project-local ``.env`` file rather than failing after container creation.
+
 ## 0.60.7 - 2026-07-09
 
 - Add a daemon runtime cleanup worker facade for remote-upload cancellation

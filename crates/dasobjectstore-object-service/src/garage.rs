@@ -170,6 +170,18 @@ impl ObjectServiceProvider for GarageProvider {
         yaml.push_str("    environment:\n");
         yaml.push_str("      DASOBJECTSTORE_PROVIDER: garage\n");
         yaml.push_str(&format!("      DASOBJECTSTORE_BUCKETS: {}\n", buckets));
+        if let Some(default_bucket) = request.store_bindings.first() {
+            yaml.push_str(
+                "      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:?set GARAGE_DEFAULT_ACCESS_KEY in the Garage project .env}\n",
+            );
+            yaml.push_str(
+                "      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:?set GARAGE_DEFAULT_SECRET_KEY in the Garage project .env}\n",
+            );
+            yaml.push_str(&format!(
+                "      GARAGE_DEFAULT_BUCKET: ${{GARAGE_DEFAULT_BUCKET:-{}}}\n",
+                default_bucket.bucket_name
+            ));
+        }
         yaml.push_str(
             "    command: [\"/garage\", \"server\", \"--single-node\", \"--default-bucket\"]\n",
         );
@@ -302,6 +314,10 @@ mod tests {
         assert!(rendered
             .compose_yaml
             .contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
+        assert!(rendered.compose_yaml.contains("GARAGE_DEFAULT_ACCESS_KEY"));
+        assert!(rendered
+            .compose_yaml
+            .contains("GARAGE_DEFAULT_BUCKET: ${GARAGE_DEFAULT_BUCKET:-dos-generated}"));
         assert!(rendered.compose_yaml.contains("\"127.0.0.1:3900:3900\""));
         assert!(rendered
             .compose_yaml
