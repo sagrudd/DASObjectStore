@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Add a daemon remote-upload S3 transfer execution wrapper that acquires an
+  admission permit before invoking worker transfer code and releases capacity
+  after success or transfer failure.
 - Add an RAII-style daemon remote-upload S3 transfer permit so concrete upload
   workers can reserve bounded transfer capacity and release it safely on
   completion or failure.
