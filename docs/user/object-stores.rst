@@ -36,14 +36,9 @@ Override the copy count only when the policy is intentional:
      --copies 3 \
      --writer-group mnemosyne
 
-Create with an explicit S3 bucket name:
-
-.. code-block:: console
-
-   sudo dasobjectstore store create generated-data \
-     --class generated_data \
-     --bucket generated-data \
-     --writer-group mnemosyne
+The S3 bucket identity is derived from the store name by default. The Web
+console displays the derived bucket name as an immutable outcome during store
+creation so operators do not have to choose a second object-service name.
 
 Portable Registry
 -----------------

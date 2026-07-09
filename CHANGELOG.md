@@ -6,6 +6,19 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.5 - 2026-07-09
+
+- Simplify Web ObjectStore creation so operators choose store name, writer
+  group, mounted enclosure, object type, class, redundancy, export mode, and
+  visibility while S3 bucket, SSD root, retention, capacity behavior, and
+  writeable state are derived from product policy.
+- Add mounted enclosure choices to the ObjectStores dashboard payload and block
+  Web creation until an administrator has at least one mounted DAS enclosure to
+  anchor the store.
+- Default minimal Web/API ObjectStore create requests to generated-data,
+  ``naive`` object type, retain-until-deleted retention, writer-group writeable
+  state, and a bucket name derived from the store name.
+
 ## 0.54.4 - 2026-07-09
 
 - Make Web local group creation idempotent for host groups that already exist,

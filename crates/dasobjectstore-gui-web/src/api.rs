@@ -302,6 +302,8 @@ pub struct ObjectStoresPageResponse {
     pub groups_file_path: Option<String>,
     #[serde(default)]
     pub groups: Vec<StorageGroupResponse>,
+    #[serde(default)]
+    pub mounted_enclosures: Vec<DasEnclosureCardResponse>,
     pub stores: Vec<ObjectStoreCardResponse>,
     pub selected_store_id: Option<String>,
     pub create_object_store: CreateObjectStoreAffordanceResponse,

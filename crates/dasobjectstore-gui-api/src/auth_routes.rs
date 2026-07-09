@@ -407,20 +407,26 @@ pub struct PrepareEnclosureHddDeviceRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CreateObjectStoreRequest {
     pub store_id: String,
-    pub store_class: String,
+    #[serde(default)]
+    pub store_class: Option<String>,
     pub required_copies: u8,
     pub bucket: Option<String>,
     pub writer_group: String,
-    pub ssd_root: String,
-    pub object_type: String,
+    #[serde(default)]
+    pub ssd_root: Option<String>,
+    #[serde(default)]
+    pub object_type: Option<String>,
     pub enclosure_id: Option<String>,
     #[serde(default)]
     pub public: bool,
-    #[serde(default = "default_true")]
-    pub writeable: bool,
-    pub capacity_behavior: String,
-    pub retention: String,
-    pub endpoint_export_mode: String,
+    #[serde(default)]
+    pub writeable: Option<bool>,
+    #[serde(default)]
+    pub capacity_behavior: Option<String>,
+    #[serde(default)]
+    pub retention: Option<String>,
+    #[serde(default)]
+    pub endpoint_export_mode: Option<String>,
     #[serde(default)]
     pub dry_run: bool,
     pub client_request_id: Option<String>,
@@ -457,10 +463,6 @@ pub struct EndpointBindingUpsertRequest {
     pub governance_domain: String,
     pub store_id: String,
     pub readiness: String,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_manager_product_id() -> String {
@@ -1185,37 +1187,70 @@ fn validate_create_object_store_request(
     request: CreateObjectStoreRequest,
 ) -> Result<DaemonCreateObjectStoreRequest, (StatusCode, Json<AuthRouteError>)> {
     let store_id = required_field("store_id", request.store_id)?;
-    let store_class = required_field("store_class", request.store_class)?;
+    let store_class = request
+        .store_class
+        .map(|value| required_field("store_class", value))
+        .transpose()?
+        .unwrap_or_else(|| "generated_data".to_string());
     let writer_group = required_field("writer_group", request.writer_group)?;
-    let ssd_root = required_field("ssd_root", request.ssd_root)?;
-    let object_type = required_field("object_type", request.object_type)?;
-    let capacity_behavior = required_field("capacity_behavior", request.capacity_behavior)?;
-    let retention = required_field("retention", request.retention)?;
-    let endpoint_export_mode =
-        required_field("endpoint_export_mode", request.endpoint_export_mode)?;
+    let enclosure_id = request
+        .enclosure_id
+        .map(|value| required_field("enclosure_id", value))
+        .transpose()?
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "enclosure_id is required for ObjectStore creation",
+            )
+        })?;
+    let ssd_root = request
+        .ssd_root
+        .map(|value| required_field("ssd_root", value))
+        .transpose()?
+        .unwrap_or_else(|| "/srv/dasobjectstore/ssd".to_string());
+    let object_type = request
+        .object_type
+        .map(|value| required_field("object_type", value))
+        .transpose()?
+        .unwrap_or_else(|| "naive".to_string());
+    let capacity_behavior = request
+        .capacity_behavior
+        .map(|value| required_field("capacity_behavior", value))
+        .transpose()?
+        .unwrap_or_else(|| "backpressure_by_priority".to_string());
+    let retention = request
+        .retention
+        .map(|value| required_field("retention", value))
+        .transpose()?
+        .unwrap_or_else(|| "retain_until_deleted".to_string());
+    let endpoint_export_mode = request
+        .endpoint_export_mode
+        .map(|value| required_field("endpoint_export_mode", value))
+        .transpose()?
+        .unwrap_or_else(|| "s3_bucket".to_string());
     validate_client_request_id(request.client_request_id.as_deref())?;
     let confirmation_marker = validate_object_store_create_confirmation_marker(
         request.dry_run,
         request.confirmation_marker.as_deref(),
     )?;
+    let bucket = request
+        .bucket
+        .map(|value| required_field("bucket", value))
+        .transpose()?
+        .unwrap_or_else(|| derived_object_store_bucket_name(&store_id));
 
     let request = DaemonCreateObjectStoreRequest {
         store_id,
         store_class,
         required_copies: request.required_copies,
-        bucket: request
-            .bucket
-            .map(|value| required_field("bucket", value))
-            .transpose()?,
+        bucket: Some(bucket),
         writer_group,
         ssd_root: PathBuf::from(ssd_root),
         object_type,
-        enclosure_id: request
-            .enclosure_id
-            .map(|value| required_field("enclosure_id", value))
-            .transpose()?,
+        enclosure_id: Some(enclosure_id),
         public: request.public,
-        writeable: request.writeable,
+        writeable: request.writeable.unwrap_or(true),
         capacity_behavior,
         retention,
         endpoint_export_mode,
@@ -1232,6 +1267,22 @@ fn validate_create_object_store_request(
         )
     })?;
     Ok(request)
+}
+
+fn derived_object_store_bucket_name(store_id: &str) -> String {
+    store_id
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
 }
 
 fn validate_endpoint_inventory_upsert_request(
@@ -3051,6 +3102,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_object_store_derives_immutable_fields_from_minimal_request() {
+        let root = temp_root("objectstore-create-derived");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneCreateObjectStoreResponse>(
+            app,
+            "/api/v1/workspaces/object-stores/create",
+            "admin",
+            &login.session_token,
+            &CreateObjectStoreRequest {
+                store_id: "zymo-fecal-2025-05".to_string(),
+                store_class: None,
+                required_copies: 2,
+                bucket: None,
+                writer_group: "mnemosyne".to_string(),
+                ssd_root: None,
+                object_type: None,
+                enclosure_id: Some("qnap-tl-d800c-managed".to_string()),
+                public: false,
+                writeable: None,
+                capacity_behavior: None,
+                retention: None,
+                endpoint_export_mode: None,
+                dry_run: false,
+                client_request_id: Some("objectstore-derived-1".to_string()),
+                confirmation_marker: Some(OBJECT_STORE_CREATE_CONFIRMATION.to_string()),
+            },
+        )
+        .await;
+        let forwarded_requests = client.create_object_store_requests();
+
+        assert_eq!(response.store_id, "zymo-fecal-2025-05");
+        assert_eq!(forwarded_requests.len(), 1);
+        assert_eq!(forwarded_requests[0].store_class, "generated_data");
+        assert_eq!(
+            forwarded_requests[0].bucket.as_deref(),
+            Some("zymo-fecal-2025-05")
+        );
+        assert_eq!(
+            forwarded_requests[0].ssd_root,
+            PathBuf::from("/srv/dasobjectstore/ssd")
+        );
+        assert_eq!(forwarded_requests[0].object_type, "naive");
+        assert_eq!(
+            forwarded_requests[0].enclosure_id.as_deref(),
+            Some("qnap-tl-d800c-managed")
+        );
+        assert!(forwarded_requests[0].writeable);
+        assert_eq!(
+            forwarded_requests[0].capacity_behavior,
+            "backpressure_by_priority"
+        );
+        assert_eq!(forwarded_requests[0].retention, "retain_until_deleted");
+        assert_eq!(forwarded_requests[0].endpoint_export_mode, "s3_bucket");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn create_object_store_rejects_invalid_domain_policy_values() {
         let root = temp_root("objectstore-create-invalid-policy");
         let auth_store = registered_auth_store(&root);
@@ -3061,7 +3178,7 @@ mod tests {
             Some(recording_enclosure_client()),
         ));
         let request = CreateObjectStoreRequest {
-            capacity_behavior: "fast".to_string(),
+            capacity_behavior: Some("fast".to_string()),
             ..create_object_store_request()
         };
 
@@ -3987,18 +4104,18 @@ mod tests {
     fn create_object_store_request() -> CreateObjectStoreRequest {
         CreateObjectStoreRequest {
             store_id: "zymo-fecal-2025-05".to_string(),
-            store_class: "generated_data".to_string(),
+            store_class: Some("generated_data".to_string()),
             required_copies: 2,
             bucket: Some("zymo-fecal-2025-05".to_string()),
             writer_group: "bioinformatics".to_string(),
-            ssd_root: "/srv/dasobjectstore/ssd".to_string(),
-            object_type: "pod5".to_string(),
+            ssd_root: Some("/srv/dasobjectstore/ssd".to_string()),
+            object_type: Some("pod5".to_string()),
             enclosure_id: Some("tl-d800c-01".to_string()),
             public: false,
-            writeable: true,
-            capacity_behavior: "balanced".to_string(),
-            retention: "standard".to_string(),
-            endpoint_export_mode: "s3_bucket".to_string(),
+            writeable: Some(true),
+            capacity_behavior: Some("balanced".to_string()),
+            retention: Some("standard".to_string()),
+            endpoint_export_mode: Some("s3_bucket".to_string()),
             dry_run: false,
             client_request_id: Some("objectstore-create-1".to_string()),
             confirmation_marker: Some(OBJECT_STORE_CREATE_CONFIRMATION.to_string()),

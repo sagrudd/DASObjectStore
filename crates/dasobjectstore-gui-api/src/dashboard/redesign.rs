@@ -331,6 +331,8 @@ pub struct ObjectStoresPageView {
     pub generated_at_utc: String,
     pub groups_file_path: String,
     pub groups: Vec<StorageGroupView>,
+    #[serde(default)]
+    pub mounted_enclosures: Vec<DasEnclosureCardView>,
     pub stores: Vec<ObjectStoreCardView>,
     pub selected_store_id: Option<String>,
     pub create_object_store: CreateObjectStoreAffordanceView,
@@ -344,6 +346,7 @@ impl ObjectStoresPageView {
             generated_at_utc: "2026-07-08T08:00:00Z".to_string(),
             groups_file_path: "/opt/dasobjectstore/groups.json".to_string(),
             groups: Vec::new(),
+            mounted_enclosures: Vec::new(),
             selected_store_id: None,
             stores: Vec::new(),
             create_object_store: CreateObjectStoreAffordanceView::admin_required(),
@@ -431,20 +434,30 @@ impl CreateObjectStoreAffordanceView {
         view
     }
 
+    pub fn enclosure_required() -> Self {
+        let mut view = Self::enabled();
+        view.enabled = false;
+        view.blocked_reason =
+            Some("A mounted DAS enclosure is required before creating an ObjectStore.".to_string());
+        view
+    }
+
     pub fn enabled() -> Self {
         Self {
             enabled: true,
             action_kind: "store_create".to_string(),
             label: "Create ObjectStore".to_string(),
             required_fields: vec![
-                CreateObjectStoreFieldView::new("store_id", "Store ID"),
-                CreateObjectStoreFieldView::new("store_class", "Store class"),
+                CreateObjectStoreFieldView::new("store_id", "Store name"),
+                CreateObjectStoreFieldView::new("writer_group", "Writer group"),
+                CreateObjectStoreFieldView::new("enclosure_id", "Enclosure"),
             ],
             optional_fields: vec![
                 CreateObjectStoreFieldView::new("store_copies", "Required copies"),
-                CreateObjectStoreFieldView::new("bucket", "S3 bucket"),
-                CreateObjectStoreFieldView::new("writer_group", "Writer group"),
-                CreateObjectStoreFieldView::new("ssd_root", "SSD root"),
+                CreateObjectStoreFieldView::new("object_type", "Object type"),
+                CreateObjectStoreFieldView::new("store_class", "Store class"),
+                CreateObjectStoreFieldView::new("endpoint_export_mode", "Export mode"),
+                CreateObjectStoreFieldView::new("public", "Public visibility"),
             ],
             defaults: CreateObjectStoreDefaultsView {
                 store_class: "generated_data".to_string(),
@@ -461,11 +474,6 @@ impl CreateObjectStoreAffordanceView {
                     "reproducible_cache",
                     "Reproducible cache",
                     "Evictable data that can be rebuilt from an external source.",
-                ),
-                StoreClassOptionView::new(
-                    "archive",
-                    "Archive",
-                    "Cold data optimized for durability over write speed.",
                 ),
             ],
             copy_count_options: vec![1, 2, 3],
@@ -604,6 +612,13 @@ mod tests {
 
         assert_eq!(encoded["schema_version"], REDESIGN_DASHBOARD_SCHEMA_VERSION);
         assert_eq!(encoded["selected_store_id"], serde_json::Value::Null);
+        assert_eq!(
+            encoded["mounted_enclosures"]
+                .as_array()
+                .expect("mounted enclosures")
+                .len(),
+            0
+        );
         assert_eq!(encoded["stores"].as_array().expect("stores").len(), 1);
         assert_eq!(encoded["stores"][0]["object_type"], "pod5");
         assert_eq!(encoded["stores"][0]["public"], false);
@@ -632,6 +647,14 @@ mod tests {
             .iter()
             .any(|field| field["name"] == "store_id"));
         assert!(required_fields
+            .iter()
+            .any(|field| field["name"] == "writer_group"));
+        assert!(required_fields
+            .iter()
+            .any(|field| field["name"] == "enclosure_id"));
+        assert!(encoded["optional_fields"]
+            .as_array()
+            .expect("optional fields")
             .iter()
             .any(|field| field["name"] == "store_class"));
     }

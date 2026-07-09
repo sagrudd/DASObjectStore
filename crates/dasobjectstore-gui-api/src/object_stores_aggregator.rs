@@ -1,7 +1,7 @@
 use crate::dashboard::{
-    CapacitySummaryView, CreateObjectStoreAffordanceView, DashboardHealthStateView,
-    DashboardWarning, ObjectStoreCardView, ObjectStoresPageView, StorageGroupView,
-    WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    CapacitySummaryView, CreateObjectStoreAffordanceView, DasEnclosureCardView,
+    DashboardHealthStateView, DashboardWarning, ObjectStoreCardView, ObjectStoresPageView,
+    StorageGroupView, WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 use crate::groups_registry::{default_groups_registry_path, read_storage_groups_for_user};
 use crate::home_aggregator::{env_path, now_utc_string, DEFAULT_SSD_ROOT};
@@ -21,6 +21,7 @@ struct ObjectStoresAggregatorConfig {
     groups_registry_path: PathBuf,
     current_user_groups: Vec<String>,
     administrator: bool,
+    mounted_enclosures: Option<Vec<DasEnclosureCardView>>,
 }
 
 impl ObjectStoresAggregatorConfig {
@@ -36,6 +37,7 @@ impl ObjectStoresAggregatorConfig {
             groups_registry_path: default_groups_registry_path(),
             current_user_groups: Vec::new(),
             administrator: false,
+            mounted_enclosures: None,
         }
     }
 }
@@ -66,19 +68,29 @@ fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> Object
         &mut warnings,
     );
     let selected_store_id = stores.first().map(|store| store.store_id.clone());
+    let mounted_enclosures = config.mounted_enclosures.unwrap_or_else(|| {
+        crate::enclosures_aggregator::live_enclosures_dashboard_for_administrator(
+            config.administrator,
+        )
+        .enclosures
+    });
+    let create_object_store = if !config.administrator {
+        CreateObjectStoreAffordanceView::admin_required()
+    } else if mounted_enclosures.is_empty() {
+        CreateObjectStoreAffordanceView::enclosure_required()
+    } else {
+        CreateObjectStoreAffordanceView::enabled()
+    };
 
     ObjectStoresPageView {
         schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
         generated_at_utc: now_utc_string(),
         groups_file_path: groups_snapshot.path.display().to_string(),
         groups: groups_snapshot.groups,
+        mounted_enclosures,
         stores,
         selected_store_id,
-        create_object_store: if config.administrator {
-            CreateObjectStoreAffordanceView::enabled()
-        } else {
-            CreateObjectStoreAffordanceView::admin_required()
-        },
+        create_object_store,
         warnings,
     }
 }
@@ -290,7 +302,10 @@ fn export_policy_label(policy: ExportPolicy) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{build_object_stores_dashboard, ObjectStoresAggregatorConfig};
-    use crate::dashboard::DashboardHealthStateView;
+    use crate::dashboard::{
+        CapacitySummaryView, DasEnclosureCardView, DashboardHealthStateView,
+        EnclosureConnectionView,
+    };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
@@ -332,6 +347,7 @@ mod tests {
             groups_registry_path,
             current_user_groups: vec!["bioinformatics".to_string()],
             administrator: true,
+            mounted_enclosures: Some(vec![mounted_enclosure_fixture()]),
         });
 
         assert_eq!(view.groups.len(), 1);
@@ -361,6 +377,10 @@ mod tests {
         assert_eq!(view.stores[0].writer_policy.state, "ready");
         assert!(view.stores[0].writer_policy.group_defined);
         assert!(view.stores[0].writer_policy.writeable_by_current_user);
+        assert_eq!(
+            view.mounted_enclosures[0].enclosure_id,
+            "qnap-tl-d800c-managed"
+        );
         assert!(view.create_object_store.enabled);
         assert!(view.stores[0].warnings.is_empty());
         assert!(view.warnings.is_empty());
@@ -378,6 +398,7 @@ mod tests {
             groups_registry_path: root.join("missing-groups.json"),
             current_user_groups: Vec::new(),
             administrator: false,
+            mounted_enclosures: Some(Vec::new()),
         });
 
         assert!(view.stores.is_empty());
@@ -387,6 +408,36 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.code == "store_registry_unreadable"));
+    }
+
+    fn mounted_enclosure_fixture() -> DasEnclosureCardView {
+        DasEnclosureCardView {
+            enclosure_id: "qnap-tl-d800c-managed".to_string(),
+            display_name: "QNAP TL-D800C".to_string(),
+            mount_path: "/srv/dasobjectstore/hdd".to_string(),
+            connection: EnclosureConnectionView {
+                bus: "usb".to_string(),
+                protocol: "uas/filesystem".to_string(),
+                link_speed: "host reported".to_string(),
+            },
+            health: DashboardHealthStateView::Healthy,
+            drive_count: crate::dashboard::DriveCountSummaryView {
+                total: 8,
+                mounted: 8,
+                healthy: 8,
+                watch: 0,
+                suspect: 0,
+                failed: 0,
+            },
+            capacity: CapacitySummaryView {
+                total_tib: "100.0".to_string(),
+                used_tib: "12.5".to_string(),
+                free_tib: "87.5".to_string(),
+                used_percent_basis_points: 1250,
+            },
+            last_seen_at_utc: "2026-07-08T08:30:00Z".to_string(),
+            warnings: Vec::new(),
+        }
     }
 
     fn create_live_sqlite_with_store_objects(path: &PathBuf, store_id: &str) {

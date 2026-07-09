@@ -15,7 +15,8 @@ use crate::api::{
 };
 #[cfg(test)]
 use crate::api::{
-    AdminJobCancelResponse, AdminJobStatusResponse, AdminJobSummary, EnclosurePrepareResponse,
+    AdminJobCancelResponse, AdminJobStatusResponse, AdminJobSummary, DasEnclosureCardResponse,
+    EnclosurePrepareResponse,
 };
 use crate::mount::FrontendHost;
 #[cfg(target_arch = "wasm32")]
@@ -901,22 +902,29 @@ impl ObjectStoreCreateFormState {
             .and_then(|view| view.groups.first())
             .map(|group| group.group_name.clone())
             .unwrap_or_default();
+        let selected_enclosure = view.and_then(|view| view.mounted_enclosures.first());
+        let enclosure_id = selected_enclosure
+            .map(|enclosure| enclosure.enclosure_id.clone())
+            .unwrap_or_default();
+        let ssd_root = selected_enclosure
+            .map(enclosure_ssd_root)
+            .unwrap_or_else(|| "/srv/dasobjectstore/ssd".to_string());
 
         Self {
             open: false,
             store_id: String::new(),
             writer_group,
-            enclosure_id: String::new(),
+            enclosure_id,
             object_type: "naive".to_string(),
             required_copies: default_copies,
             public: false,
             writeable: true,
             store_class: default_store_class,
-            capacity_behavior: "balanced".to_string(),
-            retention: "standard".to_string(),
+            capacity_behavior: "backpressure_by_priority".to_string(),
+            retention: "retain_until_deleted".to_string(),
             endpoint_export_mode,
             bucket: String::new(),
-            ssd_root: "/srv/dasobjectstore/ssd".to_string(),
+            ssd_root,
             planning: false,
             plan: None,
             confirmation_phrase: String::new(),
@@ -1084,8 +1092,24 @@ fn object_store_bucket_default(store_id: &str) -> String {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn object_store_creation_fields_ready(store_id: &str, writer_group: &str, ssd_root: &str) -> bool {
-    !store_id.trim().is_empty() && !writer_group.trim().is_empty() && !ssd_root.trim().is_empty()
+fn enclosure_ssd_root(enclosure: &DasEnclosureCardResponse) -> String {
+    let mount_path = enclosure.mount_path.trim_end_matches('/');
+    if let Some(root) = mount_path.strip_suffix("/hdd") {
+        format!("{root}/ssd")
+    } else {
+        format!("{mount_path}/ssd")
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_store_creation_fields_ready(
+    store_id: &str,
+    writer_group: &str,
+    enclosure_id: &str,
+) -> bool {
+    !store_id.trim().is_empty()
+        && !writer_group.trim().is_empty()
+        && !enclosure_id.trim().is_empty()
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -1194,18 +1218,23 @@ fn subobject_registry_preview(state: &SubObjectFormState) -> String {
 fn object_store_create_request_from_state(
     state: &ObjectStoreCreateFormState,
 ) -> CreateObjectStoreRequest {
+    let bucket = if state.bucket.trim().is_empty() {
+        object_store_bucket_default(&state.store_id)
+    } else {
+        state.bucket.trim().to_string()
+    };
     CreateObjectStoreRequest {
         store_id: state.store_id.trim().to_string(),
         store_class: state.store_class.clone(),
         required_copies: state.required_copies,
-        bucket: (!state.bucket.trim().is_empty()).then(|| state.bucket.trim().to_string()),
+        bucket: (!bucket.is_empty()).then_some(bucket),
         writer_group: state.writer_group.trim().to_string(),
         ssd_root: state.ssd_root.trim().to_string(),
         object_type: state.object_type.clone(),
         enclosure_id: (!state.enclosure_id.trim().is_empty())
             .then(|| state.enclosure_id.trim().to_string()),
         public: state.public,
-        writeable: state.writeable,
+        writeable: true,
         capacity_behavior: state.capacity_behavior.clone(),
         retention: state.retention.clone(),
         endpoint_export_mode: state.endpoint_export_mode.clone(),
@@ -2572,12 +2601,7 @@ fn render_object_store_create_card(
     let (status, detail) = match view {
         Some(view) if view.create_object_store.enabled => (
             "Available".to_string(),
-            format!(
-                "Admin workflow: create a {} store with {} copy/copies and {} export after daemon plan review.",
-                view.create_object_store.defaults.store_class,
-                view.create_object_store.defaults.required_copies,
-                view.create_object_store.defaults.endpoint_export_mode
-            ),
+            "Admin workflow: create an enclosure-anchored Generated Data ObjectStore after daemon plan review.".to_string(),
         ),
         Some(view) => (
             "Admin only".to_string(),
@@ -2603,12 +2627,15 @@ fn render_object_store_create_card(
         .filter(|options| !options.is_empty())
         .unwrap_or_else(|| vec![1, 2, 3]);
     let group_options = view.map(|view| view.groups.clone()).unwrap_or_default();
+    let enclosure_options = view
+        .map(|view| view.mounted_enclosures.clone())
+        .unwrap_or_default();
     let can_plan = enabled
         && !state.planning
         && object_store_creation_fields_ready(
             &state.store_id,
             &state.writer_group,
-            &state.ssd_root,
+            &state.enclosure_id,
         );
     let can_submit = enabled
         && state.plan.is_some()
@@ -2749,23 +2776,15 @@ fn render_object_store_create_card(
                                 let input: HtmlInputElement = event.target_unchecked_into();
                                 let mut next = (*create_state).clone();
                                 next.store_id = input.value();
-                                if next.bucket.trim().is_empty() {
-                                    next.bucket = object_store_bucket_default(&next.store_id);
-                                }
+                                next.bucket = object_store_bucket_default(&next.store_id);
                                 next.reset_plan();
                                 create_state.set(next);
                             })
                         }) }
-                        { object_store_text_field("S3 bucket", state.bucket.clone(), {
-                            let create_state = create_state.clone();
-                            Callback::from(move |event: InputEvent| {
-                                let input: HtmlInputElement = event.target_unchecked_into();
-                                let mut next = (*create_state).clone();
-                                next.bucket = input.value();
-                                next.reset_plan();
-                                create_state.set(next);
-                            })
-                        }) }
+                        <label class="dos-form-field">
+                            <span>{ "S3 bucket" }</span>
+                            <input readonly=true value={object_store_bucket_default(&state.store_id)} />
+                        </label>
                         <label class="dos-form-field">
                             <span>{ "Writer group" }</span>
                             <select onchange={{
@@ -2786,16 +2805,34 @@ fn render_object_store_create_card(
                                 }) }
                             </select>
                         </label>
-                        { object_store_text_field("Enclosure anchor", state.enclosure_id.clone(), {
-                            let create_state = create_state.clone();
-                            Callback::from(move |event: InputEvent| {
-                                let input: HtmlInputElement = event.target_unchecked_into();
-                                let mut next = (*create_state).clone();
-                                next.enclosure_id = input.value();
-                                next.reset_plan();
-                                create_state.set(next);
-                            })
-                        }) }
+                        <label class="dos-form-field">
+                            <span>{ "Enclosure" }</span>
+                            <select onchange={{
+                                let create_state = create_state.clone();
+                                let enclosure_options = enclosure_options.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let selected = input.value();
+                                    let mut next = (*create_state).clone();
+                                    next.enclosure_id = selected.clone();
+                                    if let Some(enclosure) = enclosure_options
+                                        .iter()
+                                        .find(|enclosure| enclosure.enclosure_id == selected)
+                                    {
+                                        next.ssd_root = enclosure_ssd_root(enclosure);
+                                    }
+                                    next.reset_plan();
+                                    create_state.set(next);
+                                })
+                            }} value={state.enclosure_id.clone()}>
+                                <option value="">{ "Select mounted enclosure" }</option>
+                                { for enclosure_options.iter().map(|enclosure| html! {
+                                    <option value={enclosure.enclosure_id.clone()}>
+                                        { format!("{} ({})", enclosure.display_name, enclosure.enclosure_id) }
+                                    </option>
+                                }) }
+                            </select>
+                        </label>
                         <label class="dos-form-field">
                             <span>{ "Object type" }</span>
                             <select onchange={{
@@ -2850,50 +2887,6 @@ fn render_object_store_create_card(
                                 }) }
                             </select>
                         </label>
-                        { object_store_text_field("SSD root", state.ssd_root.clone(), {
-                            let create_state = create_state.clone();
-                            Callback::from(move |event: InputEvent| {
-                                let input: HtmlInputElement = event.target_unchecked_into();
-                                let mut next = (*create_state).clone();
-                                next.ssd_root = input.value();
-                                next.reset_plan();
-                                create_state.set(next);
-                            })
-                        }) }
-                        <label class="dos-form-field">
-                            <span>{ "Capacity behavior" }</span>
-                            <select onchange={{
-                                let create_state = create_state.clone();
-                                Callback::from(move |event: Event| {
-                                    let input: HtmlSelectElement = event.target_unchecked_into();
-                                    let mut next = (*create_state).clone();
-                                    next.capacity_behavior = input.value();
-                                    next.reset_plan();
-                                    create_state.set(next);
-                                })
-                            }} value={state.capacity_behavior.clone()}>
-                                <option value="balanced">{ "Balanced" }</option>
-                                <option value="conservative">{ "Conservative" }</option>
-                                <option value="fill_lowest_fractional_usage">{ "Distribute by free fraction" }</option>
-                            </select>
-                        </label>
-                        <label class="dos-form-field">
-                            <span>{ "Retention" }</span>
-                            <select onchange={{
-                                let create_state = create_state.clone();
-                                Callback::from(move |event: Event| {
-                                    let input: HtmlSelectElement = event.target_unchecked_into();
-                                    let mut next = (*create_state).clone();
-                                    next.retention = input.value();
-                                    next.reset_plan();
-                                    create_state.set(next);
-                                })
-                            }} value={state.retention.clone()}>
-                                <option value="standard">{ "Standard" }</option>
-                                <option value="retain_until_deleted">{ "Retain until deleted" }</option>
-                                <option value="reproducible_cache">{ "Reproducible cache" }</option>
-                            </select>
-                        </label>
                         <label class="dos-form-field">
                             <span>{ "Export mode" }</span>
                             <select onchange={{
@@ -2926,20 +2919,12 @@ fn render_object_store_create_card(
                             }} />
                             <span>{ "Publicly visible within the appliance policy boundary" }</span>
                         </label>
-                        <label>
-                            <input type="checkbox" checked={state.writeable} onchange={{
-                                let create_state = create_state.clone();
-                                Callback::from(move |event: Event| {
-                                    let input: HtmlInputElement = event.target_unchecked_into();
-                                    let mut next = (*create_state).clone();
-                                    next.writeable = input.checked();
-                                    next.reset_plan();
-                                    create_state.set(next);
-                                })
-                            }} />
-                            <span>{ "Writeable by the selected writer group" }</span>
-                        </label>
                     </div>
+                    <section class="dos-plan-result">
+                        <span class="dos-card-label">{ "Derived policy" }</span>
+                        <p>{ format!("SSD root: {}", if state.ssd_root.is_empty() { "select an enclosure".to_string() } else { state.ssd_root.clone() }) }</p>
+                        <p>{ "Capacity is distributed by available space, retention is until explicitly deleted, and the store remains writeable by its writer group until locked after population." }</p>
+                    </section>
                     <section class="dos-plan-result">
                         <span class="dos-card-label">{ "Creation review" }</span>
                         <p>{ object_store_create_review(&state) }</p>
@@ -3597,10 +3582,10 @@ fn object_store_create_review_from_values(
     writer_group: &str,
     endpoint_export_mode: &str,
     public: bool,
-    writeable: bool,
+    enclosure_id: &str,
 ) -> String {
     format!(
-        "{} · type {} · {} copy/copies · writer group {} · export {} · {} · {}",
+        "{} · type {} · {} copy/copies · writer group {} · enclosure {} · export {} · {} · writeable until locked",
         if store_id.trim().is_empty() {
             "unnamed store"
         } else {
@@ -3613,9 +3598,13 @@ fn object_store_create_review_from_values(
         } else {
             writer_group.trim()
         },
+        if enclosure_id.trim().is_empty() {
+            "pending"
+        } else {
+            enclosure_id.trim()
+        },
         endpoint_export_mode,
-        if public { "public" } else { "private" },
-        if writeable { "writeable" } else { "read-only" }
+        if public { "public" } else { "private" }
     )
 }
 
@@ -3628,7 +3617,7 @@ fn object_store_create_review(state: &ObjectStoreCreateFormState) -> String {
         &state.writer_group,
         &state.endpoint_export_mode,
         state.public,
-        state.writeable,
+        &state.enclosure_id,
     )
 }
 
@@ -5163,17 +5152,17 @@ mod tests {
         bioinformatics_derivation_source_summaries, bioinformatics_readiness_summaries,
         bioinformatics_summary_cards, bioinformatics_workspace_api_path, enclosure_card_summaries,
         enclosure_prepare_candidate, enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
-        enclosures_workspace_api_path, endpoints_workspace_api_path, home_dashboard_attention,
-        home_dashboard_metrics, home_workspace_api_path, object_store_bucket_default,
-        object_store_card_summaries, object_store_configure_review_from_values,
-        object_store_create_confirmation_matches, object_store_create_review_from_values,
-        object_store_creation_fields_ready, objectstores_workspace_api_path,
-        primary_navigation_for_host, subobject_registry_preview_from_values,
-        users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
-        EnclosureWizardState, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
-        HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE,
-        PRIMARY_NAVIGATION,
+        enclosure_ssd_root, enclosures_workspace_api_path, endpoints_workspace_api_path,
+        home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
+        object_store_bucket_default, object_store_card_summaries,
+        object_store_configure_review_from_values, object_store_create_confirmation_matches,
+        object_store_create_review_from_values, object_store_creation_fields_ready,
+        objectstores_workspace_api_path, primary_navigation_for_host,
+        subobject_registry_preview_from_values, users_groups_summary_cards,
+        users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, WorkspacePage,
+        ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     };
     use super::{
         local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
@@ -5184,11 +5173,13 @@ mod tests {
         AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
         BioinformaticsContextCardResponse, BioinformaticsDerivationSourceResponse,
         BioinformaticsReadinessCardResponse, BioinformaticsWorkspaceResponse,
-        DestageQueueSummaryResponse, EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice,
-        EnclosurePrepareResponse, EnclosuresPageResponse, HomeDashboardResponse,
-        IngestQueueSummaryResponse, LocalGroupMembershipResponse, LocalGroupOperationResponse,
-        LocalUserAuthorityResponse, ObjectStoresPageResponse, StandaloneUserAccountResponse,
-        StorageGroupResponse, UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
+        CapacitySummaryResponse, DasEnclosureCardResponse, DestageQueueSummaryResponse,
+        DriveCountSummaryResponse, EnclosureConnectionResponse, EnclosurePrepareAcceptedResponse,
+        EnclosurePrepareHddDevice, EnclosurePrepareResponse, EnclosuresPageResponse,
+        HomeDashboardResponse, IngestQueueSummaryResponse, LocalGroupMembershipResponse,
+        LocalGroupOperationResponse, LocalUserAuthorityResponse, ObjectStoresPageResponse,
+        StandaloneUserAccountResponse, StorageGroupResponse, UsersGroupsCapabilitiesResponse,
+        UsersGroupsWorkspaceResponse,
     };
     use crate::mount::FrontendHost;
     use crate::stores::STORES_WORKSPACE_ROUTE;
@@ -5739,21 +5730,59 @@ mod tests {
     }
 
     #[test]
-    fn object_store_creation_requires_identity_group_and_ssd_root() {
+    fn enclosure_ssd_root_derives_from_hdd_mount() {
+        let enclosure = DasEnclosureCardResponse {
+            enclosure_id: "qnap-tl-d800c-managed".to_string(),
+            display_name: "QNAP TL-D800C".to_string(),
+            mount_path: "/srv/dasobjectstore/hdd".to_string(),
+            connection: EnclosureConnectionResponse {
+                bus: "usb".to_string(),
+                protocol: "uas/filesystem".to_string(),
+                link_speed: "host reported".to_string(),
+            },
+            health: "healthy".to_string(),
+            drive_count: DriveCountSummaryResponse {
+                total: 8,
+                mounted: 8,
+                healthy: 8,
+                watch: 0,
+                suspect: 0,
+                failed: 0,
+            },
+            capacity: CapacitySummaryResponse {
+                total_tib: "100.0".to_string(),
+                used_tib: "12.5".to_string(),
+                free_tib: "87.5".to_string(),
+                used_percent_basis_points: 1250,
+            },
+            last_seen_at_utc: "2026-07-08T08:30:00Z".to_string(),
+            warnings: Vec::new(),
+        };
+
+        assert_eq!(enclosure_ssd_root(&enclosure), "/srv/dasobjectstore/ssd");
+    }
+
+    #[test]
+    fn object_store_creation_requires_identity_group_and_enclosure() {
         assert!(object_store_creation_fields_ready(
             "generated-data",
             "mnemosyne",
-            "/srv/dasobjectstore/ssd"
+            "qnap-tl-d800c-managed"
         ));
         assert!(!object_store_creation_fields_ready(
             "",
             "mnemosyne",
-            "/srv/dasobjectstore/ssd"
+            "qnap-tl-d800c-managed"
         ));
         assert!(!object_store_creation_fields_ready(
             "generated-data",
             "",
-            "/srv/dasobjectstore/ssd"
+            "qnap-tl-d800c-managed"
+        ));
+        assert!(!object_store_creation_fields_ready(
+            "generated-data",
+            "mnemosyne",
+            ""
         ));
     }
 
@@ -5766,12 +5795,12 @@ mod tests {
             "bioinformatics",
             "s3_bucket",
             false,
-            true,
+            "qnap-tl-d800c-managed",
         );
 
         assert_eq!(
             review,
-            "generated-data · type pod5 · 2 copy/copies · writer group bioinformatics · export s3_bucket · private · writeable"
+            "generated-data · type pod5 · 2 copy/copies · writer group bioinformatics · enclosure qnap-tl-d800c-managed · export s3_bucket · private · writeable until locked"
         );
     }
 

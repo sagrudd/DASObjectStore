@@ -380,9 +380,14 @@ reflects the daemon/API create affordance, including whether creation is
 currently available or blocked by administrator requirements.
 
 Creating or changing an object store is an admin-only workflow. The Web UI
-presents controls for store name, writer group, enclosure anchor, object type,
-redundancy, public/writeable state, store class, capacity behavior, retention,
-S3/export mode, bucket, and SSD root. The workflow first calls the GUI
+presents controls for store name, writer group, mounted enclosure, object type,
+redundancy, store class, export mode, and public visibility. Bucket name and
+SSD root are derived from the store name and selected enclosure and are displayed
+as immutable outcomes rather than operator-entered fields. New ObjectStores are
+writeable by the selected writer group until explicitly locked after population;
+retention is until explicit deletion, and capacity behavior is the appliance
+placement policy for available space and requested redundancy. The workflow
+first calls the GUI
 action-plan endpoint and renders the generated ``dasobjectstore store create``
 plan for administrator review. Submission then requires the exact phrase
 ``confirm create objectstore`` and is forwarded to ``dasobjectstored`` through
