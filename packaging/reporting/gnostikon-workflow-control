@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+image_default="grammateus/report:0.8.1"
+runtime_default="docker"
+
+usage() {
+  cat <<'USAGE'
+gnostikon-workflow-control compatibility wrapper for DASObjectStore reporting.
+
+Supported commands:
+  render-report-pdf        Render Markdown to PDF through Grammateus.
+  prewarm-report-provider  Validate the containerized Grammateus provider.
+  --version | version      Print wrapper version.
+USAGE
+}
+
+if [[ $# -eq 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+command="$1"
+shift || true
+
+if [[ "$command" == "--version" || "$command" == "version" ]]; then
+  printf 'dasobjectstore-packaged-gnostikon-workflow-control %s\n' "${DASOBJECTSTORE_VERSION:-unknown}"
+  exit 0
+fi
+
+require_value() {
+  local flag="$1"
+  local value="${2:-}"
+  if [[ -z "$value" ]]; then
+    printf 'missing value for %s\n' "$flag" >&2
+    exit 2
+  fi
+}
+
+bind_mount() {
+  local path="$1"
+  printf 'type=bind,source=%s,target=%s' "$path" "$path"
+}
+
+run_render_report_pdf() {
+  local input=""
+  local output=""
+  local provider="container"
+  local container_runtime="$runtime_default"
+  local container_image="$image_default"
+  local grammateus_bin="grammateus_markdown_pdf"
+  local -a grammateus_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input)
+        require_value "$1" "${2:-}"
+        input="$2"
+        grammateus_args+=("$1" "$2")
+        shift 2
+        ;;
+      --output)
+        require_value "$1" "${2:-}"
+        output="$2"
+        grammateus_args+=("$1" "$2")
+        shift 2
+        ;;
+      --provider)
+        require_value "$1" "${2:-}"
+        provider="$2"
+        shift 2
+        ;;
+      --container-runtime)
+        require_value "$1" "${2:-}"
+        container_runtime="$2"
+        shift 2
+        ;;
+      --container-image)
+        require_value "$1" "${2:-}"
+        container_image="$2"
+        shift 2
+        ;;
+      --grammateus-bin)
+        require_value "$1" "${2:-}"
+        grammateus_bin="$2"
+        shift 2
+        ;;
+      --title|--subtitle|--title-explanation|--metadata-json|--provenance-qr-payload|--report-template|--footer-label|--generated-at-utc)
+        require_value "$1" "${2:-}"
+        grammateus_args+=("$1" "$2")
+        shift 2
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        printf 'unsupported render-report-pdf option: %s\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  done
+
+  if [[ -z "$input" || -z "$output" ]]; then
+    printf 'render-report-pdf requires --input and --output\n' >&2
+    exit 2
+  fi
+  mkdir -p "$(dirname "$output")"
+
+  if [[ "$provider" == "native" ]]; then
+    exec "$grammateus_bin" "${grammateus_args[@]}"
+  fi
+  if [[ "$provider" != "container" ]]; then
+    printf 'unsupported report provider: %s\n' "$provider" >&2
+    exit 2
+  fi
+  if ! command -v "$container_runtime" >/dev/null 2>&1; then
+    printf 'container runtime %s is required for Grammateus PDF rendering\n' "$container_runtime" >&2
+    exit 127
+  fi
+
+  local input_dir output_dir
+  input_dir="$(cd "$(dirname "$input")" && pwd -P)"
+  output_dir="$(mkdir -p "$(dirname "$output")" && cd "$(dirname "$output")" && pwd -P)"
+
+  local -a docker_args=(run --rm --mount "$(bind_mount "$input_dir")")
+  if [[ "$output_dir" != "$input_dir" ]]; then
+    docker_args+=(--mount "$(bind_mount "$output_dir")")
+  fi
+  docker_args+=("$container_image" grammateus_markdown_pdf "${grammateus_args[@]}")
+  exec "$container_runtime" "${docker_args[@]}"
+}
+
+run_prewarm_report_provider() {
+  local container_runtime="$runtime_default"
+  local container_image="$image_default"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --container-runtime)
+        require_value "$1" "${2:-}"
+        container_runtime="$2"
+        shift 2
+        ;;
+      --container-image)
+        require_value "$1" "${2:-}"
+        container_image="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        printf 'unsupported prewarm-report-provider option: %s\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  done
+  if ! command -v "$container_runtime" >/dev/null 2>&1; then
+    printf 'container runtime %s is required for Grammateus provider prewarm\n' "$container_runtime" >&2
+    exit 127
+  fi
+  exec "$container_runtime" run --rm --entrypoint /bin/sh "$container_image" -lc \
+    "set -eu; grammateus_markdown_pdf --help >/dev/null; Rscript -e 'pkgs <- c(\"ggplot2\", \"jsonlite\", \"scales\", \"svglite\", \"viridisLite\", \"floundeR\"); missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing)) stop(paste(\"missing R packages:\", paste(missing, collapse = \", \"))); library(floundeR); caps <- floundeR::flounder_rust_capabilities(required = TRUE); if (!isTRUE(caps\$compiled_support)) stop(\"floundeR compiled support is unavailable\"); cat(\"grammateus report provider prewarmed\\n\")'"
+}
+
+case "$command" in
+  render-report-pdf)
+    run_render_report_pdf "$@"
+    ;;
+  prewarm-report-provider)
+    run_prewarm_report_provider "$@"
+    ;;
+  --help|-h|help)
+    usage
+    ;;
+  *)
+    printf 'unsupported command for DASObjectStore packaged gnostikon wrapper: %s\n' "$command" >&2
+    exit 2
+    ;;
+esac

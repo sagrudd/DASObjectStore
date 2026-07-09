@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.10 - 2026-07-09
+
+- Package a DASObjectStore-owned ``gnostikon-workflow-control`` compatibility
+  wrapper for Grammateus PDF rendering so local DEB/RPM installs no longer
+  depend on a noninstallable external renderer package.
+- Keep Docker/container runtime as the formal report-rendering dependency and
+  teach the CLI to prefer the packaged wrapper before falling back to a
+  developer-provided ``gnostikon-workflow-control`` command.
+
 ## 0.54.9 - 2026-07-09
 
 - Add ``gnostikon-workflow-control`` to Mnemosyne sibling discovery for

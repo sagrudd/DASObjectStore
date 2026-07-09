@@ -9,6 +9,7 @@ tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
 daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
 web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
 pam_service="$repo_root/packaging/linux/pam.d/dasobjectstore"
+reporting_wrapper="$repo_root/packaging/reporting/gnostikon-workflow-control"
 postinst="$repo_root/packaging/debian/postinst"
 build_deb="$repo_root/packaging/debian/build-deb.sh"
 build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
@@ -40,6 +41,7 @@ require_file "$tmpfiles"
 require_file "$daemon_config"
 require_file "$web_config"
 require_file "$pam_service"
+require_file "$reporting_wrapper"
 require_file "$postinst"
 require_file "$build_deb"
 require_file "$build_rpm"
@@ -99,11 +101,16 @@ require_text "$build_deb" 'opt/dasobjectstore/web'
 require_text "$build_deb" 'etc/pam.d/dasobjectstore'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_deb" 'DEBIAN/postinst'
-require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io'
+require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, docker.io'
 require_text "$build_deb" 'X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg'
 require_text "$build_deb" 'sudo apt-get install clang libclang-dev libpam0g-dev'
 require_text "$repo_root/Makefile" 'gnostikon'
+require_text "$reporting_wrapper" 'render-report-pdf'
+require_text "$reporting_wrapper" 'prewarm-report-provider'
+require_text "$reporting_wrapper" 'grammateus_markdown_pdf'
+require_text "$reporting_wrapper" 'docker_args=(run --rm'
 
 require_text "$build_rpm" "rpmbuild"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
@@ -119,11 +126,11 @@ require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper'
+require_text "$build_rpm" '/usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_rpm" 'BuildRequires:  clang'
 require_text "$build_rpm" 'BuildRequires:  libclang-devel'
 require_text "$build_rpm" 'BuildRequires:  pam-devel'
 require_text "$build_rpm" 'Requires:       pam'
-require_text "$build_rpm" 'Requires:       gnostikon-workflow-control'
 require_text "$build_rpm" 'Requires:       /usr/bin/docker'
 require_text "$build_rpm" 'sudo dnf install clang libclang-devel pam-devel'
 

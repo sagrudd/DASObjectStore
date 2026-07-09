@@ -115,6 +115,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
+use std::ffi::OsString;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
@@ -5332,13 +5333,27 @@ fn write_pdf_report(
     write_formal_performance_pdf_report(markdown_path, pdf_path, report)
 }
 
+const REPORT_RENDERER_ENV: &str = "DASOBJECTSTORE_REPORT_RENDERER";
+const PACKAGED_REPORT_RENDERER: &str = "/usr/libexec/dasobjectstore/gnostikon-workflow-control";
+
+fn report_renderer_command() -> OsString {
+    if let Some(command) = std::env::var_os(REPORT_RENDERER_ENV) {
+        return command;
+    }
+    let packaged = Path::new(PACKAGED_REPORT_RENDERER);
+    if packaged.exists() {
+        return packaged.as_os_str().to_os_string();
+    }
+    OsString::from("gnostikon-workflow-control")
+}
+
 fn write_formal_performance_pdf_report(
     markdown_path: &Path,
     pdf_path: &Path,
     report: &PerformanceReport,
 ) -> Result<(), CliError> {
     let metadata_json = performance_report_metadata_json(report);
-    let status = ProcessCommand::new("gnostikon-workflow-control")
+    let status = ProcessCommand::new(report_renderer_command())
         .arg("render-report-pdf")
         .arg("--provider")
         .arg("container")
@@ -5364,11 +5379,11 @@ fn write_formal_performance_pdf_report(
     match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering failed with status {status}; install/repair the gnostikon-workflow-control package, Docker/container runtime, and the Grammateus report provider, then rebuild with `dasobjectstore performance-report --json-artifact {}`",
+            "formal performance PDF rendering failed with status {status}; install/repair the DASObjectStore packaged report renderer, Docker/container runtime, and the Grammateus report provider, then rebuild with `dasobjectstore performance-report --json-artifact {}`",
             report.json_path.display()
         ))),
         Err(error) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering requires the gnostikon-workflow-control package with Grammateus support plus a Docker/container runtime: {error}; rebuild later with `dasobjectstore performance-report --json-artifact {}`",
+            "formal performance PDF rendering requires the DASObjectStore packaged report renderer or an external gnostikon-workflow-control command with Grammateus support plus a Docker/container runtime: {error}; rebuild later with `dasobjectstore performance-report --json-artifact {}`",
             report.json_path.display()
         ))),
     }
@@ -5383,7 +5398,7 @@ fn write_formal_performance_pdf_report_from_artifact(
     let generated_at =
         json_string(artifact, &["run", "generated_at_utc"]).unwrap_or_else(|| now_utc_string());
     let qr_payload = performance_report_qr_payload_from_artifact(artifact);
-    let status = ProcessCommand::new("gnostikon-workflow-control")
+    let status = ProcessCommand::new(report_renderer_command())
         .arg("render-report-pdf")
         .arg("--provider")
         .arg("container")
@@ -5409,10 +5424,10 @@ fn write_formal_performance_pdf_report_from_artifact(
     match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering failed with status {status}; install/repair the gnostikon-workflow-control package, Docker/container runtime, and the Grammateus report provider"
+            "formal performance PDF rendering failed with status {status}; install/repair the DASObjectStore packaged report renderer, Docker/container runtime, and the Grammateus report provider"
         ))),
         Err(error) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering requires the gnostikon-workflow-control package with Grammateus support plus a Docker/container runtime: {error}"
+            "formal performance PDF rendering requires the DASObjectStore packaged report renderer or an external gnostikon-workflow-control command with Grammateus support plus a Docker/container runtime: {error}"
         ))),
     }
 }

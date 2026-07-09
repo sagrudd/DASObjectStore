@@ -30,6 +30,7 @@ package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"
 packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
 packaging_product="$packaging_linux/opt/dasobjectstore"
+packaging_reporting="$repo_root/packaging/reporting"
 web_dist="$(bash "$repo_root/packaging/web/prepare-web-dist.sh")"
 bash "$packaging_debian/validate-package-assets.sh"
 
@@ -59,6 +60,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$build_root/usr/bin/dasobjectstore-remote"
 install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
   "$build_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
+install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
+  "$build_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
@@ -84,7 +87,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io
+Depends: ca-certificates, acl, libpam0g, docker.io
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore

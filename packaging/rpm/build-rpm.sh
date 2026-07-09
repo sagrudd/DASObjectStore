@@ -28,6 +28,7 @@ fi
 packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
 packaging_product="$packaging_linux/opt/dasobjectstore"
+packaging_reporting="$repo_root/packaging/reporting"
 web_dist="$(bash "$repo_root/packaging/web/prepare-web-dist.sh")"
 bash "$packaging_debian/validate-package-assets.sh"
 
@@ -64,6 +65,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
 install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
+install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
+  "$payload_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
@@ -103,7 +106,6 @@ BuildRequires:  rust
 # target; those are usually installed through rustup/cargo rather than RPM.
 Requires:       acl
 Requires:       ca-certificates
-Requires:       gnostikon-workflow-control
 Requires:       /usr/bin/docker
 Requires:       pam
 Requires:       systemd
@@ -203,6 +205,7 @@ fi
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
+/usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/systemd/system/dasobjectstore-server.service
 /usr/lib/sysusers.d/dasobjectstore.conf

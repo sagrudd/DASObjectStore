@@ -12,6 +12,8 @@ const TMPFILES: &str = include_str!("../../../packaging/linux/tmpfiles.d/dasobje
 const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobjectstore/daemon.json");
 const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectstore/config.json");
 const PAM_SERVICE: &str = include_str!("../../../packaging/linux/pam.d/dasobjectstore");
+const REPORTING_WRAPPER: &str =
+    include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
 const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
@@ -109,7 +111,7 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(
         BUILD_DEB,
-        "Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io",
+        "Depends: ca-certificates, acl, libpam0g, docker.io",
     );
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
     assert_contains(
@@ -122,9 +124,24 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_RPM, "BuildRequires:  libclang-devel");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
     assert_contains(BUILD_RPM, "Requires:       pam");
-    assert_contains(BUILD_RPM, "Requires:       gnostikon-workflow-control");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "sudo dnf install clang libclang-devel pam-devel");
+}
+
+#[test]
+fn package_installs_das_owned_report_renderer_wrapper() {
+    assert_contains(REPORTING_WRAPPER, "render-report-pdf");
+    assert_contains(REPORTING_WRAPPER, "prewarm-report-provider");
+    assert_contains(REPORTING_WRAPPER, "grammateus_markdown_pdf");
+    assert_contains(REPORTING_WRAPPER, "docker_args=(run --rm");
+    assert_contains(
+        BUILD_DEB,
+        "usr/libexec/dasobjectstore/gnostikon-workflow-control",
+    );
+    assert_contains(
+        BUILD_RPM,
+        "/usr/libexec/dasobjectstore/gnostikon-workflow-control",
+    );
 }
 
 #[test]
@@ -157,7 +174,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
     assert_contains(
         BUILD_DEB,
-        "Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io",
+        "Depends: ca-certificates, acl, libpam0g, docker.io",
     );
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
 }
@@ -197,7 +214,6 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "Requires:       ca-certificates");
     assert_contains(BUILD_RPM, "Requires:       acl");
     assert_contains(BUILD_RPM, "Requires:       pam");
-    assert_contains(BUILD_RPM, "Requires:       gnostikon-workflow-control");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
 }

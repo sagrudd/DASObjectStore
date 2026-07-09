@@ -130,12 +130,13 @@ The developer fallback page is available only through the explicit
 be used for `make deb` or `make rpm` artifacts.
 
 Formal performance-report rendering in the Web Activity page depends on the
-Mnemosyne Grammateus handoff command `gnostikon-workflow-control` and a
-Docker-compatible container runtime. `make pull` fetches the
-`gnostikon-workflow-control` sibling checkout for local development, and the
-DEB/RPM manifests declare the renderer and container runtime as runtime
-dependencies so appliance installs do not silently expose a broken reporting
-surface.
+packaged DASObjectStore Grammateus handoff wrapper
+`/usr/libexec/dasobjectstore/gnostikon-workflow-control` and a Docker-compatible
+container runtime. `make pull` still fetches the upstream
+`gnostikon-workflow-control` sibling checkout for local development, while the
+DEB/RPM manifests install the DAS-owned wrapper and declare the container
+runtime as a runtime dependency so appliance installs do not silently expose a
+broken reporting surface.
 
 ## TLS Assets
 
