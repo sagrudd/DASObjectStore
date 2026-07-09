@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.57.0 - 2026-07-09
+
+- Implement the client-side ``dasobjectstore-remote easyconnect`` browser
+  launch flow with loopback callback binding, timeout handling, ``--no-browser``
+  fallback, one-time pairing result capture, and redacted exchange-code output.
+
 ## 0.56.0 - 2026-07-09
 
 - Add paired-appliance remote client configuration storage for easyconnect

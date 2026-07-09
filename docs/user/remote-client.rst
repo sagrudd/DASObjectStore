@@ -48,31 +48,37 @@ Easyconnect Contract
 
 ``easyconnect`` is the planned browser-approved connection flow for users who
 know the appliance host or IP address but should not paste passwords, S3 access
-keys, or bucket names into the terminal. The current command defines and prints
-the product contract that subsequent pairing implementation follows:
+keys, or bucket names into the terminal. The command binds a loopback callback
+listener, opens the appliance login page in a browser, and waits for a one-time
+pairing callback:
 
 .. code-block:: console
 
    dasobjectstore-remote easyconnect 192.168.1.192
 
 The command resolves the standalone Web application URL using HTTPS port
-``8448`` by default, prints the discovery URL, prints the browser login URL,
-describes the local callback listener or polling fallback, and lists the
-pairing lifecycle and failure states. It does not yet perform the network
-pairing exchange; the command output ends with an explicit contract-only status
-until the server-side pairing APIs are implemented.
+``8448`` by default. After authenticated approval in the browser, the remote
+client receives a one-time pairing result on its loopback callback listener. The
+exchange code is treated as secret-bearing material and is not printed.
 
-Use ``--json`` when another tool should consume the contract:
+Server-side session exchange is the next implementation stage. Until that API
+is available, successful output states that the browser-approved callback was
+received and that session exchange is not yet implemented in the build.
+
+Use ``--contract`` to inspect the readable product contract without launching a
+browser, or ``--json`` when another tool should consume the contract:
 
 .. code-block:: console
 
+   dasobjectstore-remote easyconnect 192.168.1.192 --contract
    dasobjectstore-remote easyconnect 192.168.1.192 --json
 
 Use ``--https-port`` only when a standalone appliance is intentionally deployed
 on a non-default Web port. Use ``--callback-port`` when firewall policy or a
-launcher requires a fixed loopback callback port; otherwise the implemented
-client should choose an ephemeral loopback port and fall back to bounded polling
-if it cannot bind a callback listener.
+launcher requires a fixed loopback callback port; otherwise the client chooses
+an ephemeral loopback port. Use ``--timeout-seconds`` to change the pairing wait
+time. Use ``--no-browser`` on headless systems: the client prints the browser
+URL and still waits for the callback.
 
 The easyconnect lifecycle is:
 

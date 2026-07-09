@@ -730,7 +730,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add remote CLI configuration storage for paired DAS appliances, issued
   session credentials, expiry time, renewal metadata, selected default
   ObjectStore, and secure redaction in logs/help output.
-- [ ] Implement the remote CLI browser-launch flow that opens the appliance Web
+- [x] Implement the remote CLI browser-launch flow that opens the appliance Web
   authentication page for a host such as `192.168.1.192` and waits for a
   one-time pairing result without requiring the user to paste passwords or S3
   keys into the terminal.

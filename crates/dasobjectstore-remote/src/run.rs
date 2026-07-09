@@ -10,8 +10,10 @@ use crate::config::{
     RemoteConfigOverrides, DEFAULT_PROFILE, DEFAULT_REGION,
 };
 use crate::easyconnect::{
-    define_easyconnect_contract, RemoteEasyconnectContract, RemoteEasyconnectContractError,
-    RemoteEasyconnectContractRequest,
+    define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
+    RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
+    RemoteEasyconnectPairingError, RemoteEasyconnectPairingOptions,
+    RemoteEasyconnectPairingOutcome, SystemBrowserLauncher,
 };
 use crate::s3::{
     execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload, RemoteS3Error,
@@ -19,6 +21,7 @@ use crate::s3::{
 use std::fmt;
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
@@ -43,9 +46,64 @@ fn run_easyconnect(args: &EasyconnectArgs, writer: &mut impl Write) -> Result<()
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &contract)?;
         writer.write_all(b"\n")?;
-    } else {
+    } else if args.contract() {
         write_easyconnect_contract(&contract, writer)?;
+    } else {
+        let options = RemoteEasyconnectPairingOptions {
+            host_or_ip: args.host_or_ip().to_string(),
+            https_port: args.https_port(),
+            callback_port: args.callback_port(),
+            timeout: Duration::from_secs(args.timeout_seconds()),
+            open_browser: !args.no_browser(),
+        };
+        let open_browser = !args.no_browser();
+        let outcome =
+            run_easyconnect_pairing_with_ready(options, &SystemBrowserLauncher, |contract| {
+                write_easyconnect_pairing_ready(contract, open_browser, writer)?;
+                writer.flush()?;
+                Ok(())
+            })?;
+        write_easyconnect_pairing(&outcome, writer)?;
     }
+    Ok(())
+}
+
+fn write_easyconnect_pairing_ready(
+    contract: &RemoteEasyconnectContract,
+    open_browser: bool,
+    writer: &mut impl Write,
+) -> Result<(), std::io::Error> {
+    writeln!(writer, "Remote easyconnect pairing")?;
+    writeln!(writer, "Appliance: {}", contract.appliance_base_url)?;
+    writeln!(
+        writer,
+        "Local callback bind: {}",
+        contract.local_callback_bind
+    )?;
+    if open_browser {
+        writeln!(writer, "Browser launch: requested")?;
+    } else {
+        writeln!(writer, "Open browser URL: {}", contract.browser_login_url)?;
+    }
+    writeln!(writer, "Waiting for browser-approved pairing callback...")?;
+    Ok(())
+}
+
+fn write_easyconnect_pairing(
+    outcome: &RemoteEasyconnectPairingOutcome,
+    writer: &mut impl Write,
+) -> Result<(), std::io::Error> {
+    writeln!(writer, "Pairing result: received")?;
+    writeln!(writer, "Pairing ID: {}", outcome.result.pairing_id)?;
+    writeln!(
+        writer,
+        "Exchange code: {}",
+        outcome.result.redacted_exchange_code()
+    )?;
+    writeln!(
+        writer,
+        "Status: browser-approved pairing callback received; session exchange API is not implemented in this build."
+    )?;
     Ok(())
 }
 
@@ -85,7 +143,7 @@ fn write_easyconnect_contract(
     }
     writeln!(
         writer,
-        "Status: contract defined; pairing execution is not implemented in this build."
+        "Status: contract defined; run without --contract/--json to launch browser pairing. Session exchange API is not implemented in this build."
     )?;
     Ok(())
 }
@@ -293,6 +351,7 @@ pub enum RemoteRunError {
     Json(serde_json::Error),
     Config(RemoteConfigError),
     Easyconnect(RemoteEasyconnectContractError),
+    EasyconnectPairing(RemoteEasyconnectPairingError),
     Auth(RemoteAuthError),
     S3(RemoteS3Error),
 }
@@ -304,6 +363,7 @@ impl fmt::Display for RemoteRunError {
             Self::Json(error) => write!(formatter, "{error}"),
             Self::Config(error) => write!(formatter, "{error}"),
             Self::Easyconnect(error) => write!(formatter, "{error}"),
+            Self::EasyconnectPairing(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
         }
@@ -333,6 +393,12 @@ impl From<RemoteConfigError> for RemoteRunError {
 impl From<RemoteEasyconnectContractError> for RemoteRunError {
     fn from(error: RemoteEasyconnectContractError) -> Self {
         Self::Easyconnect(error)
+    }
+}
+
+impl From<RemoteEasyconnectPairingError> for RemoteRunError {
+    fn from(error: RemoteEasyconnectPairingError) -> Self {
+        Self::EasyconnectPairing(error)
     }
 }
 

@@ -97,7 +97,16 @@ pub struct EasyconnectArgs {
     /// Fixed local callback port; omit to let the remote client choose one.
     #[arg(long)]
     callback_port: Option<u16>,
-    /// Emit the contract as JSON.
+    /// Print the easyconnect contract without launching the browser.
+    #[arg(long)]
+    contract: bool,
+    /// Print the browser URL and wait for callback without opening a browser.
+    #[arg(long)]
+    no_browser: bool,
+    /// Seconds to wait for browser-approved pairing callback.
+    #[arg(long, default_value_t = crate::easyconnect::DEFAULT_PAIRING_TIMEOUT_SECS)]
+    timeout_seconds: u64,
+    /// Emit the contract as JSON without launching the browser.
     #[arg(long)]
     json: bool,
 }
@@ -113,6 +122,18 @@ impl EasyconnectArgs {
 
     pub fn callback_port(&self) -> Option<u16> {
         self.callback_port
+    }
+
+    pub fn contract(&self) -> bool {
+        self.contract
+    }
+
+    pub fn no_browser(&self) -> bool {
+        self.no_browser
+    }
+
+    pub fn timeout_seconds(&self) -> u64 {
+        self.timeout_seconds
     }
 
     pub fn json(&self) -> bool {
@@ -301,6 +322,8 @@ mod tests {
             "--callback-port",
             "49321",
             "--json",
+            "--timeout-seconds",
+            "10",
         ])
         .expect("cli parses");
 
@@ -310,6 +333,9 @@ mod tests {
         assert_eq!(args.host_or_ip(), "192.168.1.192");
         assert_eq!(args.https_port(), 8448);
         assert_eq!(args.callback_port(), Some(49321));
+        assert_eq!(args.timeout_seconds(), 10);
+        assert!(!args.no_browser());
+        assert!(!args.contract());
         assert!(args.json());
     }
 
