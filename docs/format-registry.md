@@ -56,6 +56,16 @@ compatibility-sensitive and documented in the same change that introduces them.
 These formats need explicit schema identifiers before a release that presents
 them as stable public contracts.
 
+## Telemetry Formats
+
+| Format | Artifact | Current version | Version carrier | Notes |
+| --- | --- | --- | --- | --- |
+| Appliance telemetry sample set | `docs/schemas/dasobjectstore.appliance_telemetry.v1.schema.json` | `dasobjectstore.appliance_telemetry.v1` | `schema_version` field | Timestamped appliance telemetry covering CPU usage, memory usage, enclosure and disk identity, disk capacity, disk IO counters, Web and remote-agent session counts, and explicit missing-data markers. |
+
+Telemetry readers must preserve missing-data semantics. A `null` metric with a
+`missing_reason` or entry in `missing_data` is not zero and must not be
+interpolated silently in dashboards or reports.
+
 ## Mnemosyne Adapter Formats
 
 | Format | Current version | Version carrier | Notes |

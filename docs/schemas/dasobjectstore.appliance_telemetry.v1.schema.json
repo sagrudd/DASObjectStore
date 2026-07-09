@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dasobjectstore.local/schemas/dasobjectstore.appliance_telemetry.v1.schema.json",
+  "title": "DASObjectStore appliance telemetry sample set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at_utc",
+    "cadence_seconds",
+    "source",
+    "samples"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "dasobjectstore.appliance_telemetry.v1"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cadence_seconds": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sample"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "appliance_id",
+        "host_id"
+      ],
+      "properties": {
+        "appliance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hostname": {
+          "type": "string"
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timestamp_utc",
+        "collection_quality",
+        "missing_data",
+        "cpu",
+        "memory",
+        "enclosures",
+        "disks",
+        "sessions"
+      ],
+      "properties": {
+        "timestamp_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "collection_quality": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "missing_data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/missing_data_marker"
+          }
+        },
+        "cpu": {
+          "$ref": "#/$defs/cpu"
+        },
+        "memory": {
+          "$ref": "#/$defs/memory"
+        },
+        "enclosures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/enclosure"
+          }
+        },
+        "disks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/disk"
+          }
+        },
+        "sessions": {
+          "$ref": "#/$defs/sessions"
+        }
+      }
+    },
+    "cpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage_percent"
+      ],
+      "properties": {
+        "usage_percent": {
+          "$ref": "#/$defs/nullable_percent"
+        },
+        "load_average_1m": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "load_average_5m": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "load_average_15m": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "logical_core_count": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "missing_reason": {
+          "$ref": "#/$defs/missing_reason"
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_bytes",
+        "available_bytes",
+        "used_percent"
+      ],
+      "properties": {
+        "total_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "available_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "used_percent": {
+          "$ref": "#/$defs/nullable_percent"
+        },
+        "swap_total_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "swap_used_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "missing_reason": {
+          "$ref": "#/$defs/missing_reason"
+        }
+      }
+    },
+    "enclosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enclosure_id",
+        "label",
+        "disk_ids"
+      ],
+      "properties": {
+        "enclosure_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transport": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vendor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serial": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disk_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "disk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disk_id",
+        "label",
+        "role",
+        "capacity",
+        "io"
+      ],
+      "properties": {
+        "disk_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enclosure_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bay_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "enum": [
+            "ssd",
+            "hdd",
+            "metadata",
+            "external",
+            "unknown"
+          ]
+        },
+        "mount_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capacity": {
+          "$ref": "#/$defs/disk_capacity"
+        },
+        "io": {
+          "$ref": "#/$defs/disk_io"
+        }
+      }
+    },
+    "disk_capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_bytes",
+        "used_bytes",
+        "available_bytes",
+        "used_percent"
+      ],
+      "properties": {
+        "total_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "used_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "available_bytes": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "used_percent": {
+          "$ref": "#/$defs/nullable_percent"
+        },
+        "missing_reason": {
+          "$ref": "#/$defs/missing_reason"
+        }
+      }
+    },
+    "disk_io": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "read_bytes_per_second",
+        "write_bytes_per_second",
+        "read_operations_per_second",
+        "write_operations_per_second"
+      ],
+      "properties": {
+        "read_bytes_per_second": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "write_bytes_per_second": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "read_operations_per_second": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "write_operations_per_second": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "queue_depth": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "await_ms": {
+          "$ref": "#/$defs/nullable_non_negative_number"
+        },
+        "counter_reset": {
+          "type": "boolean"
+        },
+        "missing_reason": {
+          "$ref": "#/$defs/missing_reason"
+        }
+      }
+    },
+    "sessions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "web_active_sessions",
+        "remote_agent_active_sessions",
+        "distinct_logged_in_users"
+      ],
+      "properties": {
+        "web_active_sessions": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "remote_agent_active_sessions": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "distinct_logged_in_users": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "administrator_sessions": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "operator_sessions": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "missing_reason": {
+          "$ref": "#/$defs/missing_reason"
+        }
+      }
+    },
+    "missing_data_marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "$ref": "#/$defs/missing_reason"
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "missing_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "collector_unavailable",
+        "permission_denied",
+        "unsupported_platform",
+        "device_missing",
+        "counter_reset",
+        "daemon_startup",
+        "sample_timeout",
+        "not_configured",
+        "unknown",
+        null
+      ]
+    },
+    "nullable_percent": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "nullable_non_negative_integer": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "nullable_non_negative_number": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    }
+  }
+}

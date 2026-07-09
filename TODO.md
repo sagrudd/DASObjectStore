@@ -919,7 +919,7 @@ planning are tracked under Milestones 21 and 22.
 
 ## Milestone 23: Appliance Telemetry, Home Dashboard Graphs, and floundeR Time-Series Contracts
 
-- [ ] Define a versioned appliance telemetry JSON schema covering timestamped
+- [x] Define a versioned appliance telemetry JSON schema covering timestamped
   CPU usage, memory usage, disk capacity, per-disk read/write IO counters,
   enclosure/disk identity, DASObjectStore Web/session user counts, and
   collection quality/missing-data markers.
