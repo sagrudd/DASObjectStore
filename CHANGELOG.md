@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.55.0 - 2026-07-09
+
+- Add the public ``dasobjectstore-remote easyconnect <host-or-ip>`` contract
+  command with stable discovery URL, browser-login URL, local callback/polling
+  lifecycle, failure-state, and JSON output semantics for the planned
+  browser-approved remote upload pairing flow.
+
 ## 0.54.25 - 2026-07-09
 
 - Improve Web ObjectStore browser placement fidelity with SSD landing,

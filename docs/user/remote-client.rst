@@ -43,6 +43,52 @@ password prompt disables terminal echo and passes the password only to the
 credential helper through the ``DASOBJECTSTORE_REMOTE_PASSWORD`` environment
 variable for that child process.
 
+Easyconnect Contract
+--------------------
+
+``easyconnect`` is the planned browser-approved connection flow for users who
+know the appliance host or IP address but should not paste passwords, S3 access
+keys, or bucket names into the terminal. The current command defines and prints
+the product contract that subsequent pairing implementation follows:
+
+.. code-block:: console
+
+   dasobjectstore-remote easyconnect 192.168.1.192
+
+The command resolves the standalone Web application URL using HTTPS port
+``8448`` by default, prints the discovery URL, prints the browser login URL,
+describes the local callback listener or polling fallback, and lists the
+pairing lifecycle and failure states. It does not yet perform the network
+pairing exchange; the command output ends with an explicit contract-only status
+until the server-side pairing APIs are implemented.
+
+Use ``--json`` when another tool should consume the contract:
+
+.. code-block:: console
+
+   dasobjectstore-remote easyconnect 192.168.1.192 --json
+
+Use ``--https-port`` only when a standalone appliance is intentionally deployed
+on a non-default Web port. Use ``--callback-port`` when firewall policy or a
+launcher requires a fixed loopback callback port; otherwise the implemented
+client should choose an ephemeral loopback port and fall back to bounded polling
+if it cannot bind a callback listener.
+
+The easyconnect lifecycle is:
+
+* discover appliance pairing capabilities from the HTTPS Web API;
+* start a local loopback callback listener, or use polling fallback when
+  callback binding is unavailable;
+* open the appliance browser login and pairing approval page;
+* wait for authenticated approval without printing passwords or S3 credentials;
+* exchange the approved pairing for a remote upload session and accessible
+  ObjectStore list; and
+* persist only non-secret appliance metadata and issued session references.
+
+Expected failure states include unreachable discovery URL, untrusted appliance
+identity, callback bind failure, browser launch failure, denied login, expired
+pairing, denied session exchange, and local agent disconnection.
+
 Configure a Remote Host
 -----------------------
 

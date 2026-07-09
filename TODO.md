@@ -723,7 +723,7 @@ planning are tracked under Milestones 21 and 22.
 
 ## Milestone 22: Remote Easyconnect Uploads and Ingress Policy Simplification
 
-- [ ] Define the remote easyconnect product contract for
+- [x] Define the remote easyconnect product contract for
   `dasobjectstore-remote easyconnect <host-or-ip>`, including discovery URL,
   browser launch, pairing lifecycle, local callback/polling fallback, failure
   states, and CLI output.

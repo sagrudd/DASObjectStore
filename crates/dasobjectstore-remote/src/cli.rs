@@ -77,12 +77,47 @@ impl RemoteCli {
 
 #[derive(Debug, Subcommand)]
 pub enum RemoteCommand {
+    /// Define the browser-approved easyconnect pairing flow for a DAS appliance.
+    Easyconnect(EasyconnectArgs),
     /// Configure this remote client.
     Config(ConfigArgs),
     /// List object stores accessible through the configured S3 endpoint.
     Stores(StoresArgs),
     /// Upload a file or folder to an accessible object store.
     Upload(UploadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EasyconnectArgs {
+    /// DAS appliance host name or IP address, without a URL scheme.
+    host_or_ip: String,
+    /// HTTPS port for the standalone DASObjectStore Web application.
+    #[arg(long, default_value_t = crate::easyconnect::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    /// Fixed local callback port; omit to let the remote client choose one.
+    #[arg(long)]
+    callback_port: Option<u16>,
+    /// Emit the contract as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl EasyconnectArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+
+    pub fn callback_port(&self) -> Option<u16> {
+        self.callback_port
+    }
+
+    pub fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Args)]
@@ -256,6 +291,27 @@ mod tests {
     use super::{RemoteCli, RemoteCommand, StoresCommand};
     use crate::auth::RemoteAuthAuthority;
     use clap::Parser;
+
+    #[test]
+    fn parses_easyconnect_contract_command() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "easyconnect",
+            "192.168.1.192",
+            "--callback-port",
+            "49321",
+            "--json",
+        ])
+        .expect("cli parses");
+
+        let RemoteCommand::Easyconnect(args) = cli.command() else {
+            panic!("expected easyconnect command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.192");
+        assert_eq!(args.https_port(), 8448);
+        assert_eq!(args.callback_port(), Some(49321));
+        assert!(args.json());
+    }
 
     #[test]
     fn parses_store_list() {

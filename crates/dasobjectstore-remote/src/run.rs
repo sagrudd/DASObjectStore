@@ -2,11 +2,16 @@ use crate::auth::{
     request_s3_credentials, RemoteAuthAuthority, RemoteAuthError, RemoteS3Credentials,
 };
 use crate::cli::{
-    ConfigCommand, RemoteCli, RemoteCommand, StoreListArgs, StoresCommand, UploadArgs,
+    ConfigCommand, EasyconnectArgs, RemoteCli, RemoteCommand, StoreListArgs, StoresCommand,
+    UploadArgs,
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
     RemoteConfigOverrides, DEFAULT_PROFILE, DEFAULT_REGION,
+};
+use crate::easyconnect::{
+    define_easyconnect_contract, RemoteEasyconnectContract, RemoteEasyconnectContractError,
+    RemoteEasyconnectContractRequest,
 };
 use crate::s3::{
     execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload, RemoteS3Error,
@@ -17,6 +22,7 @@ use std::path::PathBuf;
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
+        RemoteCommand::Easyconnect(args) => run_easyconnect(args, writer),
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
             ConfigCommand::Show(args) => run_config_show(cli, args.json(), writer),
@@ -26,6 +32,62 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         },
         RemoteCommand::Upload(args) => run_upload(cli, args, writer),
     }
+}
+
+fn run_easyconnect(args: &EasyconnectArgs, writer: &mut impl Write) -> Result<(), RemoteRunError> {
+    let contract = define_easyconnect_contract(RemoteEasyconnectContractRequest {
+        host_or_ip: args.host_or_ip().to_string(),
+        https_port: args.https_port(),
+        callback_port: args.callback_port(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &contract)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_easyconnect_contract(&contract, writer)?;
+    }
+    Ok(())
+}
+
+fn write_easyconnect_contract(
+    contract: &RemoteEasyconnectContract,
+    writer: &mut impl Write,
+) -> Result<(), std::io::Error> {
+    writeln!(writer, "Remote easyconnect contract")?;
+    writeln!(writer, "Appliance: {}", contract.appliance_base_url)?;
+    writeln!(writer, "Discovery URL: {}", contract.discovery_url)?;
+    writeln!(writer, "Browser login URL: {}", contract.browser_login_url)?;
+    writeln!(
+        writer,
+        "Local callback bind: {}",
+        contract.local_callback_bind
+    )?;
+    writeln!(
+        writer,
+        "Polling URL template: {}",
+        contract.polling_url_template
+    )?;
+    writeln!(writer, "Lifecycle:")?;
+    for step in &contract.lifecycle {
+        writeln!(
+            writer,
+            "- {} [{}]: {}",
+            step.state, step.actor, step.message
+        )?;
+    }
+    writeln!(writer, "Failure states:")?;
+    for failure in &contract.failure_states {
+        writeln!(
+            writer,
+            "- {} (retryable={}): {}",
+            failure.code, failure.retryable, failure.message
+        )?;
+    }
+    writeln!(
+        writer,
+        "Status: contract defined; pairing execution is not implemented in this build."
+    )?;
+    Ok(())
 }
 
 fn run_config_set(
@@ -196,6 +258,7 @@ pub enum RemoteRunError {
     Io(std::io::Error),
     Json(serde_json::Error),
     Config(RemoteConfigError),
+    Easyconnect(RemoteEasyconnectContractError),
     Auth(RemoteAuthError),
     S3(RemoteS3Error),
 }
@@ -206,6 +269,7 @@ impl fmt::Display for RemoteRunError {
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Json(error) => write!(formatter, "{error}"),
             Self::Config(error) => write!(formatter, "{error}"),
+            Self::Easyconnect(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
         }
@@ -229,6 +293,12 @@ impl From<serde_json::Error> for RemoteRunError {
 impl From<RemoteConfigError> for RemoteRunError {
     fn from(error: RemoteConfigError) -> Self {
         Self::Config(error)
+    }
+}
+
+impl From<RemoteEasyconnectContractError> for RemoteRunError {
+    fn from(error: RemoteEasyconnectContractError) -> Self {
+        Self::Easyconnect(error)
     }
 }
 
