@@ -25,6 +25,7 @@ pub use endpoint_registry::{
     EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,
     ENDPOINT_REGISTRY_SCHEMA,
 };
+pub(crate) use ingest_files::default_ssd_root;
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,
     DaemonFileIngestSummary, DaemonIngestFilesRuntimeError,
@@ -36,7 +37,8 @@ pub use local_admin::{
     SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
 };
 pub use object_browser::{
-    query_object_browser_metadata, ObjectBrowserMetadataEntry, ObjectBrowserQueryError,
+    query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,
+    ObjectBrowserMetadataReadError, ObjectBrowserQueryError,
 };
 pub use performance_policy::{
     authoritative_performance_recommendation_path, read_authoritative_ingest_policy,

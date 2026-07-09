@@ -1167,7 +1167,7 @@ fn stage_message_for_object_progress(
     }
 }
 
-fn default_ssd_root() -> PathBuf {
+pub(crate) fn default_ssd_root() -> PathBuf {
     std::env::var_os(SSD_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SSD_ROOT))

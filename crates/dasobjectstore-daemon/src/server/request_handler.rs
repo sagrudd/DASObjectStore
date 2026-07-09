@@ -7,22 +7,24 @@ use crate::api::{
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, PrepareEnclosureRequest,
-    PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectBrowserRequest,
+    PrepareEnclosureRequest, PrepareEnclosureResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
 use crate::runtime::{
-    default_endpoint_registry_path, provision_garage_store_registry,
+    default_endpoint_registry_path, default_ssd_root, provision_garage_store_registry,
+    query_object_browser_metadata, read_object_browser_metadata,
     submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
     AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ServiceCommandRunner,
-    SystemLocalAdminCommandRunner,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
     read_subobject_registry, ObjectServiceError, ObjectServiceProviderId,
@@ -38,6 +40,7 @@ pub struct DaemonRequestHandler<S, C> {
     admin_job_registry: Option<Arc<dyn AdminJobRegistry>>,
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
+    live_sqlite_path: PathBuf,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -52,6 +55,7 @@ where
             admin_job_registry: None,
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
+            live_sqlite_path: default_live_sqlite_path(),
         }
     }
 
@@ -66,6 +70,7 @@ where
             admin_job_registry: Some(admin_job_registry),
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
+            live_sqlite_path: default_live_sqlite_path(),
         }
     }
 
@@ -76,6 +81,11 @@ where
     ) -> Self {
         self.store_registry_path = store_registry_path.into();
         self.subobject_registry_path = subobject_registry_path.into();
+        self
+    }
+
+    pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
+        self.live_sqlite_path = live_sqlite_path.into();
         self
     }
 
@@ -214,6 +224,29 @@ where
                     ))),
                 }
             }
+            DaemonApiRequest::ObjectBrowser(request) => {
+                let store_id = match self.authorize_object_browser(actor, &request) {
+                    Ok(store_id) => store_id,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            error.code(),
+                            error.to_string(),
+                        )));
+                    }
+                };
+                let entries = match read_object_browser_metadata(&self.live_sqlite_path, store_id) {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "object_browser_metadata_failed",
+                            error.to_string(),
+                        )));
+                    }
+                };
+                query_object_browser_metadata(&request, &entries)
+                    .map(DaemonApiResponse::ObjectBrowser)
+                    .map_err(Into::into)
+            }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
                 format!(
@@ -249,6 +282,35 @@ where
         }
         authorize_store_write(actor, &policy)?;
         Ok(())
+    }
+
+    fn authorize_object_browser(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        request: &ObjectBrowserRequest,
+    ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
+        let store_id = resolve_authorization_store_id(
+            &request.endpoint,
+            &self.store_registry_path,
+            &self.subobject_registry_path,
+        )
+        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        let stores = read_store_registry(&self.store_registry_path)?;
+        let store = stores
+            .into_iter()
+            .find(|definition| definition.store_id == store_id)
+            .ok_or_else(|| ObjectBrowserAccessFailure::MissingStore {
+                store_id: store_id.clone(),
+                store_registry_path: self.store_registry_path.clone(),
+            })?;
+
+        let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
+        if let Some(writer_group) = store.writer_group {
+            policy = policy.with_writer_group(writer_group);
+        }
+        authorize_store_write(actor, &policy)?;
+        Ok(store_id)
     }
 
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
@@ -390,6 +452,61 @@ impl From<DaemonAuthorizationError> for IngestAuthorizationFailure {
 }
 
 impl From<ObjectServiceError> for IngestAuthorizationFailure {
+    fn from(error: ObjectServiceError) -> Self {
+        Self::ObjectService(error)
+    }
+}
+
+#[derive(Debug)]
+enum ObjectBrowserAccessFailure {
+    MissingActor,
+    Authorization(DaemonAuthorizationError),
+    ObjectService(ObjectServiceError),
+    Endpoint(IngestAuthorizationFailure),
+    MissingStore {
+        store_id: StoreId,
+        store_registry_path: PathBuf,
+    },
+}
+
+impl ObjectBrowserAccessFailure {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::MissingActor | Self::Authorization(_) => "permission_denied",
+            Self::ObjectService(_) | Self::Endpoint(_) | Self::MissingStore { .. } => {
+                "object_browser_authorization_failed"
+            }
+        }
+    }
+}
+
+impl Display for ObjectBrowserAccessFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingActor => formatter
+                .write_str("authenticated daemon actor is required to browse ObjectStore metadata"),
+            Self::Authorization(error) => Display::fmt(error, formatter),
+            Self::ObjectService(error) => Display::fmt(error, formatter),
+            Self::Endpoint(error) => Display::fmt(error, formatter),
+            Self::MissingStore {
+                store_id,
+                store_registry_path,
+            } => write!(
+                formatter,
+                "ObjectBrowser authorization references missing store {store_id} in {}",
+                store_registry_path.display()
+            ),
+        }
+    }
+}
+
+impl From<DaemonAuthorizationError> for ObjectBrowserAccessFailure {
+    fn from(error: DaemonAuthorizationError) -> Self {
+        Self::Authorization(error)
+    }
+}
+
+impl From<ObjectServiceError> for ObjectBrowserAccessFailure {
     fn from(error: ObjectServiceError) -> Self {
         Self::ObjectService(error)
     }
@@ -855,6 +972,7 @@ pub enum DaemonRequestHandlerError {
     ServiceRuntime(DaemonServiceRuntimeError),
     LocalAdminRuntime(LocalAdminRuntimeError),
     IngestRuntime(DaemonIngestFilesRuntimeError),
+    ObjectBrowserQuery(ObjectBrowserQueryError),
 }
 
 impl Display for DaemonRequestHandlerError {
@@ -864,6 +982,7 @@ impl Display for DaemonRequestHandlerError {
             Self::ServiceRuntime(error) => Display::fmt(error, formatter),
             Self::LocalAdminRuntime(error) => Display::fmt(error, formatter),
             Self::IngestRuntime(error) => Display::fmt(error, formatter),
+            Self::ObjectBrowserQuery(error) => Display::fmt(error, formatter),
         }
     }
 }
@@ -874,6 +993,24 @@ impl From<crate::api::DaemonRequestValidationError> for DaemonRequestHandlerErro
     fn from(error: crate::api::DaemonRequestValidationError) -> Self {
         Self::RequestValidation(error)
     }
+}
+
+impl From<ObjectBrowserQueryError> for DaemonRequestHandlerError {
+    fn from(error: ObjectBrowserQueryError) -> Self {
+        Self::ObjectBrowserQuery(error)
+    }
+}
+
+const LIVE_SQLITE_PATH_ENV: &str = "DASOBJECTSTORE_LIVE_SQLITE_PATH";
+
+fn default_live_sqlite_path() -> PathBuf {
+    std::env::var_os(LIVE_SQLITE_PATH_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            default_ssd_root()
+                .join(METADATA_DIR_NAME)
+                .join(LIVE_SQLITE_FILE_NAME)
+        })
 }
 
 impl DaemonApiRequest {
@@ -916,7 +1053,9 @@ mod tests {
         DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+        DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
+        ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
+        ObjectBrowserSort, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
         SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
         UpsertEndpointInventoryResponse, ENCLOSURE_PREPARE_CONFIRMATION,
@@ -927,12 +1066,14 @@ mod tests {
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
         FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
     };
-    use dasobjectstore_core::ids::{IngestJobId, StoreId};
+    use dasobjectstore_core::ids::{IngestJobId, PoolId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
+    use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
         ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
     };
+    use rusqlite::{params, Connection};
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
@@ -1668,6 +1809,125 @@ mod tests {
     }
 
     #[test]
+    fn rejects_daemon_object_browser_without_authenticated_actor() {
+        let root = temp_root("browser-auth-missing");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+
+        let response = handler
+            .handle(DaemonApiRequest::ObjectBrowser(object_browser_request(
+                "ena",
+            )))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("authenticated daemon actor is required")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_daemon_object_browser_when_actor_lacks_writer_group() {
+        let root = temp_root("browser-auth-denied");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("guest")
+            .with_groups(["users"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(object_browser_request("ena")),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("membership in group mnemosyne is required")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_browser_returns_authorized_live_metadata_with_readiness() {
+        let root = temp_root("browser-auth-allowed");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        insert_browser_object(
+            &live_sqlite,
+            "ena/raw/redownload.fastq.gz",
+            "RedownloadRequired",
+            false,
+        );
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("stephen")
+            .with_groups(["mnemosyne"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(ObjectBrowserRequest {
+                    prefix: Some("raw".to_string()),
+                    include_placement: true,
+                    ..object_browser_request("ena")
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        let DaemonApiResponse::ObjectBrowser(response) = response else {
+            panic!("expected object browser response");
+        };
+        assert_eq!(response.files.len(), 2);
+        assert_eq!(response.files[0].name, "redownload.fastq.gz");
+        assert_eq!(
+            response.files[0].readiness,
+            ObjectBrowserReadinessState::RedownloadRequired
+        );
+        assert_eq!(response.files[1].name, "sample.fastq.gz");
+        assert_eq!(
+            response.files[1].readiness,
+            ObjectBrowserReadinessState::Available
+        );
+        assert_eq!(response.files[1].copy_count, 1);
+        assert_eq!(
+            response.files[1].placements[0].location,
+            ObjectBrowserPlacementLocation::HddSettled
+        );
+        assert_eq!(
+            response.files[1].placements[0].state,
+            ObjectBrowserPlacementState::Verified
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn validates_request_before_dispatch() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -1812,6 +2072,93 @@ mod tests {
         .expect("store registry written");
         fs::write(&subobject_registry, "[]").expect("subobject registry written");
         (store_registry, subobject_registry)
+    }
+
+    fn object_browser_request(store_id: &str) -> ObjectBrowserRequest {
+        ObjectBrowserRequest {
+            endpoint: StoreId::new(store_id).expect("store id"),
+            prefix: None,
+            search: None,
+            sort: ObjectBrowserSort::NameAsc,
+            page: ObjectBrowserPageRequest::default(),
+            include_placement: false,
+        }
+    }
+
+    fn create_live_sqlite(root: &PathBuf, store_id: &str) -> PathBuf {
+        fs::create_dir_all(root).expect("temp metadata dir");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        connection
+            .execute(
+                "INSERT INTO pools (pool_id, state, created_at_utc, updated_at_utc)
+                 VALUES (?1, 'Clean', '2026-07-09T00:00:00Z', '2026-07-09T00:00:00Z')",
+                [PoolId::new("pool-a").expect("pool id").as_str()],
+            )
+            .expect("pool inserts");
+        connection
+            .execute(
+                "INSERT INTO disks (
+                    disk_id, pool_id, role, state, size_bytes, serial_hint, model_hint,
+                    enclosure_topology_path, created_at_utc, updated_at_utc
+                 )
+                 VALUES (
+                    'qnap-1057', 'pool-a', 'hdd', 'Healthy', 4000000000000,
+                    NULL, NULL, NULL, '2026-07-09T00:00:00Z', '2026-07-09T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("disk inserts");
+        connection
+            .execute(
+                "INSERT INTO stores (
+                    store_id, pool_id, class, policy_json, created_at_utc, updated_at_utc
+                 )
+                 VALUES (?1, 'pool-a', 'reproducible_cache', '{}',
+                    '2026-07-09T00:00:00Z', '2026-07-09T00:00:00Z')",
+                [store_id],
+            )
+            .expect("store inserts");
+        live_sqlite_path
+    }
+
+    fn insert_browser_object(
+        live_sqlite_path: &PathBuf,
+        object_id: &str,
+        state: &str,
+        verified_placement: bool,
+    ) {
+        let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
+        connection
+            .execute(
+                "INSERT INTO objects (
+                    object_id, store_id, object_type, state, size_bytes, content_hash,
+                    created_at_utc, updated_at_utc
+                 )
+                 VALUES (?1, 'ena', 'fastq', ?2, 128, 'hash-a',
+                    '2026-07-09T00:00:00Z', '2026-07-09T00:01:00Z')",
+                params![object_id, state],
+            )
+            .expect("object inserts");
+        connection
+            .execute(
+                "INSERT INTO placements (
+                    placement_id, object_id, disk_id, relative_path, content_hash,
+                    verified_at_utc, created_at_utc
+                 )
+                 VALUES (?1, ?2, 'qnap-1057', ?3, 'hash-a', ?4,
+                    '2026-07-09T00:02:00Z')",
+                params![
+                    format!("placement-{object_id}"),
+                    object_id,
+                    object_id,
+                    verified_placement.then_some("2026-07-09T00:03:00Z")
+                ],
+            )
+            .expect("placement inserts");
     }
 
     #[derive(Default)]

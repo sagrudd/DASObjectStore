@@ -6,12 +6,17 @@ use crate::api::{
     ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
     ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
 };
-use dasobjectstore_core::ids::ObjectId;
+use dasobjectstore_core::ids::{InvalidId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::ObjectState;
 use dasobjectstore_core::object_type::ObjectType;
+use dasobjectstore_metadata::{
+    read_object_inspect, read_store_contents, ObjectInspectError, ObjectPlacementSummary,
+    StoreContentsReadError, StoreContentsRequest,
+};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
+use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectBrowserMetadataEntry {
@@ -23,6 +28,55 @@ pub struct ObjectBrowserMetadataEntry {
     pub checksum: Option<ObjectBrowserChecksum>,
     pub lifecycle_state: ObjectState,
     pub placements: Vec<ObjectBrowserPlacement>,
+}
+
+pub fn read_object_browser_metadata(
+    live_sqlite_path: impl AsRef<Path>,
+    store_id: StoreId,
+) -> Result<Vec<ObjectBrowserMetadataEntry>, ObjectBrowserMetadataReadError> {
+    let live_sqlite_path = live_sqlite_path.as_ref();
+    let snapshot = read_store_contents(&StoreContentsRequest::new(
+        live_sqlite_path,
+        store_id.clone(),
+    ))?;
+    let mut entries = Vec::with_capacity(snapshot.objects.len());
+
+    for object in snapshot.objects {
+        let object_id = ObjectId::new(object.object_id.clone()).map_err(|source| {
+            ObjectBrowserMetadataReadError::InvalidObjectId {
+                value: object.object_id.clone(),
+                source,
+            }
+        })?;
+        let inspect = read_object_inspect(live_sqlite_path, &object_id)?;
+        let lifecycle_state = parse_object_state(&inspect.state)?;
+        let size_bytes = inspect.size_bytes.unwrap_or(object.size_bytes);
+        let checksum = inspect
+            .content_hash
+            .clone()
+            .map(|value| ObjectBrowserChecksum {
+                algorithm: "sha256".to_string(),
+                value,
+                verified_at_utc: None,
+            });
+
+        entries.push(ObjectBrowserMetadataEntry {
+            object_id,
+            path: object.path,
+            object_type: inspect.object_type,
+            size_bytes,
+            modified_at_utc: Some(inspect.updated_at_utc),
+            checksum,
+            lifecycle_state,
+            placements: inspect
+                .placements
+                .iter()
+                .map(|placement| placement_node(placement, size_bytes))
+                .collect(),
+        });
+    }
+
+    Ok(entries)
 }
 
 pub fn query_object_browser_metadata(
@@ -94,6 +148,49 @@ pub fn query_object_browser_metadata(
     })
 }
 
+#[derive(Debug)]
+pub enum ObjectBrowserMetadataReadError {
+    StoreContents(StoreContentsReadError),
+    ObjectInspect(ObjectInspectError),
+    InvalidObjectId { value: String, source: InvalidId },
+    UnsupportedObjectState { value: String },
+}
+
+impl Display for ObjectBrowserMetadataReadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StoreContents(err) => Display::fmt(err, formatter),
+            Self::ObjectInspect(err) => Display::fmt(err, formatter),
+            Self::InvalidObjectId { value, source } => {
+                write!(
+                    formatter,
+                    "invalid object browser object_id `{value}`: {source}"
+                )
+            }
+            Self::UnsupportedObjectState { value } => {
+                write!(
+                    formatter,
+                    "unsupported object browser lifecycle state `{value}`"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ObjectBrowserMetadataReadError {}
+
+impl From<StoreContentsReadError> for ObjectBrowserMetadataReadError {
+    fn from(err: StoreContentsReadError) -> Self {
+        Self::StoreContents(err)
+    }
+}
+
+impl From<ObjectInspectError> for ObjectBrowserMetadataReadError {
+    fn from(err: ObjectInspectError) -> Self {
+        Self::ObjectInspect(err)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectBrowserQueryError {
     InvalidRequest(DaemonRequestValidationError),
@@ -119,6 +216,45 @@ impl std::error::Error for ObjectBrowserQueryError {}
 impl From<DaemonRequestValidationError> for ObjectBrowserQueryError {
     fn from(err: DaemonRequestValidationError) -> Self {
         Self::InvalidRequest(err)
+    }
+}
+
+fn placement_node(placement: &ObjectPlacementSummary, size_bytes: u64) -> ObjectBrowserPlacement {
+    ObjectBrowserPlacement {
+        disk_id: Some(placement.disk_id.clone()),
+        disk_label: None,
+        location: ObjectBrowserPlacementLocation::HddSettled,
+        state: if placement.verified_at_utc.is_some() {
+            ObjectBrowserPlacementState::Verified
+        } else {
+            ObjectBrowserPlacementState::Pending
+        },
+        size_bytes,
+        checksum: placement
+            .content_hash
+            .clone()
+            .map(|value| ObjectBrowserChecksum {
+                algorithm: "sha256".to_string(),
+                value,
+                verified_at_utc: placement.verified_at_utc.clone(),
+            }),
+        verified_at_utc: placement.verified_at_utc.clone(),
+    }
+}
+
+fn parse_object_state(value: &str) -> Result<ObjectState, ObjectBrowserMetadataReadError> {
+    match value.trim() {
+        "ReceivedOnSsd" | "received_on_ssd" => Ok(ObjectState::ReceivedOnSsd),
+        "HashVerified" | "hash_verified" => Ok(ObjectState::HashVerified),
+        "PlacementPlanned" | "placement_planned" => Ok(ObjectState::PlacementPlanned),
+        "CopyingToHdd" | "copying_to_hdd" => Ok(ObjectState::CopyingToHdd),
+        "HddCopyVerified" | "hdd_copy_verified" => Ok(ObjectState::HddCopyVerified),
+        "Protected" | "protected" => Ok(ObjectState::Protected),
+        "SsdEvictionEligible" | "ssd_eviction_eligible" => Ok(ObjectState::SsdEvictionEligible),
+        "RedownloadRequired" | "redownload_required" => Ok(ObjectState::RedownloadRequired),
+        other => Err(ObjectBrowserMetadataReadError::UnsupportedObjectState {
+            value: other.to_string(),
+        }),
     }
 }
 

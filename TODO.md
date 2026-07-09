@@ -679,9 +679,12 @@ planning are tracked under Milestones 21 and 22.
   pagination, bounded response sizes, and large-tree regression fixtures.
 - [x] Add the standalone authenticated API route for listing ObjectStore folders
   and files through the daemon ObjectBrowser client boundary.
-- [ ] Enforce public/read/write group permissions and object lifecycle
-  readiness in the daemon-backed ObjectBrowser API before exposing metadata or
-  download actions.
+- [x] Enforce daemon-authenticated writer-group permissions and object
+  lifecycle readiness in the daemon-backed ObjectBrowser API before exposing
+  metadata through the daemon request handler.
+- [ ] Add first-class public/read group fields to store policy/registry data
+  and apply them to ObjectBrowser metadata and download authorization before
+  exposing download actions.
 - [ ] Implement individual file download routes that stream from the selected
   settled copy, report content length where known, use safe content-disposition
   headers, and fail clearly for missing, unsettled, degraded, or unauthorized
