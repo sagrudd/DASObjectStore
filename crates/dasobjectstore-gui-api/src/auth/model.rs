@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_REGISTRATION_TTL_SECONDS: i64 = 24 * 60 * 60;
-pub const DEFAULT_SESSION_TTL_SECONDS: i64 = 60 * 60;
-pub const MAX_SESSION_TTL_SECONDS: i64 = 12 * 60 * 60;
-
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AuthRegistry {
     pub users: Vec<AuthenticatedUser>,

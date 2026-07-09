@@ -3,6 +3,7 @@ use std::io::Read;
 use std::process::ExitCode;
 
 const HELPER_BYPASS_ENV: &str = "DASOBJECTSTORE_LOCAL_AUTH_HELPER_BYPASS";
+const PROSOPIKON_HELPER_BYPASS_ENV: &str = "PROSOPIKON_LOCAL_AUTH_HELPER_BYPASS";
 
 fn main() -> ExitCode {
     match run() {
@@ -39,6 +40,7 @@ fn run() -> Result<(), LocalAuthHelperError> {
     let mut password = String::new();
     std::io::stdin().read_to_string(&mut password)?;
     std::env::set_var(HELPER_BYPASS_ENV, "1");
+    std::env::set_var(PROSOPIKON_HELPER_BYPASS_ENV, "1");
     PamLocalPasswordAuthenticator::new(service_name)
         .authenticate(&username, &password)
         .map_err(|err| match err {

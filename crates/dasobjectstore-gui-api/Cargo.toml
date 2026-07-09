@@ -9,7 +9,6 @@ repository.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
-argon2.workspace = true
 axum.workspace = true
 bytes.workspace = true
 dasobjectstore-core.workspace = true
@@ -18,20 +17,15 @@ dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true
 flate2.workspace = true
 libc.workspace = true
-prosopikon-core.workspace = true
-rand_core.workspace = true
+prosopikon-core = { workspace = true, features = ["auth", "pam"] }
 rcgen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 tar.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-pam-client.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true

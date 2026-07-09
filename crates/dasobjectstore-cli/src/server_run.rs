@@ -43,7 +43,7 @@ async fn start_server(
 ) -> Result<(), ServerRunError> {
     let socket_addr = config.socket_addr()?;
     ensure_standalone_tls_assets(&config)?;
-    let auth_store = LocalAuthStore::new(config.product_root.clone());
+    let auth_store = LocalAuthStore::default_standalone();
     let revoked_sessions = auth_store.revoke_all_sessions()?;
     let tls =
         RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
@@ -60,7 +60,7 @@ async fn start_server(
         )?;
     }
     let web_root = config.product_root.join("web");
-    let auth_root = config.product_root.clone();
+    let auth_root = auth_store.root().to_path_buf();
     axum_server::bind_rustls(socket_addr, tls)
         .serve(standalone_router(web_root, config.authentication, auth_root).into_make_service())
         .await?;

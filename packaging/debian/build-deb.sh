@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
+prosopikon_pam_marker="mnemosyne.prosopikon.native.pam"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
 version="${version:-0.4.2}"
@@ -89,6 +90,7 @@ Architecture: $arch
 Maintainer: DASObjectStore contributors
 Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx
+X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics

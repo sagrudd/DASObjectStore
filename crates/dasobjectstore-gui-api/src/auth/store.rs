@@ -1,64 +1,55 @@
 use super::model::{
     AuthRegistry, AuthTokenResetReport, AuthenticatedUser, LoginResponse, LogoutResponse,
     RegisterResponse, RegistrationTokenRecord, SessionCheckResponse, SessionTokenRecord,
-    UserSummary, DEFAULT_REGISTRATION_TTL_SECONDS, DEFAULT_SESSION_TTL_SECONDS,
-    MAX_SESSION_TTL_SECONDS,
+    UserSummary,
 };
-use super::token::{hash_password, new_token, token_hash, unix_now_seconds, verify_password};
-use dasobjectstore_core::DEFAULT_PRODUCT_ROOT;
+use prosopikon_core::{
+    AuthError as ProsopikonAuthError, AuthRegistry as ProsopikonAuthRegistry,
+    AuthenticatedUser as ProsopikonAuthenticatedUser, LoginResponse as ProsopikonLoginResponse,
+    LogoutResponse as ProsopikonLogoutResponse, ProsopikonAuthStore,
+    RegisterResponse as ProsopikonRegisterResponse,
+    RegistrationTokenRecord as ProsopikonRegistrationTokenRecord,
+    SessionCheckResponse as ProsopikonSessionCheckResponse,
+    SessionTokenRecord as ProsopikonSessionTokenRecord, UserSummary as ProsopikonUserSummary,
+};
 use std::fmt::{self, Display};
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct LocalAuthStore {
-    root: PathBuf,
+    inner: ProsopikonAuthStore,
 }
 
 impl LocalAuthStore {
     pub fn default_standalone() -> Self {
-        Self::new(DEFAULT_PRODUCT_ROOT)
+        Self {
+            inner: ProsopikonAuthStore::default_system(),
+        }
     }
 
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            inner: ProsopikonAuthStore::new(root),
+        }
     }
 
     pub fn root(&self) -> &Path {
-        &self.root
+        self.inner.root()
     }
 
     pub fn registry_path(&self) -> PathBuf {
-        self.root.join("users.json")
+        self.inner.registry_path()
     }
 
     pub fn create_user(
         &self,
         username: impl Into<String>,
     ) -> Result<UserSummary, LocalAuthStoreError> {
-        let username = normalize_username(username.into());
-        reject_blank_username(&username)?;
-        let mut registry = self.load_registry()?;
-        if registry.users.iter().any(|user| user.username == username) {
-            return Err(LocalAuthStoreError::UserAlreadyExists { username });
-        }
-
-        let now = unix_now_seconds();
-        let user = AuthenticatedUser {
-            username,
-            created_at_unix_seconds: now,
-            password_hash: None,
-            registered_at_unix_seconds: None,
-            registration_tokens: Vec::new(),
-            sessions: Vec::new(),
-        };
-        let summary = user_summary(&user, now);
-        registry.users.push(user);
-        self.save_registry(&registry)?;
-        Ok(summary)
+        self.inner
+            .create_user(username)
+            .map(user_summary_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn issue_registration_token(
@@ -66,21 +57,9 @@ impl LocalAuthStore {
         username: &str,
         ttl_seconds: Option<i64>,
     ) -> Result<String, LocalAuthStoreError> {
-        let ttl_seconds = ttl_seconds
-            .filter(|seconds| *seconds > 0)
-            .unwrap_or(DEFAULT_REGISTRATION_TTL_SECONDS);
-        let mut registry = self.load_registry()?;
-        let user = find_user_mut(&mut registry, username)?;
-        let token = new_token();
-        let now = unix_now_seconds();
-        user.registration_tokens.push(RegistrationTokenRecord {
-            token_hash: token_hash(&token),
-            issued_at_unix_seconds: now,
-            expires_at_unix_seconds: now + ttl_seconds,
-            used_at_unix_seconds: None,
-        });
-        self.save_registry(&registry)?;
-        Ok(token)
+        self.inner
+            .issue_registration_token_seconds(username, ttl_seconds)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn register_with_token(
@@ -89,38 +68,10 @@ impl LocalAuthStore {
         token: &str,
         password: &str,
     ) -> Result<RegisterResponse, LocalAuthStoreError> {
-        let mut registry = self.load_registry()?;
-        let user = find_user_mut(&mut registry, username)?;
-        if user.password_hash.is_some() {
-            return Err(LocalAuthStoreError::UserAlreadyRegistered {
-                username: user.username.clone(),
-            });
-        }
-
-        let now = unix_now_seconds();
-        let token_digest = token_hash(token);
-        let registration_token = user
-            .registration_tokens
-            .iter_mut()
-            .find(|entry| entry.token_hash == token_digest)
-            .ok_or(LocalAuthStoreError::InvalidRegistrationToken)?;
-        if registration_token.used_at_unix_seconds.is_some() {
-            return Err(LocalAuthStoreError::UsedRegistrationToken);
-        }
-        if registration_token.expires_at_unix_seconds < now {
-            return Err(LocalAuthStoreError::ExpiredRegistrationToken);
-        }
-
-        registration_token.used_at_unix_seconds = Some(now);
-        user.password_hash = Some(hash_password(password)?);
-        user.registered_at_unix_seconds = Some(now);
-        let (session_token, expires_at_unix_seconds) = push_session(user, None, now);
-        self.save_registry(&registry)?;
-        Ok(RegisterResponse {
-            username: normalize_username(username),
-            session_token,
-            expires_at_unix_seconds,
-        })
+        self.inner
+            .register_with_token(username, token, password)
+            .map(register_response_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn login(
@@ -137,23 +88,10 @@ impl LocalAuthStore {
         password: &str,
         ttl_seconds: Option<i64>,
     ) -> Result<LoginResponse, LocalAuthStoreError> {
-        let mut registry = self.load_registry()?;
-        let user = find_user_mut(&mut registry, username)?;
-        let Some(password_hash) = &user.password_hash else {
-            return Err(LocalAuthStoreError::UserNotRegistered {
-                username: normalize_username(username),
-            });
-        };
-        verify_password(password_hash, password)?;
-
-        let now = unix_now_seconds();
-        let (session_token, expires_at_unix_seconds) = push_session(user, ttl_seconds, now);
-        self.save_registry(&registry)?;
-        Ok(LoginResponse {
-            username: normalize_username(username),
-            session_token,
-            expires_at_unix_seconds,
-        })
+        self.inner
+            .login_with_session_ttl_seconds(username, password, ttl_seconds)
+            .map(login_response_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn create_session_for_authenticated_local_user(
@@ -161,38 +99,10 @@ impl LocalAuthStore {
         username: &str,
         ttl_seconds: Option<i64>,
     ) -> Result<LoginResponse, LocalAuthStoreError> {
-        let username = normalize_username(username);
-        reject_blank_username(&username)?;
-        let mut registry = self.load_registry()?;
-        let now = unix_now_seconds();
-        let user_index = if let Some(index) = registry
-            .users
-            .iter()
-            .position(|user| user.username == username)
-        {
-            index
-        } else {
-            registry.users.push(AuthenticatedUser {
-                username: username.clone(),
-                created_at_unix_seconds: now,
-                password_hash: None,
-                registered_at_unix_seconds: None,
-                registration_tokens: Vec::new(),
-                sessions: Vec::new(),
-            });
-            registry.users.len() - 1
-        };
-        let user = registry
-            .users
-            .get_mut(user_index)
-            .expect("session user index was just resolved");
-        let (session_token, expires_at_unix_seconds) = push_session(user, ttl_seconds, now);
-        self.save_registry(&registry)?;
-        Ok(LoginResponse {
-            username,
-            session_token,
-            expires_at_unix_seconds,
-        })
+        self.inner
+            .create_session_for_authenticated_local_user(username, ttl_seconds)
+            .map(login_response_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn verify_session(
@@ -200,26 +110,10 @@ impl LocalAuthStore {
         username: &str,
         session_token: &str,
     ) -> Result<SessionCheckResponse, LocalAuthStoreError> {
-        let registry = self.load_registry()?;
-        let user = find_user(&registry, username)?;
-        let digest = token_hash(session_token);
-        let session = user
-            .sessions
-            .iter()
-            .find(|entry| entry.token_hash == digest)
-            .ok_or(LocalAuthStoreError::InvalidSessionToken)?;
-        if session.revoked_at_unix_seconds.is_some() {
-            return Err(LocalAuthStoreError::InvalidSessionToken);
-        }
-        if session.expires_at_unix_seconds < unix_now_seconds() {
-            return Err(LocalAuthStoreError::ExpiredSessionToken);
-        }
-
-        Ok(SessionCheckResponse {
-            username: normalize_username(username),
-            valid: true,
-            expires_at_unix_seconds: session.expires_at_unix_seconds,
-        })
+        self.inner
+            .verify_session(username, session_token)
+            .map(session_check_response_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn logout(
@@ -227,101 +121,65 @@ impl LocalAuthStore {
         username: &str,
         session_token: &str,
     ) -> Result<LogoutResponse, LocalAuthStoreError> {
-        let mut registry = self.load_registry()?;
-        let user = find_user_mut(&mut registry, username)?;
-        let digest = token_hash(session_token);
-        let session = user
-            .sessions
-            .iter_mut()
-            .find(|entry| entry.token_hash == digest)
-            .ok_or(LocalAuthStoreError::InvalidSessionToken)?;
-        session.revoked_at_unix_seconds = Some(unix_now_seconds());
-        self.save_registry(&registry)?;
-        Ok(LogoutResponse {
-            username: normalize_username(username),
-            disconnected: true,
-        })
+        self.inner
+            .logout(username, session_token)
+            .map(logout_response_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn revoke_all_sessions(&self) -> Result<usize, LocalAuthStoreError> {
-        let mut registry = self.load_registry()?;
-        let now = unix_now_seconds();
-        let mut revoked = 0;
-        for user in &mut registry.users {
-            for session in &mut user.sessions {
-                if session.revoked_at_unix_seconds.is_none() {
-                    session.revoked_at_unix_seconds = Some(now);
-                    revoked += 1;
-                }
-            }
-        }
-        if revoked > 0 {
-            self.save_registry(&registry)?;
-        }
-        Ok(revoked)
+        self.inner
+            .revoke_all_sessions()
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn reset_all_tokens(&self) -> Result<AuthTokenResetReport, LocalAuthStoreError> {
-        let mut registry = self.load_registry()?;
-        let now = unix_now_seconds();
-        let mut revoked_sessions = 0;
-        let mut revoked_registration_tokens = 0;
-        for user in &mut registry.users {
-            for session in &mut user.sessions {
-                if session.revoked_at_unix_seconds.is_none() {
-                    session.revoked_at_unix_seconds = Some(now);
-                    revoked_sessions += 1;
-                }
-            }
-            for token in &mut user.registration_tokens {
-                if token.used_at_unix_seconds.is_none() {
-                    token.used_at_unix_seconds = Some(now);
-                    revoked_registration_tokens += 1;
-                }
-            }
-        }
-        if revoked_sessions > 0 || revoked_registration_tokens > 0 {
-            self.save_registry(&registry)?;
-        }
-        Ok(AuthTokenResetReport {
-            revoked_sessions,
-            revoked_registration_tokens,
-        })
+        self.inner
+            .reset_all_tokens()
+            .map(|report| AuthTokenResetReport {
+                revoked_sessions: report.revoked_sessions,
+                revoked_registration_tokens: report.revoked_registration_tokens,
+            })
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn list_users(&self) -> Result<Vec<UserSummary>, LocalAuthStoreError> {
-        let registry = self.load_registry()?;
-        let now = unix_now_seconds();
-        Ok(registry
-            .users
-            .iter()
-            .map(|user| user_summary(user, now))
-            .collect())
+        self.inner
+            .list_users()
+            .map(|users| {
+                users
+                    .into_iter()
+                    .map(user_summary_from_prosopikon)
+                    .collect()
+            })
+            .map_err(LocalAuthStoreError::from)
     }
 
     pub fn load_registry(&self) -> Result<AuthRegistry, LocalAuthStoreError> {
-        let path = self.registry_path();
-        if !path.exists() {
-            return Ok(AuthRegistry::default());
-        }
-        let Some(data) = read_registry_with_empty_retry(&path)? else {
-            return Ok(AuthRegistry::default());
-        };
-        serde_json::from_str(&data).map_err(LocalAuthStoreError::Json)
+        self.inner
+            .load_registry()
+            .map(registry_from_prosopikon)
+            .map_err(LocalAuthStoreError::from)
     }
 
-    fn save_registry(&self, registry: &AuthRegistry) -> Result<(), LocalAuthStoreError> {
-        fs::create_dir_all(&self.root).map_err(|source| LocalAuthStoreError::Io {
-            path: self.root.clone(),
-            source,
-        })?;
-        let data = serde_json::to_string_pretty(registry).map_err(LocalAuthStoreError::Json)?;
-        fs::write(self.registry_path(), format!("{data}\n")).map_err(|source| {
-            LocalAuthStoreError::Io {
-                path: self.registry_path(),
-                source,
-            }
-        })
+    #[cfg(test)]
+    pub fn expire_sessions_for_test(&self, username: &str) -> Result<(), LocalAuthStoreError> {
+        let username = normalize_username(username);
+        let mut registry = self
+            .inner
+            .load_registry()
+            .map_err(LocalAuthStoreError::from)?;
+        let user = registry
+            .users
+            .iter_mut()
+            .find(|user| user.username == username)
+            .ok_or(LocalAuthStoreError::UserNotFound { username })?;
+        for session in &mut user.sessions {
+            session.expires_at_utc = session.issued_at_utc;
+        }
+        self.inner
+            .save_registry(&registry)
+            .map_err(LocalAuthStoreError::from)
     }
 }
 
@@ -329,6 +187,7 @@ impl LocalAuthStore {
 pub enum LocalAuthStoreError {
     Io { path: PathBuf, source: io::Error },
     Json(serde_json::Error),
+    ProsopikonStore(String),
     UserNameRequired,
     UserAlreadyExists { username: String },
     UserAlreadyRegistered { username: String },
@@ -355,6 +214,7 @@ impl Display for LocalAuthStoreError {
                 )
             }
             Self::Json(err) => write!(formatter, "local auth JSON failed: {err}"),
+            Self::ProsopikonStore(err) => write!(formatter, "prosopikon auth store failed: {err}"),
             Self::UserNameRequired => write!(formatter, "username is required"),
             Self::UserAlreadyExists { username } => {
                 write!(formatter, "local auth user already exists: {username}")
@@ -387,86 +247,132 @@ impl Display for LocalAuthStoreError {
 
 impl std::error::Error for LocalAuthStoreError {}
 
-fn read_registry_with_empty_retry(path: &Path) -> Result<Option<String>, LocalAuthStoreError> {
-    const ATTEMPTS: usize = 5;
-    for attempt in 0..ATTEMPTS {
-        let data = fs::read_to_string(path).map_err(|source| LocalAuthStoreError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        if !data.trim().is_empty() {
-            return Ok(Some(data));
-        }
-        if attempt + 1 < ATTEMPTS {
-            thread::sleep(Duration::from_millis(20));
+impl From<ProsopikonAuthError> for LocalAuthStoreError {
+    fn from(err: ProsopikonAuthError) -> Self {
+        match err {
+            ProsopikonAuthError::Io(message) | ProsopikonAuthError::Json(message) => {
+                Self::ProsopikonStore(message)
+            }
+            ProsopikonAuthError::UserNameRequired => Self::UserNameRequired,
+            ProsopikonAuthError::UserAlreadyExists { username } => {
+                Self::UserAlreadyExists { username }
+            }
+            ProsopikonAuthError::UserNotFound { username } => Self::UserNotFound { username },
+            ProsopikonAuthError::UserAlreadyRegistered { username } => {
+                Self::UserAlreadyRegistered { username }
+            }
+            ProsopikonAuthError::UserNotRegistered { username } => {
+                Self::UserNotRegistered { username }
+            }
+            ProsopikonAuthError::InvalidRegistrationToken => Self::InvalidRegistrationToken,
+            ProsopikonAuthError::ExpiredRegistrationToken => Self::ExpiredRegistrationToken,
+            ProsopikonAuthError::UsedRegistrationToken => Self::UsedRegistrationToken,
+            ProsopikonAuthError::InvalidPassword => Self::InvalidPassword,
+            ProsopikonAuthError::InvalidSessionToken => Self::InvalidSessionToken,
+            ProsopikonAuthError::ExpiredSessionToken => Self::ExpiredSessionToken,
+            ProsopikonAuthError::PasswordRequired => Self::PasswordRequired,
+            ProsopikonAuthError::PasswordHash => Self::PasswordHash,
         }
     }
-    Ok(None)
 }
 
-fn find_user_mut<'a>(
-    registry: &'a mut AuthRegistry,
-    username: &str,
-) -> Result<&'a mut AuthenticatedUser, LocalAuthStoreError> {
-    let username = normalize_username(username);
-    registry
-        .users
-        .iter_mut()
-        .find(|user| user.username == username)
-        .ok_or(LocalAuthStoreError::UserNotFound { username })
+fn registry_from_prosopikon(registry: ProsopikonAuthRegistry) -> AuthRegistry {
+    AuthRegistry {
+        users: registry
+            .users
+            .into_iter()
+            .map(authenticated_user_from_prosopikon)
+            .collect(),
+    }
 }
 
-fn find_user<'a>(
-    registry: &'a AuthRegistry,
-    username: &str,
-) -> Result<&'a AuthenticatedUser, LocalAuthStoreError> {
-    let username = normalize_username(username);
-    registry
-        .users
-        .iter()
-        .find(|user| user.username == username)
-        .ok_or(LocalAuthStoreError::UserNotFound { username })
+fn authenticated_user_from_prosopikon(user: ProsopikonAuthenticatedUser) -> AuthenticatedUser {
+    AuthenticatedUser {
+        username: user.username,
+        created_at_unix_seconds: user.created_at_utc.timestamp(),
+        password_hash: user.password_hash,
+        registered_at_unix_seconds: user
+            .registered_at_utc
+            .map(|timestamp| timestamp.timestamp()),
+        registration_tokens: user
+            .registration_tokens
+            .into_iter()
+            .map(registration_token_from_prosopikon)
+            .collect(),
+        sessions: user
+            .sessions
+            .into_iter()
+            .map(session_token_from_prosopikon)
+            .collect(),
+    }
 }
 
+fn registration_token_from_prosopikon(
+    token: ProsopikonRegistrationTokenRecord,
+) -> RegistrationTokenRecord {
+    RegistrationTokenRecord {
+        token_hash: token.token_hash,
+        issued_at_unix_seconds: token.issued_at_utc.timestamp(),
+        expires_at_unix_seconds: token.expires_at_utc.timestamp(),
+        used_at_unix_seconds: token.used_at_utc.map(|timestamp| timestamp.timestamp()),
+    }
+}
+
+fn session_token_from_prosopikon(token: ProsopikonSessionTokenRecord) -> SessionTokenRecord {
+    SessionTokenRecord {
+        token_hash: token.token_hash,
+        issued_at_unix_seconds: token.issued_at_utc.timestamp(),
+        expires_at_unix_seconds: token.expires_at_utc.timestamp(),
+        revoked_at_unix_seconds: token.revoked_at_utc.map(|timestamp| timestamp.timestamp()),
+    }
+}
+
+fn user_summary_from_prosopikon(user: ProsopikonUserSummary) -> UserSummary {
+    UserSummary {
+        username: user.username,
+        registered: user.registered,
+        created_at_unix_seconds: user.created_at_utc.timestamp(),
+        registered_at_unix_seconds: user
+            .registered_at_utc
+            .map(|timestamp| timestamp.timestamp()),
+        active_session_count: user.active_session_count,
+    }
+}
+
+fn register_response_from_prosopikon(response: ProsopikonRegisterResponse) -> RegisterResponse {
+    RegisterResponse {
+        username: response.username,
+        session_token: response.session_token,
+        expires_at_unix_seconds: response.expires_at_utc.timestamp(),
+    }
+}
+
+fn login_response_from_prosopikon(response: ProsopikonLoginResponse) -> LoginResponse {
+    LoginResponse {
+        username: response.username,
+        session_token: response.session_token,
+        expires_at_unix_seconds: response.expires_at_utc.timestamp(),
+    }
+}
+
+fn session_check_response_from_prosopikon(
+    response: ProsopikonSessionCheckResponse,
+) -> SessionCheckResponse {
+    SessionCheckResponse {
+        username: response.username,
+        valid: response.valid,
+        expires_at_unix_seconds: response.expires_at_utc.timestamp(),
+    }
+}
+
+fn logout_response_from_prosopikon(response: ProsopikonLogoutResponse) -> LogoutResponse {
+    LogoutResponse {
+        username: response.username,
+        disconnected: response.disconnected,
+    }
+}
+
+#[cfg(test)]
 fn normalize_username(username: impl AsRef<str>) -> String {
     username.as_ref().trim().to_string()
-}
-
-fn reject_blank_username(username: &str) -> Result<(), LocalAuthStoreError> {
-    if username.is_empty() {
-        return Err(LocalAuthStoreError::UserNameRequired);
-    }
-    Ok(())
-}
-
-fn user_summary(user: &AuthenticatedUser, now: i64) -> UserSummary {
-    UserSummary {
-        username: user.username.clone(),
-        registered: user.password_hash.is_some(),
-        created_at_unix_seconds: user.created_at_unix_seconds,
-        registered_at_unix_seconds: user.registered_at_unix_seconds,
-        active_session_count: user
-            .sessions
-            .iter()
-            .filter(|session| {
-                session.revoked_at_unix_seconds.is_none() && session.expires_at_unix_seconds > now
-            })
-            .count(),
-    }
-}
-
-fn push_session(user: &mut AuthenticatedUser, ttl_seconds: Option<i64>, now: i64) -> (String, i64) {
-    let session_token = new_token();
-    let ttl_seconds = ttl_seconds
-        .filter(|seconds| *seconds > 0)
-        .unwrap_or(DEFAULT_SESSION_TTL_SECONDS)
-        .min(MAX_SESSION_TTL_SECONDS);
-    let expires_at_unix_seconds = now + ttl_seconds;
-    user.sessions.push(SessionTokenRecord {
-        token_hash: token_hash(&session_token),
-        issued_at_unix_seconds: now,
-        expires_at_unix_seconds,
-        revoked_at_unix_seconds: None,
-    });
-    (session_token, expires_at_unix_seconds)
 }

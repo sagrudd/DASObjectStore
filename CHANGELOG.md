@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.2 - 2026-07-09
+
+- Delegate standalone DASObjectStore authentication registry, session, token,
+  and local PAM plumbing to Prosopikon while preserving existing DAS route
+  response contracts.
+- Mark DEB/RPM native PAM dependencies with the Prosopikon authentication
+  dependency marker for package infrastructure.
+
 ## 0.60.1 - 2026-07-09
 
 - Add the authenticated Web ``Remote Upload`` workspace with easyconnect

@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package_name="dasobjectstore"
+prosopikon_pam_marker="mnemosyne.prosopikon.native.pam"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
 version="${version:-0.4.2}"
@@ -104,11 +105,13 @@ BuildRequires:  pam-devel
 BuildRequires:  rust
 # WebAssembly packaging also requires Trunk and the wasm32-unknown-unknown Rust
 # target; those are usually installed through rustup/cargo rather than RPM.
+Provides:       prosopikon-native(pam)
 Requires:       acl
 Requires:       ca-certificates
 Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
 Requires:       pam
+# Prosopikon native dependency marker: $prosopikon_pam_marker
 Requires:       systemd
 Requires(post): coreutils
 Requires(post): findutils

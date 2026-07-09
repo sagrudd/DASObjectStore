@@ -128,6 +128,7 @@ fn local_auth_rejection(err: LocalAuthStoreError) -> AuthGuardRejection {
     match err {
         LocalAuthStoreError::Io { .. }
         | LocalAuthStoreError::Json(_)
+        | LocalAuthStoreError::ProsopikonStore(_)
         | LocalAuthStoreError::PasswordHash => rejection(
             StatusCode::INTERNAL_SERVER_ERROR,
             "auth_store_error",

@@ -2113,6 +2113,7 @@ fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteErro
         | LocalAuthStoreError::InvalidPassword => StatusCode::UNAUTHORIZED,
         LocalAuthStoreError::Io { .. }
         | LocalAuthStoreError::Json(_)
+        | LocalAuthStoreError::ProsopikonStore(_)
         | LocalAuthStoreError::PasswordHash => StatusCode::INTERNAL_SERVER_ERROR,
     };
 
@@ -4429,17 +4430,9 @@ mod tests {
     }
 
     fn expire_user_sessions(auth_store: &LocalAuthStore, username: &str) {
-        let mut registry = auth_store.load_registry().expect("registry loads");
-        let user = registry
-            .users
-            .iter_mut()
-            .find(|user| user.username == username)
-            .expect("user exists");
-        for session in &mut user.sessions {
-            session.expires_at_unix_seconds = 0;
-        }
-        let data = serde_json::to_string_pretty(&registry).expect("registry encodes");
-        fs::write(auth_store.registry_path(), format!("{data}\n")).expect("registry writes");
+        auth_store
+            .expire_sessions_for_test(username)
+            .expect("sessions expire");
     }
 
     fn temp_root(label: &str) -> PathBuf {

@@ -33,6 +33,11 @@ pub use auth::{
     PamLocalPasswordAuthenticator, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
     SessionTokenRecord, UserSummary, SUDO_ADMIN_GROUPS,
 };
+#[cfg(target_os = "linux")]
+pub use auth::{
+    DEFAULT_DASOBJECTSTORE_LOCAL_AUTH_HELPER_PATH, DEFAULT_PROSOPIKON_LOCAL_AUTH_HELPER_PATH,
+    PROSOPIKON_LOCAL_AUTH_HELPER_BYPASS_ENV, PROSOPIKON_LOCAL_AUTH_HELPER_ENV,
+};
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
     STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
