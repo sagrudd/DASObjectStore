@@ -662,6 +662,22 @@ mod tests {
     }
 
     #[test]
+    fn rejects_expired_pairing_callback() {
+        let request = concat!(
+            "GET /products/dasobjectstore/remote/easyconnect/callback?",
+            "error=pairing_expired HTTP/1.1\r\n",
+            "Host: 127.0.0.1\r\n\r\n"
+        );
+
+        let err = parse_pairing_callback_request(request).expect_err("expiry rejected");
+
+        assert!(matches!(
+            err,
+            RemoteEasyconnectPairingError::PairingDenied(message) if message == "pairing_expired"
+        ));
+    }
+
+    #[test]
     fn launches_browser_and_waits_for_pairing_callback() {
         let launcher = CallbackLauncher;
 

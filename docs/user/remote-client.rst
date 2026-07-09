@@ -260,6 +260,9 @@ writer grants, derives the backing bucket, and uses the stored temporary
 session credentials for the AWS CLI environment. If a bucket name is passed
 while a paired appliance is configured, the command is rejected and asks for a
 writable ObjectStore name.
+If the paired ObjectStore has no active session, or if the stored session has
+expired, the client rejects the upload before using any stored credentials and
+asks the user to run ``dasobjectstore-remote easyconnect`` again.
 
 Upload a single file to a prefix. The filename is preserved:
 

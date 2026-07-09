@@ -869,9 +869,12 @@ planning are tracked under Milestones 21 and 22.
   continues transfer.
 - [x] Add remote CLI progress rendering for easyconnect uploads using the same
   daemon job/event model as normal CLI ingest and embedded TUI views.
-- [ ] Add tests for easyconnect pairing success, expired pairing, denied login,
-  revoked session, eight-hour expiry, renewal during active upload, and
-  standalone local-user permission checks.
+- [x] Add remote-client tests for easyconnect pairing success, expired pairing,
+  denied login, missing/expired paired upload sessions, and renewal telemetry
+  states.
+- [ ] Add server-side tests for easyconnect revoked session handling,
+  eight-hour expiry and renewal during active upload, and standalone local-user
+  permission checks.
 - [ ] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.

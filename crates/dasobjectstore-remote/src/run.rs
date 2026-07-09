@@ -589,6 +589,7 @@ fn resolve_upload_route(
             "ObjectStore {requested_object_store} is paired but has no active remote upload session; run dasobjectstore-remote easyconnect"
         ))
     })?;
+    reject_expired_session(requested_object_store, session, SystemTime::now())?;
 
     Ok(RemoteUploadRoute {
         object_store: grant.object_store.clone(),
@@ -597,6 +598,95 @@ fn resolve_upload_route(
         credential_source: AwsS3CredentialSource::Environment,
         session_renewal_status: Some(session_renewal_status(session).to_string()),
     })
+}
+
+fn reject_expired_session(
+    requested_object_store: &str,
+    session: &RemoteUploadSession,
+    now: SystemTime,
+) -> Result<(), RemoteRunError> {
+    if remote_upload_session_expired(session, now)? {
+        return Err(RemoteRunError::UploadRouting(format!(
+            "ObjectStore {requested_object_store} has an expired remote upload session; run dasobjectstore-remote easyconnect again"
+        )));
+    }
+    Ok(())
+}
+
+fn remote_upload_session_expired(
+    session: &RemoteUploadSession,
+    now: SystemTime,
+) -> Result<bool, RemoteRunError> {
+    let expires_at = parse_rfc3339_utc_seconds(&session.expires_at).ok_or_else(|| {
+        RemoteRunError::UploadRouting(format!(
+            "remote upload session {} has an invalid expires_at timestamp; run dasobjectstore-remote easyconnect again",
+            session.redacted_session_id()
+        ))
+    })?;
+    let now = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| RemoteRunError::Clock(err.to_string()))?
+        .as_secs() as i64;
+
+    Ok(expires_at <= now)
+}
+
+fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
+    if value.len() != 20 || !value.ends_with('Z') {
+        return None;
+    }
+    let year = value.get(0..4)?.parse::<i64>().ok()?;
+    let month = value.get(5..7)?.parse::<u32>().ok()?;
+    let day = value.get(8..10)?.parse::<u32>().ok()?;
+    let hour = value.get(11..13)?.parse::<u32>().ok()?;
+    let minute = value.get(14..16)?.parse::<u32>().ok()?;
+    let second = value.get(17..19)?.parse::<u32>().ok()?;
+    if value.as_bytes().get(4) != Some(&b'-')
+        || value.as_bytes().get(7) != Some(&b'-')
+        || value.as_bytes().get(10) != Some(&b'T')
+        || value.as_bytes().get(13) != Some(&b':')
+        || value.as_bytes().get(16) != Some(&b':')
+        || !(1..=12).contains(&month)
+        || !(1..=days_in_month(year, month)).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+
+    let days = days_before_year(year) + days_before_month(year, month) + i64::from(day - 1);
+    Some(days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second))
+}
+
+fn days_before_year(year: i64) -> i64 {
+    let years = year - 1970;
+    (years * 365) + leap_days_before_year(year) - leap_days_before_year(1970)
+}
+
+fn leap_days_before_year(year: i64) -> i64 {
+    let previous = year - 1;
+    previous / 4 - previous / 100 + previous / 400
+}
+
+fn days_before_month(year: i64, month: u32) -> i64 {
+    (1..month)
+        .map(|current| i64::from(days_in_month(year, current)))
+        .sum()
+}
+
+fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn session_credentials(session: &RemoteUploadSession) -> RemoteS3Credentials {
@@ -690,6 +780,7 @@ pub enum RemoteRunError {
     Auth(RemoteAuthError),
     S3(RemoteS3Error),
     Daemon(DaemonClientError),
+    Clock(String),
     UploadRouting(String),
 }
 
@@ -704,6 +795,7 @@ impl fmt::Display for RemoteRunError {
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
             Self::Daemon(error) => write!(formatter, "{error}"),
+            Self::Clock(error) => write!(formatter, "{error}"),
             Self::UploadRouting(message) => formatter.write_str(message),
         }
     }
@@ -756,7 +848,8 @@ impl From<RemoteS3Error> for RemoteRunError {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_job_progress_line, plan_upload_with_credentials, resolve_upload_route, run,
+        daemon_job_progress_line, parse_rfc3339_utc_seconds, plan_upload_with_credentials,
+        remote_upload_session_expired, resolve_upload_route, run, session_renewal_status,
         source_inventory, submit_upload_plan_to_daemon, write_daemon_upload_response,
     };
     use crate::auth::RemoteAuthAuthority;
@@ -773,6 +866,7 @@ mod tests {
         InProcessDaemonTransport, RemoteEasyconnectSubmitAwsCliUploadResponse,
     };
     use std::cell::RefCell;
+    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn config_show_json_redacts_paired_session_credentials() {
@@ -901,6 +995,77 @@ mod tests {
             .contains("choose a writable ObjectStore name"));
         std::fs::remove_dir_all(root).expect("cleanup source");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn paired_upload_rejects_missing_session_before_using_credentials() {
+        let mut config = paired_config();
+        config.paired_appliances[0].session = None;
+
+        let err = resolve_upload_route(&config, "zymo_fecal_2025.05")
+            .expect_err("missing session rejected");
+
+        assert!(err.to_string().contains("no active remote upload session"));
+    }
+
+    #[test]
+    fn paired_upload_rejects_expired_session_before_using_credentials() {
+        let mut config = paired_config();
+        let session = config.paired_appliances[0]
+            .session
+            .as_mut()
+            .expect("session");
+        session.expires_at = "2000-01-01T00:00:00Z".to_string();
+
+        let err = resolve_upload_route(&config, "zymo_fecal_2025.05").expect_err("expiry rejected");
+
+        assert!(err.to_string().contains("expired remote upload session"));
+        assert!(!err.to_string().contains("super-secret"));
+        assert!(!err.to_string().contains("temporary-token"));
+    }
+
+    #[test]
+    fn remote_session_expiry_uses_utc_timestamp_contract() {
+        let mut config = paired_config();
+        let session = config.paired_appliances[0]
+            .session
+            .as_mut()
+            .expect("session");
+        session.expires_at = "2026-07-09T19:30:00Z".to_string();
+        let before_expiry = UNIX_EPOCH
+            + Duration::from_secs(parse_rfc3339_utc_seconds("2026-07-09T19:29:59Z").unwrap() as u64);
+        let at_expiry = UNIX_EPOCH
+            + Duration::from_secs(parse_rfc3339_utc_seconds("2026-07-09T19:30:00Z").unwrap() as u64);
+
+        assert!(
+            !remote_upload_session_expired(session, before_expiry).expect("expiry check succeeds")
+        );
+        assert!(remote_upload_session_expired(session, at_expiry).expect("expiry check succeeds"));
+    }
+
+    #[test]
+    fn session_renewal_status_reports_configured_missing_and_not_configured() {
+        let config = paired_config_with_renewal();
+        let session = config.paired_appliances[0]
+            .session
+            .as_ref()
+            .expect("session");
+        assert_eq!(session_renewal_status(session), "renewal_configured");
+
+        let mut missing = paired_config_with_renewal();
+        let session = missing.paired_appliances[0]
+            .session
+            .as_mut()
+            .expect("session");
+        session.renewal.as_mut().expect("renewal").renewal_token = None;
+        assert_eq!(session_renewal_status(session), "renewal_token_missing");
+
+        let config = paired_config();
+        let session = config.paired_appliances[0]
+            .session
+            .as_ref()
+            .expect("session");
+        assert_eq!(session_renewal_status(session), "renewal_not_configured");
     }
 
     #[test]

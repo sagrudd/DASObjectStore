@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Add remote-client easyconnect regression coverage for successful, denied, and
+  expired pairing callbacks, paired upload sessions, renewal metadata states,
+  and local rejection of expired sessions before stored credentials are used.
 - Render remote easyconnect daemon upload job events in
   ``dasobjectstore-remote upload --submit-to-daemon`` with percent, byte/unit
   counters, stage, and daemon message/failure details, while allowing
