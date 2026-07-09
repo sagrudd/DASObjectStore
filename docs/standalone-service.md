@@ -169,6 +169,47 @@ Web report rebuild scratch space lives under
 visible to both `dasobjectstore-server.service` and the Docker daemon even when
 the systemd unit uses `PrivateTmp=true`.
 
+## Telemetry State
+
+Managed appliance telemetry lives under the package state tree:
+
+```text
+/var/lib/dasobjectstore/telemetry
+```
+
+Packages create this directory as `dasobjectstore:dasobjectstore` with mode
+`0750`. Telemetry state files written inside it SHALL use mode `0640` and the
+same owner/group. This keeps host performance data, disk identity, and Web
+session counts readable to DASObjectStore services without making them
+world-readable.
+
+The initial telemetry state file is:
+
+```text
+/var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json
+```
+
+Writers SHALL update the file atomically by writing a schema-valid document to
+a temporary file in the same directory, fsyncing the file, applying final
+ownership and permissions, renaming it over the current state file, and fsyncing
+the telemetry directory. Temporary files SHOULD use a hidden same-directory name
+such as `.appliance-telemetry.v1.json.tmp-<pid>`.
+
+Readers SHALL ignore incomplete temporary files. On startup, the daemon MAY
+remove stale temporary files whose writer no longer exists. If the current JSON
+file is missing, the daemon SHALL start from an empty schema-valid telemetry
+history. If the current file is corrupt or fails schema validation, the daemon
+SHALL preserve it for operator inspection using a timestamped
+`corrupt-*.json` name in the telemetry directory, then start a fresh
+schema-valid file rather than merging partial data.
+
+Future schema versions SHALL retain the version in the payload and write major
+versions to distinct filenames such as `appliance-telemetry.v2.json`. A daemon
+that sees an unknown future major version SHALL leave it untouched and fall back
+to the newest version it understands. Migrations SHALL write the target version
+atomically and keep the source version until migration succeeds, preserving a
+rollback and audit path.
+
 ## Remote Client Packages
 
 Remote upload hosts do not need the full appliance package. Use the remote-only

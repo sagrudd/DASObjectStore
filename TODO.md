@@ -923,7 +923,7 @@ planning are tracked under Milestones 21 and 22.
   CPU usage, memory usage, disk capacity, per-disk read/write IO counters,
   enclosure/disk identity, DASObjectStore Web/session user counts, and
   collection quality/missing-data markers.
-- [ ] Choose and document the managed telemetry state location under the
+- [x] Choose and document the managed telemetry state location under the
   appliance-owned state tree, including file ownership, permissions, atomic
   write strategy, recovery from partial writes, and migration behavior for
   future schema versions.

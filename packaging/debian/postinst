@@ -108,6 +108,7 @@ ensure_container_runtime_access
 ensure_owned_dir /run/dasobjectstore 0750
 ensure_owned_dir /var/lib/dasobjectstore 0750
 ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750
+ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750
 ensure_owned_dir /var/log/dasobjectstore 0750
 ensure_owned_dir "$product_root" 0750
 ensure_owned_dir "$product_root/tls" 0750

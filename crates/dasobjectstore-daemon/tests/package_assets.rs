@@ -96,6 +96,12 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
     assert_contains(
         TMPFILES,
         &format!(
+            "d {LINUX_DAEMON_STATE_DIR}/telemetry 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
+        ),
+    );
+    assert_contains(
+        TMPFILES,
+        &format!(
             "d {LINUX_DAEMON_LOG_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
         ),
     );
@@ -239,6 +245,10 @@ fn rpm_build_installs_daemon_boundary_assets() {
         BUILD_RPM,
         "install -d -o \"\\$service_user\" -g \"\\$service_group\" -m 0750 /var/lib/dasobjectstore/report-rebuild",
     );
+    assert_contains(
+        BUILD_RPM,
+        "install -d -o \"\\$service_user\" -g \"\\$service_group\" -m 0750 /var/lib/dasobjectstore/telemetry",
+    );
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
@@ -281,6 +291,10 @@ fn deb_postinst_rejects_user_owned_managed_root() {
     assert_contains(
         POSTINST,
         "ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750",
+    );
+    assert_contains(
+        POSTINST,
+        "ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750",
     );
     assert_contains(POSTINST, "ensure_container_runtime_access");
     assert_contains(POSTINST, "ensure_report_provider");
