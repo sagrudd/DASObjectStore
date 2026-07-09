@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.1 - 2026-07-09
+
+- Refine the Web login page Mnemosyne Biosciences wordmark sizing and
+  centering so the brand pane reads as a composed identity lockup rather than a
+  large illustration.
+
 ## 0.54.0 - 2026-07-09
 
 - Add an authenticated Activity Reporting card with drag-and-drop benchmarking

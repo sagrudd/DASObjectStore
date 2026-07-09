@@ -87,12 +87,12 @@ h2 {
 
 .dos-auth-shell {
   display: grid;
-  grid-template-columns: minmax(300px, 0.9fr) minmax(340px, 480px);
-  gap: 20px;
+  grid-template-columns: minmax(300px, 0.82fr) minmax(340px, 480px);
+  gap: 22px;
   width: min(1040px, 100%);
   min-height: calc(100vh - 104px);
   margin: 0 auto;
-  align-items: stretch;
+  align-items: center;
 }
 
 .dos-auth-brand,
@@ -107,9 +107,10 @@ h2 {
 .dos-auth-brand {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  min-height: 480px;
-  padding: 28px;
+  justify-content: center;
+  gap: 46px;
+  min-height: 500px;
+  padding: 32px;
 }
 
 .dos-brand-lockup,
@@ -127,12 +128,14 @@ h2 {
 .dos-auth-wordmark-lockup {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .dos-auth-wordmark {
   display: block;
-  width: clamp(260px, 30vw, 332px);
+  width: clamp(190px, 22vw, 248px);
   max-width: 100%;
   height: auto;
 }
@@ -964,6 +967,15 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .dos-auth-shell {
+    align-items: stretch;
+  }
+
+  .dos-auth-brand {
+    min-height: auto;
+    gap: 28px;
+  }
+
   .dos-metric-grid,
   .dos-store-grid,
   .dos-activity-grid {
@@ -1002,11 +1014,12 @@ h2 {
   }
 
   .dos-auth-brand {
-    min-height: 360px;
+    gap: 24px;
+    min-height: auto;
   }
 
   .dos-auth-wordmark {
-    width: clamp(220px, 72vw, 260px);
+    width: clamp(172px, 58vw, 220px);
   }
 
   .dos-auth-summary h1 {
