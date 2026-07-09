@@ -926,7 +926,6 @@ fn run_performance_test(
         qr_path: qr_path.clone(),
         pdf_path: report_path.clone(),
         reproduce_command,
-        reproduction_payload,
         reproduction_payload_sha256,
         qr_status,
     };
@@ -1598,7 +1597,6 @@ struct PerformanceReport {
     qr_path: PathBuf,
     pdf_path: PathBuf,
     reproduce_command: String,
-    reproduction_payload: String,
     reproduction_payload_sha256: String,
     qr_status: String,
 }
@@ -5791,10 +5789,23 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
         ));
     }
 
-    output.push_str("## Reproduction Payload\n\n");
-    output.push_str("```json\n");
-    output.push_str(&serde_json::to_string_pretty(artifact).unwrap_or_else(|_| "{}".to_string()));
-    output.push_str("\n```\n");
+    output.push_str("## Reproducibility\n\n");
+    output.push_str("| Field | Value |\n| --- | --- |\n");
+    output.push_str(&format!(
+        "| JSON artifact | `{}` |\n",
+        json_string(artifact, &["run", "artifacts", "json_path"])
+            .map(|path| compact_path(&path))
+            .unwrap_or_else(|| "not recorded".to_string())
+    ));
+    output.push_str(&format!(
+        "| Artifact SHA-256 | `{}` |\n",
+        compact_hash(&performance_artifact_signature(artifact))
+    ));
+    output.push_str("| Reproduction command | Recorded in the JSON artifact |\n");
+    output.push_str("| QR payload | Encoded in the report QR code |\n\n");
+    output.push_str(
+        "The complete machine-readable benchmark artifact is retained as JSON and is deliberately not embedded in the formal PDF body. Use the JSON artifact for exact reproduction, audit, and daemon ingress-policy import.\n",
+    );
     output
 }
 
@@ -6722,7 +6733,7 @@ fn render_performance_report(report: PerformanceReport) -> String {
 | Redundancy | `{}` HDD copy/copies per logical file |\n\
 | Command digest | `{}` |\n\
 | Reproduction payload SHA-256 | `{}` |\n\
-| Reproduction QR payload | See reproduction payload |\n\n",
+| Reproduction QR payload | Encoded in report QR code |\n\n",
         compact_run_id(&report.run_id),
         report.generated_at_utc,
         compact_identifier(&report.repository_revision, 18),
@@ -6783,9 +6794,25 @@ fn render_performance_report(report: PerformanceReport) -> String {
     output.push_str("## Summary\n\n");
     output.push_str(&format!("- Run id: `{}`\n", compact_run_id(&report.run_id)));
     output.push_str("- Reproduce with: command recorded in the JSON artifact.\n");
-    output.push_str("\n## Reproduction Payload\n\n```json\n");
-    output.push_str(&report.reproduction_payload);
-    output.push_str("\n```\n\n");
+    output.push_str("\n## Reproducibility\n\n");
+    output.push_str("| Field | Value |\n| --- | --- |\n");
+    output.push_str(&format!(
+        "| JSON artifact | `{}` |\n",
+        compact_path(&report.json_path.display().to_string())
+    ));
+    output.push_str(&format!(
+        "| Payload SHA-256 | `{}` |\n",
+        compact_hash(&report.reproduction_payload_sha256)
+    ));
+    output.push_str(&format!(
+        "| Command digest | `{}` |\n",
+        compact_hash(&sha256_hex_bytes(report.reproduce_command.as_bytes()))
+    ));
+    output.push_str("| Reproduction command | Recorded in the JSON artifact |\n");
+    output.push_str("| QR payload | Encoded in the report QR code |\n\n");
+    output.push_str(
+        "The complete machine-readable benchmark artifact is retained as JSON and is deliberately not embedded in the formal PDF body. Use the JSON artifact for exact reproduction, audit, and daemon ingress-policy import.\n\n",
+    );
     output.push_str(&format!(
         "- Total elapsed: {:.1} s\n",
         report.elapsed_seconds
@@ -12408,7 +12435,10 @@ mod tests {
         assert!(report.contains("| QR status | `qrencode SVG` |"));
         assert!(report.contains("Reproduction payload SHA-256"));
         assert!(report.contains("Reproduction QR payload"));
-        assert!(report.contains("## Reproduction Payload"));
+        assert!(report.contains("## Reproducibility"));
+        assert!(!report.contains("## Reproduction Payload"));
+        assert!(!report.contains("```json"));
+        assert!(!report.contains(r#"{"run_id":"perf-test-run"}"#));
         assert!(
             report.contains("Scenario: generated workload, 1 files, 1.0 MiB logical source total; file selection `random`; file order(s) `fifo`, `size_desc`.")
         );
@@ -12563,10 +12593,11 @@ mod tests {
         assert!(markdown.contains("## Scenario Summary"));
         assert!(markdown.contains("## Per-Disk HDD Write Rates"));
         assert!(markdown.contains("![Landing rate by strategy]"));
-        assert!(markdown.contains("```json"));
-        assert!(
-            markdown.contains("\"schema\": \"dasobjectstore.performance_test.recommendation.v1\"")
-        );
+        assert!(markdown.contains("## Reproducibility"));
+        assert!(!markdown.contains("```json"));
+        assert!(!markdown.contains("\"artifact_kind\""));
+        assert!(markdown
+            .contains("The complete machine-readable benchmark artifact is retained as JSON"));
     }
 
     #[test]
@@ -13088,7 +13119,6 @@ mod tests {
             keep_temp: false,
             reproduce_command: "dasobjectstore performance-test --file_size 1MiB --file_count 1"
                 .to_string(),
-            reproduction_payload: r#"{"run_id":"perf-test-run"}"#.to_string(),
             reproduction_payload_sha256:
                 "623f8d191890968ec394ff02950710ecb9e5eed5a0b68c064e28e8ffa0876f58".to_string(),
             qr_status: "qrencode SVG".to_string(),

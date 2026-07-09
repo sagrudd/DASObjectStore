@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.22 - 2026-07-09
+
+- Remove full benchmark JSON payloads from formal performance report bodies and
+  replace them with concise reproducibility provenance so chart sections render
+  without thousands of pages of raw JSON.
+
 ## 0.54.21 - 2026-07-09
 
 - Add daemon-authorized ObjectStore folder archive downloads with verified
