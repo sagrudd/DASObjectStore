@@ -1014,9 +1014,13 @@ planning are tracked under Milestones 21 and 22.
   Completed by adding a Home telemetry DOM/CSS regression contract test that
   pins the metric grid, time-window controls, fixed SVG chart frame, chart
   labels/points, text wrapping, and desktop/mobile responsive breakpoints.
-- [ ] Update `docs/user/web-interface.rst` with the Home telemetry cards,
+- [x] Update `docs/user/web-interface.rst` with the Home telemetry cards,
   time-window control, missing-data interpretation, update cadence, and
   administrator/operator expectations.
+  Completed by documenting the Home telemetry cards, the 1 hour/1 day/10
+  days/3 months selector, missing and sparse sample interpretation, the
+  30-second browser refresh cadence, and read-only operator versus
+  administrator expectations.
 - [ ] Update `docs/standalone-service.md` with telemetry state file location,
   retention policy, ownership, cadence configuration, and how to reset or
   inspect telemetry safely.

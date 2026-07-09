@@ -217,9 +217,11 @@ The redesigned Home page loads its live summary from
 issued at login. The page shows authenticated loading, permission-denied, and
 transport-error states instead of presenting fixture metrics as live appliance
 state. Once loaded, the visible cards cover drive count, mounted enclosure
-count, usable capacity, selected-window throughput, memory pressure, SMART warnings,
-visible ObjectStores, and operator attention items from the daemon health
-payload.
+count, usable capacity, selected-window throughput, memory pressure, SMART
+warnings, visible ObjectStores, and operator attention items from the daemon
+health payload. Telemetry-backed deployments add the operational cards that
+operators normally check first: Capacity, Throughput, Disk IO, CPU usage,
+Memory Stress, and Logged-in users.
 
 The current Home API aggregator reads the managed SSD root
 ``/srv/dasobjectstore/ssd`` and managed HDD root ``/srv/dasobjectstore/hdd``
@@ -232,14 +234,24 @@ view of managed disks, IO rates, and host memory pressure. The Home page also
 shows telemetry-backed Disk IO, CPU, and Logged-in users cards when appliance
 samples are available; those cards report explicit unavailable telemetry state
 instead of bootstrap values when the daemon has not produced samples yet.
+
+Read unavailable telemetry as an instrumentation state, not as a healthy zero.
+An unavailable card means the daemon did not provide a sample for that metric
+and time range, the telemetry state file could not be read, or the local
+platform does not expose the counter. A sparse chart shows only the samples the
+daemon reported; the Web UI leaves gaps and empty states visible instead of
+interpolating missing throughput, CPU, memory, disk, or user activity into a
+continuous line.
+
 Operators can use the Home telemetry window selector to view the latest
 ``1 hour``, ``1 day``, ``10 days``, or ``3 months`` of daemon appliance
 telemetry. The browser sends the selected value as
 ``telemetry_window=one_hour``, ``one_day``, ``ten_days``, or
 ``three_months`` on ``/products/dasobjectstore/api/v1/dashboard/home`` so the
 Capacity, Throughput, Disk IO, CPU, Memory Stress, and Logged-in users cards
-are derived from a consistent sample window. Operators can override the
-telemetry source with
+are derived from a consistent sample window. The selected window affects both
+card summaries and chart samples; changing it does not change stored telemetry
+or daemon retention policy. Operators can override the telemetry source with
 ``DASOBJECTSTORE_WEB_APPLIANCE_TELEMETRY_PATH``. If appliance telemetry is not
 available, the aggregator falls back to filesystem capacity, the optional
 seven-day throughput JSON input at
@@ -249,10 +261,18 @@ JSON input at ``/var/lib/dasobjectstore/health/smart-warnings.json``; until
 those daemon writers are present, the dashboard reports explicit
 unavailable-source warnings rather than bootstrap fixture text.
 
-The Home page refreshes its selected-window telemetry payload on a fixed
-cadence while the page is open. The throughput telemetry chart uses a stable
-SVG view box, fixed axes, bounded labels, and an explicit empty-sample state so
-updates do not resize cards or interpolate missing data into the visible line.
+The Home page refreshes its selected-window telemetry payload every 30 seconds
+while the page is open. The throughput telemetry chart uses a stable SVG view
+box, fixed axes, bounded labels, and an explicit empty-sample state so updates
+do not resize cards or interpolate missing data into the visible line.
+
+Any authenticated operator can use Home as a read-only appliance status page.
+Administrator status only affects whether the same session can enter
+daemon-owned mutation workflows from pages such as Enclosures, ObjectStores,
+Users/Groups, or Activity. Home telemetry should therefore be treated as
+shared operational evidence: if a card is unavailable or stale, inspect the
+daemon telemetry writer and service state before acting on browser-side
+assumptions.
 
 The redesigned Home, Enclosures, ObjectStores, and Bioinformatics pages share a
 single Yew API loading contract. Each page renders explicit loading, success,
