@@ -360,7 +360,7 @@ and records completion bytes through the common remote-upload progress model.
 Progress updates now have a typed telemetry payload for source scan count,
 staged bytes, S3 transfer rate, SSD queue depth, HDD landing queue depth,
 active per-HDD writers, verification state, and session-renewal status. Until
-the source scanner, SSD stager, HDD landing, verification, and session-renewal
+the source scanner, SSD stager, HDD landing, verification, and renewal executor
 workers are fully wired, those fields appear only when a producer supplies
 them. The easyconnect AWS CLI submit path supplies source scan count and
 staged-byte totals from the client-side source inventory. The daemon
@@ -368,8 +368,9 @@ remote-upload worker derives S3 transfer-rate telemetry from byte progress and
 progress timestamps when a transfer producer does not supply its own rate;
 non-zero SSD stage and HDD landing queue depths are populated from the daemon
 admission gate snapshot; active HDD writer counts and pending verification
-state are derived from daemon ingest telemetry. Session-renewal producers are
-still being wired.
+state are derived from daemon ingest telemetry. The easyconnect AWS CLI submit
+path also reports whether paired session renewal metadata is configured,
+missing, or unavailable; active renewal execution remains future work.
 The runtime job executor constructs the remote-upload job and AWS CLI transfer
 from one easyconnect job request, then runs that job through the same
 admission-gated worker used by lower-level transfer adapters. The daemon API

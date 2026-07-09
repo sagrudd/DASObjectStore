@@ -379,6 +379,7 @@ fn build_daemon_upload_request(
         progress_telemetry: Some(RemoteEasyconnectUploadProgressTelemetry {
             source_scan_count: Some(source_inventory.file_count),
             staged_bytes: Some(source_inventory.total_bytes),
+            session_renewal_status: route.session_renewal_status.clone(),
             ..RemoteEasyconnectUploadProgressTelemetry::default()
         }),
         progress_message: Some(format!(
@@ -520,6 +521,7 @@ struct RemoteUploadRoute {
     bucket: String,
     credentials: Option<RemoteS3Credentials>,
     credential_source: AwsS3CredentialSource,
+    session_renewal_status: Option<String>,
 }
 
 fn resolve_upload_route(
@@ -532,6 +534,7 @@ fn resolve_upload_route(
             bucket: requested_object_store.to_string(),
             credentials: None,
             credential_source: AwsS3CredentialSource::AwsProfile,
+            session_renewal_status: None,
         });
     }
 
@@ -555,6 +558,7 @@ fn resolve_upload_route(
         bucket: grant.bucket.clone(),
         credentials: Some(session_credentials(session)),
         credential_source: AwsS3CredentialSource::Environment,
+        session_renewal_status: Some(session_renewal_status(session).to_string()),
     })
 }
 
@@ -563,6 +567,17 @@ fn session_credentials(session: &RemoteUploadSession) -> RemoteS3Credentials {
         access_key_id: session.credentials.access_key_id.clone(),
         secret_access_key: session.credentials.secret_access_key.clone(),
         session_token: session.credentials.session_token.clone(),
+    }
+}
+
+fn session_renewal_status(session: &RemoteUploadSession) -> &'static str {
+    let Some(renewal) = &session.renewal else {
+        return "renewal_not_configured";
+    };
+    if renewal.renewal_token.is_some() {
+        "renewal_configured"
+    } else {
+        "renewal_token_missing"
     }
 }
 
@@ -711,7 +726,8 @@ mod tests {
     use crate::cli::RemoteCli;
     use crate::config::{
         read_optional_config, write_config, RemoteConfig, RemoteObjectStoreGrant,
-        RemotePairedAppliance, RemoteSessionCredentials, RemoteUploadSession,
+        RemotePairedAppliance, RemoteSessionCredentials, RemoteSessionRenewalMetadata,
+        RemoteUploadSession,
     };
     use clap::Parser;
     use dasobjectstore_daemon::{
@@ -852,7 +868,7 @@ mod tests {
 
     #[test]
     fn paired_upload_can_submit_aws_plan_to_daemon_with_session_environment() {
-        let config = paired_config();
+        let config = paired_config_with_renewal();
         let root = temp_source_root("upload-daemon-submit");
         std::fs::create_dir_all(&root).expect("create source");
         let source = root.join("reads.fastq.gz");
@@ -934,6 +950,13 @@ mod tests {
                 .and_then(|telemetry| telemetry.staged_bytes),
             Some(4)
         );
+        assert_eq!(
+            request
+                .progress_telemetry
+                .as_ref()
+                .and_then(|telemetry| telemetry.session_renewal_status.as_deref()),
+            Some("renewal_configured")
+        );
         assert!(request
             .display_args
             .iter()
@@ -990,6 +1013,21 @@ mod tests {
                 }),
             }],
         }
+    }
+
+    fn paired_config_with_renewal() -> RemoteConfig {
+        let mut config = paired_config();
+        let session = config.paired_appliances[0]
+            .session
+            .as_mut()
+            .expect("paired session");
+        session.renewal = Some(RemoteSessionRenewalMetadata {
+            renew_url: "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/sessions/SESSIONREFERENCE7890/renew".to_string(),
+            renew_after: "2026-07-09T18:30:00Z".to_string(),
+            renewal_token: Some("renewal-token-secret".to_string()),
+            last_renewed_at: None,
+        });
+        config
     }
 
     fn temp_config_path(name: &str) -> std::path::PathBuf {

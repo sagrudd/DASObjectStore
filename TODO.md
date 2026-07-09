@@ -862,8 +862,8 @@ planning are tracked under Milestones 21 and 22.
   snapshot.
 - [x] Wire daemon ingest telemetry into remote-upload progress for active HDD
   writer count and pending verification state.
-- [ ] Wire remaining remote upload session-renewal producers to populate the
-  daemon progress telemetry payload.
+- [x] Wire the remote easyconnect/AWS CLI submit path to populate
+  session-renewal status telemetry from paired session renewal metadata.
 - [ ] Add Web progress rendering for remote uploads that remains accurate when
   the browser refreshes, disconnects, or reconnects while the paired CLI agent
   continues transfer.

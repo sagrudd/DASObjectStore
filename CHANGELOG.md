@@ -8,6 +8,8 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Populate remote-upload progress with session-renewal status telemetry from
+  paired easyconnect session renewal metadata.
 - Populate remote-upload progress with active HDD writer count and pending
   verification-state telemetry derived from daemon ingest telemetry.
 - Populate remote-upload progress with non-zero SSD stage and HDD landing
