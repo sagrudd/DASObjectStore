@@ -47,7 +47,7 @@ planning are tracked under Milestones 21 and 22.
   expectations.
 - [x] Update DEB validation to ensure managed DAS roots are owned by the daemon
   service identity, not ordinary ingest users.
-- [ ] Add integration tests proving normal non-root ingest succeeds through the
+- [x] Add integration tests proving normal non-root ingest succeeds through the
   daemon without granting direct write permission to managed DAS roots.
 - [x] Update user documentation so ingest is described as a client/server job
   submission with byte-level progress, not a local filesystem write.
