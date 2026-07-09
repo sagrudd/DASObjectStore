@@ -64,6 +64,9 @@ pub fn gui_api_router_for_host_mode(
             .merge(standalone_auth_router(auth_store.clone()))
             .merge(standalone_users_groups_router(auth_store.clone()))
             .merge(standalone_enclosure_admin_router(auth_store.clone()))
+            .merge(
+                crate::object_browser_routes::standalone_object_browser_router(auth_store.clone()),
+            )
             .merge(standalone_reporting_router(auth_store)),
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }

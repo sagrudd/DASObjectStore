@@ -12,6 +12,7 @@ mod endpoints_aggregator;
 mod endpoints_registry;
 mod groups_registry;
 mod home_aggregator;
+mod object_browser_routes;
 mod object_stores_aggregator;
 mod reporting;
 pub mod routes;

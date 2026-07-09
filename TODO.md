@@ -677,9 +677,11 @@ planning are tracked under Milestones 21 and 22.
 - [x] Implement metadata-backed ObjectStore tree query logic with prefix
   browsing, breadcrumb paths, server-side filtering/search, sort options,
   pagination, bounded response sizes, and large-tree regression fixtures.
-- [ ] Add authenticated API routes for listing ObjectStore folders and files,
-  enforcing public/read/write group permissions and object lifecycle readiness
-  before exposing metadata or download actions.
+- [x] Add the standalone authenticated API route for listing ObjectStore folders
+  and files through the daemon ObjectBrowser client boundary.
+- [ ] Enforce public/read/write group permissions and object lifecycle
+  readiness in the daemon-backed ObjectBrowser API before exposing metadata or
+  download actions.
 - [ ] Implement individual file download routes that stream from the selected
   settled copy, report content length where known, use safe content-disposition
   headers, and fail clearly for missing, unsettled, degraded, or unauthorized
