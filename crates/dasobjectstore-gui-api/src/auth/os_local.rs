@@ -255,6 +255,15 @@ fn authenticate_local_password(
 #[cfg(unix)]
 pub fn discover_current_local_user() -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
     let username = current_username().ok_or(LocalUserDiscoveryError::MissingUsername)?;
+    discover_local_user(&username)
+}
+
+#[cfg(unix)]
+pub fn discover_local_user(username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Err(LocalUserDiscoveryError::MissingUsername);
+    }
     let passwd =
         fs::read_to_string("/etc/passwd").map_err(|source| LocalUserDiscoveryError::Io {
             path: "/etc/passwd",
@@ -266,15 +275,24 @@ pub fn discover_current_local_user() -> Result<LocalUserMetadata, LocalUserDisco
     })?;
 
     Ok(local_user_metadata_from_unix_account_files(
-        &username, &passwd, &group,
+        username, &passwd, &group,
     ))
 }
 
 #[cfg(not(unix))]
 pub fn discover_current_local_user() -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
     let username = current_username().ok_or(LocalUserDiscoveryError::MissingUsername)?;
+    discover_local_user(&username)
+}
+
+#[cfg(not(unix))]
+pub fn discover_local_user(username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Err(LocalUserDiscoveryError::MissingUsername);
+    }
     Ok(LocalUserMetadata::from_username_and_groups(
-        username,
+        username.to_string(),
         Vec::new(),
     ))
 }
@@ -434,6 +452,23 @@ mod tests {
             vec!["guest".to_string(), "users".to_string()]
         );
         assert!(!metadata.sudo_administrator);
+    }
+
+    #[test]
+    fn discovers_named_user_instead_of_process_user() {
+        let passwd = "\
+dasobjectstore:x:997:997:DASObjectStore:/var/lib/dasobjectstore:/usr/sbin/nologin\n\
+stephen:x:1000:1000:Stephen:/home/stephen:/bin/bash\n";
+        let group = "dasobjectstore:x:997:\nstephen:x:1000:\nsudo:x:27:stephen\n";
+
+        let metadata = local_user_metadata_from_unix_account_files("stephen", passwd, group);
+
+        assert_eq!(metadata.username, "stephen");
+        assert_eq!(
+            metadata.groups,
+            vec!["stephen".to_string(), "sudo".to_string()]
+        );
+        assert!(metadata.sudo_administrator);
     }
 
     #[cfg(target_os = "linux")]

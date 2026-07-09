@@ -12,16 +12,20 @@ use crate::workspaces::{
 use axum::{http::StatusCode, routing::get, routing::post, Json, Router};
 
 pub fn gui_api_router() -> Router {
-    Router::new()
-        .route("/api/v1/health", get(health))
-        .route("/api/v1/actions", get(actions))
-        .route("/api/v1/actions/plan", post(plan_action))
+    gui_api_router_without_redesign_dashboards()
         .route("/api/v1/dashboard/home", get(home_dashboard))
         .route("/api/v1/dashboard/enclosures", get(enclosures_dashboard))
         .route(
             "/api/v1/dashboard/object-stores",
             get(object_stores_dashboard),
         )
+}
+
+pub(crate) fn gui_api_router_without_redesign_dashboards() -> Router {
+    Router::new()
+        .route("/api/v1/health", get(health))
+        .route("/api/v1/actions", get(actions))
+        .route("/api/v1/actions/plan", post(plan_action))
         .route("/api/v1/workspaces/overview", get(overview_workspace))
         .route("/api/v1/workspaces/home", get(product_home_workspace))
         .route(

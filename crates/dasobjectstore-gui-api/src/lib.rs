@@ -24,11 +24,11 @@ pub use actions::{
     GuiActionKind, GuiActionPlan, GuiActionPlanError, GuiActionPlanRequest, GuiActionSafety,
 };
 pub use auth::{
-    discover_current_local_user, AuthRegistry, AuthTokenResetReport, AuthenticatedUser,
-    LocalAuthStore, LocalAuthStoreError, LocalPasswordAuthError, LocalUserDiscoveryError,
-    LocalUserMetadata, LoginResponse, LogoutResponse, PamLocalPasswordAuthenticator,
-    RegisterResponse, RegistrationTokenRecord, SessionCheckResponse, SessionTokenRecord,
-    UserSummary, SUDO_ADMIN_GROUPS,
+    discover_current_local_user, discover_local_user, AuthRegistry, AuthTokenResetReport,
+    AuthenticatedUser, LocalAuthStore, LocalAuthStoreError, LocalPasswordAuthError,
+    LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, LogoutResponse,
+    PamLocalPasswordAuthenticator, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
+    SessionTokenRecord, UserSummary, SUDO_ADMIN_GROUPS,
 };
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,

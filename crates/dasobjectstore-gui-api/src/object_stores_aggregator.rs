@@ -20,6 +20,7 @@ struct ObjectStoresAggregatorConfig {
     live_sqlite_path: PathBuf,
     groups_registry_path: PathBuf,
     current_user_groups: Vec<String>,
+    administrator: bool,
 }
 
 impl ObjectStoresAggregatorConfig {
@@ -34,12 +35,23 @@ impl ObjectStoresAggregatorConfig {
                 .unwrap_or(default_live_sqlite_path),
             groups_registry_path: default_groups_registry_path(),
             current_user_groups: Vec::new(),
+            administrator: false,
         }
     }
 }
 
 pub(crate) fn live_object_stores_dashboard() -> ObjectStoresPageView {
     build_object_stores_dashboard(ObjectStoresAggregatorConfig::from_env())
+}
+
+pub(crate) fn live_object_stores_dashboard_for_user(
+    current_user_groups: Vec<String>,
+    administrator: bool,
+) -> ObjectStoresPageView {
+    let mut config = ObjectStoresAggregatorConfig::from_env();
+    config.current_user_groups = current_user_groups;
+    config.administrator = administrator;
+    build_object_stores_dashboard(config)
 }
 
 fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> ObjectStoresPageView {
@@ -62,7 +74,11 @@ fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> Object
         groups: groups_snapshot.groups,
         stores,
         selected_store_id,
-        create_object_store: CreateObjectStoreAffordanceView::admin_required(),
+        create_object_store: if config.administrator {
+            CreateObjectStoreAffordanceView::enabled()
+        } else {
+            CreateObjectStoreAffordanceView::admin_required()
+        },
         warnings,
     }
 }
@@ -315,6 +331,7 @@ mod tests {
             live_sqlite_path,
             groups_registry_path,
             current_user_groups: vec!["bioinformatics".to_string()],
+            administrator: true,
         });
 
         assert_eq!(view.groups.len(), 1);
@@ -344,6 +361,7 @@ mod tests {
         assert_eq!(view.stores[0].writer_policy.state, "ready");
         assert!(view.stores[0].writer_policy.group_defined);
         assert!(view.stores[0].writer_policy.writeable_by_current_user);
+        assert!(view.create_object_store.enabled);
         assert!(view.stores[0].warnings.is_empty());
         assert!(view.warnings.is_empty());
     }
@@ -359,10 +377,12 @@ mod tests {
             live_sqlite_path: root.join("missing-live.sqlite"),
             groups_registry_path: root.join("missing-groups.json"),
             current_user_groups: Vec::new(),
+            administrator: false,
         });
 
         assert!(view.stores.is_empty());
         assert_eq!(view.selected_store_id, None);
+        assert!(!view.create_object_store.enabled);
         assert!(view
             .warnings
             .iter()

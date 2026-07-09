@@ -38,6 +38,14 @@ pub(crate) fn live_enclosures_dashboard() -> EnclosuresPageView {
     build_enclosures_dashboard(EnclosuresAggregatorConfig::from_env())
 }
 
+pub(crate) fn live_enclosures_dashboard_for_administrator(
+    administrator: bool,
+) -> EnclosuresPageView {
+    let mut config = EnclosuresAggregatorConfig::from_env();
+    config.administrator = administrator;
+    build_enclosures_dashboard(config)
+}
+
 fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresPageView {
     let generated_at_utc = now_utc_string();
     let mut warnings = Vec::new();

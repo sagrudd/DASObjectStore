@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.53.3 - 2026-07-09
+
+- Fix standalone Web administrator detection so sudo-derived authority is
+  resolved for the authenticated local session username rather than the Web
+  service process account.
+- Serve standalone dashboard admin affordances through authenticated routes so
+  Enclosure and ObjectStore Web controls reflect the logged-in local user's
+  sudo status and group membership.
+
 ## 0.53.2 - 2026-07-09
 
 - Extend the Web screenshot regression harness into role-aware end-to-end

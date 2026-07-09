@@ -1,6 +1,6 @@
 use crate::groups_registry::{default_groups_registry_path, read_storage_groups_for_user};
 use crate::{
-    discover_current_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
+    discover_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
     LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
     PamLocalPasswordAuthenticator, RegisterResponse, SessionCheckResponse,
     UsersGroupsWorkspaceView,
@@ -51,7 +51,8 @@ pub fn gui_api_router_for_host_mode(
     auth_store: LocalAuthStore,
 ) -> Router {
     match host_mode {
-        GuiApiHostMode::Standalone => crate::gui_api_router()
+        GuiApiHostMode::Standalone => crate::routes::gui_api_router_without_redesign_dashboards()
+            .merge(standalone_dashboard_router(auth_store.clone()))
             .merge(standalone_auth_router(auth_store.clone()))
             .merge(standalone_users_groups_router(auth_store.clone()))
             .merge(standalone_enclosure_admin_router(auth_store)),
@@ -69,6 +70,25 @@ fn standalone_auth_router_with_state(state: StandaloneAuthRouteState) -> Router 
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/session", post(session))
+        .with_state(state)
+}
+
+fn standalone_dashboard_router(auth_store: LocalAuthStore) -> Router {
+    standalone_dashboard_router_with_state(StandaloneDashboardRouteState::system(auth_store))
+}
+
+fn standalone_dashboard_router_with_state(state: StandaloneDashboardRouteState) -> Router {
+    Router::new()
+        .route("/api/v1/dashboard/home", get(standalone_home_dashboard))
+        .route(
+            "/api/v1/dashboard/enclosures",
+            get(standalone_enclosures_dashboard),
+        )
+        .route(
+            "/api/v1/dashboard/object-stores",
+            get(standalone_object_stores_dashboard),
+        )
+        .layer(Extension(state.auth_store.clone()))
         .with_state(state)
 }
 
@@ -137,6 +157,12 @@ struct StandaloneUsersGroupsRouteState {
 }
 
 #[derive(Clone)]
+struct StandaloneDashboardRouteState {
+    auth_store: LocalAuthStore,
+    local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
+}
+
+#[derive(Clone)]
 struct StandaloneEnclosureAdminRouteState {
     auth_store: LocalAuthStore,
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
@@ -151,6 +177,15 @@ impl StandaloneEnclosureAdminRouteState {
             enclosure_admin_client: Some(Arc::new(
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             )),
+        }
+    }
+}
+
+impl StandaloneDashboardRouteState {
+    fn system(auth_store: LocalAuthStore) -> Self {
+        Self {
+            auth_store,
+            local_user_provider: Arc::new(SystemLocalUserAuthorityProvider),
         }
     }
 }
@@ -199,18 +234,20 @@ impl LocalPasswordAuthenticator for SystemLocalPasswordAuthenticator {
 }
 
 trait LocalUserAuthorityProvider: Send + Sync {
-    fn current_local_user(
+    fn local_user(
         &self,
+        username: &str,
     ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError>;
 }
 
 struct SystemLocalUserAuthorityProvider;
 
 impl LocalUserAuthorityProvider for SystemLocalUserAuthorityProvider {
-    fn current_local_user(
+    fn local_user(
         &self,
+        username: &str,
     ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError> {
-        discover_current_local_user()
+        discover_local_user(username)
     }
 }
 
@@ -766,21 +803,54 @@ async fn session(
         .map_err(auth_route_error)
 }
 
+async fn standalone_home_dashboard(
+    State(_state): State<StandaloneDashboardRouteState>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<crate::dashboard::HomeDashboardView>, (StatusCode, Json<AuthRouteError>)> {
+    Ok(Json(crate::home_aggregator::live_home_dashboard()))
+}
+
+async fn standalone_enclosures_dashboard(
+    State(state): State<StandaloneDashboardRouteState>,
+    actor: AuthenticatedGuiActor,
+) -> Result<Json<crate::dashboard::EnclosuresPageView>, (StatusCode, Json<AuthRouteError>)> {
+    let current_user = local_standalone_user(state.local_user_provider.as_ref(), &actor)?;
+    Ok(Json(
+        crate::enclosures_aggregator::live_enclosures_dashboard_for_administrator(
+            current_user.sudo_administrator,
+        ),
+    ))
+}
+
+async fn standalone_object_stores_dashboard(
+    State(state): State<StandaloneDashboardRouteState>,
+    actor: AuthenticatedGuiActor,
+) -> Result<Json<crate::dashboard::ObjectStoresPageView>, (StatusCode, Json<AuthRouteError>)> {
+    let current_user = local_standalone_user(state.local_user_provider.as_ref(), &actor)?;
+    Ok(Json(
+        crate::object_stores_aggregator::live_object_stores_dashboard_for_user(
+            current_user.groups,
+            current_user.sudo_administrator,
+        ),
+    ))
+}
+
 async fn users_groups_workspace(
     State(state): State<StandaloneUsersGroupsRouteState>,
-    _actor: AuthenticatedGuiActor,
+    actor: AuthenticatedGuiActor,
 ) -> Result<Json<UsersGroupsWorkspaceView>, (StatusCode, Json<AuthRouteError>)> {
     let users = state.auth_store.list_users().map_err(auth_route_error)?;
-    let (current_user, warnings) = match state.local_user_provider.current_local_user() {
-        Ok(user) => (Some(user), Vec::new()),
-        Err(err) => (
-            None,
-            vec![DashboardWarning {
-                code: "local_user_discovery_failed".to_string(),
-                message: err.to_string(),
-            }],
-        ),
-    };
+    let (current_user, warnings) =
+        match actor_local_user_for_workspace(state.local_user_provider.as_ref(), &actor) {
+            Ok(user) => (Some(user), Vec::new()),
+            Err(err) => (
+                None,
+                vec![DashboardWarning {
+                    code: "local_user_discovery_failed".to_string(),
+                    message: err.to_string(),
+                }],
+            ),
+        };
     let current_user_groups = current_user
         .as_ref()
         .map(|user| user.groups.clone())
@@ -797,6 +867,18 @@ async fn users_groups_workspace(
         groups_snapshot.groups,
         warnings,
     )))
+}
+
+fn actor_local_user_for_workspace(
+    local_user_provider: &dyn LocalUserAuthorityProvider,
+    actor: &AuthenticatedGuiActor,
+) -> Result<crate::LocalUserMetadata, String> {
+    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+        return Err("standalone local session is required to inspect local authority.".to_string());
+    }
+    local_user_provider
+        .local_user(&actor.subject_id)
+        .map_err(|err| err.to_string())
 }
 
 async fn create_local_group(
@@ -1101,21 +1183,7 @@ fn require_local_administrator(
     local_user_provider: &dyn LocalUserAuthorityProvider,
     actor: &AuthenticatedGuiActor,
 ) -> Result<crate::LocalUserMetadata, (StatusCode, Json<AuthRouteError>)> {
-    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
-        return Err(route_error(
-            StatusCode::FORBIDDEN,
-            "standalone_local_session_required",
-            "standalone local group administration requires a local session",
-        ));
-    }
-
-    let current_user = local_user_provider.current_local_user().map_err(|err| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "local_user_discovery_failed",
-            err.to_string(),
-        )
-    })?;
+    let current_user = local_standalone_user(local_user_provider, actor)?;
 
     if !current_user.sudo_administrator {
         return Err(route_error(
@@ -1126,6 +1194,29 @@ fn require_local_administrator(
     }
 
     Ok(current_user)
+}
+
+fn local_standalone_user(
+    local_user_provider: &dyn LocalUserAuthorityProvider,
+    actor: &AuthenticatedGuiActor,
+) -> Result<crate::LocalUserMetadata, (StatusCode, Json<AuthRouteError>)> {
+    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "standalone_local_session_required",
+            "standalone local group administration requires a local session",
+        ));
+    }
+
+    local_user_provider
+        .local_user(&actor.subject_id)
+        .map_err(|err| {
+            route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "local_user_discovery_failed",
+                err.to_string(),
+            )
+        })
 }
 
 fn submit_local_group_admin_request(
@@ -1741,29 +1832,30 @@ fn route_error(
 mod tests {
     use super::{
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
-        standalone_enclosure_admin_router_with_state, standalone_users_groups_router_with_state,
-        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
-        DaemonEndpointBindingReadiness, DaemonEndpointKind, DaemonEndpointValidation,
-        DaemonEndpointValidationState, DaemonUpsertEndpointInventoryRequest,
-        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
-        EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
-        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, PrepareEnclosureHddDeviceRequest,
-        PrepareEnclosureRequest, RegisterRequest, SessionCheckRequest,
-        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
-        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
-        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        standalone_dashboard_router_with_state, standalone_enclosure_admin_router_with_state,
+        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
+        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointBindingReadiness,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
+        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
+        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
-        StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
-        StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
-        StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
-        StandaloneEndpointInventoryAcceptedResponse, StandaloneEndpointInventoryUpsertResponse,
-        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
-        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
-        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        StandaloneDashboardRouteState, StandaloneEnclosureAdminClient,
+        StandaloneEnclosureAdminClientError, StandaloneEnclosureAdminRouteState,
+        StandaloneEnclosurePrepareAcceptedResponse, StandaloneEnclosurePrepareDaemonRequest,
+        StandaloneEnclosurePrepareResponse, StandaloneEndpointInventoryAcceptedResponse,
+        StandaloneEndpointInventoryUpsertResponse, StandaloneLocalGroupAdminAcceptedResponse,
+        StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
+        StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
+        StandaloneLocalGroupOperation, StandaloneUsersGroupsRouteState,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -2090,6 +2182,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standalone_users_groups_workspace_uses_authenticated_local_username_for_authority() {
+        let root = temp_root("standalone-users-groups-stephen-admin");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let login = auth_store
+            .login("stephen", "secret")
+            .expect("login succeeds");
+        let app =
+            standalone_users_groups_router_with_state(test_users_groups_state_with_groups_path(
+                auth_store,
+                local_user("dasobjectstore", vec!["sudo"]),
+                None,
+                root_groups_path("stephen-admin"),
+            ));
+
+        let encoded = get_json_with_session::<serde_json::Value>(
+            app,
+            "/api/v1/workspaces/users-groups",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(encoded["current_user"]["username"], "stephen");
+        assert_eq!(encoded["current_user"]["sudo_administrator"], true);
+        assert_eq!(
+            encoded["capabilities"]["administrator_actions_enabled"],
+            true
+        );
+        assert_eq!(encoded["operations"][0]["enabled"], true);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_dashboards_use_authenticated_local_username_for_admin_affordances() {
+        let root = temp_root("standalone-dashboard-stephen-admin");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let login = auth_store
+            .login("stephen", "secret")
+            .expect("login succeeds");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store,
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("dasobjectstore", vec!["sudo"]),
+            }),
+        });
+
+        let enclosures = get_json_with_session::<serde_json::Value>(
+            app.clone(),
+            "/api/v1/dashboard/enclosures",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+        let object_stores = get_json_with_session::<serde_json::Value>(
+            app,
+            "/api/v1/dashboard/object-stores",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(enclosures["add_enclosure"]["administrator"], true);
+        assert_ne!(enclosures["add_enclosure"]["state"], "admin_required");
+        assert_eq!(object_stores["create_object_store"]["enabled"], true);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn standalone_users_groups_workspace_returns_managed_writer_groups() {
         let root = temp_root("standalone-users-groups-writer-policy");
         fs::create_dir_all(&root).expect("temp root");
@@ -2235,7 +2397,7 @@ mod tests {
                 username: None,
                 dry_run: true,
                 client_request_id: Some("request-1".to_string()),
-                administrator_actor: Some("operator".to_string()),
+                administrator_actor: Some("admin".to_string()),
                 confirmation_marker: LOCAL_ADMIN_CONFIRMATION_MARKER.to_string(),
             }]
         );
@@ -2284,7 +2446,7 @@ mod tests {
                 username: Some("stephen".to_string()),
                 dry_run: true,
                 client_request_id: Some("request-2".to_string()),
-                administrator_actor: Some("operator".to_string()),
+                administrator_actor: Some("admin".to_string()),
                 confirmation_marker: LOCAL_ADMIN_CONFIRMATION_MARKER.to_string(),
             }]
         );
@@ -2470,7 +2632,7 @@ mod tests {
                 owner: Some("stephen".to_string()),
                 dry_run: false,
                 client_request_id: Some("prepare-1".to_string()),
-                administrator_actor: Some("operator".to_string()),
+                administrator_actor: Some("admin".to_string()),
                 allow_format: true,
                 existing_data_acknowledged: true,
                 confirmation_marker: ENCLOSURE_PREPARE_CONFIRMATION.to_string(),
@@ -2567,7 +2729,7 @@ mod tests {
         assert_eq!(response.accepted.job_id, "objectstore-create-job-1");
         assert_eq!(response.accepted.kind, "object_store_creation");
         assert_eq!(response.store_id, "zymo-fecal-2025-05");
-        assert_eq!(response.administrator_actor.as_deref(), Some("operator"));
+        assert_eq!(response.administrator_actor.as_deref(), Some("admin"));
         let forwarded_requests = client.create_object_store_requests();
         assert_eq!(
             forwarded_requests,
@@ -2587,7 +2749,7 @@ mod tests {
                 endpoint_export_mode: "s3_bucket".to_string(),
                 dry_run: false,
                 client_request_id: Some("objectstore-create-1".to_string()),
-                administrator_actor: Some("operator".to_string()),
+                administrator_actor: Some("admin".to_string()),
                 confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
             }]
         );
@@ -2747,7 +2909,7 @@ mod tests {
                 }],
                 dry_run: false,
                 client_request_id: Some("endpoint-upsert-1".to_string()),
-                administrator_actor: Some("operator".to_string()),
+                administrator_actor: Some("admin".to_string()),
                 confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
             }]
         );
@@ -3202,8 +3364,11 @@ mod tests {
     }
 
     impl LocalUserAuthorityProvider for FixedLocalUserProvider {
-        fn current_local_user(&self) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
-            Ok(self.current_user.clone())
+        fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
+            Ok(LocalUserMetadata::from_username_and_groups(
+                username,
+                self.current_user.groups.clone(),
+            ))
         }
     }
 
@@ -3518,13 +3683,17 @@ mod tests {
     }
 
     fn registered_auth_store(root: &Path) -> LocalAuthStore {
+        registered_auth_store_for_user(root, "admin")
+    }
+
+    fn registered_auth_store_for_user(root: &Path, username: &str) -> LocalAuthStore {
         let auth_store = LocalAuthStore::new(root);
-        auth_store.create_user("admin").expect("user created");
+        auth_store.create_user(username).expect("user created");
         let token = auth_store
-            .issue_registration_token("admin", Some(3_600))
+            .issue_registration_token(username, Some(3_600))
             .expect("token issued");
         auth_store
-            .register_with_token("admin", &token, "secret")
+            .register_with_token(username, &token, "secret")
             .expect("registered");
         auth_store
     }

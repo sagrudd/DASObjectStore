@@ -16,6 +16,12 @@ session is not the source of administrator authority. For administrator
 workflows, DASObjectStore uses OS-local identity and sudo-derived administrator
 status, then submits the action to ``dasobjectstored``.
 
+Administrator capability is evaluated for the authenticated local username
+from the browser session, not for the unprivileged Web service account. For
+example, when ``stephen`` signs in and belongs to ``sudo`` or another supported
+administrator group, the Web dashboard and administrator submission routes
+should expose administrator-capable affordances for ``stephen``.
+
 The packaged service runs the Web process as the unprivileged
 ``dasobjectstore`` user. Local password verification is therefore delegated to
 the root-owned ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``

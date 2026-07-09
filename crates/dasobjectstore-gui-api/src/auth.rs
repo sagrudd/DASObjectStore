@@ -11,7 +11,7 @@ pub use model::{
     UserSummary,
 };
 pub use os_local::{
-    discover_current_local_user, local_user_metadata_from_unix_account_files,
+    discover_current_local_user, discover_local_user, local_user_metadata_from_unix_account_files,
     LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
     PamLocalPasswordAuthenticator, SUDO_ADMIN_GROUPS,
 };
