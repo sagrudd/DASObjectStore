@@ -1,3 +1,10 @@
+use super::{
+    admin_jobs::AdminJobRegistry,
+    remote_upload::{
+        run_remote_easyconnect_aws_cli_upload_job, RemoteEasyconnectAwsCliUploadJobRequest,
+        RemoteUploadAdmissionGate, RemoteUploadS3TransferWorkerReport,
+    },
+};
 use crate::api::{
     DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusDetail,
@@ -12,6 +19,7 @@ use serde_json::Value;
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GarageServiceRuntimeConfig {
@@ -133,6 +141,15 @@ where
             buckets: plan.bucket_count(),
             commands: plan.commands.len(),
         })
+    }
+
+    pub fn remote_easyconnect_aws_cli_upload_job(
+        &self,
+        registry: &dyn AdminJobRegistry,
+        gate: Arc<RemoteUploadAdmissionGate>,
+        request: RemoteEasyconnectAwsCliUploadJobRequest,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+        run_remote_easyconnect_aws_cli_upload_job(registry, gate, &self.runner, request)
     }
 }
 

@@ -82,7 +82,8 @@ pub use remote_easyconnect::{
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
     RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
-    RemoteEasyconnectSessionRenewal, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
     RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
     RemoteEasyconnectUploadHandoffFailure, RemoteEasyconnectUploadHandoffMode,
     RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffResponse,
@@ -133,6 +134,7 @@ pub enum DaemonApiRequest {
     RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionRequest),
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionRequest),
     RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionRequest),
+    RemoteEasyconnectSubmitAwsCliUpload(RemoteEasyconnectSubmitAwsCliUploadRequest),
 }
 
 impl DaemonApiRequest {
@@ -176,6 +178,9 @@ impl DaemonApiRequest {
             Self::RemoteEasyconnectRenewSession(request) => request
                 .validate()
                 .map_err(remote_easyconnect_validation_error),
+            Self::RemoteEasyconnectSubmitAwsCliUpload(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
             | Self::IngestJobStatus(_)
@@ -217,6 +222,7 @@ pub enum DaemonApiResponse {
     RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionResponse),
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionResponse),
     RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionDecision),
+    RemoteEasyconnectSubmitAwsCliUpload(RemoteEasyconnectSubmitAwsCliUploadResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
 }
@@ -267,6 +273,9 @@ fn remote_easyconnect_validation_error(
                 field: "total_bytes",
                 value: format!("expected {expected}, got {actual}"),
             }
+        }
+        RemoteEasyconnectValidationError::EmptyAwsCliArgs => {
+            DaemonRequestValidationError::BlankField { field: "args" }
         }
     }
 }
@@ -434,10 +443,11 @@ mod tests {
         PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
         RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectUploadAdmissionRequest,
-        StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
-        OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        UpsertEndpointInventoryRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
@@ -712,6 +722,19 @@ mod tests {
                 verification_queue_depth: 0,
             },
         );
+        let submit_upload = DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(
+            RemoteEasyconnectSubmitAwsCliUploadRequest {
+                job_id: "remote-upload-job-1".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                policy: RemoteUploadBackpressurePolicy::default(),
+                ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                program: "aws".to_string(),
+                args: vec!["s3".to_string(), "cp".to_string()],
+                display_args: vec!["s3".to_string(), "cp".to_string()],
+                progress_message: None,
+            },
+        );
 
         let discovery = serde_json::to_value(discovery).expect("discovery serializes");
         let create = serde_json::to_value(create).expect("create serializes");
@@ -719,6 +742,7 @@ mod tests {
         let revoke = serde_json::to_value(revoke).expect("revoke serializes");
         let renew = serde_json::to_value(renew).expect("renew serializes");
         let admission = serde_json::to_value(admission).expect("admission serializes");
+        let submit_upload = serde_json::to_value(submit_upload).expect("submit serializes");
 
         assert_eq!(discovery["command"], "remote_easyconnect_discovery");
         assert_eq!(create["command"], "remote_easyconnect_create_pairing");
@@ -731,6 +755,10 @@ mod tests {
         assert_eq!(renew["command"], "remote_easyconnect_renew_session");
         assert_eq!(admission["command"], "remote_easyconnect_upload_admission");
         assert_eq!(admission["payload"]["ssd_pressure"], "accepting_writes");
+        assert_eq!(
+            submit_upload["command"],
+            "remote_easyconnect_submit_aws_cli_upload"
+        );
         assert_eq!(
             REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
             "/api/v1/remote/easyconnect/pairings/exchange"

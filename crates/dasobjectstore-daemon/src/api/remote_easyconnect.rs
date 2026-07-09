@@ -1,5 +1,6 @@
 use super::health::DaemonSsdPressure;
 use super::ingest::{DaemonIngressLandingMode, DaemonIngressOrigin};
+use super::jobs::DaemonJobEvent;
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
@@ -411,6 +412,40 @@ pub struct RemoteEasyconnectUploadAdmissionDecision {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectSubmitAwsCliUploadRequest {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+    #[serde(default)]
+    pub policy: RemoteUploadBackpressurePolicy,
+    pub ssd_pressure: DaemonSsdPressure,
+    pub program: String,
+    pub args: Vec<String>,
+    pub display_args: Vec<String>,
+    pub progress_message: Option<String>,
+}
+
+impl RemoteEasyconnectSubmitAwsCliUploadRequest {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        require_non_blank("job_id", &self.job_id)?;
+        require_non_blank("object_store", &self.object_store)?;
+        require_non_blank("program", &self.program)?;
+        if self.args.is_empty() {
+            return Err(RemoteEasyconnectValidationError::EmptyAwsCliArgs);
+        }
+        validate_optional_non_blank("progress_message", self.progress_message.as_deref())?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectSubmitAwsCliUploadResponse {
+    pub running_event: Option<DaemonJobEvent>,
+    pub progress_events: Vec<DaemonJobEvent>,
+    pub final_event: DaemonJobEvent,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteEasyconnectUploadBackpressureReason {
@@ -583,6 +618,7 @@ pub enum RemoteEasyconnectValidationError {
     EmptyUploadSelection,
     AbsoluteUploadSelectionPath { display_path: String },
     UploadSelectionByteMismatch { expected: u64, actual: u64 },
+    EmptyAwsCliArgs,
 }
 
 pub fn resolve_remote_easyconnect_session_lifetime_seconds(
@@ -636,6 +672,9 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
                 formatter,
                 "remote upload handoff selected file bytes total {expected}, got declared total {actual}"
             ),
+            Self::EmptyAwsCliArgs => {
+                formatter.write_str("remote easyconnect AWS CLI upload requires command arguments")
+            }
         }
     }
 }

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.6 - 2026-07-09
+
+- Add a typed daemon API, client helper, and request-handler route for
+  easyconnect AWS CLI remote-upload jobs so submissions reach the
+  admission-gated runtime executor.
+
 ## 0.60.5 - 2026-07-09
 
 - Add a daemon runtime easyconnect AWS CLI upload-job executor that constructs

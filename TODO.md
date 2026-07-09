@@ -830,10 +830,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add a daemon runtime easyconnect AWS CLI upload-job executor that
   constructs remote-upload job metadata and the daemon AWS CLI/S3
   byte-transfer plan before running both through the admission-gated worker.
-- [ ] Wire the remote easyconnect HTTP/API and client route to submit upload
-  jobs into the daemon runtime easyconnect AWS CLI/S3 executor so SSD staging,
-  S3/object-service intake, HDD landing workers, and verification cannot grow
-  without bounds end-to-end.
+- [x] Add the daemon API DTOs, typed daemon client helper, and request-handler
+  route that submit easyconnect AWS CLI upload jobs into the daemon runtime
+  executor.
+- [ ] Wire the remote client/local-agent easyconnect upload command to call the
+  daemon submit route so SSD staging, S3/object-service intake, HDD landing
+  workers, and verification cannot grow without bounds end-to-end.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
   expired pairings, and interrupted browser tabs.

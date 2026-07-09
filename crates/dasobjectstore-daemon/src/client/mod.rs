@@ -26,6 +26,7 @@ use crate::api::{
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
     StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
@@ -359,6 +360,21 @@ where
             response => Err(unexpected("remote_easyconnect_upload_admission", response)),
         }
     }
+
+    pub fn remote_easyconnect_submit_aws_cli_upload(
+        &self,
+        request: RemoteEasyconnectSubmitAwsCliUploadRequest,
+    ) -> Result<RemoteEasyconnectSubmitAwsCliUploadResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(
+            request,
+        ))? {
+            DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(response) => Ok(response),
+            response => Err(unexpected(
+                "remote_easyconnect_submit_aws_cli_upload",
+                response,
+            )),
+        }
+    }
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -406,6 +422,9 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RemoteEasyconnectUploadAdmission(_) => {
             "remote_easyconnect_upload_admission"
         }
+        DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(_) => {
+            "remote_easyconnect_submit_aws_cli_upload"
+        }
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }
@@ -419,9 +438,9 @@ mod tests {
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
         CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
         DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestConflictPolicy,
-        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
-        DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-        DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent, DaemonJobId,
+        DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
+        DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserPageRequest,
@@ -429,7 +448,8 @@ mod tests {
         ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
         ObjectFolderDownloadResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectUploadAdmissionDecision,
+        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
@@ -829,6 +849,61 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::RemoteEasyconnectUploadAdmission(_)]
+        ));
+    }
+
+    #[test]
+    fn remote_easyconnect_submit_aws_cli_upload_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(
+                RemoteEasyconnectSubmitAwsCliUploadResponse {
+                    running_event: None,
+                    progress_events: Vec::new(),
+                    final_event: DaemonJobEvent::Complete(DaemonJobSummary {
+                        job_id: DaemonJobId::new("remote-upload-job-1").expect("job id"),
+                        kind: DaemonJobKind::RemoteUpload,
+                        state: DaemonJobState::Complete,
+                        progress: DaemonJobProgress {
+                            stage: "remote_s3_transfer_complete".to_string(),
+                            work_bytes_done: 42,
+                            work_bytes_total: 42,
+                            work_units_done: 1,
+                            work_units_total: 1,
+                            message: Some("completed".to_string()),
+                        },
+                        submitted_at_utc: "2026-07-09T14:40:00Z".to_string(),
+                        updated_at_utc: "2026-07-09T14:40:00Z".to_string(),
+                        actor: Some("stephen".to_string()),
+                        failure_message: None,
+                    }),
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .remote_easyconnect_submit_aws_cli_upload(RemoteEasyconnectSubmitAwsCliUploadRequest {
+                job_id: "remote-upload-job-1".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                policy: RemoteUploadBackpressurePolicy::default(),
+                ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                program: "aws".to_string(),
+                args: vec!["s3".to_string(), "cp".to_string()],
+                display_args: vec!["s3".to_string(), "cp".to_string()],
+                progress_message: Some("completed".to_string()),
+            })
+            .expect("upload submit response");
+
+        let DaemonJobEvent::Complete(job) = response.final_event else {
+            panic!("expected complete remote upload event");
+        };
+        assert_eq!(job.kind, DaemonJobKind::RemoteUpload);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(_)]
         ));
     }
 

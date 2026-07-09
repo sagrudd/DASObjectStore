@@ -334,7 +334,10 @@ boundary, keeps redacted display arguments separate from execution arguments,
 and records completion bytes through the common remote-upload progress model.
 The runtime job executor constructs the remote-upload job and AWS CLI transfer
 from one easyconnect job request, then runs that job through the same
-admission-gated worker used by lower-level transfer adapters.
+admission-gated worker used by lower-level transfer adapters. The daemon API
+and typed daemon client now expose that executor as an easyconnect AWS CLI
+upload submission route, so paired clients can hand upload jobs to
+``dasobjectstored`` instead of invoking storage mutation paths directly.
 
 Credential Helper Contract
 --------------------------

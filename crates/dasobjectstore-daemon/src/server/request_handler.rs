@@ -9,6 +9,7 @@ use crate::api::{
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectDownloadRequest,
     ObjectFolderDownloadRequest, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -24,7 +25,8 @@ use crate::runtime::{
     AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteUploadAdmissionGate, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate, ServiceCommandRunner,
+    SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
@@ -320,6 +322,38 @@ where
                     self.remote_upload_admission_gate
                         .admission_decision_from_request(request),
                 ))
+            }
+            DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(request) => {
+                let Some(registry) = &self.admin_job_registry else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "job_registry_unavailable",
+                        "remote easyconnect uploads require the daemon job registry",
+                    )));
+                };
+                let accepted_at_utc = self.clock.now_utc();
+                match self
+                    .service_orchestrator
+                    .remote_easyconnect_aws_cli_upload_job(
+                        registry.as_ref(),
+                        Arc::clone(&self.remote_upload_admission_gate),
+                        remote_easyconnect_aws_cli_upload_job_request(
+                            request,
+                            &accepted_at_utc,
+                            actor.and_then(|actor| actor.username.clone()),
+                        ),
+                    ) {
+                    Ok(report) => Ok(DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(
+                        RemoteEasyconnectSubmitAwsCliUploadResponse {
+                            running_event: report.running_event,
+                            progress_events: report.progress_events,
+                            final_event: report.final_event,
+                        },
+                    )),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_upload_failed",
+                        error.to_string(),
+                    ))),
+                }
             }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
@@ -628,6 +662,19 @@ pub trait DaemonServiceOrchestrator {
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError>;
 
+    fn remote_easyconnect_aws_cli_upload_job(
+        &self,
+        _registry: &dyn AdminJobRegistry,
+        _gate: Arc<RemoteUploadAdmissionGate>,
+        _request: RemoteEasyconnectAwsCliUploadJobRequest,
+    ) -> Result<crate::runtime::RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation:
+                "remote easyconnect AWS CLI upload requires an object-service command runner"
+                    .to_string(),
+        })
+    }
+
     fn prepare_enclosure(
         &self,
         _request: PrepareEnclosureRequest,
@@ -851,6 +898,29 @@ fn daemon_job_summary_from_accepted(
     }
 }
 
+fn remote_easyconnect_aws_cli_upload_job_request(
+    request: RemoteEasyconnectSubmitAwsCliUploadRequest,
+    accepted_at_utc: &str,
+    actor: Option<String>,
+) -> RemoteEasyconnectAwsCliUploadJobRequest {
+    RemoteEasyconnectAwsCliUploadJobRequest {
+        job_id: request.job_id,
+        object_store: request.object_store,
+        source_bytes: request.source_bytes,
+        policy: request.policy,
+        ssd_pressure: request.ssd_pressure,
+        program: request.program,
+        args: request.args,
+        display_args: request.display_args,
+        submitted_at_utc: accepted_at_utc.to_string(),
+        started_at_utc: accepted_at_utc.to_string(),
+        finished_at_utc: accepted_at_utc.to_string(),
+        progress_updated_at_utc: accepted_at_utc.to_string(),
+        actor,
+        progress_message: request.progress_message,
+    }
+}
+
 impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
 where
     R: ServiceCommandRunner,
@@ -903,6 +973,17 @@ where
             summary.buckets,
             summary.commands,
         ))
+    }
+
+    fn remote_easyconnect_aws_cli_upload_job(
+        &self,
+        registry: &dyn AdminJobRegistry,
+        gate: Arc<RemoteUploadAdmissionGate>,
+        request: RemoteEasyconnectAwsCliUploadJobRequest,
+    ) -> Result<crate::runtime::RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+        GarageServiceController::remote_easyconnect_aws_cli_upload_job(
+            self, registry, gate, request,
+        )
     }
 
     fn create_object_store(
@@ -1140,6 +1221,9 @@ impl DaemonApiRequest {
             Self::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
             Self::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
             Self::RemoteEasyconnectUploadAdmission(_) => "remote_easyconnect_upload_admission",
+            Self::RemoteEasyconnectSubmitAwsCliUpload(_) => {
+                "remote_easyconnect_submit_aws_cli_upload"
+            }
         }
     }
 }
@@ -1164,7 +1248,8 @@ mod tests {
         ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
         ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectUploadAdmissionRequest,
+        PrepareEnclosureRequest, PrepareEnclosureResponse,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
         RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, SubmitIngestFilesRequest,
         SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
@@ -1174,8 +1259,9 @@ mod tests {
     use crate::runtime::{
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
         FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
-        RemoteUploadAdmissionGate,
+        RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
     };
+    use crate::AdminJobRegistry;
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::remote_upload::{
@@ -2318,6 +2404,70 @@ mod tests {
     }
 
     #[test]
+    fn daemon_submits_remote_easyconnect_aws_cli_upload_job() {
+        let root = temp_root("remote-easyconnect-submit-aws-cli");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-09T14:40:00Z"),
+            registry,
+        );
+
+        let response = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(
+                RemoteEasyconnectSubmitAwsCliUploadRequest {
+                    job_id: "remote-upload-job-1".to_string(),
+                    object_store: "zymo_fecal_2025.05".to_string(),
+                    source_bytes: 42,
+                    policy: RemoteUploadBackpressurePolicy::default(),
+                    ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                    program: "aws".to_string(),
+                    args: vec![
+                        "s3".to_string(),
+                        "cp".to_string(),
+                        "/private/source/reads.fastq.gz".to_string(),
+                        "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
+                    ],
+                    display_args: vec![
+                        "s3".to_string(),
+                        "cp".to_string(),
+                        "<source-redacted>".to_string(),
+                        "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
+                    ],
+                    progress_message: Some("completed".to_string()),
+                },
+            ))
+            .expect("request handled");
+
+        let DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(response) = response else {
+            panic!("expected remote easyconnect AWS CLI upload response");
+        };
+        let crate::api::DaemonJobEvent::Complete(job) = response.final_event else {
+            panic!("expected complete final event");
+        };
+        assert_eq!(job.kind, DaemonJobKind::RemoteUpload);
+        assert_eq!(job.progress.work_bytes_done, 42);
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .remote_upload_calls
+                .borrow()
+                .as_slice(),
+            [(
+                "remote-upload-job-1".to_string(),
+                "zymo_fecal_2025.05".to_string(),
+                42,
+                "aws".to_string()
+            )]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn reports_unwired_commands_as_api_errors() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -2563,6 +2713,7 @@ mod tests {
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         create_object_store_calls: RefCell<Vec<(String, String, bool)>>,
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
+        remote_upload_calls: RefCell<Vec<(String, String, u64, String)>>,
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
@@ -2619,6 +2770,46 @@ mod tests {
                 1,
                 3,
             ))
+        }
+
+        fn remote_easyconnect_aws_cli_upload_job(
+            &self,
+            registry: &dyn AdminJobRegistry,
+            _gate: Arc<RemoteUploadAdmissionGate>,
+            request: RemoteEasyconnectAwsCliUploadJobRequest,
+        ) -> Result<crate::runtime::RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+        {
+            self.remote_upload_calls.borrow_mut().push((
+                request.job_id.clone(),
+                request.object_store.clone(),
+                request.source_bytes,
+                request.program.clone(),
+            ));
+            let job = DaemonJobSummary {
+                job_id: DaemonJobId::new(request.job_id.clone())
+                    .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(request.job_id.clone()))?,
+                kind: DaemonJobKind::RemoteUpload,
+                state: DaemonJobState::Complete,
+                progress: DaemonJobProgress {
+                    stage: "remote_s3_transfer_complete".to_string(),
+                    work_bytes_done: request.source_bytes,
+                    work_bytes_total: request.source_bytes,
+                    work_units_done: 1,
+                    work_units_total: 1,
+                    message: request.progress_message,
+                },
+                submitted_at_utc: request.submitted_at_utc,
+                updated_at_utc: request.finished_at_utc,
+                actor: request.actor,
+                failure_message: None,
+            };
+            registry.record(job.clone())?;
+            Ok(crate::runtime::RemoteUploadS3TransferWorkerReport {
+                running_event: None,
+                progress_events: Vec::new(),
+                final_event: crate::api::DaemonJobEvent::Complete(job),
+                runtime_after: Default::default(),
+            })
         }
 
         fn create_local_group(
