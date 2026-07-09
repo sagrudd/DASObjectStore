@@ -43,6 +43,7 @@ pub use api::{
     ObjectBrowserPageRequest, ObjectBrowserPlacement, ObjectBrowserPlacementLocation,
     ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
     ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
+    ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
     PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
     PrepareEnclosureResponse, PrepareEnclosureValidationError, StoreInventoryItem,
     StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,

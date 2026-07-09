@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.21 - 2026-07-09
+
+- Add daemon-authorized ObjectStore folder archive downloads with verified
+  managed-HDD preflight, bounded streaming ``tar.gz`` generation, and standalone
+  Web API headers that expose source byte and file counts before the stream.
+
 ## 0.54.20 - 2026-07-09
 
 - Promote performance recommendation rationale into its own report section so

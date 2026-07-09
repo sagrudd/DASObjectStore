@@ -11,17 +11,21 @@ path = "src/lib.rs"
 [dependencies]
 argon2.workspace = true
 axum.workspace = true
+bytes.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
 dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true
+flate2.workspace = true
 libc.workspace = true
 rand_core.workspace = true
 rcgen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tar.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true
 

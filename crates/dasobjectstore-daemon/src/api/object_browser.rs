@@ -46,6 +46,44 @@ pub struct ObjectDownloadResponse {
     pub size_bytes: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectFolderDownloadRequest {
+    pub endpoint: StoreId,
+    pub prefix: String,
+}
+
+impl ObjectFolderDownloadRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.endpoint.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "endpoint" });
+        }
+        if self.prefix.trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "prefix" });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectFolderDownloadResponse {
+    pub endpoint: StoreId,
+    pub store_id: StoreId,
+    pub prefix: String,
+    pub archive_name: String,
+    pub total_files: u64,
+    pub total_source_bytes: u64,
+    pub entries: Vec<ObjectFolderArchiveEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectFolderArchiveEntry {
+    pub object_id: ObjectId,
+    pub archive_path: String,
+    pub source_disk_id: DiskId,
+    pub source_path: PathBuf,
+    pub size_bytes: u64,
+}
+
 impl ObjectBrowserRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         reject_blank_optional("prefix", self.prefix.as_deref())?;
@@ -192,7 +230,8 @@ mod tests {
         ObjectBrowserFolderNode, ObjectBrowserPageRequest, ObjectBrowserPlacement,
         ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
         ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
+        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
+        ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
     };
     use crate::api::DaemonRequestValidationError;
     use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -247,6 +286,40 @@ mod tests {
 
         assert_eq!(encoded["file_name"], "metadata.tsv");
         assert_eq!(encoded["size_bytes"], 512);
+    }
+
+    #[test]
+    fn object_folder_download_request_and_response_serialize_stably() {
+        let request = ObjectFolderDownloadRequest {
+            endpoint: StoreId::new("ena").expect("store id"),
+            prefix: "ENA/Xenognostikon".to_string(),
+        };
+
+        request.validate().expect("request is valid");
+        let encoded = serde_json::to_value(&request).expect("request serializes");
+
+        assert_eq!(encoded["endpoint"], "ena");
+        assert_eq!(encoded["prefix"], "ENA/Xenognostikon");
+
+        let response = ObjectFolderDownloadResponse {
+            endpoint: StoreId::new("ena").expect("store id"),
+            store_id: StoreId::new("ena").expect("store id"),
+            prefix: request.prefix,
+            archive_name: "Xenognostikon.tar.gz".to_string(),
+            total_files: 1,
+            total_source_bytes: 512,
+            entries: vec![ObjectFolderArchiveEntry {
+                object_id: ObjectId::new("ENA/Xenognostikon/metadata.tsv").expect("object id"),
+                archive_path: "metadata.tsv".to_string(),
+                source_disk_id: DiskId::new("disk-a").expect("disk id"),
+                source_path: "/srv/dasobjectstore/hdd/disk-a/objects/aa/object/payload".into(),
+                size_bytes: 512,
+            }],
+        };
+        let encoded = serde_json::to_value(response).expect("response serializes");
+
+        assert_eq!(encoded["archive_name"], "Xenognostikon.tar.gz");
+        assert_eq!(encoded["entries"][0]["archive_path"], "metadata.tsv");
     }
 
     #[test]

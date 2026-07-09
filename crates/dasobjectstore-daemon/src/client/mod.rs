@@ -18,10 +18,10 @@ use crate::api::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
     DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
     IngestJobStatusRequest, IngestJobStatusResponse, ObjectBrowserRequest, ObjectBrowserResponse,
-    ObjectDownloadRequest, ObjectDownloadResponse, PrepareEnclosureRequest,
-    PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
+    ObjectFolderDownloadResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -243,6 +243,16 @@ where
         }
     }
 
+    pub fn object_folder_download(
+        &self,
+        request: ObjectFolderDownloadRequest,
+    ) -> Result<ObjectFolderDownloadResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ObjectFolderDownload(request))? {
+            DaemonApiResponse::ObjectFolderDownload(response) => Ok(response),
+            response => Err(unexpected("object_folder_download", response)),
+        }
+    }
+
     pub fn upsert_endpoint_inventory(
         &self,
         request: UpsertEndpointInventoryRequest,
@@ -302,6 +312,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
+        DaemonApiResponse::ObjectFolderDownload(_) => "object_folder_download",
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
@@ -325,6 +336,7 @@ mod tests {
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserRequest,
         ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
+        ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
         SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
@@ -717,6 +729,48 @@ mod tests {
 
         assert_eq!(response.file_name, "metadata.tsv");
         assert_eq!(response.size_bytes, 512);
+    }
+
+    #[test]
+    fn object_folder_download_uses_typed_request_and_response() {
+        let transport = InProcessDaemonTransport::new(|request| {
+            Ok(match request {
+                DaemonApiRequest::ObjectFolderDownload(request) => {
+                    DaemonApiResponse::ObjectFolderDownload(ObjectFolderDownloadResponse {
+                        endpoint: request.endpoint.clone(),
+                        store_id: request.endpoint,
+                        prefix: request.prefix,
+                        archive_name: "raw.tar.gz".to_string(),
+                        total_files: 1,
+                        total_source_bytes: 512,
+                        entries: vec![ObjectFolderArchiveEntry {
+                            object_id: dasobjectstore_core::ids::ObjectId::new(
+                                "ena/raw/metadata.tsv",
+                            )
+                            .expect("object id"),
+                            archive_path: "metadata.tsv".to_string(),
+                            source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a")
+                                .expect("disk id"),
+                            source_path: "/srv/dasobjectstore/hdd/disk-a/objects/aa/object/payload"
+                                .into(),
+                            size_bytes: 512,
+                        }],
+                    })
+                }
+                other => panic!("unexpected request {other:?}"),
+            })
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .object_folder_download(ObjectFolderDownloadRequest {
+                endpoint: StoreId::new("ena").expect("store id"),
+                prefix: "ena/raw".to_string(),
+            })
+            .expect("folder download response");
+
+        assert_eq!(response.archive_name, "raw.tar.gz");
+        assert_eq!(response.entries[0].archive_path, "metadata.tsv");
     }
 
     #[test]

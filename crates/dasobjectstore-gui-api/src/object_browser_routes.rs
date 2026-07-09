@@ -10,14 +10,20 @@ use axum::{
     routing::get,
     Extension, Json, Router,
 };
+use bytes::Bytes;
 use dasobjectstore_core::ids::{ObjectId, StoreId};
 use dasobjectstore_daemon::{
     DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserPageRequest,
     ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-    ObjectDownloadResponse, UnixSocketDaemonTransport,
+    ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
+    UnixSocketDaemonTransport,
 };
+use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
+use std::io::{self, Write};
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
 
 pub fn standalone_object_browser_router(auth_store: LocalAuthStore) -> Router {
@@ -37,6 +43,10 @@ pub(crate) fn standalone_object_browser_router_with_state(
         .route(
             "/api/v1/object-stores/{endpoint}/objects/download/{*object_id}",
             get(object_store_object_download),
+        )
+        .route(
+            "/api/v1/object-stores/{endpoint}/folders/download/{*prefix}",
+            get(object_store_folder_download),
         )
         .layer(Extension(state.auth_store.clone()))
         .with_state(state)
@@ -69,6 +79,11 @@ pub(crate) trait StandaloneObjectBrowserClient: Send + Sync {
         &self,
         request: ObjectDownloadRequest,
     ) -> Result<ObjectDownloadResponse, StandaloneObjectBrowserClientError>;
+
+    fn object_folder_download(
+        &self,
+        request: ObjectFolderDownloadRequest,
+    ) -> Result<ObjectFolderDownloadResponse, StandaloneObjectBrowserClientError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,6 +134,15 @@ impl StandaloneObjectBrowserClient for DaemonStandaloneObjectBrowserClient {
     ) -> Result<ObjectDownloadResponse, StandaloneObjectBrowserClientError> {
         self.client
             .object_download(request)
+            .map_err(object_browser_client_error)
+    }
+
+    fn object_folder_download(
+        &self,
+        request: ObjectFolderDownloadRequest,
+    ) -> Result<ObjectFolderDownloadResponse, StandaloneObjectBrowserClientError> {
+        self.client
+            .object_folder_download(request)
             .map_err(object_browser_client_error)
     }
 }
@@ -204,6 +228,42 @@ async fn object_store_object_download(
     Ok(response)
 }
 
+async fn object_store_folder_download(
+    State(state): State<StandaloneObjectBrowserRouteState>,
+    _actor: AuthenticatedGuiActor,
+    Path((endpoint, prefix)): Path<(String, String)>,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let request = object_folder_download_request(endpoint, prefix)?;
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_folder_download_request",
+            err.to_string(),
+        )
+    })?;
+    let download = state
+        .object_browser_client
+        .as_ref()
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::NOT_IMPLEMENTED,
+                "daemon_object_folder_download_unavailable",
+                "daemon ObjectStore folder download contract is not available",
+            )
+        })?
+        .object_folder_download(request)
+        .map_err(|err| route_error(err.status, err.code, err.message))?;
+
+    let headers = object_folder_download_headers(&download)?;
+    let archive_download = download.clone();
+    let (sender, receiver) = mpsc::channel::<Result<Bytes, io::Error>>(4);
+    tokio::task::spawn_blocking(move || stream_folder_archive(archive_download, sender));
+    let body = Body::from_stream(ReceiverStream::new(receiver));
+    let mut response = Response::new(body);
+    *response.headers_mut() = headers;
+    Ok(response)
+}
+
 fn object_browser_request(
     endpoint: String,
     query: ObjectBrowserQuery,
@@ -258,6 +318,23 @@ fn object_download_request(
     })
 }
 
+fn object_folder_download_request(
+    endpoint: String,
+    prefix: String,
+) -> Result<ObjectFolderDownloadRequest, (StatusCode, Json<AuthRouteError>)> {
+    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_folder_download_request",
+            err.to_string(),
+        )
+    })?;
+    Ok(ObjectFolderDownloadRequest {
+        endpoint,
+        prefix: required_field("prefix", prefix.trim_start_matches('/').to_string())?,
+    })
+}
+
 fn object_download_headers(
     download: &ObjectDownloadResponse,
 ) -> Result<HeaderMap, (StatusCode, Json<AuthRouteError>)> {
@@ -288,6 +365,87 @@ fn object_download_headers(
         })?,
     );
     Ok(headers)
+}
+
+fn object_folder_download_headers(
+    download: &ObjectFolderDownloadResponse,
+) -> Result<HeaderMap, (StatusCode, Json<AuthRouteError>)> {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/gzip"));
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&content_disposition(&download.archive_name)).map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_object_folder_download_response",
+                err.to_string(),
+            )
+        })?,
+    );
+    headers.insert(
+        "x-dasobjectstore-archive-files",
+        HeaderValue::from_str(&download.total_files.to_string()).map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_object_folder_download_response",
+                err.to_string(),
+            )
+        })?,
+    );
+    headers.insert(
+        "x-dasobjectstore-archive-source-bytes",
+        HeaderValue::from_str(&download.total_source_bytes.to_string()).map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "invalid_object_folder_download_response",
+                err.to_string(),
+            )
+        })?,
+    );
+    Ok(headers)
+}
+
+fn stream_folder_archive(
+    download: ObjectFolderDownloadResponse,
+    sender: mpsc::Sender<Result<Bytes, io::Error>>,
+) {
+    let error_sender = sender.clone();
+    if let Err(err) = write_folder_archive(download, sender) {
+        let _ = error_sender.blocking_send(Err(err));
+    }
+}
+
+fn write_folder_archive(
+    download: ObjectFolderDownloadResponse,
+    sender: mpsc::Sender<Result<Bytes, io::Error>>,
+) -> io::Result<()> {
+    let writer = ChannelWriter { sender };
+    let encoder = GzEncoder::new(writer, Compression::default());
+    let mut archive = tar::Builder::new(encoder);
+    for entry in download.entries {
+        archive.append_path_with_name(&entry.source_path, &entry.archive_path)?;
+    }
+    let encoder = archive.into_inner()?;
+    encoder.finish()?;
+    Ok(())
+}
+
+struct ChannelWriter {
+    sender: mpsc::Sender<Result<Bytes, io::Error>>,
+}
+
+impl Write for ChannelWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.sender
+            .blocking_send(Ok(Bytes::copy_from_slice(buf)))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "archive receiver closed"))?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn content_disposition(file_name: &str) -> String {
@@ -382,6 +540,8 @@ fn daemon_error_status(code: &str) -> StatusCode {
     match code {
         "object_download_not_found" => StatusCode::NOT_FOUND,
         "object_download_unavailable" => StatusCode::CONFLICT,
+        "object_folder_download_not_found" => StatusCode::NOT_FOUND,
+        "object_folder_download_unavailable" => StatusCode::CONFLICT,
         _ => StatusCode::BAD_GATEWAY,
     }
 }
@@ -415,9 +575,12 @@ mod tests {
     use dasobjectstore_daemon::{
         ObjectBrowserFileNode, ObjectBrowserPageRequest, ObjectBrowserReadinessState,
         ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectDownloadResponse,
+        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
+        ObjectFolderDownloadResponse,
     };
+    use flate2::read::GzDecoder;
     use std::fs;
+    use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -639,6 +802,82 @@ mod tests {
         cleanup(&root);
     }
 
+    #[tokio::test]
+    async fn object_folder_download_route_streams_tar_gz_archive() {
+        let root = temp_root("object-folder-download");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let metadata_path = write_test_file(&root, "objects/metadata.tsv", b"metadata");
+        let reads_path = write_test_file(&root, "objects/reads.fastq.gz", b"reads");
+        let client = recording_browser_client();
+        client.set_folder_download(ObjectFolderDownloadResponse {
+            endpoint: StoreId::new("ena").expect("store id"),
+            store_id: StoreId::new("ena").expect("store id"),
+            prefix: "ENA/Xeno".to_string(),
+            archive_name: "Xeno.tar.gz".to_string(),
+            total_files: 2,
+            total_source_bytes: b"metadata".len() as u64 + b"reads".len() as u64,
+            entries: vec![
+                ObjectFolderArchiveEntry {
+                    object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
+                    archive_path: "metadata.tsv".to_string(),
+                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a")
+                        .expect("disk id"),
+                    source_path: metadata_path,
+                    size_bytes: b"metadata".len() as u64,
+                },
+                ObjectFolderArchiveEntry {
+                    object_id: ObjectId::new("ENA/Xeno/reads.fastq.gz").expect("object id"),
+                    archive_path: "reads.fastq.gz".to_string(),
+                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a")
+                        .expect("disk id"),
+                    source_path: reads_path,
+                    size_bytes: b"reads".len() as u64,
+                },
+            ],
+        });
+        let app = test_router(auth_store, client.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/folders/download/ENA/Xeno")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()["content-disposition"],
+            "attachment; filename=\"Xeno.tar.gz\""
+        );
+        assert_eq!(response.headers()["x-dasobjectstore-archive-files"], "2");
+        assert_eq!(
+            client.folder_download_requests(),
+            vec![ObjectFolderDownloadRequest {
+                endpoint: StoreId::new("ena").expect("store id"),
+                prefix: "ENA/Xeno".to_string(),
+            }]
+        );
+        let body = to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .expect("body bytes");
+        assert_eq!(
+            tar_gz_members(&body),
+            vec![
+                ("metadata.tsv".to_string(), b"metadata".to_vec()),
+                ("reads.fastq.gz".to_string(), b"reads".to_vec()),
+            ]
+        );
+
+        cleanup(&root);
+    }
+
     fn test_router(
         auth_store: LocalAuthStore,
         client: Arc<RecordingObjectBrowserClient>,
@@ -669,7 +908,9 @@ mod tests {
     struct RecordingObjectBrowserClient {
         requests: Mutex<Vec<ObjectBrowserRequest>>,
         download_requests: Mutex<Vec<ObjectDownloadRequest>>,
+        folder_download_requests: Mutex<Vec<ObjectFolderDownloadRequest>>,
         download: Mutex<Option<ObjectDownloadResponse>>,
+        folder_download: Mutex<Option<ObjectFolderDownloadResponse>>,
         error: Option<StandaloneObjectBrowserClientError>,
     }
 
@@ -678,7 +919,9 @@ mod tests {
             Self {
                 requests: Mutex::new(Vec::new()),
                 download_requests: Mutex::new(Vec::new()),
+                folder_download_requests: Mutex::new(Vec::new()),
                 download: Mutex::new(None),
+                folder_download: Mutex::new(None),
                 error: Some(error),
             }
         }
@@ -694,8 +937,19 @@ mod tests {
                 .clone()
         }
 
+        fn folder_download_requests(&self) -> Vec<ObjectFolderDownloadRequest> {
+            self.folder_download_requests
+                .lock()
+                .expect("folder download requests lock")
+                .clone()
+        }
+
         fn set_download(&self, download: ObjectDownloadResponse) {
             *self.download.lock().expect("download lock") = Some(download);
+        }
+
+        fn set_folder_download(&self, download: ObjectFolderDownloadResponse) {
+            *self.folder_download.lock().expect("folder download lock") = Some(download);
         }
     }
 
@@ -755,6 +1009,28 @@ mod tests {
                     message: "test download response not configured".to_string(),
                 })
         }
+
+        fn object_folder_download(
+            &self,
+            request: ObjectFolderDownloadRequest,
+        ) -> Result<ObjectFolderDownloadResponse, StandaloneObjectBrowserClientError> {
+            self.folder_download_requests
+                .lock()
+                .expect("folder download requests lock")
+                .push(request);
+            if let Some(error) = &self.error {
+                return Err(error.clone());
+            }
+            self.folder_download
+                .lock()
+                .expect("folder download lock")
+                .clone()
+                .ok_or_else(|| StandaloneObjectBrowserClientError {
+                    status: StatusCode::NOT_FOUND,
+                    code: "object_folder_download_not_found".to_string(),
+                    message: "test folder download response not configured".to_string(),
+                })
+        }
     }
 
     async fn response_json(response: axum::response::Response) -> serde_json::Value {
@@ -775,6 +1051,33 @@ mod tests {
             .expect("system clock")
             .as_nanos();
         std::env::temp_dir().join(format!("dasobjectstore-gui-browser-{name}-{suffix}"))
+    }
+
+    fn write_test_file(root: &Path, relative_path: &str, bytes: &[u8]) -> PathBuf {
+        let path = root.join(relative_path);
+        fs::create_dir_all(path.parent().expect("file parent")).expect("file parent");
+        fs::write(&path, bytes).expect("write test file");
+        path
+    }
+
+    fn tar_gz_members(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let decoder = GzDecoder::new(bytes);
+        let mut archive = tar::Archive::new(decoder);
+        let mut members = Vec::new();
+        for entry in archive.entries().expect("archive entries") {
+            let mut entry = entry.expect("archive entry");
+            let path = entry
+                .path()
+                .expect("entry path")
+                .to_string_lossy()
+                .to_string();
+            let mut contents = Vec::new();
+            entry
+                .read_to_end(&mut contents)
+                .expect("entry contents read");
+            members.push((path, contents));
+        }
+        members
     }
 
     fn cleanup(path: &Path) {

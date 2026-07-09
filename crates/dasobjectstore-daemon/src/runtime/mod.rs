@@ -41,7 +41,9 @@ pub use object_browser::{
     query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,
     ObjectBrowserMetadataReadError, ObjectBrowserQueryError,
 };
-pub(crate) use object_download::resolve_object_download_with_hdd_root;
+pub(crate) use object_download::{
+    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+};
 pub use performance_policy::{
     authoritative_performance_recommendation_path, read_authoritative_ingest_policy,
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,

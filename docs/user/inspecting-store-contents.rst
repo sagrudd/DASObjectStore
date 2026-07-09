@@ -71,3 +71,30 @@ read managed HDD roots directly. If the object is missing, redownload-required,
 SSD-only, or otherwise lacks a verified managed HDD placement, the API returns a
 clear unavailable/not-found error instead of serving an arbitrary filesystem
 path.
+
+Download Folder Archives From the Web API
+-----------------------------------------
+
+The standalone Web API also exposes folder archive downloads through the daemon
+boundary:
+
+.. code-block:: text
+
+   GET /api/v1/object-stores/<store>/folders/download/<folder-prefix>
+
+``<folder-prefix>`` is normally the relative prefix shown by the ObjectStore
+browser, for example ``raw/PAW10254``. For compatibility with object IDs, the
+daemon also accepts a prefix that begins with the store name, such as
+``zymo_fecal_2025.05/raw/PAW10254``.
+
+Before streaming begins, ``dasobjectstored`` resolves every object under the
+prefix, applies the same read policy used for the browser and file downloads,
+and verifies that each archive member has an existing verified settled copy on
+a managed HDD root. If any object is missing, SSD-only, unverified, degraded, or
+outside the store, the request fails before an archive body is generated.
+
+Successful responses stream a ``tar.gz`` archive without staging the full
+archive on SSD or HDD. The archive contains paths relative to the selected
+folder prefix, and the response includes ``X-DASObjectStore-Archive-Files`` and
+``X-DASObjectStore-Archive-Source-Bytes`` headers so Web clients can show a
+preflight summary before or as the download starts.

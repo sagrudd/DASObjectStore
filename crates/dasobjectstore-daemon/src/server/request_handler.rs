@@ -8,8 +8,9 @@ use crate::api::{
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectDownloadRequest,
-    PrepareEnclosureRequest, PrepareEnclosureResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    ObjectFolderDownloadRequest, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -18,11 +19,12 @@ use crate::auth::{
 use crate::runtime::{
     default_endpoint_registry_path, default_hdd_root, default_ssd_root,
     provision_garage_store_registry, query_object_browser_metadata, read_object_browser_metadata,
-    resolve_object_download_with_hdd_root, submit_ingest_files_to_local_store_with_progress,
-    upsert_endpoint_inventory_record, AdminJobRegistry, DaemonIngestFilesRuntimeError,
-    DaemonServiceRuntimeError, GarageServiceController, LocalAdminRuntimeError,
-    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
-    ObjectBrowserQueryError, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+    submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
+    AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
@@ -279,6 +281,29 @@ where
                     ))),
                 }
             }
+            DaemonApiRequest::ObjectFolderDownload(request) => {
+                let store_id = match self.authorize_object_folder_download(actor, &request) {
+                    Ok(store_id) => store_id,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            error.code(),
+                            error.to_string(),
+                        )));
+                    }
+                };
+                match resolve_object_folder_download_with_hdd_root(
+                    &self.live_sqlite_path,
+                    &self.hdd_root_path,
+                    &store_id,
+                    &request,
+                ) {
+                    Ok(response) => Ok(DaemonApiResponse::ObjectFolderDownload(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    ))),
+                }
+            }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
                 format!(
@@ -357,6 +382,14 @@ where
         &self,
         actor: Option<&DaemonLocalActor>,
         request: &ObjectDownloadRequest,
+    ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        self.authorize_endpoint_read(actor, &request.endpoint)
+    }
+
+    fn authorize_object_folder_download(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        request: &ObjectFolderDownloadRequest,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
         self.authorize_endpoint_read(actor, &request.endpoint)
     }
@@ -1079,6 +1112,7 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(_) => "create_object_store",
             Self::ObjectBrowser(_) => "object_browser",
             Self::ObjectDownload(_) => "object_download",
+            Self::ObjectFolderDownload(_) => "object_folder_download",
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
@@ -1104,10 +1138,10 @@ mod tests {
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
         ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-        ObjectBrowserSort, ObjectDownloadRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        PrepareEnclosureResponse, StoreInventoryRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -1994,6 +2028,67 @@ mod tests {
         assert_eq!(response.file_name, "sample.fastq.gz");
         assert_eq!(response.source_path, source_path);
         assert_eq!(response.size_bytes, b"download payload".len() as u64);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_folder_download_allows_reader_group_without_writer_membership() {
+        let root = temp_root("folder-download-reader-allowed");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "ena",
+            Some("readers"),
+            Some("mnemosyne"),
+            false,
+        );
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(
+            &live_sqlite,
+            "ena/raw/Xeno/sample.fastq.gz",
+            "Protected",
+            true,
+        );
+        insert_browser_object(&live_sqlite, "ena/raw/Xeno/metadata.tsv", "Protected", true);
+        let hdd_root = root.join("hdd");
+        let disk_root = hdd_root.join("qnap-1057");
+        write_hdd_marker(&disk_root, "qnap-1057");
+        let sample_path = disk_root.join("ena/raw/Xeno/sample.fastq.gz");
+        fs::create_dir_all(sample_path.parent().expect("sample parent")).expect("sample parent");
+        fs::write(&sample_path, b"sample payload").expect("write sample");
+        let metadata_path = disk_root.join("ena/raw/Xeno/metadata.tsv");
+        fs::write(&metadata_path, b"metadata").expect("write metadata");
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite)
+                .with_hdd_root_path(hdd_root);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("reader")
+            .with_groups(["readers"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectFolderDownload(ObjectFolderDownloadRequest {
+                    endpoint: StoreId::new("ena").expect("store id"),
+                    prefix: "ena/raw/Xeno".to_string(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        let DaemonApiResponse::ObjectFolderDownload(response) = response else {
+            panic!("expected object folder download response, got {response:?}");
+        };
+        assert_eq!(response.archive_name, "Xeno.tar.gz");
+        assert_eq!(response.total_files, 2);
+        assert_eq!(
+            response.total_source_bytes,
+            b"sample payload".len() as u64 + b"metadata".len() as u64
+        );
+        assert_eq!(response.entries[0].archive_path, "metadata.tsv");
+        assert_eq!(response.entries[1].archive_path, "sample.fastq.gz");
 
         cleanup(&root);
     }

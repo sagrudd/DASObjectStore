@@ -686,13 +686,13 @@ planning are tracked under Milestones 21 and 22.
   and apply them to ObjectBrowser metadata authorization.
 - [x] Reuse ObjectBrowser public/read/write policy for individual file download
   authorization.
-- [ ] Reuse ObjectBrowser public/read/write policy for folder archive download
+- [x] Reuse ObjectBrowser public/read/write policy for folder archive download
   authorization when folder download routes are implemented.
 - [x] Implement individual file download routes that stream from the selected
   settled copy, report content length where known, use safe content-disposition
   headers, and fail clearly for missing, unsettled, degraded, or unauthorized
   objects.
-- [ ] Implement folder download as streamed `tar.gz` archive generation for a
+- [x] Implement folder download as streamed `tar.gz` archive generation for a
   selected folder prefix, with archive-size preflight, bounded memory use,
   cancellation-aware cleanup, and no requirement to stage the full archive on
   SSD or HDD.
