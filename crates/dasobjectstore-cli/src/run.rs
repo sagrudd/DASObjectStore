@@ -5438,16 +5438,16 @@ fn performance_report_metadata_json(report: &PerformanceReport) -> String {
         "header": "DASObjectStore performance report",
         "rows": [
             [
+                {"label": "Run ID", "value": report.run_id},
                 {"label": "Document ID", "value": document_id},
                 {"label": "Performance test identifier", "value": "DASObjectStore-Disk-Speed"},
-                {"label": "Version", "value": dasobjectstore_core::VERSION},
                 {"label": "Report state", "value": "FINAL"},
             ],
             [
                 {"label": "DeviceID", "value": hostname_for_report()},
                 {"label": "Operator", "value": std::env::var("USER").unwrap_or_else(|_| "not recorded".to_string())},
-                {"label": "Timestamp", "value": report.generated_at_utc},
-                {"label": "Run ID", "value": report.run_id},
+                {"label": "Generated at (UTC)", "value": report.generated_at_utc},
+                {"label": "Version", "value": dasobjectstore_core::VERSION},
             ],
             [
                 {"label": "Repository revision", "value": report.repository_revision},
@@ -5503,16 +5503,16 @@ fn performance_report_metadata_json_from_artifact(artifact: &Value) -> String {
         "header": "DASObjectStore performance report",
         "rows": [
             [
+                {"label": "Run ID", "value": run_id},
                 {"label": "Document ID", "value": format!("DOS-{run_id}")},
                 {"label": "Performance test identifier", "value": "DASObjectStore-Disk-Speed"},
-                {"label": "Version", "value": version},
                 {"label": "Report state", "value": "FINAL"},
             ],
             [
                 {"label": "DeviceID", "value": hostname_for_report()},
                 {"label": "Operator", "value": std::env::var("USER").unwrap_or_else(|_| "not recorded".to_string())},
-                {"label": "Timestamp", "value": generated_at},
-                {"label": "Run ID", "value": run_id},
+                {"label": "Generated at (UTC)", "value": generated_at},
+                {"label": "Version", "value": version},
             ],
             [
                 {"label": "Repository revision", "value": revision},
@@ -12404,16 +12404,16 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(metadata["header"], "DASObjectStore performance report");
-        assert_eq!(labels[0], "Document ID");
+        assert_eq!(labels[0], "Run ID");
         for required in [
+            "Run ID",
             "Document ID",
             "Performance test identifier",
             "Version",
             "Report state",
             "DeviceID",
             "Operator",
-            "Timestamp",
-            "Run ID",
+            "Generated at (UTC)",
             "Repository revision",
             "Test status",
             "Signature of operator",
@@ -12443,8 +12443,8 @@ mod tests {
         let qr_payload = performance_report_qr_payload_from_artifact(&artifact);
 
         assert_eq!(metadata["header"], "DASObjectStore performance report");
-        assert_eq!(metadata["rows"][0][0]["label"], "Document ID");
-        assert_eq!(metadata["rows"][0][1]["value"], "DASObjectStore-Disk-Speed");
+        assert_eq!(metadata["rows"][0][0]["label"], "Run ID");
+        assert_eq!(metadata["rows"][0][2]["value"], "DASObjectStore-Disk-Speed");
         assert_eq!(metadata["rows"][2][2]["label"], "Signature of operator");
         assert_eq!(metadata["rows"][2][3]["label"], "Cryptographic signature");
         assert!(qr_payload.starts_with("mnemosyne-report:DASObjectStore:perf-test-run:"));

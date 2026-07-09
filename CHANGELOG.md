@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.16 - 2026-07-09
+
+- Align DASObjectStore performance report metadata with the shared Grammateus
+  ``dasobjectstore-performance`` template so rebuilt PDFs from existing JSON
+  artifacts render with the required Run ID, QR provenance, and signature table.
+
 ## 0.54.15 - 2026-07-09
 
 - Fix the packaged Grammateus report wrapper to invoke the
