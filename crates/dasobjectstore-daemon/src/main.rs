@@ -70,7 +70,7 @@ fn garage_runtime_config(
         config_path: PathBuf::from(DEFAULT_GARAGE_CONFIG_PATH),
         metadata_path: config.state_dir.join("garage/meta"),
         data_path: PathBuf::from("/srv/dasobjectstore/hdd/garage"),
-        endpoint: format!("http://127.0.0.1:{DEFAULT_GARAGE_API_PORT}"),
+        endpoint: format!("http://0.0.0.0:{DEFAULT_GARAGE_API_PORT}"),
     })
 }
 
@@ -164,6 +164,6 @@ mod tests {
             garage.project_directory,
             Some(PathBuf::from("/var/lib/dasobjectstore/garage"))
         );
-        assert_eq!(garage.endpoint, "http://127.0.0.1:3900");
+        assert_eq!(garage.endpoint, "http://0.0.0.0:3900");
     }
 }

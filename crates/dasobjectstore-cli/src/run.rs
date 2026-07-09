@@ -7676,9 +7676,11 @@ struct RuntimeEndpointStatus {
     kind: &'static str,
     configured: bool,
     active: bool,
+    remote_ready: bool,
     bind_address: Option<String>,
     port: Option<u16>,
     url: Option<String>,
+    remote_url: Option<String>,
     service: Option<String>,
     service_state: Option<String>,
     config_path: Option<String>,
@@ -7702,9 +7704,11 @@ fn daemon_runtime_status() -> RuntimeEndpointStatus {
         kind: "unix_socket",
         configured: true,
         active,
+        remote_ready: active,
         bind_address: None,
         port: None,
         url: Some(socket_path.display().to_string()),
+        remote_url: None,
         service: Some("dasobjectstored.service".to_string()),
         service_state,
         config_path: Some("/etc/dasobjectstore/daemon.json".to_string()),
@@ -7730,9 +7734,11 @@ fn web_runtime_status() -> RuntimeEndpointStatus {
         kind: "https",
         configured: true,
         active,
+        remote_ready: active && !is_loopback_bind(&config.bind_address),
         bind_address: Some(config.bind_address),
         port: Some(config.https_port),
         url: Some(config.public_base_url),
+        remote_url: None,
         service: Some("dasobjectstore-server.service".to_string()),
         service_state,
         config_path: Some(config_path.display().to_string()),
@@ -7747,19 +7753,22 @@ fn web_runtime_status() -> RuntimeEndpointStatus {
 fn object_service_runtime_status() -> RuntimeEndpointStatus {
     let port = 3900;
     let docker_binding = docker_object_service_binding(port);
-    let bind_address = docker_binding.unwrap_or_else(|| "127.0.0.1".to_string());
+    let bind_address = docker_binding.unwrap_or_else(|| "0.0.0.0".to_string());
     let endpoint = format!("http://{bind_address}:{port}");
     let active = format!("{bind_address}:{port}")
         .parse::<SocketAddr>()
         .is_ok_and(local_tcp_listener_active);
+    let remote_ready = active && !is_loopback_bind(&bind_address);
     RuntimeEndpointStatus {
         name: "object_service",
         kind: "s3_compatible",
         configured: true,
         active,
+        remote_ready,
         bind_address: Some(bind_address.clone()),
         port: Some(port),
         url: Some(endpoint),
+        remote_url: remote_ready.then(|| remote_object_service_url(&bind_address, port)),
         service: Some("docker".to_string()),
         service_state: docker_object_service_container_state(port),
         config_path: None,
@@ -7773,6 +7782,36 @@ fn object_service_runtime_status() -> RuntimeEndpointStatus {
             Some("S3-compatible object-service listener is not reachable locally".to_string())
         },
     }
+}
+
+fn is_loopback_bind(bind_address: &str) -> bool {
+    matches!(bind_address, "127.0.0.1" | "::1" | "localhost")
+}
+
+fn remote_object_service_url(bind_address: &str, port: u16) -> String {
+    let host = if bind_address == "0.0.0.0" || bind_address == "::" {
+        public_host_address().unwrap_or_else(|| bind_address.to_string())
+    } else {
+        bind_address.to_string()
+    };
+    format!("http://{host}:{port}")
+}
+
+fn public_host_address() -> Option<String> {
+    if let Ok(host) = std::env::var("DASOBJECTSTORE_PUBLIC_HOST") {
+        let host = host.trim();
+        if !host.is_empty() {
+            return Some(host.to_string());
+        }
+    }
+    let output = ProcessCommand::new("hostname").arg("-I").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .find(|address| !address.starts_with("127.") && !address.contains(':'))
+        .map(str::to_string)
 }
 
 fn docker_object_service_binding(port: u16) -> Option<String> {
@@ -7915,6 +7954,9 @@ fn write_runtime_endpoint_status(
     )?;
     if let Some(url) = &endpoint.url {
         writeln!(writer, "  url: {url}")?;
+    }
+    if let Some(remote_url) = &endpoint.remote_url {
+        writeln!(writer, "  remote url: {remote_url}")?;
     }
     if let Some(bind_address) = &endpoint.bind_address {
         writeln!(
@@ -11202,10 +11244,11 @@ mod tests {
         parse_binary_size, parse_docker_published_bind_address, performance_report_metadata_json,
         performance_report_metadata_json_from_artifact,
         performance_report_qr_payload_from_artifact, performance_sync_all_calls,
-        plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
-        render_performance_report, render_performance_report_from_json_artifact,
-        render_performance_tui_snapshot, render_simple_pdf, reset_performance_sync_all_calls, run,
-        source_performance_workload, throughput, try_submit_pending_ssd_pipeline_jobs,
+        plan_performance_scenario_matrix, plan_ssd_residency_batches, remote_object_service_url,
+        render_performance_json, render_performance_report,
+        render_performance_report_from_json_artifact, render_performance_tui_snapshot,
+        render_simple_pdf, reset_performance_sync_all_calls, run, source_performance_workload,
+        throughput, try_submit_pending_ssd_pipeline_jobs,
         update_file_read_measurements_from_disk_results, validate_managed_hdds_on_supported_das,
         validate_pdf_report_path, write_health_json, write_health_summary, write_health_verbose,
         write_host_connection_status, write_pretty_report, zero_measurement, ActiveHddWrite,
@@ -11324,6 +11367,14 @@ mod tests {
         assert_eq!(
             parse_docker_published_bind_address(ports, 3900).as_deref(),
             Some("0.0.0.0")
+        );
+    }
+
+    #[test]
+    fn remote_object_service_url_keeps_specific_remote_bind_address() {
+        assert_eq!(
+            remote_object_service_url("192.168.1.192", 3900),
+            "http://192.168.1.192:3900"
         );
     }
 

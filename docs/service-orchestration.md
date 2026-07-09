@@ -38,6 +38,34 @@ configuration. `status --json --dry-run` is useful on development machines when
 Docker Desktop is unavailable or when the generated Compose project should be
 reviewed before execution.
 
+Production appliance renders should bind the S3-compatible API to a
+non-loopback address so remote workers and Mnemosyne ecosystem services can
+reach it:
+
+```bash
+dasobjectstore service render-compose \
+  --project-name dasobjectstore \
+  --ssd-metadata-path /srv/dasobjectstore/ssd/garage \
+  --hdd-data-path /srv/dasobjectstore/hdd/garage \
+  --provider garage \
+  --service-name garage \
+  --image dxflrs/garage:v2.3.0 \
+  --bind-address 0.0.0.0 \
+  --api-port 3900 > /etc/dasobjectstore/garage.compose.yml
+
+dasobjectstore service up \
+  --compose-file /etc/dasobjectstore/garage.compose.yml \
+  --project-directory /var/lib/dasobjectstore/garage
+```
+
+Use the top-level runtime status command as the appliance healthcheck. Its JSON
+payload includes the active S3 bind address, port, `remote_ready` flag, and
+`remote_url` to hand to remote upload clients:
+
+```bash
+dasobjectstore status --json
+```
+
 ## macOS Docker Desktop Limits
 
 Docker Desktop for macOS runs Linux containers inside a VM. That makes it useful

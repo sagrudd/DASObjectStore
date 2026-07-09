@@ -22,10 +22,10 @@ pub use redesign::{
     CreateObjectStoreDefaultsView, CreateObjectStoreFieldView, DasEnclosureCardView,
     DasEnclosureDetailView, DashboardHealthStateView, DriveCountSummaryView,
     EnclosureConnectionView, EnclosureDriveSlotView, EnclosuresPageView, HealthSummaryView,
-    HomeDashboardView, MemoryStressStateView, MemoryStressView, ObjectStoreCardView,
-    ObjectStoresPageView, SmartWarningView, SmartWarningsSummaryView, StorageGroupView,
-    StoreClassOptionView, ThroughputDayView, ThroughputSummaryView, WriterPolicyReadinessView,
-    REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    HomeDashboardView, MemoryStressStateView, MemoryStressView, ObjectServiceStatusView,
+    ObjectStoreCardView, ObjectStoresPageView, SmartWarningView, SmartWarningsSummaryView,
+    StorageGroupView, StoreClassOptionView, ThroughputDayView, ThroughputSummaryView,
+    WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -14,6 +14,7 @@ pub struct HomeDashboardView {
     pub throughput_7d: ThroughputSummaryView,
     pub ingest: Option<IngestQueueView>,
     pub destage: Option<DestageQueueView>,
+    pub object_service: ObjectServiceStatusView,
     pub memory_stress: MemoryStressView,
     pub smart_warnings: SmartWarningsSummaryView,
     pub object_stores: Vec<ObjectStoreCardView>,
@@ -51,6 +52,16 @@ impl HomeDashboardView {
             throughput_7d: ThroughputSummaryView::bootstrap_fixture(),
             ingest: None,
             destage: None,
+            object_service: ObjectServiceStatusView {
+                active: false,
+                remote_ready: false,
+                bind_address: "0.0.0.0".to_string(),
+                port: 3900,
+                local_url: "http://127.0.0.1:3900".to_string(),
+                remote_url: None,
+                service_state: None,
+                message: Some("S3-compatible object service is not running.".to_string()),
+            },
             memory_stress: MemoryStressView {
                 state: MemoryStressStateView::Elevated,
                 pressure_percent: 0,
@@ -145,6 +156,18 @@ pub struct ThroughputDayView {
     pub read_tib: String,
     pub written_tib: String,
     pub ingest_tib: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectServiceStatusView {
+    pub active: bool,
+    pub remote_ready: bool,
+    pub bind_address: String,
+    pub port: u16,
+    pub local_url: String,
+    pub remote_url: Option<String>,
+    pub service_state: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -541,6 +564,8 @@ mod tests {
         assert_eq!(encoded["drives"]["total"], 0);
         assert_eq!(encoded["capacity"]["total_tib"], "0.0");
         assert_eq!(encoded["throughput_7d"]["window_days"], 7);
+        assert_eq!(encoded["object_service"]["port"], 3900);
+        assert_eq!(encoded["object_service"]["remote_ready"], false);
         assert_eq!(
             encoded["throughput_7d"]["daily"]
                 .as_array()

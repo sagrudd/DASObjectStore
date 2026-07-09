@@ -11,6 +11,13 @@ agreement before landing.
 - Add a typed daemon runtime cleanup plan for cancelled or interrupted remote
   uploads, covering partial SSD staging, failed multipart uploads, abandoned
   sessions, expired pairings, and interrupted browser handoffs.
+- Surface S3-compatible object-service status in the Web Home dashboard,
+  including active state, bind address, port, service state, and a remote-ready
+  endpoint URL for Mnemosyne ecosystem clients.
+- Extend the top-level runtime status healthcheck payload with object-service
+  remote readiness and remote URL fields.
+- Align daemon-managed Garage service defaults with production remote upload by
+  reporting a non-loopback object-service endpoint.
 
 ## 0.60.6 - 2026-07-09
 

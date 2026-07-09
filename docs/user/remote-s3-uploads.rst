@@ -51,7 +51,10 @@ to a remote-capable host binding:
 This renders host port bindings on ``0.0.0.0``. For local-only testing, pass
 ``--bind-address 127.0.0.1`` explicitly. ``dasobjectstore status`` reports when
 the detected Docker listener is loopback-only so operators do not mistake a
-local health check for a remote-upload-ready endpoint.
+local health check for a remote-upload-ready endpoint. Use
+``dasobjectstore status --json`` as the healthcheck surface and hand remote
+clients ``object_service.remote_url`` only when
+``object_service.remote_ready`` is ``true``.
 
 On a remote computer that does not have the DASObjectStore store registry, pass
 the bucket name explicitly:

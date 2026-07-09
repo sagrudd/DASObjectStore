@@ -1001,6 +1001,13 @@ service endpoints together:
    dasobjectstore status
    dasobjectstore status --json
 
+The ``object_service`` section of the JSON output is the CLI healthcheck surface
+for S3-compatible access. It reports whether the service is active, the bind
+address, the active port, whether the endpoint is remote-ready, and the
+``remote_url`` that remote workers should use. The Web Home page shows the same
+information in the S3 service card so operators can see at a glance whether
+Mnemosyne ecosystem clients can reach the object store endpoint.
+
 The managed storage daemon, ``dasobjectstored``, is separate from the standalone
 Web UI service. Check the web service and listener explicitly when diagnosing
 access issues:

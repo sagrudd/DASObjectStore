@@ -443,6 +443,7 @@ h2 {
   color: #182128;
   font-size: 1.35rem;
   line-height: 1.15;
+  overflow-wrap: anywhere;
 }
 
 .dos-enclosure-card strong,

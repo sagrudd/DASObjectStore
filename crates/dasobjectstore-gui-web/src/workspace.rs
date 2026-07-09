@@ -317,6 +317,35 @@ pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetr
             &format!("{} days", view.throughput_7d.window_days),
         ),
         DashboardMetric::new(
+            "S3 service",
+            if view.object_service.remote_ready {
+                view.object_service
+                    .remote_url
+                    .clone()
+                    .unwrap_or_else(|| format!("port {}", view.object_service.port))
+            } else if view.object_service.active {
+                "Loopback only".to_string()
+            } else {
+                "Offline".to_string()
+            },
+            format!(
+                "bind {}:{}; {}",
+                view.object_service.bind_address,
+                view.object_service.port,
+                view.object_service
+                    .service_state
+                    .as_deref()
+                    .unwrap_or("service state unavailable")
+            ),
+            if view.object_service.remote_ready {
+                "remote ready"
+            } else if view.object_service.active {
+                "loopback"
+            } else {
+                "offline"
+            },
+        ),
+        DashboardMetric::new(
             "Memory stress",
             format!("{}%", view.memory_stress.pressure_percent),
             format!(
@@ -451,6 +480,22 @@ pub fn home_dashboard_attention(view: &HomeDashboardResponse) -> Vec<DashboardAt
             "Memory stress",
             warning.message.clone(),
             &view.memory_stress.state,
+        ));
+    }
+    if !view.object_service.remote_ready {
+        items.push(DashboardAttentionItem::new(
+            "S3 object service",
+            view.object_service.message.clone().unwrap_or_else(|| {
+                format!(
+                    "S3-compatible object service is not remote-ready on {}:{}.",
+                    view.object_service.bind_address, view.object_service.port
+                )
+            }),
+            if view.object_service.active {
+                "warning"
+            } else {
+                "critical"
+            },
         ));
     }
     for enclosure in view.mounted_enclosures.iter().filter(|enclosure| {
@@ -1716,6 +1761,7 @@ fn home_dashboard_loading_cards() -> Vec<&'static str> {
         "DAS enclosures",
         "Capacity",
         "7-day throughput",
+        "S3 service",
         "Memory stress",
         "SMART warnings",
         "ObjectStores",
@@ -8102,6 +8148,16 @@ mod tests {
                     "message": "Memory pressure is elevated."
                 }
             },
+            "object_service": {
+                "active": true,
+                "remote_ready": true,
+                "bind_address": "0.0.0.0",
+                "port": 3900,
+                "local_url": "http://127.0.0.1:3900",
+                "remote_url": "http://192.168.1.192:3900",
+                "service_state": "Up 1 minute",
+                "message": null
+            },
             "smart_warnings": {
                 "warning_count": 1,
                 "affected_drive_count": 1,
@@ -8133,6 +8189,9 @@ mod tests {
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "ObjectStores" && metric.value == "1"));
+        assert!(metrics.iter().any(|metric| {
+            metric.label == "S3 service" && metric.value == "http://192.168.1.192:3900"
+        }));
 
         let attention = home_dashboard_attention(&view);
         assert!(attention
@@ -8234,6 +8293,16 @@ mod tests {
                 "swap_used_percent": 0,
                 "page_cache_tib": "0.4",
                 "warning": null
+            },
+            "object_service": {
+                "active": true,
+                "remote_ready": false,
+                "bind_address": "127.0.0.1",
+                "port": 3900,
+                "local_url": "http://127.0.0.1:3900",
+                "remote_url": null,
+                "service_state": "Up 1 minute",
+                "message": "S3-compatible object service is bound to loopback."
             },
             "smart_warnings": {
                 "warning_count": 0,
@@ -8363,6 +8432,16 @@ mod tests {
                 "swap_used_percent": 0,
                 "page_cache_tib": "0.4",
                 "warning": null
+            },
+            "object_service": {
+                "active": true,
+                "remote_ready": true,
+                "bind_address": "0.0.0.0",
+                "port": 3900,
+                "local_url": "http://127.0.0.1:3900",
+                "remote_url": "http://192.168.1.192:3900",
+                "service_state": "Up 1 minute",
+                "message": null
             },
             "smart_warnings": {
                 "warning_count": 0,

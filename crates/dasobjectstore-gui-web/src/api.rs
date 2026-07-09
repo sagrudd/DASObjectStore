@@ -52,6 +52,7 @@ pub struct HomeDashboardResponse {
     pub ingest: Option<IngestQueueSummaryResponse>,
     #[serde(default)]
     pub destage: Option<DestageQueueSummaryResponse>,
+    pub object_service: ObjectServiceStatusResponse,
     pub memory_stress: MemoryStressResponse,
     pub smart_warnings: SmartWarningsSummaryResponse,
     pub object_stores: Vec<ObjectStoreCardResponse>,
@@ -604,6 +605,18 @@ pub struct ThroughputSummaryResponse {
     pub ingest_tib: String,
     pub avg_read_mib_s: u32,
     pub avg_write_mib_s: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectServiceStatusResponse {
+    pub active: bool,
+    pub remote_ready: bool,
+    pub bind_address: String,
+    pub port: u16,
+    pub local_url: String,
+    pub remote_url: Option<String>,
+    pub service_state: Option<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -1580,6 +1593,16 @@ mod tests {
                 "page_cache_tib": "0.2",
                 "warning": null
             },
+            "object_service": {
+                "active": true,
+                "remote_ready": true,
+                "bind_address": "0.0.0.0",
+                "port": 3900,
+                "local_url": "http://127.0.0.1:3900",
+                "remote_url": "http://192.168.1.192:3900",
+                "service_state": "Up 1 minute",
+                "message": null
+            },
             "smart_warnings": {
                 "warning_count": 0,
                 "affected_drive_count": 0,
@@ -1610,6 +1633,8 @@ mod tests {
         assert_eq!(decoded.drives.total, 7);
         assert_eq!(decoded.capacity.free_tib, "87.5");
         assert_eq!(decoded.throughput_7d.avg_write_mib_s, 240);
+        assert!(decoded.object_service.remote_ready);
+        assert_eq!(decoded.object_service.port, 3900);
     }
 
     #[test]
