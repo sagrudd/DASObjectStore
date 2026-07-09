@@ -1,6 +1,7 @@
 use crate::api::{
-    remote_easyconnect_renew_after_offset_seconds,
-    resolve_remote_easyconnect_session_lifetime_seconds, AssignLocalUserToLocalGroupRequest,
+    query_appliance_telemetry, remote_easyconnect_renew_after_offset_seconds,
+    resolve_remote_easyconnect_session_lifetime_seconds, ApplianceTelemetryRequest,
+    ApplianceTelemetryResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
     CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
     DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
@@ -25,12 +26,13 @@ use crate::auth::{
     DaemonStoreAccessPolicy,
 };
 use crate::runtime::{
-    default_endpoint_registry_path, default_hdd_root, default_ssd_root,
-    provision_garage_store_registry, query_object_browser_metadata, read_object_browser_metadata,
-    remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
-    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    session_credentials_from_store_credentials, submit_ingest_files_to_local_store_with_progress,
-    upsert_endpoint_inventory_record, AdminJobRegistry, DaemonIngestFilesRuntimeError,
+    appliance_telemetry_state_path, default_endpoint_registry_path, default_hdd_root,
+    default_ssd_root, provision_garage_store_registry, query_object_browser_metadata,
+    read_object_browser_metadata, remote_easyconnect_pairing_store_path,
+    remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
+    resolve_object_folder_download_with_hdd_root, session_credentials_from_store_credentials,
+    submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
+    AdminJobRegistry, ApplianceTelemetrySampleSet, DaemonIngestFilesRuntimeError,
     DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
     FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
     LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
@@ -51,6 +53,8 @@ use dasobjectstore_object_service::{
     ObjectServiceError, ObjectServiceProviderId, StoreCredentialRequest, SystemCredentialEntropy,
 };
 use std::fmt::{self, Display};
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,6 +67,7 @@ pub struct DaemonRequestHandler<S, C> {
     subobject_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
     hdd_root_path: PathBuf,
+    appliance_telemetry_state_path: PathBuf,
     remote_easyconnect_pairing_store_path: PathBuf,
     remote_easyconnect_session_store_path: PathBuf,
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
@@ -82,6 +87,9 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            appliance_telemetry_state_path: appliance_telemetry_state_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             remote_easyconnect_pairing_store_path: remote_easyconnect_pairing_store_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -105,6 +113,9 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            appliance_telemetry_state_path: appliance_telemetry_state_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             remote_easyconnect_pairing_store_path: remote_easyconnect_pairing_store_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -132,6 +143,11 @@ where
 
     pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
         self.hdd_root_path = hdd_root_path.into();
+        self
+    }
+
+    pub fn with_appliance_telemetry_state_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.appliance_telemetry_state_path = path.into();
         self
     }
 
@@ -272,6 +288,15 @@ where
                     Ok(response) => Ok(DaemonApiResponse::StoreInventory(response)),
                     Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "store_inventory_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
+            DaemonApiRequest::ApplianceTelemetry(request) => {
+                match self.appliance_telemetry_for_actor(request, actor) {
+                    Ok(response) => Ok(DaemonApiResponse::ApplianceTelemetry(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
                         error.to_string(),
                     ))),
                 }
@@ -815,6 +840,33 @@ where
         Ok(())
     }
 
+    fn appliance_telemetry_for_actor(
+        &self,
+        request: ApplianceTelemetryRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<ApplianceTelemetryResponse, ApplianceTelemetryAccessFailure> {
+        if actor.is_none() {
+            return Err(ApplianceTelemetryAccessFailure::MissingActor);
+        }
+        match fs::read_to_string(&self.appliance_telemetry_state_path) {
+            Ok(contents) => {
+                let sample_set: ApplianceTelemetrySampleSet = serde_json::from_str(&contents)
+                    .map_err(|error| ApplianceTelemetryAccessFailure::InvalidState {
+                        path: self.appliance_telemetry_state_path.clone(),
+                        message: error.to_string(),
+                    })?;
+                Ok(query_appliance_telemetry(&sample_set, &request))
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                Ok(ApplianceTelemetryResponse::missing(request.window))
+            }
+            Err(error) => Err(ApplianceTelemetryAccessFailure::ReadState {
+                path: self.appliance_telemetry_state_path.clone(),
+                message: error.to_string(),
+            }),
+        }
+    }
+
     fn authorize_endpoint_read(
         &self,
         actor: Option<&DaemonLocalActor>,
@@ -1258,6 +1310,43 @@ impl From<DaemonAuthorizationError> for IngestAuthorizationFailure {
 impl From<ObjectServiceError> for IngestAuthorizationFailure {
     fn from(error: ObjectServiceError) -> Self {
         Self::ObjectService(error)
+    }
+}
+
+#[derive(Debug)]
+enum ApplianceTelemetryAccessFailure {
+    MissingActor,
+    ReadState { path: PathBuf, message: String },
+    InvalidState { path: PathBuf, message: String },
+}
+
+impl ApplianceTelemetryAccessFailure {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::MissingActor => "permission_denied",
+            Self::ReadState { .. } | Self::InvalidState { .. } => {
+                "appliance_telemetry_state_failed"
+            }
+        }
+    }
+}
+
+impl Display for ApplianceTelemetryAccessFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingActor => formatter
+                .write_str("authenticated daemon actor is required to read appliance telemetry"),
+            Self::ReadState { path, message } => write!(
+                formatter,
+                "read appliance telemetry state {}: {message}",
+                path.display()
+            ),
+            Self::InvalidState { path, message } => write!(
+                formatter,
+                "parse appliance telemetry state {}: {message}",
+                path.display()
+            ),
+        }
     }
 }
 
@@ -1916,6 +2005,7 @@ impl DaemonApiRequest {
             Self::JobStatus(_) => "job_status",
             Self::CancelJob(_) => "cancel_job",
             Self::ServiceStatus(_) => "service_status",
+            Self::ApplianceTelemetry(_) => "appliance_telemetry",
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
@@ -1947,6 +2037,7 @@ mod tests {
         SystemDaemonClock,
     };
     use crate::api::{
+        ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
         CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
@@ -2734,6 +2825,96 @@ mod tests {
             .is_empty());
 
         cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_appliance_telemetry_without_authenticated_actor() {
+        let root = temp_root("telemetry-auth-missing");
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T18:30:00Z"))
+                .with_appliance_telemetry_state_path(root.join("telemetry.json"));
+
+        let response = handler
+            .handle(DaemonApiRequest::ApplianceTelemetry(
+                ApplianceTelemetryRequest {
+                    window: ApplianceTelemetryWindow::OneHour,
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("authenticated daemon actor is required")
+        ));
+    }
+
+    #[test]
+    fn appliance_telemetry_reports_missing_state_for_authenticated_actor() {
+        let root = temp_root("telemetry-state-missing");
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T18:30:00Z"))
+                .with_appliance_telemetry_state_path(root.join("telemetry.json"));
+        let actor = DaemonLocalActor::new(1000).with_username("stephen");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ApplianceTelemetry(ApplianceTelemetryRequest {
+                    window: ApplianceTelemetryWindow::OneDay,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        match response {
+            DaemonApiResponse::ApplianceTelemetry(response) => {
+                assert_eq!(response.state, ApplianceTelemetryState::Missing);
+                assert_eq!(response.requested_window, ApplianceTelemetryWindow::OneDay);
+                assert!(response.current.is_none());
+            }
+            other => panic!("expected appliance telemetry response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn appliance_telemetry_returns_current_summary_for_authenticated_actor() {
+        let root = temp_root("telemetry-state-available");
+        let telemetry_path = root.join("telemetry/appliance-telemetry.v1.json");
+        fs::create_dir_all(telemetry_path.parent().expect("telemetry parent"))
+            .expect("telemetry parent");
+        fs::write(&telemetry_path, appliance_telemetry_fixture_json())
+            .expect("telemetry fixture written");
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T18:30:00Z"))
+                .with_appliance_telemetry_state_path(&telemetry_path);
+        let actor = DaemonLocalActor::new(1000).with_username("stephen");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ApplianceTelemetry(ApplianceTelemetryRequest {
+                    window: ApplianceTelemetryWindow::OneHour,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        cleanup(&root);
+
+        match response {
+            DaemonApiResponse::ApplianceTelemetry(response) => {
+                assert_eq!(response.state, ApplianceTelemetryState::Available);
+                assert_eq!(response.series.cpu_usage.len(), 1);
+                let current = response.current.expect("current telemetry");
+                assert_eq!(current.cpu_usage_percent_basis_points, Some(4_250));
+                assert_eq!(current.memory_used_percent_basis_points, Some(2_500));
+                assert_eq!(current.sessions.web_active_sessions, Some(2));
+            }
+            other => panic!("expected appliance telemetry response, got {other:?}"),
+        }
     }
 
     #[test]
@@ -3618,6 +3799,53 @@ mod tests {
             "dasobjectstore-request-handler-{label}-{}",
             std::process::id()
         ))
+    }
+
+    fn appliance_telemetry_fixture_json() -> &'static str {
+        r#"{
+          "schema_version": "dasobjectstore.appliance_telemetry.v1",
+          "generated_at_utc": "2026-07-09T18:30:00Z",
+          "cadence_seconds": 30.0,
+          "source": {
+            "appliance_id": "fixture-appliance",
+            "host_id": "fixture-host",
+            "hostname": "fixture-hostname"
+          },
+          "samples": [
+            {
+              "timestamp_utc": "2026-07-09T18:30:00Z",
+              "collection_quality": "complete",
+              "missing_data": [],
+              "cpu": {
+                "usage_percent": 42.5,
+                "load_average_1m": 0.1,
+                "load_average_5m": 0.2,
+                "load_average_15m": 0.3,
+                "logical_core_count": 2,
+                "missing_reason": null
+              },
+              "memory": {
+                "total_bytes": 100,
+                "available_bytes": 75,
+                "used_percent": 25.0,
+                "swap_total_bytes": 0,
+                "swap_used_bytes": 0,
+                "missing_reason": null
+              },
+              "enclosures": [],
+              "disks": [],
+              "disk_io": [],
+              "sessions": {
+                "web_active_sessions": 2,
+                "remote_agent_active_sessions": 1,
+                "distinct_logged_in_users": 2,
+                "administrator_sessions": 1,
+                "operator_sessions": 1,
+                "missing_reason": null
+              }
+            }
+          ]
+        }"#
     }
 
     fn cleanup(root: &PathBuf) {

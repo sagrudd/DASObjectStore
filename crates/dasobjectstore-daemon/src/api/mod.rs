@@ -1,5 +1,6 @@
 //! Transport-neutral daemon API contracts.
 
+mod appliance_telemetry;
 mod enclosure;
 mod endpoint;
 mod health;
@@ -12,6 +13,15 @@ mod remote_easyconnect;
 mod service;
 mod stores;
 
+pub use appliance_telemetry::{
+    query_appliance_telemetry, ApplianceTelemetryCapacityPoint, ApplianceTelemetryCapacitySummary,
+    ApplianceTelemetryCurrentSummary, ApplianceTelemetryDiskCapacitySummary,
+    ApplianceTelemetryDiskIoPoint, ApplianceTelemetryDiskIoSeries, ApplianceTelemetryDiskIoSummary,
+    ApplianceTelemetryMissingInterval, ApplianceTelemetryPercentPoint, ApplianceTelemetryRequest,
+    ApplianceTelemetryResponse, ApplianceTelemetrySeries, ApplianceTelemetrySessionPoint,
+    ApplianceTelemetrySessionSummary, ApplianceTelemetryState, ApplianceTelemetryWindow,
+    ApplianceTelemetryWindowAvailability,
+};
 pub use enclosure::{
     PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
     PrepareEnclosureResponse, PrepareEnclosureValidationError, ENCLOSURE_PREPARE_CONFIRMATION,
@@ -118,6 +128,7 @@ pub enum DaemonApiRequest {
     JobStatus(DaemonJobStatusRequest),
     CancelJob(DaemonJobCancelRequest),
     ServiceStatus(DaemonServiceStatusRequest),
+    ApplianceTelemetry(ApplianceTelemetryRequest),
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
@@ -188,6 +199,7 @@ impl DaemonApiRequest {
             | Self::JobList(_)
             | Self::JobStatus(_)
             | Self::ServiceStatus(_)
+            | Self::ApplianceTelemetry(_)
             | Self::RemoteEasyconnectDiscovery(_)
             | Self::RemoteEasyconnectUploadAdmission(_) => Ok(()),
         }
@@ -206,6 +218,7 @@ pub enum DaemonApiResponse {
     JobStatus(DaemonJobStatusResponse),
     CancelJob(DaemonJobCancelResponse),
     ServiceStatus(DaemonServiceStatusResponse),
+    ApplianceTelemetry(ApplianceTelemetryResponse),
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
@@ -439,13 +452,13 @@ impl DaemonApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssignLocalUserToLocalGroupRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonApiRequest, DaemonEndpointKind, DaemonEndpointValidation,
-        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonIngressOrigin,
-        DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest,
-        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceStatusRequest, DaemonSsdPressure, ObjectBrowserPageRequest,
-        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
+        ApplianceTelemetryRequest, ApplianceTelemetryWindow, AssignLocalUserToLocalGroupRequest,
+        CreateLocalGroupRequest, CreateObjectStoreRequest, DaemonApiRequest, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestConflictPolicy,
+        DaemonIngressOrigin, DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest,
+        DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, DaemonSsdPressure,
+        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
@@ -512,6 +525,19 @@ mod tests {
         assert_eq!(lifecycle["command"], "service_lifecycle");
         assert_eq!(lifecycle["payload"]["operation"], "start");
         assert_eq!(provision["command"], "service_provision");
+    }
+
+    #[test]
+    fn appliance_telemetry_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::ApplianceTelemetry(ApplianceTelemetryRequest {
+            window: ApplianceTelemetryWindow::TenDays,
+        });
+
+        request.validate().expect("request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "appliance_telemetry");
+        assert_eq!(encoded["payload"]["window"], "ten_days");
     }
 
     #[test]

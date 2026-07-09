@@ -959,7 +959,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add daemon tests for telemetry cadence, bounded retention, atomic rewrite,
   corrupt JSON recovery, missing metric markers, and preservation of
   enclosure/disk identity across samples.
-- [ ] Expose authenticated telemetry API routes for current summaries,
+- [x] Expose authenticated telemetry API routes for current summaries,
   downsampled time-series windows, per-disk IO series, capacity history,
   session/user history, available time windows, and missing-data intervals.
 - [ ] Add API tests proving telemetry windows are downsampled consistently,

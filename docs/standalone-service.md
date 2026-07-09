@@ -198,6 +198,12 @@ grow the file without limit: raw cadence samples are kept for the last hour,
 one sample per minute is kept through one day, one sample per ten-minute bucket
 is kept through ten days, and one sample per hour is kept through 92 days.
 Older samples are dropped during the next atomic rewrite.
+Authenticated daemon clients should consume telemetry through the
+`appliance_telemetry` API command rather than parsing this file directly. The
+API returns current CPU, memory, capacity, session, and per-disk IO summaries,
+fixed-point time-series data for the 1 hour, 1 day, 10 day, and 3 month
+windows, available-window metadata, and explicit missing-data intervals for
+chart gaps.
 Each sample includes CPU, memory, and managed HDD capacity data when
 `/srv/dasobjectstore/hdd/<disk-id>/.dasobjectstore/device.env` declares
 `role=hdd:<disk-id>`. The collector preserves disk ID, label, mount path,

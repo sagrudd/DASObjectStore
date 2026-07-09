@@ -9,27 +9,28 @@ pub use in_process::InProcessDaemonTransport;
 pub use unix_socket::UnixSocketDaemonTransport;
 
 use crate::api::{
-    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-    CancelIngestJobRequest, CancelIngestJobResponse, CreateLocalGroupRequest,
-    CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
-    DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest, DaemonHealthSummaryResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
-    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
-    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    IngestJobStatusRequest, IngestJobStatusResponse, ObjectBrowserRequest, ObjectBrowserResponse,
-    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
-    ObjectFolderDownloadResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    ApplianceTelemetryRequest, ApplianceTelemetryResponse, AssignLocalUserToLocalGroupRequest,
+    AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
+    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+    CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest,
+    DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest,
+    DaemonJobCancelResponse, DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest,
+    DaemonJobStatusResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+    DaemonServiceStatusResponse, IngestJobStatusRequest, IngestJobStatusResponse,
+    ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
+    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, StoreInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -188,6 +189,16 @@ where
         match self.send(DaemonApiRequest::ServiceStatus(request))? {
             DaemonApiResponse::ServiceStatus(response) => Ok(response),
             response => Err(unexpected("service_status", response)),
+        }
+    }
+
+    pub fn appliance_telemetry(
+        &self,
+        request: ApplianceTelemetryRequest,
+    ) -> Result<ApplianceTelemetryResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ApplianceTelemetry(request))? {
+            DaemonApiResponse::ApplianceTelemetry(response) => Ok(response),
+            response => Err(unexpected("appliance_telemetry", response)),
         }
     }
 
@@ -399,6 +410,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::JobStatus(_) => "job_status",
         DaemonApiResponse::CancelJob(_) => "cancel_job",
         DaemonApiResponse::ServiceStatus(_) => "service_status",
+        DaemonApiResponse::ApplianceTelemetry(_) => "appliance_telemetry",
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
@@ -434,6 +446,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
 mod tests {
     use super::{DaemonClient, DaemonClientError, InProcessDaemonTransport};
     use crate::api::{
+        ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplianceTelemetryWindow,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
         CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
@@ -592,6 +605,30 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::ServiceStatus(_)]
+        ));
+    }
+
+    #[test]
+    fn appliance_telemetry_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ApplianceTelemetry(
+                ApplianceTelemetryResponse::missing(ApplianceTelemetryWindow::OneDay),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .appliance_telemetry(ApplianceTelemetryRequest {
+                window: ApplianceTelemetryWindow::OneDay,
+            })
+            .expect("appliance telemetry response");
+
+        assert_eq!(response.requested_window, ApplianceTelemetryWindow::OneDay);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ApplianceTelemetry(_)]
         ));
     }
 

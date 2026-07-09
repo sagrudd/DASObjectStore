@@ -30,6 +30,9 @@ agreement before landing.
 - Preserve corrupt telemetry JSON for operator inspection before starting a
   fresh schema-valid history, with regression coverage for recovery, atomic
   rewrite cleanup, missing-data markers, and disk/enclosure identity retention.
+- Add an authenticated daemon appliance telemetry API command that returns
+  current summaries, fixed-point chart series, available windows, per-disk IO,
+  capacity/session history, and missing-data intervals from the managed state.
 
 ## 0.61.2 - 2026-07-09
 

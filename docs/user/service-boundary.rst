@@ -46,6 +46,12 @@ and writes the current JSON state under:
 The telemetry directory is daemon-owned state; operators and Web/API readers
 should treat the JSON file as read-only and use supported interfaces as they are
 added.
+Authenticated daemon API callers can request appliance telemetry through the
+``appliance_telemetry`` command. The response contains current CPU, memory,
+capacity, session, and per-disk IO summaries, bounded time-series windows for
+Home-dashboard charts, available-window metadata, and missing-data intervals.
+Percentages are exposed as basis-point integers so API consumers do not need to
+handle floating-point drift.
 The daemon bounds that JSON history by retaining raw cadence samples for the
 last hour, one-minute buckets through one day, ten-minute buckets through ten
 days, and hourly buckets through 92 days.
