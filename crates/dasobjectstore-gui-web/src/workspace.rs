@@ -8544,6 +8544,357 @@ mod tests {
     }
 
     #[test]
+    fn home_dashboard_telemetry_cards_cover_full_data_and_per_disk_identity() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-09T20:07:00Z",
+            "health": {
+                "state": "healthy",
+                "label": "Healthy",
+                "warning_count": 0,
+                "critical_count": 0,
+                "action_count": 0,
+                "last_checked_at_utc": "2026-07-09T20:07:00Z"
+            },
+            "drives": {
+                "total": 8,
+                "mounted": 8,
+                "healthy": 8,
+                "watch": 0,
+                "suspect": 0,
+                "failed": 0
+            },
+            "capacity": {
+                "total_tib": "128.0",
+                "used_tib": "64.0",
+                "free_tib": "64.0",
+                "used_percent_basis_points": 5000
+            },
+            "mounted_enclosures": [{
+                "enclosure_id": "qnap-tl-d800c-01",
+                "display_name": "QNAP TL-D800C",
+                "mount_path": "/srv/dasobjectstore/hdd",
+                "connection": {
+                    "bus": "usb",
+                    "protocol": "uas",
+                    "link_speed": "10 Gb/s"
+                },
+                "health": "healthy",
+                "drive_count": {
+                    "total": 8,
+                    "mounted": 8,
+                    "healthy": 8,
+                    "watch": 0,
+                    "suspect": 0,
+                    "failed": 0
+                },
+                "capacity": {
+                    "total_tib": "128.0",
+                    "used_tib": "64.0",
+                    "free_tib": "64.0",
+                    "used_percent_basis_points": 5000
+                },
+                "last_seen_at_utc": "2026-07-09T20:07:00Z",
+                "warnings": []
+            }],
+            "telemetry_window": {
+                "selected": "three_months",
+                "selected_label": "3 months",
+                "options": [
+                    { "value": "one_hour", "label": "1 hour", "selected": false },
+                    { "value": "one_day", "label": "1 day", "selected": false },
+                    { "value": "ten_days", "label": "10 days", "selected": false },
+                    { "value": "three_months", "label": "3 months", "selected": true }
+                ]
+            },
+            "throughput_7d": {
+                "window_days": 92,
+                "read_tib": "11.0",
+                "written_tib": "13.5",
+                "ingest_tib": "18.0",
+                "avg_read_mib_s": 180,
+                "avg_write_mib_s": 320,
+                "daily": [
+                    { "date": "2026-04-09", "read_tib": "1.0", "written_tib": "2.0", "ingest_tib": "3.0" },
+                    { "date": "2026-05-09", "read_tib": "2.0", "written_tib": "4.0", "ingest_tib": "6.0" },
+                    { "date": "2026-06-09", "read_tib": "3.0", "written_tib": "6.0", "ingest_tib": "9.0" },
+                    { "date": "2026-07-09", "read_tib": "4.0", "written_tib": "8.0", "ingest_tib": "18.0" }
+                ]
+            },
+            "disk_io": {
+                "available": true,
+                "read_mib_s": 96,
+                "write_mib_s": 384,
+                "read_ops_s": 31,
+                "write_ops_s": 44,
+                "busiest_disk_id": "qnap-bay-04",
+                "state": "elevated",
+                "message": null
+            },
+            "cpu_usage": {
+                "available": true,
+                "usage_percent": 86,
+                "load_average_1m": "7.84",
+                "logical_core_count": 16,
+                "state": "high",
+                "message": null
+            },
+            "active_users": {
+                "available": true,
+                "active_sessions": 9,
+                "distinct_logged_in_users": 5,
+                "administrator_sessions": 2,
+                "operator_sessions": 3,
+                "remote_agent_sessions": 4,
+                "state": "nominal",
+                "message": null
+            },
+            "memory_stress": {
+                "state": "high",
+                "pressure_percent": 88,
+                "swap_used_percent": 22,
+                "page_cache_tib": "1.7",
+                "warning": {
+                    "code": "memory_pressure_high",
+                    "message": "Memory pressure is high."
+                }
+            },
+            "object_service": {
+                "active": true,
+                "remote_ready": true,
+                "bind_address": "0.0.0.0",
+                "port": 3900,
+                "local_url": "http://127.0.0.1:3900",
+                "remote_url": "http://192.168.1.192:3900",
+                "service_state": "Up 12 minutes",
+                "message": null
+            },
+            "smart_warnings": {
+                "warning_count": 0,
+                "affected_drive_count": 0,
+                "warnings": []
+            },
+            "object_stores": [{
+                "store_id": "generated-data",
+                "display_name": "generated-data",
+                "health": "healthy",
+                "object_count": 142,
+                "warnings": []
+            }]
+        });
+        let view =
+            serde_json::from_value::<HomeDashboardResponse>(payload).expect("dashboard decodes");
+
+        let metrics = home_dashboard_metrics(&view);
+        let capacity = metrics
+            .iter()
+            .find(|metric| metric.label == "Capacity")
+            .expect("capacity metric");
+        let throughput = metrics
+            .iter()
+            .find(|metric| metric.label == "Throughput")
+            .expect("throughput metric");
+        let disk_io = metrics
+            .iter()
+            .find(|metric| metric.label == "Disk IO")
+            .expect("disk io metric");
+        let cpu = metrics
+            .iter()
+            .find(|metric| metric.label == "CPU")
+            .expect("cpu metric");
+        let active_users = metrics
+            .iter()
+            .find(|metric| metric.label == "Logged-in users")
+            .expect("active users metric");
+        let memory = metrics
+            .iter()
+            .find(|metric| metric.label == "Memory stress")
+            .expect("memory metric");
+
+        assert_eq!(capacity.value, "64.0 TiB free");
+        assert_eq!(capacity.state, "50.0% used");
+        assert_eq!(throughput.value, "18.0 TiB ingest");
+        assert_eq!(throughput.state, "3 months");
+        assert_eq!(disk_io.value, "384 MiB/s write");
+        assert_eq!(
+            disk_io.detail,
+            "96 MiB/s read; 44 write ops/s; 31 read ops/s"
+        );
+        assert_eq!(disk_io.state, "elevated");
+        assert_eq!(view.disk_io.busiest_disk_id.as_deref(), Some("qnap-bay-04"));
+        assert_eq!(cpu.value, "86%");
+        assert_eq!(cpu.detail, "load 7.84; 16 logical core(s)");
+        assert_eq!(cpu.state, "high");
+        assert_eq!(active_users.value, "5");
+        assert_eq!(
+            active_users.detail,
+            "9 active session(s); 2 admin; 4 remote"
+        );
+        assert_eq!(memory.value, "88%");
+        assert_eq!(memory.detail, "22% swap; 1.7 TiB page cache");
+        assert_eq!(memory.state, "high");
+
+        let chart_points = home_throughput_chart_points(&view);
+        assert_eq!(chart_points.len(), 4);
+        assert_eq!(chart_points[0].date, "2026-04-09");
+        assert_eq!(chart_points[3].date, "2026-07-09");
+        assert_eq!(home_throughput_chart_max_tib(&chart_points), "18 TiB");
+        assert_eq!(
+            home_throughput_chart_polyline(&chart_points),
+            "48.0,124.0 237.3,104.0 426.7,84.0 616.0,24.0"
+        );
+    }
+
+    #[test]
+    fn home_dashboard_telemetry_tests_sparse_missing_and_invalid_chart_samples() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-09T20:08:00Z",
+            "health": {
+                "state": "watch",
+                "label": "Watch",
+                "warning_count": 1,
+                "critical_count": 0,
+                "action_count": 1,
+                "last_checked_at_utc": null
+            },
+            "drives": {
+                "total": 4,
+                "mounted": 3,
+                "healthy": 2,
+                "watch": 1,
+                "suspect": 0,
+                "failed": 1
+            },
+            "capacity": {
+                "total_tib": "64.0",
+                "used_tib": "12.0",
+                "free_tib": "52.0",
+                "used_percent_basis_points": 1875
+            },
+            "mounted_enclosures": [],
+            "telemetry_window": {
+                "selected": "ten_days",
+                "selected_label": "10 days",
+                "options": [
+                    { "value": "one_hour", "label": "1 hour", "selected": false },
+                    { "value": "one_day", "label": "1 day", "selected": false },
+                    { "value": "ten_days", "label": "10 days", "selected": true },
+                    { "value": "three_months", "label": "3 months", "selected": false }
+                ]
+            },
+            "throughput_7d": {
+                "window_days": 10,
+                "read_tib": "0.0",
+                "written_tib": "0.0",
+                "ingest_tib": "0.0",
+                "avg_read_mib_s": 0,
+                "avg_write_mib_s": 0,
+                "daily": [
+                    { "date": "2026-07-01", "read_tib": "0.0", "written_tib": "0.0", "ingest_tib": "" },
+                    { "date": "2026-07-02", "read_tib": "0.0", "written_tib": "0.0", "ingest_tib": "missing" },
+                    { "date": "2026-07-03", "read_tib": "0.0", "written_tib": "0.0", "ingest_tib": "-1.0" },
+                    { "date": "2026-07-04", "read_tib": "0.0", "written_tib": "0.0", "ingest_tib": "0.25 TiB" }
+                ]
+            },
+            "disk_io": {
+                "available": false,
+                "read_mib_s": 0,
+                "write_mib_s": 0,
+                "read_ops_s": 0,
+                "write_ops_s": 0,
+                "busiest_disk_id": null,
+                "state": "unavailable",
+                "message": "Disk IO counters are unavailable for this host."
+            },
+            "cpu_usage": {
+                "available": false,
+                "usage_percent": null,
+                "load_average_1m": null,
+                "logical_core_count": null,
+                "state": "unavailable",
+                "message": "CPU telemetry was not sampled in this window."
+            },
+            "active_users": {
+                "available": false,
+                "active_sessions": 0,
+                "distinct_logged_in_users": 0,
+                "administrator_sessions": 0,
+                "operator_sessions": 0,
+                "remote_agent_sessions": 0,
+                "state": "unavailable",
+                "message": "Session telemetry is unavailable."
+            },
+            "memory_stress": {
+                "state": "nominal",
+                "pressure_percent": 0,
+                "swap_used_percent": 0,
+                "page_cache_tib": "0.0",
+                "warning": null
+            },
+            "object_service": {
+                "active": false,
+                "remote_ready": false,
+                "bind_address": "127.0.0.1",
+                "port": 3900,
+                "local_url": "http://127.0.0.1:3900",
+                "remote_url": null,
+                "service_state": null,
+                "message": "S3-compatible object service is offline."
+            },
+            "smart_warnings": {
+                "warning_count": 0,
+                "affected_drive_count": 0,
+                "warnings": []
+            },
+            "object_stores": []
+        });
+        let view =
+            serde_json::from_value::<HomeDashboardResponse>(payload).expect("dashboard decodes");
+
+        let metrics = home_dashboard_metrics(&view);
+        let throughput = metrics
+            .iter()
+            .find(|metric| metric.label == "Throughput")
+            .expect("throughput metric");
+        let disk_io = metrics
+            .iter()
+            .find(|metric| metric.label == "Disk IO")
+            .expect("disk io metric");
+        let cpu = metrics
+            .iter()
+            .find(|metric| metric.label == "CPU")
+            .expect("cpu metric");
+        let active_users = metrics
+            .iter()
+            .find(|metric| metric.label == "Logged-in users")
+            .expect("active users metric");
+
+        assert_eq!(throughput.state, "10 days");
+        assert_eq!(disk_io.value, "Unavailable");
+        assert_eq!(
+            disk_io.detail,
+            "Disk IO counters are unavailable for this host."
+        );
+        assert_eq!(cpu.value, "Unavailable");
+        assert_eq!(cpu.detail, "CPU telemetry was not sampled in this window.");
+        assert_eq!(active_users.value, "Unavailable");
+        assert_eq!(active_users.detail, "Session telemetry is unavailable.");
+
+        let chart_points = home_throughput_chart_points(&view);
+        assert_eq!(chart_points.len(), 2);
+        assert_eq!(chart_points[0].date, "2026-07-03");
+        assert_eq!(chart_points[0].ingest_tib, 0.0);
+        assert_eq!(chart_points[1].date, "2026-07-04");
+        assert_eq!(chart_points[1].ingest_tib, 0.25);
+        assert_eq!(home_throughput_chart_max_tib(&chart_points), "0.2 TiB");
+        assert_eq!(
+            home_throughput_chart_polyline(&chart_points),
+            "48.0,144.0 616.0,114.0"
+        );
+    }
+
+    #[test]
     fn home_dashboard_attention_surfaces_capacity_enclosure_and_store_signals() {
         let payload = serde_json::json!({
             "schema_version": "dasobjectstore.web_redesign.v1",

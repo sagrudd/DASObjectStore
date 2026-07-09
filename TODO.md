@@ -1001,9 +1001,13 @@ planning are tracked under Milestones 21 and 22.
   Completed by adding a product-neutral floundeR chart contract wrapper with
   explicit Web dashboard, Grammateus report, and API export audiences plus a
   conversion path from DASObjectStore appliance telemetry payloads.
-- [ ] Add Yew DTO/component tests for CPU, memory, IO, capacity, throughput,
+- [x] Add Yew DTO/component tests for CPU, memory, IO, capacity, throughput,
   and active-user charts with full data, sparse data, missing intervals,
   changing time windows, and per-disk series.
+  Completed by adding Web workspace DTO/component-helper tests for full Home
+  telemetry cards, non-default telemetry windows, per-disk IO identity, sparse
+  and unavailable telemetry states, and invalid/missing throughput chart
+  samples.
 - [ ] Add screenshot or DOM regression coverage proving the Home telemetry
   cards and charts do not jitter, overlap, or resize unexpectedly across
   desktop and mobile layouts.
