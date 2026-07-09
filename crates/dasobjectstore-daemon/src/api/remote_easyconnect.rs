@@ -813,10 +813,11 @@ mod tests {
         RemoteEasyconnectSessionPolicy, RemoteEasyconnectSessionRenewal,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
-        RemoteEasyconnectUploadHandoffState, RemoteEasyconnectUploadSelectionEntry,
-        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
-        REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
-        REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
+        RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
+        RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
+        REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
+        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
+        REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
     };
     use crate::auth::DaemonLocalActor;
     use dasobjectstore_core::remote_upload::{
@@ -1157,6 +1158,64 @@ mod tests {
     }
 
     #[test]
+    fn accepts_drag_drop_folder_expansion_as_browser_agent_handoff_metadata() {
+        let mut request = upload_handoff_request();
+        request.selected_files = vec![
+            RemoteEasyconnectUploadSelectionEntry {
+                display_path: "run-42/Sample_A/L001/R1.fastq.gz".to_string(),
+                size_bytes: 4096,
+            },
+            RemoteEasyconnectUploadSelectionEntry {
+                display_path: "run-42/Sample_A/L001/R2.fastq.gz".to_string(),
+                size_bytes: 8192,
+            },
+            RemoteEasyconnectUploadSelectionEntry {
+                display_path: "run-42/manifests/sample-sheet.csv".to_string(),
+                size_bytes: 512,
+            },
+        ];
+        request.total_bytes = 12_800;
+
+        let response =
+            plan_remote_easyconnect_upload_handoff(request).expect("folder-expanded selection");
+
+        assert_eq!(
+            response.mode,
+            RemoteEasyconnectUploadHandoffMode::LoopbackPost
+        );
+        assert_eq!(
+            response.state,
+            RemoteEasyconnectUploadHandoffState::ConfirmationRequired
+        );
+        assert_eq!(
+            response.local_agent_handoff_url,
+            "http://127.0.0.1:49329/v1/dasobjectstore/remote/uploads/handoffs"
+        );
+        assert!(response.message.contains("explicit user confirmation"));
+    }
+
+    #[test]
+    fn reports_pre_transfer_agent_and_user_cancellation_failure_states() {
+        let response =
+            plan_remote_easyconnect_upload_handoff(upload_handoff_request()).expect("handoff plan");
+
+        assert_eq!(
+            response.state,
+            RemoteEasyconnectUploadHandoffState::ConfirmationRequired
+        );
+        assert_handoff_failure(&response, "agent_unreachable", true);
+        assert_handoff_failure(&response, "confirmation_cancelled", true);
+        assert_handoff_failure(&response, "path_privacy_violation", false);
+        assert!(response
+            .failure_states
+            .iter()
+            .find(|failure| failure.code == "confirmation_cancelled")
+            .expect("cancellation failure state")
+            .message
+            .contains("before the local agent received transfer authority"));
+    }
+
+    #[test]
     fn rejects_non_loopback_remote_upload_handoff_url() {
         let mut request = upload_handoff_request();
         request.local_agent_base_url = "https://192.168.1.23:49329".to_string();
@@ -1192,16 +1251,22 @@ mod tests {
 
     #[test]
     fn rejects_absolute_browser_display_paths_for_privacy() {
-        let mut request = upload_handoff_request();
-        request.selected_files[0].display_path = "/Users/stephen/private.fastq.gz".to_string();
+        for display_path in [
+            "/Users/stephen/private.fastq.gz",
+            r"C:\Users\stephen\private.fastq.gz",
+            r"\Users\stephen\private.fastq.gz",
+        ] {
+            let mut request = upload_handoff_request();
+            request.selected_files[0].display_path = display_path.to_string();
 
-        let err = plan_remote_easyconnect_upload_handoff(request)
-            .expect_err("absolute source path rejected");
+            let err = plan_remote_easyconnect_upload_handoff(request)
+                .expect_err("absolute source path rejected");
 
-        assert!(matches!(
-            err,
-            RemoteEasyconnectValidationError::AbsoluteUploadSelectionPath { .. }
-        ));
+            assert!(matches!(
+                err,
+                RemoteEasyconnectValidationError::AbsoluteUploadSelectionPath { .. }
+            ));
+        }
     }
 
     #[test]
@@ -1278,6 +1343,20 @@ mod tests {
         );
         assert_eq!(decision.reason, reason);
         assert_eq!(decision.retry_after_seconds, Some(30));
+    }
+
+    fn assert_handoff_failure(
+        response: &RemoteEasyconnectUploadHandoffResponse,
+        code: &str,
+        retryable: bool,
+    ) {
+        let failure = response
+            .failure_states
+            .iter()
+            .find(|failure| failure.code == code)
+            .expect("expected handoff failure state");
+
+        assert_eq!(failure.retryable, retryable);
     }
 
     fn store(object_store: &str, bucket: &str) -> RemoteEasyconnectObjectStoreAccessPolicy {

@@ -892,7 +892,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.
-- [ ] Add tests for browser/agent coordination, drag/drop folder expansion,
+- [x] Add tests for browser/agent coordination, drag/drop folder expansion,
   local path privacy, agent unreachable state, and user cancellation before
   transfer begins.
 - [ ] Add S3 upload integration tests or fakes for multipart transfer,
