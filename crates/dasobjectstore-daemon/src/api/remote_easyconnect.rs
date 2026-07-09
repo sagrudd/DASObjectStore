@@ -425,6 +425,8 @@ pub struct RemoteEasyconnectSubmitAwsCliUploadRequest {
     pub display_args: Vec<String>,
     #[serde(default)]
     pub environment: Vec<RemoteEasyconnectAwsCliEnvironmentVariable>,
+    #[serde(default)]
+    pub progress_telemetry: Option<RemoteEasyconnectUploadProgressTelemetry>,
     pub progress_message: Option<String>,
 }
 
@@ -442,6 +444,18 @@ impl RemoteEasyconnectSubmitAwsCliUploadRequest {
         validate_optional_non_blank("progress_message", self.progress_message.as_deref())?;
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadProgressTelemetry {
+    pub source_scan_count: Option<u64>,
+    pub staged_bytes: Option<u64>,
+    pub s3_bytes_per_second: Option<u64>,
+    pub ssd_queue_depth: Option<u32>,
+    pub hdd_landing_queue_depth: Option<u32>,
+    pub active_hdd_writers: Option<u16>,
+    pub verification_state: Option<String>,
+    pub session_renewal_status: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

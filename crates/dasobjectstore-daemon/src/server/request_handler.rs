@@ -25,8 +25,8 @@ use crate::runtime::{
     AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate, ServiceCommandRunner,
-    SystemLocalAdminCommandRunner,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
@@ -922,7 +922,25 @@ fn remote_easyconnect_aws_cli_upload_job_request(
         finished_at_utc: accepted_at_utc.to_string(),
         progress_updated_at_utc: accepted_at_utc.to_string(),
         actor,
+        progress_telemetry: request
+            .progress_telemetry
+            .map(remote_upload_progress_telemetry),
         progress_message: request.progress_message,
+    }
+}
+
+fn remote_upload_progress_telemetry(
+    telemetry: crate::api::RemoteEasyconnectUploadProgressTelemetry,
+) -> RemoteUploadProgressTelemetry {
+    RemoteUploadProgressTelemetry {
+        source_scan_count: telemetry.source_scan_count,
+        staged_bytes: telemetry.staged_bytes,
+        s3_bytes_per_second: telemetry.s3_bytes_per_second,
+        ssd_queue_depth: telemetry.ssd_queue_depth,
+        hdd_landing_queue_depth: telemetry.hdd_landing_queue_depth,
+        active_hdd_writers: telemetry.active_hdd_writers,
+        verification_state: telemetry.verification_state,
+        session_renewal_status: telemetry.session_renewal_status,
     }
 }
 
@@ -2447,6 +2465,7 @@ mod tests {
                         name: "AWS_ACCESS_KEY_ID".to_string(),
                         value: "AKIAEXAMPLE".to_string(),
                     }],
+                    progress_telemetry: None,
                     progress_message: Some("completed".to_string()),
                 },
             ))

@@ -8,6 +8,8 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Wire easyconnect/AWS CLI remote-upload submissions to populate source scan
+  count and staged-byte telemetry from the remote client's source inventory.
 - Add a typed daemon remote-upload progress telemetry payload covering source
   scan count, staged bytes, S3 transfer rate, SSD/HDD queue depths, active HDD
   writers, verification state, and session-renewal status.

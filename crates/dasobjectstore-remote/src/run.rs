@@ -22,8 +22,8 @@ use crate::s3::{
 use dasobjectstore_daemon::{
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonJobEvent,
     RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, UnixSocketDaemonTransport,
-    DEFAULT_DAEMON_SOCKET_FILE_NAME, LINUX_DAEMON_RUNTIME_DIR,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadProgressTelemetry,
+    UnixSocketDaemonTransport, DEFAULT_DAEMON_SOCKET_FILE_NAME, LINUX_DAEMON_RUNTIME_DIR,
 };
 use std::fmt;
 use std::io::Write;
@@ -313,7 +313,7 @@ fn run_upload(
         return Ok(());
     }
     if args.submit_to_daemon() {
-        let source_bytes = source_bytes(args.source())?;
+        let source_inventory = source_inventory(args.source())?;
         let socket_path = args
             .daemon_socket()
             .map(PathBuf::from)
@@ -325,7 +325,7 @@ fn run_upload(
             &plan,
             credentials.as_ref(),
             args.source(),
-            source_bytes,
+            source_inventory,
         )?;
         write_daemon_upload_response(&response, writer)?;
         return Ok(());
@@ -344,7 +344,7 @@ fn submit_upload_plan_to_daemon<T: DaemonClientTransport>(
     plan: &crate::s3::AwsS3CommandPlan,
     credentials: Option<&RemoteS3Credentials>,
     source: &Path,
-    source_bytes: u64,
+    source_inventory: RemoteSourceInventory,
 ) -> Result<RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteRunError> {
     client
         .remote_easyconnect_submit_aws_cli_upload(build_daemon_upload_request(
@@ -353,7 +353,7 @@ fn submit_upload_plan_to_daemon<T: DaemonClientTransport>(
             plan,
             credentials,
             source,
-            source_bytes,
+            source_inventory,
         ))
         .map_err(RemoteRunError::Daemon)
 }
@@ -364,21 +364,26 @@ fn build_daemon_upload_request(
     plan: &crate::s3::AwsS3CommandPlan,
     credentials: Option<&RemoteS3Credentials>,
     source: &Path,
-    source_bytes: u64,
+    source_inventory: RemoteSourceInventory,
 ) -> RemoteEasyconnectSubmitAwsCliUploadRequest {
     RemoteEasyconnectSubmitAwsCliUploadRequest {
         job_id,
         object_store: route.object_store.clone(),
-        source_bytes,
+        source_bytes: source_inventory.total_bytes,
         policy: plan.backpressure_policy,
         ssd_pressure: dasobjectstore_daemon::DaemonSsdPressure::AcceptingWrites,
         program: plan.program.clone(),
         args: plan.args.clone(),
         display_args: redacted_upload_display_args(plan, source),
         environment: daemon_upload_environment(credentials),
+        progress_telemetry: Some(RemoteEasyconnectUploadProgressTelemetry {
+            source_scan_count: Some(source_inventory.file_count),
+            staged_bytes: Some(source_inventory.total_bytes),
+            ..RemoteEasyconnectUploadProgressTelemetry::default()
+        }),
         progress_message: Some(format!(
             "easyconnect upload submitted {} bytes",
-            source_bytes
+            source_inventory.total_bytes
         )),
     }
 }
@@ -464,10 +469,19 @@ fn write_daemon_job_event(
     }
 }
 
-fn source_bytes(path: &Path) -> Result<u64, RemoteRunError> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RemoteSourceInventory {
+    total_bytes: u64,
+    file_count: u64,
+}
+
+fn source_inventory(path: &Path) -> Result<RemoteSourceInventory, RemoteRunError> {
     let metadata = std::fs::metadata(path)?;
     if metadata.is_file() {
-        return Ok(metadata.len());
+        return Ok(RemoteSourceInventory {
+            total_bytes: metadata.len(),
+            file_count: 1,
+        });
     }
     if !metadata.is_dir() {
         return Err(RemoteRunError::UploadRouting(format!(
@@ -475,12 +489,17 @@ fn source_bytes(path: &Path) -> Result<u64, RemoteRunError> {
             path.display()
         )));
     }
-    let mut total = 0_u64;
+    let mut inventory = RemoteSourceInventory {
+        total_bytes: 0,
+        file_count: 0,
+    };
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
-        total = total.saturating_add(source_bytes(&entry.path())?);
+        let child = source_inventory(&entry.path())?;
+        inventory.total_bytes = inventory.total_bytes.saturating_add(child.total_bytes);
+        inventory.file_count = inventory.file_count.saturating_add(child.file_count);
     }
-    Ok(total)
+    Ok(inventory)
 }
 
 fn default_daemon_socket_path() -> PathBuf {
@@ -685,7 +704,7 @@ impl From<RemoteS3Error> for RemoteRunError {
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_upload_with_credentials, resolve_upload_route, run, source_bytes,
+        plan_upload_with_credentials, resolve_upload_route, run, source_inventory,
         submit_upload_plan_to_daemon, write_daemon_upload_response,
     };
     use crate::auth::RemoteAuthAuthority;
@@ -887,7 +906,7 @@ mod tests {
             &plan,
             credentials.as_ref(),
             &source,
-            source_bytes(&source).expect("source bytes"),
+            source_inventory(&source).expect("source inventory"),
         )
         .expect("daemon submit succeeds");
         let mut rendered = Vec::new();
@@ -901,6 +920,20 @@ mod tests {
         };
         assert_eq!(request.object_store, "zymo_fecal_2025.05");
         assert_eq!(request.source_bytes, 4);
+        assert_eq!(
+            request
+                .progress_telemetry
+                .as_ref()
+                .and_then(|telemetry| telemetry.source_scan_count),
+            Some(1)
+        );
+        assert_eq!(
+            request
+                .progress_telemetry
+                .as_ref()
+                .and_then(|telemetry| telemetry.staged_bytes),
+            Some(4)
+        );
         assert!(request
             .display_args
             .iter()

@@ -292,6 +292,7 @@ pub struct RemoteUploadAwsCliTransferPlan {
     pub environment: Vec<(String, String)>,
     pub source_bytes: u64,
     pub progress_updated_at_utc: String,
+    pub progress_telemetry: Option<RemoteUploadProgressTelemetry>,
     pub progress_message: Option<String>,
 }
 
@@ -309,6 +310,7 @@ impl RemoteUploadAwsCliTransferPlan {
             environment: Vec::new(),
             source_bytes,
             progress_updated_at_utc: progress_updated_at_utc.into(),
+            progress_telemetry: None,
             progress_message: None,
         }
     }
@@ -325,6 +327,11 @@ impl RemoteUploadAwsCliTransferPlan {
 
     pub fn with_progress_message(mut self, message: impl Into<String>) -> Self {
         self.progress_message = Some(message.into());
+        self
+    }
+
+    pub fn with_progress_telemetry(mut self, telemetry: RemoteUploadProgressTelemetry) -> Self {
+        self.progress_telemetry = Some(telemetry);
         self
     }
 
@@ -372,7 +379,7 @@ impl RemoteUploadS3ByteTransfer for RemoteUploadAwsCliByteTransfer<'_> {
             .record_progress(RemoteUploadS3TransferProgressUpdate {
                 bytes_done: self.plan.source_bytes,
                 updated_at_utc: self.plan.progress_updated_at_utc.clone(),
-                telemetry: None,
+                telemetry: self.plan.progress_telemetry.clone(),
                 message: self
                     .plan
                     .progress_message
@@ -400,6 +407,7 @@ pub struct RemoteEasyconnectAwsCliUploadJobRequest {
     pub finished_at_utc: String,
     pub progress_updated_at_utc: String,
     pub actor: Option<String>,
+    pub progress_telemetry: Option<RemoteUploadProgressTelemetry>,
     pub progress_message: Option<String>,
 }
 
@@ -430,6 +438,9 @@ pub fn run_remote_easyconnect_aws_cli_upload_job(
     )
     .with_display_args(request.display_args)
     .with_environment(request.environment);
+    if let Some(telemetry) = request.progress_telemetry {
+        transfer_plan = transfer_plan.with_progress_telemetry(telemetry);
+    }
     if let Some(message) = request.progress_message {
         transfer_plan = transfer_plan.with_progress_message(message);
     }
@@ -2142,6 +2153,16 @@ mod tests {
         assert_eq!(calls[0].args[0], "s3");
         assert_eq!(calls[0].display_args[2], "<source-redacted>");
         assert_eq!(report.progress_events.len(), 1);
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event");
+        };
+        let progress_message = progress_job
+            .progress
+            .message
+            .as_deref()
+            .expect("progress message");
+        assert!(progress_message.contains("source_files=1"));
+        assert!(progress_message.contains("staged_bytes=42"));
         let DaemonJobEvent::Complete(final_job) = report.final_event else {
             panic!("expected complete final event");
         };
@@ -2648,6 +2669,11 @@ mod tests {
             finished_at_utc: "2026-07-09T14:11:00Z".to_string(),
             progress_updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
             actor: Some("stephen".to_string()),
+            progress_telemetry: Some(RemoteUploadProgressTelemetry {
+                source_scan_count: Some(1),
+                staged_bytes: Some(42),
+                ..RemoteUploadProgressTelemetry::default()
+            }),
             progress_message: Some("easyconnect AWS CLI transfer copied 42 bytes".to_string()),
         }
     }
