@@ -801,6 +801,8 @@ pub(super) fn write_remote_s3_upload_plan(
 ) -> Result<(), io::Error> {
     writeln!(writer, "Remote S3 upload plan")?;
     writeln!(writer, "Store: {}", plan.store_id)?;
+    writeln!(writer, "Ingress origin: {}", plan.ingress_origin)?;
+    writeln!(writer, "Landing mode: {}", plan.landing_mode)?;
     writeln!(writer, "Bucket: {}", plan.bucket_name)?;
     writeln!(writer, "Endpoint URL: {}", plan.endpoint_url)?;
     writeln!(writer, "Region: {}", plan.region)?;

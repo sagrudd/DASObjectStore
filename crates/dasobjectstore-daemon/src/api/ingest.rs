@@ -1,5 +1,8 @@
 use crate::api::health::DaemonSsdPressure;
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
+pub use dasobjectstore_core::ingress::{
+    IngressLandingMode as DaemonIngressLandingMode, IngressOrigin as DaemonIngressOrigin,
+};
 use dasobjectstore_core::lifecycle::IngestJobState;
 use dasobjectstore_core::object_type::ObjectType;
 use serde::{Deserialize, Serialize};
@@ -72,60 +75,6 @@ impl SubmitIngestFilesRequest {
             return Err(DaemonRequestValidationError::BlankClientRequestId);
         }
         Ok(())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DaemonIngressOrigin {
-    #[default]
-    LocalServer,
-    RemoteS3,
-    WebUpload,
-    Synoptikon,
-    Mneion,
-}
-
-impl DaemonIngressOrigin {
-    pub fn landing_mode(self) -> DaemonIngressLandingMode {
-        match self {
-            Self::LocalServer => DaemonIngressLandingMode::DirectToHddWhenPolicyAllows,
-            Self::RemoteS3 | Self::WebUpload | Self::Synoptikon | Self::Mneion => {
-                DaemonIngressLandingMode::SsdFirst
-            }
-        }
-    }
-
-    pub fn requires_ssd_staging(self) -> bool {
-        self.landing_mode() == DaemonIngressLandingMode::SsdFirst
-    }
-}
-
-impl Display for DaemonIngressOrigin {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::LocalServer => "local_server",
-            Self::RemoteS3 => "remote_s3",
-            Self::WebUpload => "web_upload",
-            Self::Synoptikon => "synoptikon",
-            Self::Mneion => "mneion",
-        })
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DaemonIngressLandingMode {
-    SsdFirst,
-    DirectToHddWhenPolicyAllows,
-}
-
-impl Display for DaemonIngressLandingMode {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::SsdFirst => "ssd_first",
-            Self::DirectToHddWhenPolicyAllows => "direct_to_hdd_when_policy_allows",
-        })
     }
 }
 

@@ -3,6 +3,7 @@
 use crate::layout::validate_bucket_name;
 use crate::provider::ObjectServiceError;
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -37,6 +38,8 @@ pub struct RemoteS3UploadPlanRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteS3UploadPlan {
     pub store_id: StoreId,
+    pub ingress_origin: IngressOrigin,
+    pub landing_mode: IngressLandingMode,
     pub bucket_name: String,
     pub endpoint_url: String,
     pub region: String,
@@ -96,6 +99,8 @@ pub fn plan_remote_s3_upload(
 
     Ok(RemoteS3UploadPlan {
         store_id: request.store_id,
+        ingress_origin: IngressOrigin::RemoteS3,
+        landing_mode: IngressOrigin::RemoteS3.landing_mode(),
         bucket_name,
         endpoint_url,
         region,
@@ -151,12 +156,15 @@ fn shell_quote(value: &str) -> String {
 mod tests {
     use super::{plan_remote_s3_upload, RemoteS3AuthAuthority, RemoteS3UploadPlanRequest};
     use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
 
     #[test]
     fn renders_mneion_remote_upload_plan() {
         let plan = plan_remote_s3_upload(request(RemoteS3AuthAuthority::Mneion, None))
             .expect("plan renders");
 
+        assert_eq!(plan.ingress_origin, IngressOrigin::RemoteS3);
+        assert_eq!(plan.landing_mode, IngressLandingMode::SsdFirst);
         assert_eq!(plan.auth_authority, RemoteS3AuthAuthority::Mneion);
         assert_eq!(plan.bucket_name, "dos-generated-data");
         assert!(plan
@@ -189,6 +197,16 @@ mod tests {
 
         assert_eq!(plan.username.as_deref(), Some("alice"));
         assert!(plan.credential_instruction.contains("local user alice"));
+    }
+
+    #[test]
+    fn remote_upload_plan_serializes_stable_ingress_classification() {
+        let plan = plan_remote_s3_upload(request(RemoteS3AuthAuthority::Mneion, None))
+            .expect("plan renders");
+        let json = serde_json::to_value(plan).expect("plan serializes");
+
+        assert_eq!(json["ingress_origin"], serde_json::json!("remote_s3"));
+        assert_eq!(json["landing_mode"], serde_json::json!("ssd_first"));
     }
 
     #[test]

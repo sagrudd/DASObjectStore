@@ -21,8 +21,11 @@ can read the DASObjectStore store registry:
      --auth mneion
 
 The command resolves the store's S3 bucket, credential reference, AWS CLI
-profile name, endpoint URL, and upload commands. Use ``--json`` when another
-tool needs to consume the plan.
+profile name, endpoint URL, upload commands, and ingress classification. Remote
+S3 uploads are reported as ``remote_s3`` ingress with ``ssd_first`` landing so
+the appliance can stage incoming bytes on the selected ObjectStore SSD before
+daemon-owned HDD settlement. Use ``--json`` when another tool needs to consume
+the plan.
 
 On a remote computer that does not have the DASObjectStore store registry, pass
 the bucket name explicitly:

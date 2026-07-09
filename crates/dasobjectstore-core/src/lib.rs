@@ -4,6 +4,7 @@ pub mod config;
 pub mod file_export;
 pub mod health;
 pub mod ids;
+pub mod ingress;
 pub mod lifecycle;
 pub mod object_type;
 pub mod placement;

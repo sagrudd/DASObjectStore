@@ -8,6 +8,8 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Promote ingress-origin classification into the core domain crate and include
+  ``remote_s3``/``ssd_first`` in remote S3 upload plans and CLI output.
 - Carry typed ingress origin through daemon file-ingest requests, default
   legacy requests to ``local_server``, and have the daemon runtime use the
   request origin when deciding SSD-first versus direct-to-HDD landing.
