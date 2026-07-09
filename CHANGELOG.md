@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.4 - 2026-07-09
 
+- Add daemon remote-upload queue observers that derive SSD staging, HDD
+  landing, and verification depths from daemon ingest telemetry before
+  admission decisions.
 - Add a daemon remote-upload S3 transfer worker facade that acquires admission
   capacity, records running/final job states, executes a byte-transfer closure,
   and releases capacity after completion or failure.

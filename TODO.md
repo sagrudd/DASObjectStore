@@ -815,10 +815,13 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add a daemon remote-upload S3 transfer worker facade that acquires
   admission capacity, records running/final job states, executes the provided
   byte-transfer closure, and releases capacity on completion or failure.
+- [x] Add daemon remote-upload queue observers that derive SSD staging, HDD
+  landing, and verification queue depths from daemon ingest telemetry before
+  admission decisions.
 - [ ] Wire the daemon runtime remote-upload admission gate into concrete upload
-  byte-transfer implementations, live progress streams, and HDD/verify queue
-  observers so SSD staging, S3/object-service intake, HDD landing workers, and
-  verification cannot grow without bounds.
+  byte-transfer implementations and live progress streams so SSD staging,
+  S3/object-service intake, HDD landing workers, and verification cannot grow
+  without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
   expired pairings, and interrupted browser tabs.

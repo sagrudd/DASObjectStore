@@ -1,8 +1,9 @@
 use super::{admin_jobs::AdminJobRegistry, service::DaemonServiceRuntimeError};
 use crate::api::{
-    decide_remote_easyconnect_upload_admission, DaemonJobEvent, DaemonJobId, DaemonJobIdError,
-    DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobSummary, DaemonSsdPressure,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+    decide_remote_easyconnect_upload_admission, DaemonIngestQueueDepths, DaemonIngestTelemetry,
+    DaemonJobEvent, DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress,
+    DaemonJobState, DaemonJobSummary, DaemonSsdPressure, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest,
 };
 use dasobjectstore_core::remote_upload::{
     RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
@@ -35,6 +36,20 @@ impl RemoteUploadAdmissionGate {
         state.hdd_landing_queue_depth = depths.hdd_landing_queue_depth;
         state.verification_queue_depth = depths.verification_queue_depth;
         *state
+    }
+
+    pub fn observe_ingest_queue_depths(
+        &self,
+        depths: DaemonIngestQueueDepths,
+    ) -> RemoteUploadRuntimeSnapshot {
+        self.observe_queue_depths(RemoteUploadQueueDepths::from(depths))
+    }
+
+    pub fn observe_ingest_telemetry(
+        &self,
+        telemetry: DaemonIngestTelemetry,
+    ) -> RemoteUploadRuntimeSnapshot {
+        self.observe_ingest_queue_depths(telemetry.queue_depths)
     }
 
     pub fn admission_decision(
@@ -188,6 +203,16 @@ pub struct RemoteUploadQueueDepths {
     pub ssd_stage_queue_depth: u32,
     pub hdd_landing_queue_depth: u32,
     pub verification_queue_depth: u32,
+}
+
+impl From<DaemonIngestQueueDepths> for RemoteUploadQueueDepths {
+    fn from(depths: DaemonIngestQueueDepths) -> Self {
+        Self {
+            ssd_stage_queue_depth: depths.ssd_stage,
+            hdd_landing_queue_depth: depths.hdd_write,
+            verification_queue_depth: depths.verification,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -502,7 +527,8 @@ mod tests {
         RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
-        DaemonJobEvent, DaemonJobKind, DaemonJobState, DaemonJobStatusRequest, DaemonSsdPressure,
+        DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonJobEvent, DaemonJobKind,
+        DaemonJobState, DaemonJobStatusRequest, DaemonSsdPressure,
         RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadBackpressureReason,
     };
     use crate::runtime::{admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry};
@@ -661,6 +687,56 @@ mod tests {
         assert_eq!(
             decision.reason,
             RemoteEasyconnectUploadBackpressureReason::SsdStageQueueFull
+        );
+    }
+
+    #[test]
+    fn remote_upload_queue_depths_are_derived_from_ingest_worker_queues() {
+        let depths = RemoteUploadQueueDepths::from(DaemonIngestQueueDepths {
+            scan: 99,
+            source_read: 88,
+            ssd_stage: 3,
+            hdd_write: 5,
+            verification: 7,
+        });
+
+        assert_eq!(
+            depths,
+            RemoteUploadQueueDepths {
+                ssd_stage_queue_depth: 3,
+                hdd_landing_queue_depth: 5,
+                verification_queue_depth: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn gate_observes_ingest_telemetry_queue_depths_for_admission() {
+        let gate = RemoteUploadAdmissionGate::new();
+        let policy = RemoteUploadBackpressurePolicy::default();
+        let telemetry = DaemonIngestTelemetry {
+            queue_depths: DaemonIngestQueueDepths {
+                scan: 99,
+                source_read: 88,
+                ssd_stage: 0,
+                hdd_write: policy.max_hdd_landing_queue_depth,
+                verification: 0,
+            },
+            ..DaemonIngestTelemetry::default()
+        };
+
+        let snapshot = gate.observe_ingest_telemetry(telemetry);
+        let decision = gate.admission_decision(policy, DaemonSsdPressure::AcceptingWrites);
+
+        assert_eq!(snapshot.ssd_stage_queue_depth, 0);
+        assert_eq!(
+            snapshot.hdd_landing_queue_depth,
+            policy.max_hdd_landing_queue_depth
+        );
+        assert_eq!(snapshot.verification_queue_depth, 0);
+        assert_eq!(
+            decision.reason,
+            RemoteEasyconnectUploadBackpressureReason::HddLandingQueueFull
         );
     }
 
