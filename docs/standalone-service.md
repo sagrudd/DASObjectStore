@@ -203,7 +203,9 @@ Authenticated daemon clients should consume telemetry through the
 API returns current CPU, memory, capacity, session, and per-disk IO summaries,
 fixed-point time-series data for the 1 hour, 1 day, 10 day, and 3 month
 windows, available-window metadata, and explicit missing-data intervals for
-chart gaps.
+chart gaps. Chart series are downsampled by requested window: raw cadence for
+1 hour, one-minute buckets for 1 day, ten-minute buckets for 10 days, and
+hourly buckets for 3 months.
 Each sample includes CPU, memory, and managed HDD capacity data when
 `/srv/dasobjectstore/hdd/<disk-id>/.dasobjectstore/device.env` declares
 `role=hdd:<disk-id>`. The collector preserves disk ID, label, mount path,

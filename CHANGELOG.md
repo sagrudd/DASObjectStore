@@ -33,6 +33,9 @@ agreement before landing.
 - Add an authenticated daemon appliance telemetry API command that returns
   current summaries, fixed-point chart series, available windows, per-disk IO,
   capacity/session history, and missing-data intervals from the managed state.
+- Downsample appliance telemetry API chart series by requested window and add
+  regression coverage for authorization, missing-data gaps, and bounded
+  three-month responses.
 
 ## 0.61.2 - 2026-07-09
 

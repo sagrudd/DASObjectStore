@@ -50,8 +50,10 @@ Authenticated daemon API callers can request appliance telemetry through the
 ``appliance_telemetry`` command. The response contains current CPU, memory,
 capacity, session, and per-disk IO summaries, bounded time-series windows for
 Home-dashboard charts, available-window metadata, and missing-data intervals.
-Percentages are exposed as basis-point integers so API consumers do not need to
-handle floating-point drift.
+Chart series are downsampled by requested window: raw cadence for 1 hour,
+one-minute buckets for 1 day, ten-minute buckets for 10 days, and hourly
+buckets for 3 months. Percentages are exposed as basis-point integers so API
+consumers do not need to handle floating-point drift.
 The daemon bounds that JSON history by retaining raw cadence samples for the
 last hour, one-minute buckets through one day, ten-minute buckets through ten
 days, and hourly buckets through 92 days.

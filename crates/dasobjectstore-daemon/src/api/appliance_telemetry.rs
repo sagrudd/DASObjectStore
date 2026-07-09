@@ -194,6 +194,7 @@ pub fn query_appliance_telemetry(
     request: &ApplianceTelemetryRequest,
 ) -> ApplianceTelemetryResponse {
     let samples = samples_in_window(&sample_set.samples, request.window);
+    let series_samples = downsample_samples(samples.clone(), request.window);
     let current = samples.last().map(|sample| current_summary(sample));
     ApplianceTelemetryResponse {
         state: ApplianceTelemetryState::Available,
@@ -203,8 +204,8 @@ pub fn query_appliance_telemetry(
         requested_window: request.window,
         available_windows: available_windows(&sample_set.samples),
         current,
-        series: series_from_samples(&samples),
-        missing_data_intervals: missing_intervals(&samples),
+        series: series_from_samples(&series_samples),
+        missing_data_intervals: missing_intervals(&series_samples),
     }
 }
 
@@ -229,6 +230,34 @@ fn samples_in_window(
         .collect::<Vec<_>>();
     filtered.sort_by(|left, right| left.timestamp_utc.cmp(&right.timestamp_utc));
     filtered
+}
+
+fn downsample_samples(
+    samples: Vec<ApplianceTelemetrySample>,
+    window: ApplianceTelemetryWindow,
+) -> Vec<ApplianceTelemetrySample> {
+    let bucket_seconds = match window {
+        ApplianceTelemetryWindow::OneHour => 1,
+        ApplianceTelemetryWindow::OneDay => 60,
+        ApplianceTelemetryWindow::TenDays => 10 * 60,
+        ApplianceTelemetryWindow::ThreeMonths => 60 * 60,
+    };
+    if bucket_seconds == 1 {
+        return samples;
+    }
+
+    let mut retained = Vec::new();
+    let mut seen_buckets = std::collections::BTreeSet::new();
+    for sample in samples.into_iter().rev() {
+        let Some(timestamp) = parse_utc_timestamp_seconds(&sample.timestamp_utc) else {
+            continue;
+        };
+        if seen_buckets.insert(timestamp / bucket_seconds) {
+            retained.push(sample);
+        }
+    }
+    retained.reverse();
+    retained
 }
 
 fn available_windows(
@@ -573,6 +602,139 @@ mod tests {
                 && interval.reason == ApplianceTelemetryMissingReason::DaemonStartup));
     }
 
+    #[test]
+    fn query_downsamples_series_by_requested_window() {
+        let sample_set = ApplianceTelemetrySampleSet {
+            schema_version: "dasobjectstore.appliance_telemetry.v1".to_string(),
+            generated_at_utc: "2026-07-09T18:30:00Z".to_string(),
+            cadence_seconds: 30.0,
+            source: source(),
+            samples: [
+                "2026-07-09T18:28:00Z",
+                "2026-07-09T18:28:30Z",
+                "2026-07-09T18:29:00Z",
+                "2026-07-09T18:29:30Z",
+                "2026-07-09T18:30:00Z",
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, timestamp)| sample(timestamp, Some(index as f64), Some(1), false))
+            .collect(),
+        };
+
+        let one_hour = query_appliance_telemetry(
+            &sample_set,
+            &ApplianceTelemetryRequest {
+                window: ApplianceTelemetryWindow::OneHour,
+            },
+        );
+        let one_day = query_appliance_telemetry(
+            &sample_set,
+            &ApplianceTelemetryRequest {
+                window: ApplianceTelemetryWindow::OneDay,
+            },
+        );
+
+        assert_eq!(one_hour.series.cpu_usage.len(), 5);
+        assert_eq!(
+            one_day
+                .series
+                .cpu_usage
+                .iter()
+                .map(|point| point.timestamp_utc.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "2026-07-09T18:28:30Z",
+                "2026-07-09T18:29:30Z",
+                "2026-07-09T18:30:00Z"
+            ]
+        );
+        assert_eq!(
+            one_day
+                .current
+                .expect("current summary")
+                .cpu_usage_percent_basis_points,
+            Some(400)
+        );
+    }
+
+    #[test]
+    fn query_reports_missing_data_as_gaps_without_interpolation() {
+        let sample_set = ApplianceTelemetrySampleSet {
+            schema_version: "dasobjectstore.appliance_telemetry.v1".to_string(),
+            generated_at_utc: "2026-07-09T18:30:00Z".to_string(),
+            cadence_seconds: 30.0,
+            source: source(),
+            samples: vec![
+                sample("2026-07-09T18:29:00Z", Some(40.0), Some(1), false),
+                sample("2026-07-09T18:29:30Z", None, Some(1), true),
+                sample("2026-07-09T18:30:00Z", Some(60.0), Some(1), false),
+            ],
+        };
+
+        let response = query_appliance_telemetry(
+            &sample_set,
+            &ApplianceTelemetryRequest {
+                window: ApplianceTelemetryWindow::OneHour,
+            },
+        );
+
+        assert_eq!(
+            response
+                .series
+                .cpu_usage
+                .iter()
+                .map(|point| point.value_basis_points)
+                .collect::<Vec<_>>(),
+            vec![Some(4_000), None, Some(6_000)]
+        );
+        assert_eq!(response.missing_data_intervals.len(), 1);
+        let interval = &response.missing_data_intervals[0];
+        assert_eq!(interval.path, "cpu.usage_percent");
+        assert_eq!(interval.start_utc, "2026-07-09T18:29:30Z");
+        assert_eq!(interval.end_utc, "2026-07-09T18:29:30Z");
+        assert_eq!(interval.sample_count, 1);
+    }
+
+    #[test]
+    fn query_bounds_three_month_response_to_hourly_points() {
+        let sample_set = ApplianceTelemetrySampleSet {
+            schema_version: "dasobjectstore.appliance_telemetry.v1".to_string(),
+            generated_at_utc: "2026-07-09T18:30:00Z".to_string(),
+            cadence_seconds: 30.0,
+            source: source(),
+            samples: dense_samples_for_hours(100, 30),
+        };
+
+        let response = query_appliance_telemetry(
+            &sample_set,
+            &ApplianceTelemetryRequest {
+                window: ApplianceTelemetryWindow::ThreeMonths,
+            },
+        );
+
+        assert_eq!(response.series.cpu_usage.len(), 101);
+        assert!(response.series.cpu_usage.len() <= 92 * 24 + 1);
+        assert_eq!(
+            response
+                .series
+                .cpu_usage
+                .first()
+                .expect("first point")
+                .timestamp_utc,
+            "2026-07-05T14:59:30Z"
+        );
+        assert_eq!(
+            response
+                .series
+                .cpu_usage
+                .last()
+                .expect("last point")
+                .timestamp_utc,
+            "2026-07-09T18:30:00Z"
+        );
+    }
+
     fn source() -> ApplianceTelemetrySource {
         ApplianceTelemetrySource {
             appliance_id: "fixture-appliance".to_string(),
@@ -659,5 +821,54 @@ mod tests {
                 missing_reason: None,
             },
         }
+    }
+
+    fn dense_samples_for_hours(hours: u32, cadence_seconds: u32) -> Vec<ApplianceTelemetrySample> {
+        let newest = timestamp_seconds("2026-07-09T18:30:00Z");
+        let oldest = newest - i64::from(hours) * 60 * 60;
+        let mut samples = Vec::new();
+        let mut timestamp = oldest;
+        while timestamp <= newest {
+            samples.push(sample(
+                &format_timestamp(timestamp),
+                Some(((timestamp - oldest) % 100) as f64),
+                Some(1),
+                false,
+            ));
+            timestamp += i64::from(cadence_seconds);
+        }
+        samples
+    }
+
+    fn timestamp_seconds(value: &str) -> i64 {
+        super::parse_utc_timestamp_seconds(value).expect("valid test timestamp")
+    }
+
+    fn format_timestamp(timestamp: i64) -> String {
+        let mut days = timestamp.div_euclid(86_400);
+        let seconds_of_day = timestamp.rem_euclid(86_400);
+        let mut year = 1970;
+        loop {
+            let days_in_year = if super::is_leap_year(year) { 366 } else { 365 };
+            if days < days_in_year {
+                break;
+            }
+            days -= days_in_year;
+            year += 1;
+        }
+        let mut month = 1;
+        loop {
+            let days_in_month = i64::from(super::days_in_month(year, month));
+            if days < days_in_month {
+                break;
+            }
+            days -= days_in_month;
+            month += 1;
+        }
+        let day = days + 1;
+        let hour = seconds_of_day / 3_600;
+        let minute = (seconds_of_day % 3_600) / 60;
+        let second = seconds_of_day % 60;
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
     }
 }
