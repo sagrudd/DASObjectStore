@@ -46,6 +46,9 @@ and writes the current JSON state under:
 The telemetry directory is daemon-owned state; operators and Web/API readers
 should treat the JSON file as read-only and use supported interfaces as they are
 added.
+The daemon bounds that JSON history by retaining raw cadence samples for the
+last hour, one-minute buckets through one day, ten-minute buckets through ten
+days, and hourly buckets through 92 days.
 When managed HDD roots contain ``.dasobjectstore/device.env`` markers with
 ``role=hdd:<disk-id>``, the daemon records their capacity in the same telemetry
 sample. Marker fields such as ``label``, ``device``, ``filesystem``, and

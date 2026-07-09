@@ -953,7 +953,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add active-user/session telemetry for local Web sessions and remote-agent
   sessions, including total active sessions, distinct logged-in users, and
   administrator/non-administrator counts where policy permits exposure.
-- [ ] Implement bounded JSON retention so telemetry cannot grow without limit,
+- [x] Implement bounded JSON retention so telemetry cannot grow without limit,
   with retention/downsampling policy sufficient for 1 hour, 1 day, 10 day, and
   3 month chart windows.
 - [ ] Add daemon tests for telemetry cadence, bounded retention, atomic rewrite,

@@ -259,6 +259,10 @@ fn file_backed_sink_writes_current_schema_shaped_sample_set() {
         .collect_once("2026-07-09T17:29:00Z")
         .expect("sample collected");
     sink.record(&sample_set).expect("state written");
+    let sample_set = loop_runner
+        .collect_once("2026-07-09T17:29:30Z")
+        .expect("second sample collected");
+    sink.record(&sample_set).expect("second state written");
     let written: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&state_path).expect("state reads"))
             .expect("state is json");
@@ -270,10 +274,66 @@ fn file_backed_sink_writes_current_schema_shaped_sample_set() {
         "dasobjectstore.appliance_telemetry.v1"
     );
     assert_eq!(written["cadence_seconds"], 30.0);
+    assert_eq!(written["generated_at_utc"], "2026-07-09T17:29:30Z");
+    assert_eq!(
+        written["samples"].as_array().expect("samples array").len(),
+        2
+    );
     assert_eq!(
         written["samples"][0]["sessions"]["missing_reason"],
         "not_configured"
     );
+}
+
+#[test]
+fn file_backed_sink_bounds_telemetry_retention_by_chart_windows() {
+    let root = temp_root("appliance-telemetry-retention");
+    let state_path = appliance_telemetry_state_path(&root);
+    let mut sink = FileBackedApplianceTelemetrySink::new(&state_path);
+
+    for timestamp in [
+        "2026-03-01T00:00:00Z",
+        "2026-06-20T12:00:00Z",
+        "2026-06-20T12:30:00Z",
+        "2026-07-08T17:00:00Z",
+        "2026-07-08T17:05:00Z",
+        "2026-07-09T16:30:00Z",
+        "2026-07-09T16:30:30Z",
+        "2026-07-09T17:59:30Z",
+        "2026-07-09T18:00:00Z",
+    ] {
+        let sample_set = sample_set_at(timestamp);
+        sink.record(&sample_set).expect("state written");
+    }
+
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("state reads"))
+            .expect("state is json");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    let timestamps = written["samples"]
+        .as_array()
+        .expect("samples array")
+        .iter()
+        .map(|sample| {
+            sample["timestamp_utc"]
+                .as_str()
+                .expect("sample timestamp")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        timestamps,
+        vec![
+            "2026-06-20T12:30:00Z",
+            "2026-07-08T17:05:00Z",
+            "2026-07-09T16:30:30Z",
+            "2026-07-09T17:59:30Z",
+            "2026-07-09T18:00:00Z"
+        ]
+    );
+    assert_eq!(written["generated_at_utc"], "2026-07-09T18:00:00Z");
 }
 
 #[test]
@@ -450,6 +510,13 @@ fn source() -> ApplianceTelemetrySource {
         host_id: "fixture-host".to_string(),
         hostname: Some("fixture-hostname".to_string()),
     }
+}
+
+fn sample_set_at(timestamp: &str) -> dasobjectstore_daemon::ApplianceTelemetrySampleSet {
+    let config = ApplianceTelemetryLoopConfig::new(30, source()).expect("loop config");
+    ApplianceTelemetryLoop::new(config, FakeCollector::new())
+        .collect_once(timestamp)
+        .expect("sample collected")
 }
 
 #[derive(Default)]

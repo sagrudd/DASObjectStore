@@ -24,6 +24,9 @@ agreement before landing.
 - Add appliance session telemetry for active standalone Web sessions, remote
   easyconnect agents, distinct logged-in users, and local administrator/operator
   session counts where host group data is readable.
+- Bound the appliance telemetry JSON history with raw samples for the last hour,
+  one-minute buckets through one day, ten-minute buckets through ten days, and
+  hourly buckets through three months.
 
 ## 0.61.2 - 2026-07-09
 

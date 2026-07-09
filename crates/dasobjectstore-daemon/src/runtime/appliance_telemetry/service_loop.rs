@@ -6,9 +6,10 @@ use super::model::{
     APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS, APPLIANCE_TELEMETRY_FILE_NAME,
     APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS, APPLIANCE_TELEMETRY_SCHEMA_VERSION,
 };
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
@@ -18,6 +19,12 @@ use std::os::unix::fs::PermissionsExt;
 
 const APPLIANCE_TELEMETRY_DIR_MODE: u32 = 0o750;
 const APPLIANCE_TELEMETRY_FILE_MODE: u32 = 0o640;
+const APPLIANCE_TELEMETRY_ONE_HOUR_SECONDS: i64 = 60 * 60;
+const APPLIANCE_TELEMETRY_ONE_DAY_SECONDS: i64 = 24 * 60 * 60;
+const APPLIANCE_TELEMETRY_TEN_DAYS_SECONDS: i64 = 10 * APPLIANCE_TELEMETRY_ONE_DAY_SECONDS;
+const APPLIANCE_TELEMETRY_THREE_MONTH_SECONDS: i64 = 92 * APPLIANCE_TELEMETRY_ONE_DAY_SECONDS;
+const APPLIANCE_TELEMETRY_ONE_MINUTE_BUCKET_SECONDS: i64 = 60;
+const APPLIANCE_TELEMETRY_TEN_MINUTE_BUCKET_SECONDS: i64 = 10 * 60;
 
 pub trait ApplianceHostTelemetryCollector {
     fn collect(
@@ -314,6 +321,7 @@ fn write_appliance_telemetry_state(
     path: &Path,
     sample_set: &ApplianceTelemetrySampleSet,
 ) -> Result<(), ApplianceTelemetryLoopError> {
+    let sample_set = merge_bounded_appliance_telemetry_state(path, sample_set)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             ApplianceTelemetryLoopError::Sink(format!(
@@ -339,7 +347,7 @@ fn write_appliance_telemetry_state(
                 tmp_path.display()
             ))
         })?;
-        serde_json::to_writer_pretty(&mut file, sample_set).map_err(|error| {
+        serde_json::to_writer_pretty(&mut file, &sample_set).map_err(|error| {
             ApplianceTelemetryLoopError::Sink(format!(
                 "write telemetry temp file {}: {error}",
                 tmp_path.display()
@@ -373,6 +381,141 @@ fn write_appliance_telemetry_state(
         sync_parent_directory(parent)?;
     }
     Ok(())
+}
+
+fn merge_bounded_appliance_telemetry_state(
+    path: &Path,
+    sample_set: &ApplianceTelemetrySampleSet,
+) -> Result<ApplianceTelemetrySampleSet, ApplianceTelemetryLoopError> {
+    let mut merged = sample_set.clone();
+    match fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<ApplianceTelemetrySampleSet>(&contents) {
+            Ok(mut existing) if can_merge_appliance_telemetry_state(&existing, sample_set) => {
+                existing.generated_at_utc = sample_set.generated_at_utc.clone();
+                existing.samples.extend(sample_set.samples.clone());
+                merged = existing;
+            }
+            Ok(_) | Err(_) => {}
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(ApplianceTelemetryLoopError::Sink(format!(
+                "read telemetry state file {}: {error}",
+                path.display()
+            )));
+        }
+    }
+    retain_bounded_appliance_telemetry_samples(&mut merged);
+    Ok(merged)
+}
+
+fn can_merge_appliance_telemetry_state(
+    existing: &ApplianceTelemetrySampleSet,
+    incoming: &ApplianceTelemetrySampleSet,
+) -> bool {
+    existing.schema_version == incoming.schema_version
+        && existing.cadence_seconds == incoming.cadence_seconds
+        && existing.source == incoming.source
+}
+
+fn retain_bounded_appliance_telemetry_samples(sample_set: &mut ApplianceTelemetrySampleSet) {
+    let mut parsed_samples = sample_set
+        .samples
+        .drain(..)
+        .filter_map(|sample| {
+            parse_utc_timestamp_seconds(&sample.timestamp_utc).map(|timestamp| (timestamp, sample))
+        })
+        .collect::<Vec<_>>();
+    parsed_samples.sort_by_key(|(timestamp, _)| *timestamp);
+    let Some((newest_timestamp, _)) = parsed_samples.last() else {
+        return;
+    };
+    let newest_timestamp = *newest_timestamp;
+    let mut seen_buckets = BTreeSet::new();
+    let mut retained = Vec::new();
+
+    for (timestamp, sample) in parsed_samples.into_iter().rev() {
+        let Some(bucket) = telemetry_retention_bucket(timestamp, newest_timestamp) else {
+            continue;
+        };
+        if seen_buckets.insert(bucket) {
+            retained.push(sample);
+        }
+    }
+
+    retained.reverse();
+    sample_set.samples = retained;
+}
+
+fn telemetry_retention_bucket(timestamp: i64, newest_timestamp: i64) -> Option<i64> {
+    let age_seconds = newest_timestamp.saturating_sub(timestamp);
+    if age_seconds <= APPLIANCE_TELEMETRY_ONE_HOUR_SECONDS {
+        Some(timestamp)
+    } else if age_seconds <= APPLIANCE_TELEMETRY_ONE_DAY_SECONDS {
+        Some(timestamp / APPLIANCE_TELEMETRY_ONE_MINUTE_BUCKET_SECONDS)
+    } else if age_seconds <= APPLIANCE_TELEMETRY_TEN_DAYS_SECONDS {
+        Some(timestamp / APPLIANCE_TELEMETRY_TEN_MINUTE_BUCKET_SECONDS)
+    } else if age_seconds <= APPLIANCE_TELEMETRY_THREE_MONTH_SECONDS {
+        Some(timestamp / APPLIANCE_TELEMETRY_ONE_HOUR_SECONDS)
+    } else {
+        None
+    }
+}
+
+fn parse_utc_timestamp_seconds(value: &str) -> Option<i64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year = date_parts.next()?.parse::<i32>().ok()?;
+    let month = date_parts.next()?.parse::<u32>().ok()?;
+    let day = date_parts.next()?.parse::<u32>().ok()?;
+    if date_parts.next().is_some() {
+        return None;
+    }
+
+    let time = time.split_once('.').map_or(time, |(whole, _)| whole);
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next()?.parse::<u32>().ok()?;
+    let minute = time_parts.next()?.parse::<u32>().ok()?;
+    let second = time_parts.next()?.parse::<u32>().ok()?;
+    if time_parts.next().is_some()
+        || hour > 23
+        || minute > 59
+        || second > 59
+        || !(1..=12).contains(&month)
+    {
+        return None;
+    }
+
+    let month_day_count = days_in_month(year, month);
+    if day == 0 || day > month_day_count {
+        return None;
+    }
+
+    let mut days = 0i64;
+    for current_year in 1970..year {
+        days += if is_leap_year(current_year) { 366 } else { 365 };
+    }
+    for current_month in 1..month {
+        days += i64::from(days_in_month(year, current_month));
+    }
+    days += i64::from(day - 1);
+
+    Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 #[cfg(unix)]

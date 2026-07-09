@@ -193,6 +193,11 @@ The initial telemetry state file is:
 enables telemetry with a 30 second cadence by default; the initial supported
 cadences are 6 seconds for fast local diagnostics and 30 seconds for normal
 appliance operation.
+The JSON state is retained in bounded tiers so long-running appliances cannot
+grow the file without limit: raw cadence samples are kept for the last hour,
+one sample per minute is kept through one day, one sample per ten-minute bucket
+is kept through ten days, and one sample per hour is kept through 92 days.
+Older samples are dropped during the next atomic rewrite.
 Each sample includes CPU, memory, and managed HDD capacity data when
 `/srv/dasobjectstore/hdd/<disk-id>/.dasobjectstore/device.env` declares
 `role=hdd:<disk-id>`. The collector preserves disk ID, label, mount path,
