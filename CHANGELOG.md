@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.7 - 2026-07-09
+
+- Refresh the Web Users/Groups workspace after successful live local group
+  creation or user assignment so writer groups and assignment controls update
+  immediately without a browser reload.
+- Reset stale local group creation form state after successful submission and
+  seed the assignment form with the newly created group for a clearer operator
+  journey.
+
 ## 0.54.6 - 2026-07-09
 
 - Fix Web build warnings by retaining the session heartbeat interval for effect

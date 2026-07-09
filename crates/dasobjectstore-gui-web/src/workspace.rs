@@ -3728,6 +3728,167 @@ pub fn local_group_admin_confirmation_matches(value: &str) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn users_groups_empty_workspace_message(view: &UsersGroupsWorkspaceResponse) -> Option<String> {
+    (view.current_user.is_none() && view.users.is_empty() && view.writer_groups.is_empty()).then(
+        || "No local identity or writer-policy state was returned by the appliance.".to_string(),
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn local_group_display_name(group_name: &str) -> String {
+    let display_name = group_name
+        .trim()
+        .replace(['-', '_'], " ")
+        .split_whitespace()
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first
+                    .to_uppercase()
+                    .chain(chars.flat_map(char::to_lowercase))
+                    .collect(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(" ");
+
+    if display_name.is_empty() {
+        group_name.trim().to_string()
+    } else {
+        display_name
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn users_groups_view_with_writer_group(
+    mut view: UsersGroupsWorkspaceResponse,
+    group_name: &str,
+) -> UsersGroupsWorkspaceResponse {
+    let group_name = group_name.trim();
+    if group_name.is_empty() {
+        return view;
+    }
+
+    let current_user_member = view
+        .current_user
+        .as_ref()
+        .map(|user| user.groups.iter().any(|group| group == group_name))
+        .unwrap_or(false);
+
+    if let Some(group) = view
+        .writer_groups
+        .iter_mut()
+        .find(|group| group.group_name == group_name)
+    {
+        group.current_user_member |= current_user_member;
+    } else {
+        view.writer_groups.push(crate::api::StorageGroupResponse {
+            group_name: group_name.to_string(),
+            display_name: local_group_display_name(group_name),
+            source: "object_storage_group_registry".to_string(),
+            current_user_member,
+        });
+    }
+
+    view.writer_groups
+        .sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    view.selected_group_name = Some(group_name.to_string());
+    view
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn users_groups_view_with_group_assignment(
+    mut view: UsersGroupsWorkspaceResponse,
+    username: &str,
+    group_name: &str,
+) -> UsersGroupsWorkspaceResponse {
+    let username = username.trim();
+    let group_name = group_name.trim();
+    if username.is_empty() || group_name.is_empty() {
+        return view;
+    }
+
+    if view
+        .current_user
+        .as_ref()
+        .map(|user| user.username == username)
+        .unwrap_or(false)
+    {
+        if let Some(user) = view.current_user.as_mut() {
+            if !user.groups.iter().any(|group| group == group_name) {
+                user.groups.push(group_name.to_string());
+                user.groups.sort();
+            }
+        }
+        for writer_group in &mut view.writer_groups {
+            if writer_group.group_name == group_name {
+                writer_group.current_user_member = true;
+            }
+        }
+        for local_group in &mut view.groups {
+            if local_group.group_name == group_name {
+                local_group.current_user_member = true;
+            }
+        }
+    }
+
+    view.selected_username = Some(username.to_string());
+    view.selected_group_name = Some(group_name.to_string());
+    view
+}
+
+#[cfg(target_arch = "wasm32")]
+fn users_groups_state_with_writer_group(
+    state: &ApiLoadState<UsersGroupsWorkspaceResponse>,
+    group_name: &str,
+) -> ApiLoadState<UsersGroupsWorkspaceResponse> {
+    match state {
+        ApiLoadState::Success(view) => ApiLoadState::Success(users_groups_view_with_writer_group(
+            view.clone(),
+            group_name,
+        )),
+        ApiLoadState::StaleData { value, message } => ApiLoadState::StaleData {
+            value: users_groups_view_with_writer_group(value.clone(), group_name),
+            message: message.clone(),
+        },
+        state => state.clone(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn users_groups_state_with_group_assignment(
+    state: &ApiLoadState<UsersGroupsWorkspaceResponse>,
+    username: &str,
+    group_name: &str,
+) -> ApiLoadState<UsersGroupsWorkspaceResponse> {
+    match state {
+        ApiLoadState::Success(view) => ApiLoadState::Success(
+            users_groups_view_with_group_assignment(view.clone(), username, group_name),
+        ),
+        ApiLoadState::StaleData { value, message } => ApiLoadState::StaleData {
+            value: users_groups_view_with_group_assignment(value.clone(), username, group_name),
+            message: message.clone(),
+        },
+        state => state.clone(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn refresh_users_groups_workspace(
+    api_base_path: String,
+    users_groups_state: UseStateHandle<ApiLoadState<UsersGroupsWorkspaceResponse>>,
+) {
+    let path = users_groups_workspace_api_path(&api_base_path);
+    wasm_bindgen_futures::spawn_local(async move {
+        users_groups_state.set(page_load_state_from_result(
+            crate::api::get_users_groups_workspace(&path).await,
+            users_groups_empty_workspace_message,
+        ));
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CreateLocalGroupFormState {
     group_name: String,
@@ -3823,17 +3984,36 @@ pub fn users_groups_page(props: &UsersGroupsPageProps) -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 users_groups_state.set(page_load_state_from_result(
                     crate::api::get_users_groups_workspace(&path).await,
-                    |view| {
-                        (view.current_user.is_none()
-                            && view.users.is_empty()
-                            && view.writer_groups.is_empty())
-                        .then(|| {
-                            "No local identity or writer-policy state was returned by the appliance."
-                                .to_string()
-                        })
-                    },
+                    users_groups_empty_workspace_message,
                 ));
             });
+            || ()
+        });
+    }
+
+    {
+        let assign_user_state = assign_user_state.clone();
+        use_effect_with((*users_groups_state).clone(), move |state| {
+            if let ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } = state
+            {
+                let mut next = (*assign_user_state).clone();
+                let mut changed = false;
+                if next.username.trim().is_empty() {
+                    if let Some(user) = &view.current_user {
+                        next.username = user.username.clone();
+                        changed = true;
+                    }
+                }
+                if next.group_name.trim().is_empty() {
+                    if let Some(group) = view.writer_groups.first() {
+                        next.group_name = group.group_name.clone();
+                        changed = true;
+                    }
+                }
+                if changed {
+                    assign_user_state.set(next);
+                }
+            }
             || ()
         });
     }
@@ -3847,6 +4027,7 @@ pub fn users_groups_page(props: &UsersGroupsPageProps) -> Html {
             />
             { render_users_groups_state(
                 &*users_groups_state,
+                users_groups_state.clone(),
                 create_group_state,
                 assign_user_state,
                 props.api_base_path.clone(),
@@ -3858,6 +4039,7 @@ pub fn users_groups_page(props: &UsersGroupsPageProps) -> Html {
 #[cfg(target_arch = "wasm32")]
 fn render_users_groups_state(
     state: &ApiLoadState<UsersGroupsWorkspaceResponse>,
+    users_groups_state: UseStateHandle<ApiLoadState<UsersGroupsWorkspaceResponse>>,
     create_group_state: UseStateHandle<CreateLocalGroupFormState>,
     assign_user_state: UseStateHandle<AssignLocalUserFormState>,
     api_base_path: String,
@@ -3871,6 +4053,7 @@ fn render_users_groups_state(
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
             render_users_groups_workspace(
                 view,
+                users_groups_state,
                 create_group_state,
                 assign_user_state,
                 api_base_path,
@@ -3893,6 +4076,7 @@ fn render_users_groups_state(
 #[cfg(target_arch = "wasm32")]
 fn render_users_groups_workspace(
     view: &UsersGroupsWorkspaceResponse,
+    users_groups_state: UseStateHandle<ApiLoadState<UsersGroupsWorkspaceResponse>>,
     create_group_state: UseStateHandle<CreateLocalGroupFormState>,
     assign_user_state: UseStateHandle<AssignLocalUserFormState>,
     api_base_path: String,
@@ -3903,8 +4087,19 @@ fn render_users_groups_workspace(
                 { for users_groups_summary_cards(view).into_iter().map(render_metric_card) }
             </section>
             <section class="dos-attention-grid">
-                { render_create_local_group_card(view, create_group_state, api_base_path.clone()) }
-                { render_assign_local_user_card(view, assign_user_state, api_base_path) }
+                { render_create_local_group_card(
+                    view,
+                    users_groups_state.clone(),
+                    create_group_state,
+                    assign_user_state.clone(),
+                    api_base_path.clone(),
+                ) }
+                { render_assign_local_user_card(
+                    view,
+                    users_groups_state,
+                    assign_user_state,
+                    api_base_path,
+                ) }
                 <section class="dos-card dos-wide-card">
                     <span class="dos-card-label">{ "Current OS authority" }</span>
                     if let Some(user) = &view.current_user {
@@ -3954,7 +4149,9 @@ fn render_users_groups_workspace(
 #[cfg(target_arch = "wasm32")]
 fn render_create_local_group_card(
     view: &UsersGroupsWorkspaceResponse,
+    users_groups_state: UseStateHandle<ApiLoadState<UsersGroupsWorkspaceResponse>>,
     create_group_state: UseStateHandle<CreateLocalGroupFormState>,
+    assign_user_state: UseStateHandle<AssignLocalUserFormState>,
     api_base_path: String,
 ) -> Html {
     let state = (*create_group_state).clone();
@@ -4015,6 +4212,8 @@ fn render_create_local_group_card(
     };
     let apply = {
         let create_group_state = create_group_state.clone();
+        let users_groups_state = users_groups_state.clone();
+        let assign_user_state = assign_user_state.clone();
         let api_base_path = api_base_path.clone();
         Callback::from(move |_| {
             let mut pending = (*create_group_state).clone();
@@ -4024,6 +4223,8 @@ fn render_create_local_group_card(
             create_group_state.set(pending.clone());
 
             let create_group_state = create_group_state.clone();
+            let users_groups_state = users_groups_state.clone();
+            let assign_user_state = assign_user_state.clone();
             let api_base_path = api_base_path.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let request = CreateLocalGroupRequest {
@@ -4037,8 +4238,21 @@ fn render_create_local_group_card(
                 next.applying = false;
                 match result {
                     Ok(response) => {
-                        next.submitted = Some(response);
-                        next.error = None;
+                        let group_name = response.group_name.clone();
+                        create_group_state.set(CreateLocalGroupFormState::new());
+                        users_groups_state.set(users_groups_state_with_writer_group(
+                            &*users_groups_state,
+                            &group_name,
+                        ));
+                        let mut assign_next = (*assign_user_state).clone();
+                        assign_next.group_name = group_name.clone();
+                        assign_next.confirmation_phrase.clear();
+                        assign_next.previewing = false;
+                        assign_next.applying = false;
+                        assign_next.reset_result();
+                        assign_user_state.set(assign_next);
+                        refresh_users_groups_workspace(api_base_path, users_groups_state);
+                        return;
                     }
                     Err(error) => {
                         next.submitted = None;
@@ -4103,6 +4317,7 @@ fn render_create_local_group_card(
 #[cfg(target_arch = "wasm32")]
 fn render_assign_local_user_card(
     view: &UsersGroupsWorkspaceResponse,
+    users_groups_state: UseStateHandle<ApiLoadState<UsersGroupsWorkspaceResponse>>,
     assign_user_state: UseStateHandle<AssignLocalUserFormState>,
     api_base_path: String,
 ) -> Html {
@@ -4159,6 +4374,7 @@ fn render_assign_local_user_card(
     };
     let apply = {
         let assign_user_state = assign_user_state.clone();
+        let users_groups_state = users_groups_state.clone();
         let api_base_path = api_base_path.clone();
         Callback::from(move |_| {
             let mut pending = (*assign_user_state).clone();
@@ -4168,6 +4384,7 @@ fn render_assign_local_user_card(
             assign_user_state.set(pending.clone());
 
             let assign_user_state = assign_user_state.clone();
+            let users_groups_state = users_groups_state.clone();
             let api_base_path = api_base_path.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let request = AssignLocalUserToGroupRequest {
@@ -4183,8 +4400,20 @@ fn render_assign_local_user_card(
                 next.applying = false;
                 match result {
                     Ok(response) => {
+                        let username = response
+                            .username
+                            .clone()
+                            .unwrap_or_else(|| pending.username.trim().to_string());
+                        let group_name = response.group_name.clone();
                         next.submitted = Some(response);
+                        next.confirmation_phrase.clear();
                         next.error = None;
+                        users_groups_state.set(users_groups_state_with_group_assignment(
+                            &*users_groups_state,
+                            &username,
+                            &group_name,
+                        ));
+                        refresh_users_groups_workspace(api_base_path, users_groups_state);
                     }
                     Err(error) => {
                         next.submitted = None;
@@ -5166,7 +5395,8 @@ mod tests {
     };
     use super::{
         local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
-        local_group_create_fields_ready,
+        local_group_create_fields_ready, local_group_display_name,
+        users_groups_view_with_group_assignment, users_groups_view_with_writer_group,
     };
     use crate::api::{
         ActivityCategoryResponse, ActivityTaskResponse, ActivityWorkspaceResponse,
@@ -5425,6 +5655,55 @@ mod tests {
         assert!(!local_group_admin_confirmation_matches(
             "confirm create objectstore"
         ));
+    }
+
+    #[test]
+    fn users_groups_live_create_updates_writer_policy_view() {
+        let view = users_groups_view_with_writer_group(
+            users_groups_workspace_fixture(),
+            "mnemosyne_writers",
+        );
+
+        assert_eq!(
+            local_group_display_name("mnemosyne_writers"),
+            "Mnemosyne Writers"
+        );
+        assert!(view
+            .writer_groups
+            .iter()
+            .any(|group| group.group_name == "mnemosyne_writers"
+                && group.display_name == "Mnemosyne Writers"
+                && !group.current_user_member));
+        assert_eq!(
+            view.selected_group_name.as_deref(),
+            Some("mnemosyne_writers")
+        );
+    }
+
+    #[test]
+    fn users_groups_live_assignment_updates_current_user_membership_view() {
+        let view = users_groups_view_with_writer_group(
+            users_groups_workspace_fixture(),
+            "mnemosyne_writers",
+        );
+        let view = users_groups_view_with_group_assignment(view, "operator", "mnemosyne_writers");
+
+        assert!(view
+            .current_user
+            .as_ref()
+            .expect("fixture user")
+            .groups
+            .iter()
+            .any(|group| group == "mnemosyne_writers"));
+        assert!(view
+            .writer_groups
+            .iter()
+            .any(|group| group.group_name == "mnemosyne_writers" && group.current_user_member));
+        assert_eq!(view.selected_username.as_deref(), Some("operator"));
+        assert_eq!(
+            view.selected_group_name.as_deref(),
+            Some("mnemosyne_writers")
+        );
     }
 
     #[test]
