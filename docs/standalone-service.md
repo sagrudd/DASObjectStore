@@ -169,6 +169,42 @@ Web report rebuild scratch space lives under
 visible to both `dasobjectstore-server.service` and the Docker daemon even when
 the systemd unit uses `PrivateTmp=true`.
 
+## Remote Client Packages
+
+Remote upload hosts do not need the full appliance package. Use the remote-only
+Makefile targets from a source checkout:
+
+```text
+make remote
+make remote-deb
+make remote-rpm
+```
+
+`make remote` builds only the release `dasobjectstore-remote` binary. It is the
+fast local check for the upload client and does not build the Web UI,
+`dasobjectstored`, systemd units, Garage orchestration assets, or full
+appliance packages.
+
+`make remote-deb` and `make remote-rpm` build packages named
+`dasobjectstore-remote`. Those packages install the remote client binary and
+remote-client documentation only. They intentionally do not install the daemon
+service identity, local appliance configuration, managed storage directories,
+Web UI assets, or object-service lifecycle units.
+
+The remote Debian package requires `ca-certificates` and suggests `awscli`.
+The remote RPM requires `ca-certificates` and recommends `awscli`. AWS CLI is
+still required for concrete `stores list` and `upload` transfers unless a
+future transfer engine replaces the AWS CLI adapter; it is soft-listed because
+many sites install AWS CLI v2 from Amazon's installer rather than from the OS
+package repository.
+
+Easyconnect browser launch is a runtime expectation, not a package-managed
+desktop dependency. `dasobjectstore-remote easyconnect <host-or-ip>` attempts
+to open the appliance login URL with the host opener (`open` on macOS,
+`xdg-open` on Linux, and `cmd /C start` on Windows). Headless upload hosts,
+SSH sessions, and minimal containers should use `--no-browser`; the client then
+prints the login URL and continues waiting for browser-approved pairing.
+
 ## TLS Assets
 
 Default standalone TLS assets live under the product root:

@@ -10,7 +10,7 @@ FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
 REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
 GRAMMATEUS_REPORT_PROVIDER ?= grammateus_report_provider
 
-.PHONY: help pull build web web-screenshots report-provider test fmt check deb rpm remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots report-provider test fmt check deb rpm remote remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -24,8 +24,9 @@ help:
 	@printf '  make check      Run cargo check for the workspace\n'
 	@printf '  make deb        Build a Debian package under target/deb/\n'
 	@printf '  make rpm        Build an RPM package under target/rpm/rpmbuild/RPMS/\n'
-	@printf '  make remote-deb Build a Debian package for dasobjectstore-remote only\n'
-	@printf '  make remote-rpm Build an RPM package for dasobjectstore-remote only\n'
+	@printf '  make remote     Build the dasobjectstore-remote client only; runtime needs AWS CLI and a browser or --no-browser\n'
+	@printf '  make remote-deb Build a remote-only Debian package; package suggests awscli and easyconnect opens a browser when available\n'
+	@printf '  make remote-rpm Build a remote-only RPM package; package recommends awscli and easyconnect opens a browser when available\n'
 	@printf '  make package    Build both DEB and RPM packages\n'
 	@printf '  make clean      Remove Cargo build artifacts\n'
 	@printf '  make distclean  Remove Cargo and package build artifacts\n'
@@ -104,6 +105,9 @@ deb: web report-provider
 
 rpm: web report-provider
 	bash packaging/rpm/build-rpm.sh
+
+remote:
+	cargo build --release -p dasobjectstore-remote
 
 remote-deb:
 	bash packaging/debian/build-remote-deb.sh

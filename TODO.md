@@ -910,7 +910,7 @@ planning are tracked under Milestones 21 and 22.
   and `docs/user/web-interface.rst` with the simplified ingress-origin rules:
   local server ingest writes direct to HDD, while S3/Web/remote upload stages to
   SSD first.
-- [ ] Update packaging docs and Makefile notes for `make remote`, `make
+- [x] Update packaging docs and Makefile notes for `make remote`, `make
   remote-deb`, and `make remote-rpm` so remote easyconnect dependencies and
   browser-launch expectations are explicit.
 - [ ] Add operator documentation for the default HDD landing concurrency rule,

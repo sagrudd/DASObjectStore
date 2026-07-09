@@ -16,18 +16,48 @@ Install ``dasobjectstore-remote`` and the AWS CLI on the remote computer. The
 remote client plans and invokes ``aws s3api`` and ``aws s3`` commands against
 the configured DASObjectStore endpoint.
 
-Build the remote-only packages from a source checkout when distributing the
-client to upload-only hosts:
+Build the remote client from a source checkout when testing locally:
+
+.. code-block:: console
+
+   make remote
+
+This target builds only ``dasobjectstore-remote``. It does not build the Web
+UI, appliance daemon, object-service orchestration assets, or full appliance
+packages.
+
+Build the remote-only packages when distributing the client to upload-only
+hosts:
 
 .. code-block:: console
 
    make remote-deb
    make remote-rpm
 
-These targets produce packages named ``dasobjectstore-remote`` and install only
-the remote client binary and its documentation. They do not install
+``make remote-deb`` requires ``dpkg-deb`` from the Debian ``dpkg`` tooling.
+``make remote-rpm`` requires ``rpmbuild`` from ``rpm-build`` or the equivalent
+RPM tooling for the packaging host. Both targets compile the release
+``dasobjectstore-remote`` binary before assembling the package.
+
+These package targets produce packages named ``dasobjectstore-remote`` and
+install only the remote client binary and its documentation. They do not install
 ``dasobjectstored``, systemd service units, local appliance configuration, or
 managed storage directories.
+
+The remote package has a hard runtime dependency on system CA certificates so
+it can connect to appliance HTTPS endpoints. The AWS CLI is a runtime
+dependency for actual object transfer: Debian packages list it as ``Suggests:
+awscli`` and RPM packages list it as ``Recommends: awscli`` because some sites
+install AWS CLI v2 outside the OS package manager. Install a working
+``aws`` command before running ``stores list`` or ``upload``.
+
+Easyconnect tries to open the browser login URL automatically. On macOS this
+uses the platform ``open`` command; on Linux it uses ``xdg-open``; on Windows
+it uses ``cmd /C start``. Remote-only packages do not install a browser or
+desktop opener. On headless sequencers, servers, containers, or SSH sessions,
+run easyconnect with ``--no-browser`` and open the printed URL from a browser
+that can reach the DAS appliance while the remote client keeps waiting for the
+loopback callback.
 
 The remote computer must have one of the following credential paths:
 
