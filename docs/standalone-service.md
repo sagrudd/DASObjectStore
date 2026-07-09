@@ -205,6 +205,11 @@ previous `/proc/diskstats` sample internally and calculates rates over the
 configured telemetry cadence. The first sample after daemon startup or counter
 reset reports an explicit missing reason rather than interpolating or inventing
 IO data.
+Session telemetry is collected from the standalone Web auth registry and the
+remote easyconnect paired-session registry when those files exist. Active Web
+sessions, active remote-agent sessions, distinct logged-in users, and
+administrator/operator session counts are reported from unrevoked, unexpired
+records; administrator classification uses the host group file when readable.
 
 Writers SHALL update the file atomically by writing a schema-valid document to
 a temporary file in the same directory, fsyncing the file, applying final

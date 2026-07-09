@@ -5,11 +5,16 @@ use super::model::{
     LinuxHostTelemetrySample,
 };
 use super::service_loop::ApplianceHostTelemetryCollector;
+use super::sessions::{
+    collect_appliance_session_telemetry, DEFAULT_LOCAL_GROUP_PATH,
+    DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH, DEFAULT_STANDALONE_AUTH_ROOT,
+};
 use dasobjectstore_metadata::{measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 
@@ -17,6 +22,9 @@ pub const DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT: &str = "/srv/dasobjectstore/hdd"
 pub struct LinuxProcTelemetryCollector {
     proc_root: PathBuf,
     hdd_root: Option<PathBuf>,
+    web_auth_root: Option<PathBuf>,
+    remote_session_path: Option<PathBuf>,
+    local_group_path: Option<PathBuf>,
     previous_diskstats: Option<BTreeMap<String, LinuxDiskIoCounters>>,
 }
 
@@ -25,12 +33,27 @@ impl LinuxProcTelemetryCollector {
         Self {
             proc_root: proc_root.into(),
             hdd_root: None,
+            web_auth_root: None,
+            remote_session_path: None,
+            local_group_path: None,
             previous_diskstats: None,
         }
     }
 
     pub fn with_hdd_root(mut self, hdd_root: impl Into<PathBuf>) -> Self {
         self.hdd_root = Some(hdd_root.into());
+        self
+    }
+
+    pub fn with_session_sources(
+        mut self,
+        web_auth_root: impl Into<PathBuf>,
+        remote_session_path: impl Into<PathBuf>,
+        local_group_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.web_auth_root = Some(web_auth_root.into());
+        self.remote_session_path = Some(remote_session_path.into());
+        self.local_group_path = Some(local_group_path.into());
         self
     }
 
@@ -42,10 +65,19 @@ impl LinuxProcTelemetryCollector {
         self.hdd_root.as_deref()
     }
 
+    pub fn web_auth_root(&self) -> Option<&Path> {
+        self.web_auth_root.as_deref()
+    }
+
+    pub fn remote_session_path(&self) -> Option<&Path> {
+        self.remote_session_path.as_deref()
+    }
+
     pub fn collect(
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
         elapsed_seconds: u64,
+        timestamp_utc: &str,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
         let proc_stat = self.read_proc_file("stat")?;
         let proc_loadavg = self.read_proc_file("loadavg")?;
@@ -74,6 +106,13 @@ impl LinuxProcTelemetryCollector {
             enclosures,
             disks,
             disk_io,
+            sessions: collect_appliance_session_telemetry(
+                self.web_auth_root.as_deref(),
+                self.remote_session_path.as_deref(),
+                self.local_group_path.as_deref(),
+                timestamp_utc,
+                unix_now_seconds(),
+            ),
             cpu_snapshot,
         })
     }
@@ -89,7 +128,13 @@ impl LinuxProcTelemetryCollector {
 
 impl Default for LinuxProcTelemetryCollector {
     fn default() -> Self {
-        Self::new("/proc").with_hdd_root(DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT)
+        Self::new("/proc")
+            .with_hdd_root(DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT)
+            .with_session_sources(
+                DEFAULT_STANDALONE_AUTH_ROOT,
+                DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH,
+                DEFAULT_LOCAL_GROUP_PATH,
+            )
     }
 }
 
@@ -98,9 +143,17 @@ impl ApplianceHostTelemetryCollector for LinuxProcTelemetryCollector {
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
         elapsed_seconds: u64,
+        timestamp_utc: &str,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
-        LinuxProcTelemetryCollector::collect(self, previous_cpu, elapsed_seconds)
+        LinuxProcTelemetryCollector::collect(self, previous_cpu, elapsed_seconds, timestamp_utc)
     }
+}
+
+fn unix_now_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
 }
 
 pub fn parse_linux_cpu_snapshot(

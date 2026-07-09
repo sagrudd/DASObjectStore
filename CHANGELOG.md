@@ -21,6 +21,9 @@ agreement before landing.
   document the credential custody and rotation workflow for S3 uploads.
 - Wire daemon appliance telemetry to report managed-HDD capacity and Linux
   `/proc/diskstats` read/write IO rates using retained cadence-aware samples.
+- Add appliance session telemetry for active standalone Web sessions, remote
+  easyconnect agents, distinct logged-in users, and local administrator/operator
+  session counts where host group data is readable.
 
 ## 0.61.2 - 2026-07-09
 

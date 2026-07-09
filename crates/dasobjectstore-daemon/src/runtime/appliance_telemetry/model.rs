@@ -42,6 +42,7 @@ pub struct LinuxHostTelemetrySample {
     pub enclosures: Vec<ApplianceEnclosureTelemetry>,
     pub disks: Vec<ApplianceDiskCapacityTelemetry>,
     pub disk_io: Vec<ApplianceDiskIoTelemetry>,
+    pub sessions: ApplianceSessionTelemetry,
     pub cpu_snapshot: LinuxCpuSnapshot,
 }
 

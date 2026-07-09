@@ -19,14 +19,14 @@ pub use admin_jobs::{
     ADMIN_JOB_REGISTRY_DIR_NAME, ADMIN_JOB_REGISTRY_FILE_NAME, ADMIN_JOB_REGISTRY_SCHEMA,
 };
 pub use appliance_telemetry::{
-    appliance_sample_set, appliance_telemetry_state_path, collect_linux_cpu_telemetry,
-    collect_linux_disk_capacity_telemetry, collect_linux_disk_io_telemetry,
-    collect_linux_memory_telemetry, parse_linux_cpu_snapshot, parse_linux_diskstats,
-    validate_appliance_telemetry_cadence, ApplianceCpuTelemetry, ApplianceDiskCapacityTelemetry,
-    ApplianceDiskIoTelemetry, ApplianceEnclosureTelemetry, ApplianceHostTelemetryCollector,
-    ApplianceMemoryTelemetry, ApplianceSessionTelemetry, ApplianceTelemetryCollectionQuality,
-    ApplianceTelemetryCollectorError, ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig,
-    ApplianceTelemetryLoopError, ApplianceTelemetryMissingDataMarker,
+    appliance_sample_set, appliance_telemetry_state_path, collect_appliance_session_telemetry,
+    collect_linux_cpu_telemetry, collect_linux_disk_capacity_telemetry,
+    collect_linux_disk_io_telemetry, collect_linux_memory_telemetry, parse_linux_cpu_snapshot,
+    parse_linux_diskstats, validate_appliance_telemetry_cadence, ApplianceCpuTelemetry,
+    ApplianceDiskCapacityTelemetry, ApplianceDiskIoTelemetry, ApplianceEnclosureTelemetry,
+    ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry, ApplianceSessionTelemetry,
+    ApplianceTelemetryCollectionQuality, ApplianceTelemetryCollectorError, ApplianceTelemetryLoop,
+    ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError, ApplianceTelemetryMissingDataMarker,
     ApplianceTelemetryMissingReason, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
     ApplianceTelemetrySink, ApplianceTelemetrySleeper, ApplianceTelemetrySource,
     FileBackedApplianceTelemetrySink, LinuxCpuSnapshot, LinuxDiskIoCounters,
@@ -34,6 +34,8 @@ pub use appliance_telemetry::{
     APPLIANCE_TELEMETRY_DIR_NAME, APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS,
     APPLIANCE_TELEMETRY_FILE_NAME, APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS,
     APPLIANCE_TELEMETRY_SCHEMA_VERSION, DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT,
+    DEFAULT_LOCAL_GROUP_PATH, DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH,
+    DEFAULT_STANDALONE_AUTH_ROOT,
 };
 pub use config::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonTelemetryRuntimeConfig,

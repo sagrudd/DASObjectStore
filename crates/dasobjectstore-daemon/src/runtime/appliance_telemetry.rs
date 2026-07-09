@@ -3,6 +3,7 @@
 mod linux;
 mod model;
 mod service_loop;
+mod sessions;
 
 pub use linux::{
     collect_linux_cpu_telemetry, collect_linux_disk_capacity_telemetry,
@@ -24,4 +25,8 @@ pub use service_loop::{
     ApplianceHostTelemetryCollector, ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig,
     ApplianceTelemetryLoopError, ApplianceTelemetrySink, ApplianceTelemetrySleeper,
     FileBackedApplianceTelemetrySink, ThreadApplianceTelemetrySleeper,
+};
+pub use sessions::{
+    collect_appliance_session_telemetry, DEFAULT_LOCAL_GROUP_PATH,
+    DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH, DEFAULT_STANDALONE_AUTH_ROOT,
 };

@@ -86,12 +86,12 @@ pub use client::{
 };
 pub use runtime::{
     admin_job_registry_path, appliance_sample_set, appliance_telemetry_state_path,
-    authoritative_performance_recommendation_path, collect_linux_cpu_telemetry,
-    collect_linux_disk_capacity_telemetry, collect_linux_disk_io_telemetry,
-    collect_linux_memory_telemetry, default_endpoint_registry_path, parse_linux_cpu_snapshot,
-    parse_linux_diskstats, plan_remote_upload_cancellation_cleanup,
-    provision_garage_store_registry, query_object_browser_metadata,
-    read_authoritative_ingest_policy, read_object_browser_metadata,
+    authoritative_performance_recommendation_path, collect_appliance_session_telemetry,
+    collect_linux_cpu_telemetry, collect_linux_disk_capacity_telemetry,
+    collect_linux_disk_io_telemetry, collect_linux_memory_telemetry,
+    default_endpoint_registry_path, parse_linux_cpu_snapshot, parse_linux_diskstats,
+    plan_remote_upload_cancellation_cleanup, provision_garage_store_registry,
+    query_object_browser_metadata, read_authoritative_ingest_policy, read_object_browser_metadata,
     record_remote_upload_s3_transfer_job, run_remote_easyconnect_aws_cli_upload_job,
     run_remote_upload_cancellation_cleanup, upsert_endpoint_inventory_record,
     validate_appliance_telemetry_cadence, AdminJobRegistry, ApplianceCpuTelemetry,

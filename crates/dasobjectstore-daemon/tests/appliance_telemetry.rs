@@ -1,8 +1,8 @@
 use dasobjectstore_daemon::{
-    appliance_telemetry_state_path, collect_linux_cpu_telemetry,
-    collect_linux_disk_capacity_telemetry, collect_linux_disk_io_telemetry,
-    collect_linux_memory_telemetry, parse_linux_cpu_snapshot, parse_linux_diskstats,
-    validate_appliance_telemetry_cadence, ApplianceHostTelemetryCollector,
+    appliance_telemetry_state_path, collect_appliance_session_telemetry,
+    collect_linux_cpu_telemetry, collect_linux_disk_capacity_telemetry,
+    collect_linux_disk_io_telemetry, collect_linux_memory_telemetry, parse_linux_cpu_snapshot,
+    parse_linux_diskstats, validate_appliance_telemetry_cadence, ApplianceHostTelemetryCollector,
     ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError, ApplianceTelemetryLoop,
     ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError, ApplianceTelemetryMissingReason,
     ApplianceTelemetrySink, ApplianceTelemetrySleeper, ApplianceTelemetrySource,
@@ -286,7 +286,7 @@ fn proc_collector_reads_fixture_directory_without_live_host_state() {
     let previous = parse_linux_cpu_snapshot(PROC_STAT_1).expect("previous snapshot");
     let mut collector = LinuxProcTelemetryCollector::new(&root);
     let sample = collector
-        .collect(Some(&previous), 30)
+        .collect(Some(&previous), 30, "2026-07-09T18:00:00Z")
         .expect("fixture telemetry collected");
     fs::remove_dir_all(&root).expect("fixture root removed");
 
@@ -317,12 +317,14 @@ fn proc_collector_retains_diskstats_for_cadence_aware_disk_io_rates() {
     .expect("device marker written");
 
     let mut collector = LinuxProcTelemetryCollector::new(&proc_root).with_hdd_root(&hdd_root);
-    let first = collector.collect(None, 6).expect("first sample collected");
+    let first = collector
+        .collect(None, 6, "2026-07-09T18:00:00Z")
+        .expect("first sample collected");
     fs::write(proc_root.join("stat"), PROC_STAT_2).expect("second stat fixture written");
     fs::write(proc_root.join("diskstats"), PROC_DISKSTATS_2)
         .expect("second diskstats fixture written");
     let second = collector
-        .collect(Some(&first.cpu_snapshot), 6)
+        .collect(Some(&first.cpu_snapshot), 6, "2026-07-09T18:00:06Z")
         .expect("second sample collected");
     fs::remove_dir_all(&root).expect("fixture root removed");
 
@@ -342,6 +344,87 @@ fn proc_collector_retains_diskstats_for_cadence_aware_disk_io_rates() {
     assert_eq!(second.disk_io[0].average_await_millis, Some(2.5));
     assert_eq!(second.disk_io[0].io_time_percent, Some(2.0));
     assert_eq!(second.disk_io[0].missing_reason, None);
+}
+
+#[test]
+fn session_telemetry_counts_web_and_remote_agent_sessions() {
+    let root = temp_root("appliance-telemetry-sessions");
+    let auth_root = root.join("auth");
+    let remote_session_path = root.join("remote-easyconnect/sessions.json");
+    let group_path = root.join("group");
+    fs::create_dir_all(&auth_root).expect("auth fixture directory");
+    fs::create_dir_all(remote_session_path.parent().expect("remote session parent"))
+        .expect("remote session fixture directory");
+    fs::write(
+        auth_root.join("registry.json"),
+        r#"{
+          "users": [
+            {
+              "username": "admin",
+              "sessions": [
+                {"expires_at_utc": "2026-07-09T19:00:00Z", "revoked_at_utc": null}
+              ]
+            },
+            {
+              "username": "stephen",
+              "sessions": [
+                {"expires_at_utc": "2026-07-09T20:00:00Z", "revoked_at_utc": null},
+                {"expires_at_utc": "2026-07-09T20:00:00Z", "revoked_at_utc": "2026-07-09T17:00:00Z"},
+                {"expires_at_utc": "2026-07-09T17:00:00Z", "revoked_at_utc": null}
+              ]
+            }
+          ]
+        }"#,
+    )
+    .expect("web auth registry written");
+    fs::write(
+        &remote_session_path,
+        r#"{
+          "schema_version": "dasobjectstore.remote_easyconnect.sessions.v1",
+          "sessions": [
+            {
+              "session_id": "remote-1",
+              "approved_actor": "stephen",
+              "expires_at_utc": "2026-07-09T19:30:00Z",
+              "revoked_at_utc": null
+            },
+            {
+              "session_id": "remote-2",
+              "approved_actor": "operator",
+              "expires_at_utc": "2026-07-09T17:30:00Z",
+              "revoked_at_utc": null
+            },
+            {
+              "session_id": "remote-3",
+              "approved_actor": "admin",
+              "expires_at_utc": "2026-07-09T19:30:00Z",
+              "revoked_at_utc": "2026-07-09T17:45:00Z"
+            }
+          ]
+        }"#,
+    )
+    .expect("remote session registry written");
+    fs::write(
+        &group_path,
+        "sudo:x:27:admin\nusers:x:100:stephen,operator\n",
+    )
+    .expect("group fixture written");
+
+    let telemetry = collect_appliance_session_telemetry(
+        Some(&auth_root),
+        Some(&remote_session_path),
+        Some(&group_path),
+        "2026-07-09T18:00:00Z",
+        0,
+    );
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(telemetry.web_active_sessions, Some(2));
+    assert_eq!(telemetry.remote_agent_active_sessions, Some(1));
+    assert_eq!(telemetry.distinct_logged_in_users, Some(2));
+    assert_eq!(telemetry.administrator_sessions, Some(1));
+    assert_eq!(telemetry.operator_sessions, Some(2));
+    assert_eq!(telemetry.missing_reason, None);
 }
 
 #[test]
@@ -424,6 +507,7 @@ impl ApplianceHostTelemetryCollector for FakeCollector {
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
         _elapsed_seconds: u64,
+        _timestamp_utc: &str,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
         let snapshot = self.snapshots.remove(0);
         Ok(LinuxHostTelemetrySample {
@@ -439,6 +523,14 @@ impl ApplianceHostTelemetryCollector for FakeCollector {
             enclosures: Vec::new(),
             disks: Vec::new(),
             disk_io: Vec::new(),
+            sessions: dasobjectstore_daemon::ApplianceSessionTelemetry {
+                web_active_sessions: None,
+                remote_agent_active_sessions: None,
+                distinct_logged_in_users: None,
+                administrator_sessions: None,
+                operator_sessions: None,
+                missing_reason: Some(ApplianceTelemetryMissingReason::NotConfigured),
+            },
             cpu_snapshot: snapshot,
         })
     }

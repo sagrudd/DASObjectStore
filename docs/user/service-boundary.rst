@@ -57,6 +57,11 @@ and operation-rate data. On Linux, the daemon retains the previous
 telemetry cadence. The first sample after daemon startup or counter reset
 reports missing IO rates explicitly instead of guessing from capacity or ingest
 state.
+Session telemetry is derived from the standalone Web auth registry and the
+remote easyconnect paired-session registry when those files exist. The daemon
+counts unrevoked, unexpired Web and remote-agent sessions, distinct logged-in
+users, and administrator/operator sessions when the host group file is readable
+for local authority classification.
 
 Packaged installations restrict the socket directory and socket file to the
 ``dasobjectstore`` group. A local user must be in this transport group before

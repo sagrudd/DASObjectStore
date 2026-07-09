@@ -950,7 +950,7 @@ planning are tracked under Milestones 21 and 22.
     retained previous samples and cadence-aware rate calculation.
   - [ ] Tie disk IO samples to the future physical enclosure/bay registry so
     per-enclosure IO grouping uses authoritative hardware association.
-- [ ] Add active-user/session telemetry for local Web sessions and remote-agent
+- [x] Add active-user/session telemetry for local Web sessions and remote-agent
   sessions, including total active sessions, distinct logged-in users, and
   administrator/non-administrator counts where policy permits exposure.
 - [ ] Implement bounded JSON retention so telemetry cannot grow without limit,

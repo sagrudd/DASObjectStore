@@ -1,11 +1,10 @@
 use super::model::{
-    ApplianceSessionTelemetry, ApplianceTelemetryCollectionQuality,
-    ApplianceTelemetryCollectorError, ApplianceTelemetryMissingDataMarker,
-    ApplianceTelemetryMissingReason, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
-    ApplianceTelemetrySource, LinuxCpuSnapshot, LinuxHostTelemetrySample,
-    APPLIANCE_TELEMETRY_DIR_NAME, APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS,
-    APPLIANCE_TELEMETRY_FILE_NAME, APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS,
-    APPLIANCE_TELEMETRY_SCHEMA_VERSION,
+    ApplianceTelemetryCollectionQuality, ApplianceTelemetryCollectorError,
+    ApplianceTelemetryMissingDataMarker, ApplianceTelemetryMissingReason, ApplianceTelemetrySample,
+    ApplianceTelemetrySampleSet, ApplianceTelemetrySource, LinuxCpuSnapshot,
+    LinuxHostTelemetrySample, APPLIANCE_TELEMETRY_DIR_NAME,
+    APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS, APPLIANCE_TELEMETRY_FILE_NAME,
+    APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS, APPLIANCE_TELEMETRY_SCHEMA_VERSION,
 };
 use std::fmt;
 use std::fs::{self, File};
@@ -25,6 +24,7 @@ pub trait ApplianceHostTelemetryCollector {
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
         elapsed_seconds: u64,
+        timestamp_utc: &str,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError>;
 }
 
@@ -134,16 +134,21 @@ where
         &mut self,
         timestamp_utc: impl Into<String>,
     ) -> Result<ApplianceTelemetrySampleSet, ApplianceTelemetryLoopError> {
+        let timestamp_utc = timestamp_utc.into();
         let host = self
             .collector
-            .collect(self.previous_cpu.as_ref(), self.config.cadence_seconds)
+            .collect(
+                self.previous_cpu.as_ref(),
+                self.config.cadence_seconds,
+                &timestamp_utc,
+            )
             .map_err(|error| ApplianceTelemetryLoopError::Collector(error.to_string()))?;
         self.previous_cpu = Some(host.cpu_snapshot);
         self.samples_collected = self.samples_collected.saturating_add(1);
         Ok(appliance_sample_set(
             self.config.cadence_seconds,
             self.config.source.clone(),
-            timestamp_utc.into(),
+            timestamp_utc,
             host,
         ))
     }
@@ -263,11 +268,7 @@ pub fn appliance_sample_set(
             &disk_io.missing_reason,
         );
     }
-    missing_data.push(ApplianceTelemetryMissingDataMarker {
-        path: "sessions".to_string(),
-        reason: ApplianceTelemetryMissingReason::NotConfigured,
-        detail: Some("session telemetry collector is not wired yet".to_string()),
-    });
+    push_optional_missing_marker(&mut missing_data, "sessions", &host.sessions.missing_reason);
 
     let collection_quality = if missing_data.is_empty() {
         ApplianceTelemetryCollectionQuality::Complete
@@ -283,14 +284,7 @@ pub fn appliance_sample_set(
         enclosures: host.enclosures,
         disks: host.disks,
         disk_io: host.disk_io,
-        sessions: ApplianceSessionTelemetry {
-            web_active_sessions: None,
-            remote_agent_active_sessions: None,
-            distinct_logged_in_users: None,
-            administrator_sessions: None,
-            operator_sessions: None,
-            missing_reason: Some(ApplianceTelemetryMissingReason::NotConfigured),
-        },
+        sessions: host.sessions,
     };
 
     ApplianceTelemetrySampleSet {
