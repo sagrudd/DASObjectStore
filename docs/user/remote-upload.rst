@@ -98,6 +98,63 @@ Remote uploads are classified as ``remote_s3`` ingress. The appliance stages
 incoming bytes to the managed SSD path first, then moves them through
 daemon-owned HDD settlement and verification. Users do not choose disks.
 
+Operator Throughput and Backpressure
+------------------------------------
+
+Remote upload speed is controlled by three separate parts of the appliance:
+S3 intake to SSD, HDD landing, and verification. A slow remote upload is not
+always a network problem.
+
+The daemon limits remote S3 intake before it accepts more work. By default, the
+remote-upload contract allows two active remote S3 transfers, two multipart
+parts per transfer, an SSD staging queue depth of four, an HDD landing queue
+depth of eight, and a verification queue depth of four. When SSD pressure is
+``High``, new remote transfers may be paused while destage catches up. When
+SSD pressure is ``Critical``, new remote transfers should be rejected until the
+daemon reports that SSD capacity has recovered.
+
+HDD settlement uses the same appliance landing rule as local ingest. The
+default worker count is ``max(number_of_hdds_in_enclosure - 2, 2)``, capped by
+the number of eligible HDDs. One-HDD degraded or test systems therefore use one
+worker, two to four HDDs use two workers, five HDDs use three workers, and an
+eight-HDD DAS uses six workers. The daemon also enforces one active writer per
+physical HDD and never places redundant copies of the same object on the same
+disk. This keeps disks from thrashing, but it also means that a store needing
+multiple verified copies can be limited by the number of idle eligible HDDs.
+
+To diagnose a slow remote upload, inspect the remote upload job in the Web
+``Activity`` view or the daemon job status path before restarting clients. The
+useful fields are:
+
+``S3 transfer rate``
+   Low rate with empty SSD/HDD queues usually points to the remote computer,
+   network path, AWS CLI process, or object-service endpoint reachability.
+
+``SSD queue depth`` and ``SSD pressure``
+   Non-zero queue depth or ``High``/``Critical`` pressure means intake is
+   waiting for SSD space or staging workers. Let HDD landing and verification
+   catch up before starting more remote uploads.
+
+``HDD landing queue depth`` and ``active per-HDD writers``
+   A non-zero landing queue with active writers at the default limit means the
+   appliance is using all safe HDD write slots. Adding remote clients will not
+   make this faster; it will increase waiting work.
+
+``Verification state``
+   Pending verification after S3 transfer completion means bytes have arrived
+   but the object is not protected yet. Do not treat the upload as settled until
+   the daemon reports the job complete.
+
+``Session renewal status``
+   Missing or unavailable renewal metadata can interrupt long uploads when the
+   easyconnect session expires. Keep ``dasobjectstore-remote`` running during
+   long transfers and rerun easyconnect when renewal is not available.
+
+If the Web Activity view reports ``waiting`` rather than ``running``, follow
+the retry hint instead of killing the job. Waiting usually means the daemon is
+protecting SSD capacity, S3 intake concurrency, HDD writer slots, or
+verification capacity.
+
 Session Renewal
 ---------------
 

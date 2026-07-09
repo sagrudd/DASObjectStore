@@ -913,7 +913,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Update packaging docs and Makefile notes for `make remote`, `make
   remote-deb`, and `make remote-rpm` so remote easyconnect dependencies and
   browser-launch expectations are explicit.
-- [ ] Add operator documentation for the default HDD landing concurrency rule,
+- [x] Add operator documentation for the default HDD landing concurrency rule,
   per-HDD writer exclusivity, SSD pressure behavior, and how to diagnose slow
   remote uploads.
 

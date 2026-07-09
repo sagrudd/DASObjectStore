@@ -410,6 +410,12 @@ admission gate snapshot; active HDD writer counts and pending verification
 state are derived from daemon ingest telemetry. The easyconnect AWS CLI submit
 path also reports whether paired session renewal metadata is configured,
 missing, or unavailable; active renewal execution remains future work.
+For operator diagnosis of slow remote uploads, read these telemetry fields
+together: low S3 rate with empty queues points to the remote host, network, or
+object-service path; non-zero SSD queue depth or high SSD pressure means intake
+is waiting for staging capacity; a non-zero HDD landing queue with active
+per-HDD writers at the daemon limit means all safe HDD write slots are in use;
+pending verification means the object has arrived but is not settled yet.
 The runtime job executor constructs the remote-upload job and AWS CLI transfer
 from one easyconnect job request, then runs that job through the same
 admission-gated worker used by lower-level transfer adapters. The daemon API
