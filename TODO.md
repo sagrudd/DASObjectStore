@@ -40,7 +40,7 @@ planning are tracked under Milestones 21 and 22.
   for daemon file ingest submissions.
 - [x] Move current direct local ingest execution behind an explicit hidden
   developer/test flag or test transport until it can be removed.
-- [ ] Implement daemon-side local authorization using Linux peer credentials and
+- [x] Implement daemon-side local authorization using Linux peer credentials and
   store writer-group policy for the first Linux slice.
 - [x] Add package assets for `dasobjectstored`: system user, systemd service,
   socket/runtime directory, state directory, log directory, and permission

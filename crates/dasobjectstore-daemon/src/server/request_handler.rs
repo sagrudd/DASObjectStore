@@ -11,6 +11,9 @@ use crate::api::{
     PrepareEnclosureResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
     UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
+use crate::auth::{
+    authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,
+};
 use crate::runtime::{
     default_endpoint_registry_path, provision_garage_store_registry,
     submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
@@ -19,8 +22,13 @@ use crate::runtime::{
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ServiceCommandRunner,
     SystemLocalAdminCommandRunner,
 };
-use dasobjectstore_object_service::{default_store_registry_path, ObjectServiceProviderId};
+use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_object_service::{
+    default_store_registry_path, default_subobject_registry_path, read_store_registry,
+    read_subobject_registry, ObjectServiceError, ObjectServiceProviderId,
+};
 use std::fmt::{self, Display};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,6 +36,8 @@ pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
     clock: C,
     admin_job_registry: Option<Arc<dyn AdminJobRegistry>>,
+    store_registry_path: PathBuf,
+    subobject_registry_path: PathBuf,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -40,6 +50,8 @@ where
             service_orchestrator,
             clock,
             admin_job_registry: None,
+            store_registry_path: default_store_registry_path(),
+            subobject_registry_path: default_subobject_registry_path(),
         }
     }
 
@@ -52,7 +64,19 @@ where
             service_orchestrator,
             clock,
             admin_job_registry: Some(admin_job_registry),
+            store_registry_path: default_store_registry_path(),
+            subobject_registry_path: default_subobject_registry_path(),
         }
+    }
+
+    pub fn with_registry_paths(
+        mut self,
+        store_registry_path: impl Into<PathBuf>,
+        subobject_registry_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.store_registry_path = store_registry_path.into();
+        self.subobject_registry_path = subobject_registry_path.into();
+        self
     }
 
     pub fn handle(
@@ -65,6 +89,17 @@ where
     pub fn handle_with_progress(
         &self,
         request: DaemonApiRequest,
+        emit_progress: impl FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
+    ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
+        self.handle_with_progress_for_actor(request, None, emit_progress)
+    }
+
+    pub fn handle_with_progress_for_actor(
+        &self,
+        request: DaemonApiRequest,
+        actor: Option<&DaemonLocalActor>,
         mut emit_progress: impl FnMut(
             DaemonIngestProgressEvent,
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
@@ -159,6 +194,14 @@ where
                 .map(DaemonApiResponse::CancelJob)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime),
             DaemonApiRequest::SubmitIngestFiles(request) => {
+                if let Some(actor) = actor {
+                    if let Err(error) = self.authorize_ingest_files(actor, &request) {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            error.code(),
+                            error.to_string(),
+                        )));
+                    }
+                }
                 match self.service_orchestrator.submit_ingest_files(
                     request,
                     &self.clock.now_utc(),
@@ -179,6 +222,33 @@ where
                 ),
             ))),
         }
+    }
+
+    fn authorize_ingest_files(
+        &self,
+        actor: &DaemonLocalActor,
+        request: &SubmitIngestFilesRequest,
+    ) -> Result<(), IngestAuthorizationFailure> {
+        let store_id = resolve_authorization_store_id(
+            &request.endpoint,
+            &self.store_registry_path,
+            &self.subobject_registry_path,
+        )?;
+        let stores = read_store_registry(&self.store_registry_path)?;
+        let store = stores
+            .into_iter()
+            .find(|definition| definition.store_id == store_id)
+            .ok_or_else(|| IngestAuthorizationFailure::MissingStore {
+                store_id: store_id.clone(),
+                store_registry_path: self.store_registry_path.clone(),
+            })?;
+
+        let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
+        if let Some(writer_group) = store.writer_group {
+            policy = policy.with_writer_group(writer_group);
+        }
+        authorize_store_write(actor, &policy)?;
+        Ok(())
     }
 
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
@@ -220,6 +290,108 @@ where
         }
         self.service_orchestrator
             .cancel_job(request, accepted_at_utc)
+    }
+}
+
+fn resolve_authorization_store_id(
+    endpoint: &StoreId,
+    store_registry_path: &Path,
+    subobject_registry_path: &Path,
+) -> Result<StoreId, IngestAuthorizationFailure> {
+    let stores = read_store_registry(store_registry_path)?;
+    let store_match = stores
+        .iter()
+        .find(|definition| definition.store_id == *endpoint)
+        .map(|definition| definition.store_id.clone());
+    let subobjects = read_subobject_registry(subobject_registry_path)?;
+    let subobject_match = subobjects
+        .iter()
+        .find(|definition| definition.name == endpoint.as_str());
+
+    match (store_match, subobject_match) {
+        (Some(_), Some(_)) => Err(IngestAuthorizationFailure::AmbiguousEndpoint {
+            endpoint: endpoint.clone(),
+        }),
+        (Some(store_id), None) => Ok(store_id),
+        (None, Some(subobject)) => Ok(subobject.store_id.clone()),
+        (None, None) => Err(IngestAuthorizationFailure::UnknownEndpoint {
+            endpoint: endpoint.clone(),
+            store_registry_path: store_registry_path.to_path_buf(),
+            subobject_registry_path: subobject_registry_path.to_path_buf(),
+        }),
+    }
+}
+
+#[derive(Debug)]
+enum IngestAuthorizationFailure {
+    Authorization(DaemonAuthorizationError),
+    ObjectService(ObjectServiceError),
+    UnknownEndpoint {
+        endpoint: StoreId,
+        store_registry_path: PathBuf,
+        subobject_registry_path: PathBuf,
+    },
+    AmbiguousEndpoint {
+        endpoint: StoreId,
+    },
+    MissingStore {
+        store_id: StoreId,
+        store_registry_path: PathBuf,
+    },
+}
+
+impl IngestAuthorizationFailure {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Authorization(_) => "permission_denied",
+            Self::ObjectService(_)
+            | Self::UnknownEndpoint { .. }
+            | Self::AmbiguousEndpoint { .. }
+            | Self::MissingStore { .. } => "ingest_authorization_failed",
+        }
+    }
+}
+
+impl Display for IngestAuthorizationFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Authorization(error) => Display::fmt(error, formatter),
+            Self::ObjectService(error) => Display::fmt(error, formatter),
+            Self::UnknownEndpoint {
+                endpoint,
+                store_registry_path,
+                subobject_registry_path,
+            } => write!(
+                formatter,
+                "ingest endpoint {endpoint} was not found in {} or {}",
+                store_registry_path.display(),
+                subobject_registry_path.display()
+            ),
+            Self::AmbiguousEndpoint { endpoint } => write!(
+                formatter,
+                "ingest endpoint {endpoint} is ambiguous; both an object store and a SubObject use that name"
+            ),
+            Self::MissingStore {
+                store_id,
+                store_registry_path,
+            } => write!(
+                formatter,
+                "SubObject authorization references missing store {store_id} in {}",
+                store_registry_path.display()
+            ),
+        }
+    }
+}
+
+impl From<DaemonAuthorizationError> for IngestAuthorizationFailure {
+    fn from(error: DaemonAuthorizationError) -> Self {
+        Self::Authorization(error)
+    }
+}
+
+impl From<ObjectServiceError> for IngestAuthorizationFailure {
+    fn from(error: ObjectServiceError) -> Self {
+        Self::ObjectService(error)
     }
 }
 
@@ -749,13 +921,17 @@ mod tests {
         UpsertEndpointInventoryResponse, ENCLOSURE_PREPARE_CONFIRMATION,
         ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
+    use crate::auth::DaemonLocalActor;
     use crate::runtime::{
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
         FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
     };
     use dasobjectstore_core::ids::{IngestJobId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
-    use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
+    use dasobjectstore_core::store::{StoreClass, StorePolicy};
+    use dasobjectstore_object_service::{
+        ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
+    };
     use std::cell::RefCell;
     use std::fs;
     use std::path::PathBuf;
@@ -1399,6 +1575,98 @@ mod tests {
     }
 
     #[test]
+    fn authorizes_daemon_ingest_when_actor_has_store_writer_group() {
+        let root = temp_root("ingest-auth-allowed");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "zymo_fecal_2025.05", Some("mnemosyne"));
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T09:25:00Z"))
+                .with_registry_paths(store_registry, subobject_registry);
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("stephen")
+            .with_groups(["mnemosyne"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: "/mnt/external/zymo".into(),
+                    object_type: ObjectType::Naive,
+                    copies: None,
+                    conflict_policy: crate::api::DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::SubmitIngestFiles(SubmitIngestFilesResponse { .. })
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .ingest_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "2026-07-09T09:25:00Z".to_string(),
+                "zymo_fecal_2025.05".to_string(),
+                false,
+            )]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_daemon_ingest_when_actor_lacks_store_writer_group() {
+        let root = temp_root("ingest-auth-denied");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "zymo_fecal_2025.05", Some("mnemosyne"));
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T09:25:00Z"))
+                .with_registry_paths(store_registry, subobject_registry);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("guest")
+            .with_groups(["users"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: "/mnt/external/zymo".into(),
+                    object_type: ObjectType::Naive,
+                    copies: None,
+                    conflict_policy: crate::api::DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("membership in group mnemosyne is required")
+        ));
+        assert!(handler
+            .service_orchestrator
+            .ingest_calls
+            .borrow()
+            .is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn validates_request_before_dispatch() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -1520,6 +1788,29 @@ mod tests {
 
     fn cleanup(root: &PathBuf) {
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn write_test_store_registry(
+        root: &PathBuf,
+        store_id: &str,
+        writer_group: Option<&str>,
+    ) -> (PathBuf, PathBuf) {
+        fs::create_dir_all(root).expect("temp registry dir");
+        let store_registry = root.join("stores.json");
+        let subobject_registry = root.join("subobjects.json");
+        let definitions = vec![StoreServiceDefinition {
+            store_id: StoreId::new(store_id).expect("store id"),
+            policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+            bucket_name: None,
+            writer_group: writer_group.map(ToString::to_string),
+        }];
+        fs::write(
+            &store_registry,
+            serde_json::to_string_pretty(&definitions).expect("registry JSON"),
+        )
+        .expect("store registry written");
+        fs::write(&subobject_registry, "[]").expect("subobject registry written");
+        (store_registry, subobject_registry)
     }
 
     #[derive(Default)]

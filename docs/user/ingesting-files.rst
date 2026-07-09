@@ -229,6 +229,13 @@ The output must include both ``dasobjectstore`` and ``mnemosyne`` before
 non-root ingest job submission will be allowed. If the group already exists,
 skip ``groupadd``.
 
+On Linux, ``dasobjectstored`` reads the UID and primary GID attached to the
+local Unix-socket connection, resolves the username and supplementary groups
+from the host account database, and checks the target ObjectStore writer group
+before any managed DAS root is written. Membership in ``dasobjectstore`` only
+allows a client to reach the daemon socket; it does not grant write authority
+for every store.
+
 The copy count defaults to the store policy. Use ``--copies`` only when the
 override is intentional:
 

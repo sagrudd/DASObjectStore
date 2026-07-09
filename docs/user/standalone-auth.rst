@@ -59,6 +59,13 @@ Storage mutation must still go through the daemon:
 * service start, stop, and configuration;
 * ingest, destage, repair, and migration jobs.
 
+For local CLI ingest on Linux, the daemon authorizes the connecting OS account
+from Unix-socket peer credentials. ``dasobjectstored`` resolves the peer UID and
+group set from the host account database and compares those groups with the
+ObjectStore writer-group policy in the system-managed store registry. The
+managed SSD and HDD roots remain daemon-owned; ordinary users submit jobs but
+do not receive direct filesystem write permission to DAS media.
+
 The Web UI follows the same boundary. Admin-only actions such as enclosure or
 disk lifecycle changes, object store creation, writer-group assignment, and
 store policy changes may be initiated from Web forms, but the frontend only

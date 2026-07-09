@@ -1,4 +1,5 @@
 use crate::api::{DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse};
+use crate::auth::DaemonLocalActor;
 use crate::runtime::DaemonIngestFilesRuntimeError;
 use crate::server::{DaemonRequestHandler, DaemonRequestHandlerError, DaemonServiceOrchestrator};
 use crate::DaemonClock;
@@ -65,6 +66,16 @@ pub trait DaemonApiHandler {
         let response = self.handle_api_request(request)?;
         emit_response(response)
     }
+
+    fn handle_api_request_streaming_for_actor(
+        &self,
+        request: DaemonApiRequest,
+        actor: Option<&DaemonLocalActor>,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        let _ = actor;
+        self.handle_api_request_streaming(request, emit_response)
+    }
 }
 
 impl<S, C> DaemonApiHandler for DaemonRequestHandler<S, C>
@@ -80,13 +91,14 @@ where
             .map_err(UnixSocketDaemonServerError::Handler)
     }
 
-    fn handle_api_request_streaming(
+    fn handle_api_request_streaming_for_actor(
         &self,
         request: DaemonApiRequest,
+        actor: Option<&DaemonLocalActor>,
         emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
     ) -> Result<(), UnixSocketDaemonServerError> {
         let response = self
-            .handle_with_progress(request, |event| {
+            .handle_with_progress_for_actor(request, actor, |event| {
                 emit_response(DaemonApiResponse::IngestProgress(event)).map_err(|err| {
                     DaemonIngestFilesRuntimeError::ClientDisconnected(format!(
                         "upload cancelled because the client disconnected: {err}"
@@ -122,6 +134,7 @@ pub enum UnixSocketDaemonServerError {
     Decode(serde_json::Error),
     Encode(serde_json::Error),
     Handler(DaemonRequestHandlerError),
+    PeerCredentials(std::io::Error),
 }
 
 impl Display for UnixSocketDaemonServerError {
@@ -153,6 +166,12 @@ impl Display for UnixSocketDaemonServerError {
             Self::Decode(error) => write!(formatter, "failed to decode daemon request: {error}"),
             Self::Encode(error) => write!(formatter, "failed to encode daemon response: {error}"),
             Self::Handler(error) => Display::fmt(error, formatter),
+            Self::PeerCredentials(error) => {
+                write!(
+                    formatter,
+                    "failed to read daemon client credentials: {error}"
+                )
+            }
         }
     }
 }
@@ -200,7 +219,8 @@ fn handle_stream(
     mut stream: UnixStream,
     handler: &impl DaemonApiHandler,
 ) -> Result<(), UnixSocketDaemonServerError> {
-    let result = handle_stream_inner(&mut stream, handler);
+    let actor = peer_actor_for_stream(&stream)?;
+    let result = handle_stream_inner(&mut stream, handler, actor.as_ref());
     if result
         .as_ref()
         .is_err_and(UnixSocketDaemonServerError::is_client_disconnect)
@@ -213,6 +233,7 @@ fn handle_stream(
 fn handle_stream_inner(
     stream: &mut UnixStream,
     handler: &impl DaemonApiHandler,
+    actor: Option<&DaemonLocalActor>,
 ) -> Result<(), UnixSocketDaemonServerError> {
     let mut line = String::new();
     BufReader::new(
@@ -226,7 +247,7 @@ fn handle_stream_inner(
     match serde_json::from_str::<DaemonApiRequest>(&line) {
         Ok(request) => {
             let mut emit_response = |response| write_response_frame(stream, &response);
-            handler.handle_api_request_streaming(request, &mut emit_response)?;
+            handler.handle_api_request_streaming_for_actor(request, actor, &mut emit_response)?;
         }
         Err(error) => write_response_frame(
             stream,
@@ -238,6 +259,22 @@ fn handle_stream_inner(
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn peer_actor_for_stream(
+    stream: &UnixStream,
+) -> Result<Option<DaemonLocalActor>, UnixSocketDaemonServerError> {
+    crate::auth::read_linux_peer_actor(stream)
+        .map(Some)
+        .map_err(UnixSocketDaemonServerError::PeerCredentials)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn peer_actor_for_stream(
+    _stream: &UnixStream,
+) -> Result<Option<DaemonLocalActor>, UnixSocketDaemonServerError> {
+    Ok(None)
 }
 
 fn write_response_frame(

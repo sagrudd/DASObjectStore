@@ -1,3 +1,4 @@
+use super::unix_account::actor_from_system_accounts;
 use super::DaemonLocalActor;
 use std::io;
 use std::os::fd::AsRawFd;
@@ -39,4 +40,9 @@ pub fn read_linux_peer_credentials(stream: &UnixStream) -> io::Result<LinuxPeerC
         uid: credentials.uid,
         gid: credentials.gid,
     })
+}
+
+pub fn read_linux_peer_actor(stream: &UnixStream) -> io::Result<DaemonLocalActor> {
+    let credentials = read_linux_peer_credentials(stream)?;
+    actor_from_system_accounts(credentials.uid, credentials.gid)
 }
