@@ -266,6 +266,17 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
     where
         E: fmt::Display,
     {
+        self.run_with_progress(request, |_| transfer())
+    }
+
+    pub fn run_with_progress<E>(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+    where
+        E: fmt::Display,
+    {
         let RemoteUploadS3TransferWorkerRequest {
             job,
             submitted_at_utc,
@@ -296,6 +307,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                 )?;
                 return Ok(RemoteUploadS3TransferWorkerReport {
                     running_event: None,
+                    progress_events: Vec::new(),
                     final_event,
                     runtime_after: summary.runtime_after,
                 });
@@ -311,12 +323,24 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         let running_event = daemon_job_event_for_summary(running_job.clone());
         self.registry.record(running_job)?;
 
-        let outcome = match transfer() {
+        let mut progress_reporter = RemoteUploadS3TransferProgressReporter {
+            registry: self.registry,
+            job_id: DaemonJobId::new(job.job_id.clone())
+                .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job.job_id.clone()))?,
+            object_store: job.object_store.clone(),
+            source_bytes: job.source_bytes,
+            submitted_at_utc: submitted_at_utc.clone(),
+            actor: actor.clone(),
+            events: Vec::new(),
+        };
+
+        let outcome = match transfer(&mut progress_reporter) {
             Ok(()) => RemoteUploadS3TransferJobOutcome::Completed,
             Err(error) => RemoteUploadS3TransferJobOutcome::Failed {
                 error: error.to_string(),
             },
         };
+        let progress_events = progress_reporter.into_events();
         drop(permit);
 
         let summary = RemoteUploadS3TransferJobSummary {
@@ -336,6 +360,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
 
         Ok(RemoteUploadS3TransferWorkerReport {
             running_event: Some(running_event),
+            progress_events,
             final_event,
             runtime_after: summary.runtime_after,
         })
@@ -354,8 +379,65 @@ pub struct RemoteUploadS3TransferWorkerRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteUploadS3TransferWorkerReport {
     pub running_event: Option<DaemonJobEvent>,
+    pub progress_events: Vec<DaemonJobEvent>,
     pub final_event: DaemonJobEvent,
     pub runtime_after: RemoteUploadRuntimeSnapshot,
+}
+
+pub struct RemoteUploadS3TransferProgressReporter<'a> {
+    registry: &'a dyn AdminJobRegistry,
+    job_id: DaemonJobId,
+    object_store: String,
+    source_bytes: u64,
+    submitted_at_utc: String,
+    actor: Option<String>,
+    events: Vec<DaemonJobEvent>,
+}
+
+impl RemoteUploadS3TransferProgressReporter<'_> {
+    pub fn record_progress(
+        &mut self,
+        update: RemoteUploadS3TransferProgressUpdate,
+    ) -> Result<DaemonJobEvent, DaemonServiceRuntimeError> {
+        let bytes_done = update.bytes_done.min(self.source_bytes);
+        let job = DaemonJobSummary {
+            job_id: self.job_id.clone(),
+            kind: DaemonJobKind::RemoteUpload,
+            state: DaemonJobState::Running,
+            progress: DaemonJobProgress {
+                stage: "remote_s3_transfer_running".to_string(),
+                work_bytes_done: bytes_done,
+                work_bytes_total: self.source_bytes,
+                work_units_done: 0,
+                work_units_total: 1,
+                message: update.message.or_else(|| {
+                    Some(format!(
+                        "remote upload S3 transfer running for {}",
+                        self.object_store
+                    ))
+                }),
+            },
+            submitted_at_utc: self.submitted_at_utc.clone(),
+            updated_at_utc: update.updated_at_utc,
+            actor: self.actor.clone(),
+            failure_message: None,
+        };
+        let event = daemon_job_event_for_summary(job.clone());
+        self.registry.record(job)?;
+        self.events.push(event.clone());
+        Ok(event)
+    }
+
+    fn into_events(self) -> Vec<DaemonJobEvent> {
+        self.events
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadS3TransferProgressUpdate {
+    pub bytes_done: u64,
+    pub updated_at_utc: String,
+    pub message: Option<String>,
 }
 
 impl RemoteUploadS3TransferJobSummary {
@@ -523,8 +605,8 @@ mod tests {
     use super::{
         record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
         RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferWorker,
-        RemoteUploadS3TransferWorkerRequest,
+        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressUpdate,
+        RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
         DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonJobEvent, DaemonJobKind,
@@ -968,6 +1050,7 @@ mod tests {
         };
         assert_eq!(running_job.state, DaemonJobState::Running);
         assert_eq!(running_job.progress.stage, "remote_s3_transfer_running");
+        assert!(report.progress_events.is_empty());
         let DaemonJobEvent::Complete(final_job) = report.final_event else {
             panic!("expected complete final event");
         };
@@ -1010,6 +1093,7 @@ mod tests {
             .expect("blocked worker reported");
 
         assert_eq!(report.running_event, None);
+        assert!(report.progress_events.is_empty());
         let DaemonJobEvent::Progress(final_job) = report.final_event else {
             panic!("expected waiting progress event");
         };
@@ -1025,6 +1109,56 @@ mod tests {
             .expect("waiting status");
         assert_eq!(status.job.state, DaemonJobState::Waiting);
         assert_eq!(status.job.progress.stage, "remote_s3_admission_wait");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_records_live_byte_progress_before_final_state() {
+        let root = temp_root("remote-upload-worker-progress");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+
+        let report = worker
+            .run_with_progress(worker_request("remote-upload-job-007"), |progress| {
+                let event = progress
+                    .record_progress(RemoteUploadS3TransferProgressUpdate {
+                        bytes_done: 21,
+                        updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                        message: Some("uploaded 21 bytes".to_string()),
+                    })
+                    .expect("progress recorded");
+
+                let DaemonJobEvent::Progress(job) = event else {
+                    panic!("expected progress event");
+                };
+                assert_eq!(job.state, DaemonJobState::Running);
+                assert_eq!(job.progress.work_bytes_done, 21);
+                assert_eq!(job.progress.work_bytes_total, 42);
+                assert_eq!(job.progress.message.as_deref(), Some("uploaded 21 bytes"));
+                Ok::<(), &'static str>(())
+            })
+            .expect("worker completed");
+
+        assert_eq!(report.progress_events.len(), 1);
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event in report");
+        };
+        assert_eq!(progress_job.progress.work_bytes_done, 21);
+        assert_eq!(progress_job.updated_at_utc, "2026-07-09T14:10:30Z");
+
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected complete final event");
+        };
+        let status = registry
+            .status(DaemonJobStatusRequest {
+                job_id: final_job.job_id,
+            })
+            .expect("final status");
+        assert_eq!(status.job.state, DaemonJobState::Complete);
+        assert_eq!(status.job.progress.work_bytes_done, 42);
+        assert_eq!(report.runtime_after.active_s3_transfers, 0);
 
         cleanup(&root);
     }

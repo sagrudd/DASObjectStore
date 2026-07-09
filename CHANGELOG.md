@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.4 - 2026-07-09
 
+- Add live byte-progress reporting to the daemon remote-upload transfer worker
+  so concrete byte-transfer implementations can persist intermediate job
+  progress while admission capacity is held.
 - Add daemon remote-upload queue observers that derive SSD staging, HDD
   landing, and verification depths from daemon ingest telemetry before
   admission decisions.

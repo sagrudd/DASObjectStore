@@ -321,7 +321,10 @@ transfer attempts can be inspected through the common job status/list path even
 before the final live progress stream is attached. The daemon worker facade now
 records ``running`` only after admission capacity is acquired, executes the
 byte-transfer implementation, releases capacity after completion or failure,
-and records the final job state.
+and records the final job state. Concrete byte-transfer implementations can
+also publish intermediate byte progress through the worker while the admission
+permit is held; those updates are persisted as normal daemon job progress
+events.
 
 Credential Helper Contract
 --------------------------

@@ -54,9 +54,10 @@ pub use performance_policy::{
 pub use remote_upload::{
     record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
     RemoteUploadRuntimeSnapshot, RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-    RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferPermit, RemoteUploadS3TransferRunError,
-    RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerReport,
-    RemoteUploadS3TransferWorkerRequest,
+    RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferPermit,
+    RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
+    RemoteUploadS3TransferRunError, RemoteUploadS3TransferWorker,
+    RemoteUploadS3TransferWorkerReport, RemoteUploadS3TransferWorkerRequest,
 };
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,
