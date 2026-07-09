@@ -714,7 +714,7 @@ planning are tracked under Milestones 21 and 22.
   settled-copy selection, degraded object handling, file download streaming,
   folder `tar.gz` archive contents, interrupted archive cleanup, and large-tree
   response bounds.
-- [ ] Add Yew/component or screenshot regression coverage for ObjectStore tree
+- [x] Add Yew/component or screenshot regression coverage for ObjectStore tree
   browsing, dense file lists, placement badges, download controls, empty states,
   mobile layout, and no-overlap rendering.
 - [ ] Update `docs/user/web-interface.rst` and ObjectStore user docs with

@@ -7358,6 +7358,57 @@ mod tests {
     }
 
     #[test]
+    fn object_browser_component_contract_covers_rows_downloads_and_empty_states() {
+        let source = include_str!("workspace.rs");
+
+        assert!(source.contains("dos-object-browser-table"));
+        assert!(source.contains("<th>{ \"Name\" }</th>"));
+        assert!(source.contains("<th>{ \"Placement\" }</th>"));
+        assert!(source.contains("<th>{ \"Actions\" }</th>"));
+        assert!(source.contains("dos-object-browser-folder"));
+        assert!(source.contains("dos-object-browser-download"));
+        assert!(source.contains("Download folder"));
+        assert!(source.contains("Download\""));
+        assert!(source.contains("disabled={!download_enabled}"));
+        assert!(source.contains("render_object_browser_download_state"));
+        assert!(source.contains("data-download-state=\"starting\""));
+        assert!(source.contains("data-download-state=\"permission-denied\""));
+        assert!(source.contains("render_object_browser_message(\"Empty\", message)"));
+        assert!(source
+            .contains("render_object_browser_message(\"Files\", \"No files in this folder.\")"));
+    }
+
+    #[test]
+    fn object_browser_component_contract_covers_placement_badges_and_no_overlap_css() {
+        let source = include_str!("workspace.rs");
+        let css = include_str!("../styles.css");
+
+        assert!(source.contains("dos-object-browser-placement-stack"));
+        assert!(source.contains("dos-object-browser-placement-summary"));
+        assert!(source.contains("data-location={placement.location.clone()}"));
+        assert!(source.contains("data-state={placement.state.clone()}"));
+        assert!(source.contains("data-state={object_browser_state_key(&file.readiness)}"));
+        assert!(source.contains("object_browser_placement_summary_state(placements)"));
+        assert!(source.contains("object_browser_download_disabled_reason"));
+        assert!(source.contains("object_browser_file_download_available"));
+
+        assert!(css.contains(".dos-object-browser-table-wrap {\n  overflow-x: auto;"));
+        assert!(css.contains(".dos-object-browser-table {\n  width: 100%;\n  min-width: 1040px;"));
+        assert!(css.contains(".dos-object-browser-table td:first-child span"));
+        assert!(css.contains("text-overflow: ellipsis;"));
+        assert!(
+            css.contains(".dos-object-browser-placements {\n  display: flex;\n  flex-wrap: wrap;")
+        );
+        assert!(css.contains(
+            ".dos-object-browser-placement {\n  display: inline-flex;\n  max-width: 220px;"
+        ));
+        assert!(css.contains("@media (max-width: 980px)"));
+        assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"));
+        assert!(css.contains("@media (max-width: 640px)"));
+        assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders {\n    grid-template-columns: 1fr;"));
+    }
+
+    #[test]
     fn enclosures_live_payload_maps_to_card_summaries() {
         let payload = serde_json::json!({
             "schema_version": "dasobjectstore.web_redesign.v1",
