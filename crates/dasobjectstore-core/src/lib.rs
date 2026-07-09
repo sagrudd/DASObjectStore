@@ -9,6 +9,7 @@ pub mod lifecycle;
 pub mod object_type;
 pub mod placement;
 pub mod protection;
+pub mod remote_upload;
 pub mod repair;
 pub mod risk;
 pub mod store;

@@ -3,6 +3,7 @@ use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
 use serde::{Deserialize, Serialize};
 
 pub const REMOTE_EASYCONNECT_DISCOVERY_ROUTE: &str = "/api/v1/remote/easyconnect/discovery";
@@ -373,6 +374,7 @@ pub struct RemoteEasyconnectUploadHandoffResponse {
     pub state: RemoteEasyconnectUploadHandoffState,
     pub ingress_origin: DaemonIngressOrigin,
     pub landing_mode: DaemonIngressLandingMode,
+    pub backpressure_policy: RemoteUploadBackpressurePolicy,
     pub local_agent_handoff_url: String,
     pub confirmation_phrase: String,
     pub path_privacy: String,
@@ -402,6 +404,7 @@ pub fn plan_remote_easyconnect_upload_handoff(
         state: RemoteEasyconnectUploadHandoffState::ConfirmationRequired,
         ingress_origin: DaemonIngressOrigin::RemoteS3,
         landing_mode: DaemonIngressOrigin::RemoteS3.landing_mode(),
+        backpressure_policy: RemoteUploadBackpressurePolicy::default(),
         local_agent_handoff_url: format!("{base_url}{REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE}"),
         confirmation_phrase: format!("confirm upload to {}", request.object_store),
         path_privacy: "browser sends relative display paths and byte counts only; absolute local paths stay with the paired dasobjectstore-remote agent".to_string(),
@@ -838,6 +841,8 @@ mod tests {
         );
         assert_eq!(response.ingress_origin, DaemonIngressOrigin::RemoteS3);
         assert_eq!(response.landing_mode, DaemonIngressLandingMode::SsdFirst);
+        assert_eq!(response.backpressure_policy.max_s3_transfer_concurrency, 2);
+        assert_eq!(response.backpressure_policy.max_ssd_stage_queue_depth, 4);
         assert_eq!(
             response.local_agent_handoff_url,
             "http://127.0.0.1:49329/v1/dasobjectstore/remote/uploads/handoffs"

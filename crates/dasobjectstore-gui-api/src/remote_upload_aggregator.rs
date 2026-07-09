@@ -3,6 +3,7 @@ use crate::dashboard::{
 };
 use crate::home_aggregator::now_utc_string;
 use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
+use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
 use dasobjectstore_daemon::{
     remote_easyconnect_object_store_grants_for_actor, DaemonLocalActor,
     RemoteEasyconnectObjectStoreAccessPolicy,
@@ -19,6 +20,7 @@ pub struct RemoteUploadWorkspaceView {
     pub generated_at_utc: String,
     pub actor: RemoteUploadActorView,
     pub ingress_policy: RemoteUploadIngressPolicyView,
+    pub backpressure_policy: RemoteUploadBackpressurePolicy,
     pub stores: Vec<RemoteUploadObjectStoreView>,
     pub warnings: Vec<DashboardWarning>,
 }
@@ -163,6 +165,7 @@ pub(crate) fn live_remote_upload_workspace_for_user(
             sudo_administrator,
         },
         ingress_policy: RemoteUploadIngressPolicyView::standard(),
+        backpressure_policy: RemoteUploadBackpressurePolicy::default(),
         stores,
         warnings: unique_warnings(warnings),
     }
@@ -229,6 +232,9 @@ mod tests {
         WriterPolicyReadinessView,
     };
     use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
+    use dasobjectstore_core::remote_upload::{
+        RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
+    };
     use dasobjectstore_daemon::RemoteEasyconnectObjectStoreGrant;
 
     #[test]
@@ -271,6 +277,22 @@ mod tests {
         let encoded = serde_json::to_value(policy).expect("policy serializes");
         assert_eq!(encoded["browser_ingress_origin"], "web_upload");
         assert_eq!(encoded["paired_agent_ingress_origin"], "remote_s3");
+    }
+
+    #[test]
+    fn remote_upload_workspace_uses_bounded_backpressure_policy() {
+        let policy = RemoteUploadBackpressurePolicy::default();
+
+        assert_eq!(policy.max_s3_transfer_concurrency, 2);
+        assert_eq!(policy.max_ssd_stage_queue_depth, 4);
+        assert_eq!(
+            policy.ssd_high_pressure_action,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+        );
+
+        let encoded = serde_json::to_value(policy).expect("policy serializes");
+        assert_eq!(encoded["max_s3_transfer_concurrency"], 2);
+        assert_eq!(encoded["ssd_high_pressure_action"], "pause_new_transfers");
     }
 
     fn card(

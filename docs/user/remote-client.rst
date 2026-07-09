@@ -288,6 +288,14 @@ For folders, ``dasobjectstore-remote`` uses ``aws s3 sync``. For files, it uses
      --prefix experiments/run-001 \
      --dry-run
 
+Remote upload plans include the appliance backpressure contract. The default
+contract limits remote S3 transfer concurrency to two, multipart part
+concurrency to two, browser handoff metadata to 100,000 files or 8 TiB, SSD
+stage queue depth to four, HDD landing queue depth to eight, and verification
+queue depth to four. When SSD pressure is high, clients should pause new
+transfers; when SSD pressure is critical, clients should reject new transfers
+until daemon health reports capacity for more intake.
+
 Credential Helper Contract
 --------------------------
 

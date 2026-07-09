@@ -19,6 +19,9 @@ agreement before landing.
 - Reject duplicate managed HDD disk IDs in the daemon settlement scheduler so
   active writers and redundant object copies remain tied to distinct physical
   disks.
+- Add a shared remote-upload backpressure policy and surface it through
+  easyconnect handoff, Web remote-upload workspace payloads, and remote S3
+  upload plans.
 - Carry typed ingress origin through daemon file-ingest requests, default
   legacy requests to ``local_server``, and have the daemon runtime use the
   request origin when deciding SSD-first versus direct-to-HDD landing.

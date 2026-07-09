@@ -1,5 +1,6 @@
 use crate::auth::RemoteS3Credentials;
 use crate::config::RemoteConfig;
+use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -36,6 +37,7 @@ pub struct AwsS3CommandPlan {
     pub program: String,
     pub args: Vec<String>,
     pub operation: AwsS3Operation,
+    pub backpressure_policy: RemoteUploadBackpressurePolicy,
 }
 
 impl AwsS3CommandPlan {
@@ -62,6 +64,7 @@ pub fn plan_list_stores(config: &RemoteConfig) -> AwsS3CommandPlan {
             "json".to_string(),
         ],
         operation: AwsS3Operation::ListStores,
+        backpressure_policy: RemoteUploadBackpressurePolicy::default(),
     }
 }
 
@@ -118,6 +121,7 @@ pub fn plan_upload_with_credentials(
                 source: source.to_path_buf(),
                 destination,
             },
+            backpressure_policy: RemoteUploadBackpressurePolicy::default(),
         })
     } else if metadata.is_dir() {
         if key.is_some() {
@@ -143,6 +147,7 @@ pub fn plan_upload_with_credentials(
                 source: source.to_path_buf(),
                 destination,
             },
+            backpressure_policy: RemoteUploadBackpressurePolicy::default(),
         })
     } else {
         Err(RemoteS3Error::InvalidUpload(format!(
@@ -357,6 +362,7 @@ mod tests {
         assert!(matches!(plan.operation, AwsS3Operation::UploadFile { .. }));
         assert!(plan.args.contains(&"cp".to_string()));
         assert!(plan.args.contains(&"--no-progress".to_string()));
+        assert_eq!(plan.backpressure_policy.max_s3_transfer_concurrency, 2);
         assert_eq!(
             plan.args.last().unwrap(),
             "s3://dos-generated/runs/001/sample.fastq.gz"

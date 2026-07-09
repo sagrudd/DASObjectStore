@@ -293,6 +293,16 @@ fn run_upload(
             "ObjectStore: {} -> bucket {}",
             route.object_store, route.bucket
         )?;
+        writeln!(
+            writer,
+            "Remote upload S3 concurrency: {}",
+            plan.backpressure_policy.max_s3_transfer_concurrency
+        )?;
+        writeln!(
+            writer,
+            "SSD high pressure action: {}",
+            plan.backpressure_policy.ssd_high_pressure_action
+        )?;
         writeln!(writer, "{}", plan.display_command())?;
         return Ok(());
     }
@@ -590,6 +600,8 @@ mod tests {
         assert!(
             rendered.contains("ObjectStore: zymo_fecal_2025.05 -> bucket dos-zymo-fecal-2025-05")
         );
+        assert!(rendered.contains("Remote upload S3 concurrency: 2"));
+        assert!(rendered.contains("SSD high pressure action: pause_new_transfers"));
         assert!(rendered.contains("s3://dos-zymo-fecal-2025-05/raw/PAW10254/reads.fastq.gz"));
         assert!(!rendered.contains("--profile"));
         assert!(!rendered.contains("s3://zymo_fecal_2025.05/"));

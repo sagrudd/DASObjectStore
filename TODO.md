@@ -789,7 +789,9 @@ planning are tracked under Milestones 21 and 22.
   behavior when there are too few eligible HDDs.
 - [x] Ensure the landing worker scheduler never assigns two active writes to
   the same HDD and never places redundant copies of one object on the same disk.
-- [ ] Add queue/backpressure behavior for remote uploads so SSD staging,
+- [x] Add shared remote-upload backpressure policy contracts to easyconnect
+  handoff, Web remote-upload workspace payloads, and remote S3 upload plans.
+- [ ] Add daemon-enforced queue/backpressure execution for remote uploads so SSD staging,
   S3/object-service intake, HDD landing workers, and verification cannot grow
   without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
