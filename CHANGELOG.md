@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.23 - 2026-07-09
+
+- Add the Web ObjectStores browser panel with authenticated daemon-backed
+  object metadata loading, endpoint selection, breadcrumbs, folder navigation,
+  sortable file tables, readiness/lifecycle badges, and placement badges.
+
 ## 0.54.22 - 2026-07-09
 
 - Remove full benchmark JSON payloads from formal performance report bodies and

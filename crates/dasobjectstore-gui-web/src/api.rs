@@ -777,6 +777,71 @@ pub struct ObjectStoreCardResponse {
     pub warnings: Vec<DashboardWarning>,
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectBrowserResponse {
+    pub endpoint: String,
+    pub prefix: String,
+    pub breadcrumbs: Vec<ObjectBrowserBreadcrumbResponse>,
+    pub folders: Vec<ObjectBrowserFolderNodeResponse>,
+    pub files: Vec<ObjectBrowserFileNodeResponse>,
+    pub next_cursor: Option<String>,
+    pub total_entries: Option<u64>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectBrowserBreadcrumbResponse {
+    pub name: String,
+    pub prefix: String,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectBrowserFolderNodeResponse {
+    pub name: String,
+    pub prefix: String,
+    pub object_count: Option<u64>,
+    pub total_size_bytes: Option<u64>,
+    pub readiness: String,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectBrowserFileNodeResponse {
+    pub object_id: String,
+    pub name: String,
+    pub path: String,
+    pub object_type: String,
+    pub size_bytes: u64,
+    pub modified_at_utc: Option<String>,
+    pub checksum: Option<ObjectBrowserChecksumResponse>,
+    pub readiness: String,
+    pub lifecycle_state: String,
+    pub copy_count: u16,
+    pub placements: Vec<ObjectBrowserPlacementResponse>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectBrowserChecksumResponse {
+    pub algorithm: String,
+    pub value: String,
+    pub verified_at_utc: Option<String>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectBrowserPlacementResponse {
+    pub disk_id: Option<String>,
+    pub disk_label: Option<String>,
+    pub location: String,
+    pub state: String,
+    pub size_bytes: u64,
+    pub checksum: Option<ObjectBrowserChecksumResponse>,
+    pub verified_at_utc: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct WriterPolicyReadinessResponse {
     pub writer_group: Option<String>,
@@ -949,6 +1014,54 @@ pub async fn get_enclosures_dashboard(path: &str) -> Result<EnclosuresPageRespon
 #[cfg(target_arch = "wasm32")]
 pub async fn get_object_stores_dashboard(path: &str) -> Result<ObjectStoresPageResponse, ApiError> {
     get_json(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn get_object_browser(path: &str) -> Result<ObjectBrowserResponse, ApiError> {
+    get_json(path).await
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub fn object_browser_api_path(
+    api_base_path: &str,
+    endpoint: &str,
+    prefix: &str,
+    search: &str,
+    sort: &str,
+    include_placement: bool,
+) -> String {
+    let mut path = format!(
+        "{}/object-stores/{}/browser?sort={}&limit=100&include_placement={}",
+        api_base_path.trim_end_matches('/'),
+        percent_encode(endpoint.trim()),
+        percent_encode(sort.trim()),
+        include_placement
+    );
+    if !prefix.trim().is_empty() {
+        path.push_str("&prefix=");
+        path.push_str(&percent_encode(prefix.trim()));
+    }
+    if !search.trim().is_empty() {
+        path.push_str("&search=");
+        path.push_str(&percent_encode(search.trim()));
+    }
+    path
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+fn percent_encode(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(*byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(HEX[(byte >> 4) as usize] as char);
+            encoded.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    encoded
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1247,12 +1360,12 @@ where
 mod tests {
     use super::{
         activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
-        auth_path, endpoint_inventory_upsert_path, object_store_create_path,
-        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
-        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
-        EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
-        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
-        ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+        auth_path, endpoint_inventory_upsert_path, object_browser_api_path,
+        object_store_create_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
+        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
+        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
+        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
+        LocalGroupAdminResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
 
     #[test]
@@ -1938,6 +2051,23 @@ mod tests {
         );
         assert_eq!(decoded.writer_groups[0].group_name, "mnemosyne");
         assert!(decoded.capabilities.administrator_actions_enabled);
+    }
+
+    #[test]
+    fn object_browser_api_path_encodes_endpoint_prefix_and_search() {
+        let path = object_browser_api_path(
+            "/products/dasobjectstore/api/v1/",
+            "ENA Primary",
+            "Xenognostikon/Vervet",
+            "sample fastq",
+            "size_desc",
+            true,
+        );
+
+        assert_eq!(
+            path,
+            "/products/dasobjectstore/api/v1/object-stores/ENA%20Primary/browser?sort=size_desc&limit=100&include_placement=true&prefix=Xenognostikon%2FVervet&search=sample%20fastq"
+        );
     }
 
     #[test]

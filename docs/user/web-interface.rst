@@ -379,6 +379,15 @@ transport-error states instead of using fixture store cards. The create card
 reflects the daemon/API create affordance, including whether creation is
 currently available or blocked by administrator requirements.
 
+The ``Browse objects`` panel on the ObjectStores page reads
+``/api/v1/object-stores/<endpoint>/browser`` through the authenticated Web
+session. Operators can select an ObjectStore endpoint, navigate folder prefixes
+with breadcrumbs, search by object name or path, and sort by name, size, or
+modified time. Folder and file rows show daemon-reported size, object type,
+readiness, lifecycle state, copy count, and placement badges. Placement badges
+name the managed disk label or external endpoint but do not expose writable
+managed-disk paths to the browser.
+
 Creating or changing an object store is an admin-only workflow. The Web UI
 presents controls for store name, writer group, mounted enclosure, object type,
 redundancy, store class, export mode, and public visibility. Bucket name and

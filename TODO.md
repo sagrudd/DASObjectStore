@@ -696,11 +696,11 @@ planning are tracked under Milestones 21 and 22.
   selected folder prefix, with archive-size preflight, bounded memory use,
   cancellation-aware cleanup, and no requirement to stage the full archive on
   SSD or HDD.
-- [ ] Add Yew ObjectStore file browser page/detail view with breadcrumb
+- [x] Add Yew ObjectStore file browser page/detail view with breadcrumb
   navigation, expandable folder hierarchy, sortable file table, size and object
   type columns, disk placement badges, lifecycle/readiness badges, and clear
   empty/loading/error/permission states.
-- [ ] Ensure the file browser design follows the DASObjectStore/Mnemosyne Web
+- [x] Ensure the file browser design follows the DASObjectStore/Mnemosyne Web
   console style: compact professional cards/tables, minimal icons, dense but
   readable rows, no landing-page treatment, and responsive desktop/mobile
   behavior without text overlap.

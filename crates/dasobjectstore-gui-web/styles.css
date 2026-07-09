@@ -460,6 +460,173 @@ h2 {
   border-left: 4px solid #b85c38;
 }
 
+.dos-store-grid > .dos-wide-card {
+  grid-column: 1 / -1;
+}
+
+.dos-object-browser {
+  display: grid;
+  gap: 14px;
+}
+
+.dos-object-browser-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.5fr) minmax(170px, 0.8fr);
+  gap: 12px;
+}
+
+.dos-object-browser-controls label {
+  display: grid;
+  gap: 5px;
+  color: #5b6972;
+  font-size: 0.78rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.dos-object-browser-controls input,
+.dos-object-browser-controls select {
+  min-height: 38px;
+  border: 1px solid #c7d1d5;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fff;
+  color: #172027;
+  font: inherit;
+  text-transform: none;
+}
+
+.dos-object-browser-message {
+  border: 1px solid #d7e0e4;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.dos-object-browser-body {
+  display: grid;
+  gap: 12px;
+}
+
+.dos-object-browser-breadcrumbs,
+.dos-object-browser-summary,
+.dos-object-browser-placements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.dos-object-browser-breadcrumbs button,
+.dos-object-browser-folder {
+  border: 1px solid #c7d1d5;
+  border-radius: 6px;
+  background: #fff;
+  color: #172027;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dos-object-browser-breadcrumbs button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.dos-object-browser-summary {
+  color: #5b6972;
+  font-size: 0.86rem;
+}
+
+.dos-object-browser-folders {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dos-object-browser-folder {
+  display: grid;
+  gap: 6px;
+  min-height: 108px;
+  padding: 12px;
+  text-align: left;
+}
+
+.dos-object-browser-folder strong,
+.dos-object-browser-table strong {
+  overflow: hidden;
+  color: #172027;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dos-object-browser-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #d7e0e4;
+  border-radius: 8px;
+}
+
+.dos-object-browser-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.dos-object-browser-table th,
+.dos-object-browser-table td {
+  border-bottom: 1px solid #e6ecef;
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dos-object-browser-table th {
+  color: #5b6972;
+  font-size: 0.76rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.dos-object-browser-table td:first-child {
+  max-width: 280px;
+}
+
+.dos-object-browser-table td:first-child span {
+  display: block;
+  overflow: hidden;
+  color: #6a767d;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dos-object-browser-placement {
+  display: inline-flex;
+  max-width: 220px;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #eef3f5;
+  color: #33424b;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.dos-object-browser-placement[data-state="verified"] {
+  background: #e4f2ea;
+  color: #1f6740;
+}
+
+.dos-object-browser-placement[data-state="missing"],
+.dos-object-browser-placement[data-state="degraded"] {
+  background: #f8e8e3;
+  color: #8a3d24;
+}
+
+.dos-object-browser-note {
+  color: #6a767d;
+  font-size: 0.84rem;
+}
+
 .dos-wide-card h2,
 .dos-detail-panel h2,
 .dos-create-card h2,
@@ -984,6 +1151,11 @@ h2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .dos-object-browser-controls,
+  .dos-object-browser-folders {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .dos-topbar,
   .dos-topbar-left {
     align-items: stretch;
@@ -1033,7 +1205,9 @@ h2 {
   .dos-store-grid,
   .dos-activity-grid,
   .dos-activity-queues,
-  .dos-form-grid {
+  .dos-form-grid,
+  .dos-object-browser-controls,
+  .dos-object-browser-folders {
     grid-template-columns: 1fr;
   }
 

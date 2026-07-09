@@ -1,8 +1,11 @@
 #[cfg(any(target_arch = "wasm32", test))]
 use crate::api::BioinformaticsWorkspaceResponse;
+#[cfg(target_arch = "wasm32")]
+use crate::api::ObjectBrowserResponse;
 use crate::api::{
     ActivityWorkspaceResponse, EnclosureDriveSlotResponse, EnclosuresPageResponse,
-    HomeDashboardResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+    HomeDashboardResponse, ObjectBrowserPlacementResponse, ObjectStoresPageResponse,
+    UsersGroupsWorkspaceResponse,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
@@ -18,6 +21,8 @@ use crate::api::{
     AdminJobCancelResponse, AdminJobStatusResponse, AdminJobSummary, DasEnclosureCardResponse,
     EnclosurePrepareResponse,
 };
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::api::{ObjectBrowserFileNodeResponse, ObjectBrowserFolderNodeResponse};
 use crate::mount::FrontendHost;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::Timeout;
@@ -856,6 +861,29 @@ pub struct ObjectStoreCardSummary {
     pub writer_policy: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObjectBrowserFolderSummary {
+    pub name: String,
+    pub prefix: String,
+    pub objects: String,
+    pub size: String,
+    pub readiness: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObjectBrowserFileSummary {
+    pub object_id: String,
+    pub name: String,
+    pub path: String,
+    pub object_type: String,
+    pub size: String,
+    pub modified: String,
+    pub readiness: String,
+    pub lifecycle: String,
+    pub copies: String,
+    pub placements: Vec<ObjectBrowserPlacementResponse>,
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ObjectStoreCreateFormState {
@@ -1321,6 +1349,98 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
             }
         })
         .collect()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_initial_endpoint(view: &ObjectStoresPageResponse) -> Option<String> {
+    view.selected_store_id
+        .as_ref()
+        .filter(|store_id| !store_id.trim().is_empty())
+        .cloned()
+        .or_else(|| view.stores.first().map(|store| store.store_id.clone()))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn object_browser_folder_summaries(
+    folders: &[ObjectBrowserFolderNodeResponse],
+) -> Vec<ObjectBrowserFolderSummary> {
+    folders
+        .iter()
+        .map(|folder| ObjectBrowserFolderSummary {
+            name: folder.name.clone(),
+            prefix: folder.prefix.clone(),
+            objects: folder
+                .object_count
+                .map(|count| format!("{count} object(s)"))
+                .unwrap_or_else(|| "object count pending".to_string()),
+            size: folder
+                .total_size_bytes
+                .map(format_browser_bytes)
+                .unwrap_or_else(|| "size pending".to_string()),
+            readiness: labelize_state(&folder.readiness),
+        })
+        .collect()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn object_browser_file_summaries(
+    files: &[ObjectBrowserFileNodeResponse],
+) -> Vec<ObjectBrowserFileSummary> {
+    files
+        .iter()
+        .map(|file| ObjectBrowserFileSummary {
+            object_id: file.object_id.clone(),
+            name: file.name.clone(),
+            path: file.path.clone(),
+            object_type: labelize_state(&file.object_type),
+            size: format_browser_bytes(file.size_bytes),
+            modified: file
+                .modified_at_utc
+                .as_deref()
+                .unwrap_or("not recorded")
+                .to_string(),
+            readiness: labelize_state(&file.readiness),
+            lifecycle: labelize_state(&file.lifecycle_state),
+            copies: format!("{} copy/copies", file.copy_count),
+            placements: file.placements.clone(),
+        })
+        .collect()
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn format_browser_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    const TIB: f64 = GIB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= TIB {
+        format!("{:.1} TiB", bytes / TIB)
+    } else if bytes >= GIB {
+        format!("{:.1} GiB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn labelize_state(value: &str) -> String {
+    value
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2492,27 +2612,80 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
     let create_state = use_state(|| ObjectStoreCreateFormState::from_view(None));
     let configure_state = use_state(|| ObjectStoreConfigureFormState::from_view(None));
     let subobject_state = use_state(|| SubObjectFormState::from_view(None));
+    let browser_endpoint = use_state(String::new);
+    let browser_prefix = use_state(String::new);
+    let browser_search = use_state(String::new);
+    let browser_sort = use_state(|| "name_asc".to_string());
+    let browser_state =
+        use_state(|| ApiLoadState::<ObjectBrowserResponse>::Empty("Select an ObjectStore.".into()));
 
     {
         let api_path = api_path.clone();
         let object_stores_state = object_stores_state.clone();
+        let browser_endpoint = browser_endpoint.clone();
+        let browser_prefix = browser_prefix.clone();
         use_effect_with(api_path.clone(), move |path| {
             let path = path.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                object_stores_state.set(page_load_state_from_result(
-                    crate::api::get_object_stores_dashboard(&path).await,
-                    |view| {
-                        view.stores.is_empty().then(|| {
-                            view.warnings
-                                .first()
-                                .map(|warning| warning.message.clone())
-                                .unwrap_or_else(|| "No object stores reported.".to_string())
-                        })
-                    },
-                ));
+                let result = crate::api::get_object_stores_dashboard(&path).await;
+                if let Ok(view) = &result {
+                    if browser_endpoint.trim().is_empty() {
+                        if let Some(endpoint) = object_browser_initial_endpoint(view) {
+                            browser_endpoint.set(endpoint);
+                            browser_prefix.set(String::new());
+                        }
+                    }
+                }
+                object_stores_state.set(page_load_state_from_result(result, |view| {
+                    view.stores.is_empty().then(|| {
+                        view.warnings
+                            .first()
+                            .map(|warning| warning.message.clone())
+                            .unwrap_or_else(|| "No object stores reported.".to_string())
+                    })
+                }));
             });
             || ()
         });
+    }
+
+    {
+        let api_base_path = props.api_base_path.clone();
+        let browser_state = browser_state.clone();
+        let endpoint = (*browser_endpoint).clone();
+        let prefix = (*browser_prefix).clone();
+        let search = (*browser_search).clone();
+        let sort = (*browser_sort).clone();
+        use_effect_with(
+            (api_base_path, endpoint, prefix, search, sort),
+            move |(api_base_path, endpoint, prefix, search, sort)| {
+                let endpoint = endpoint.clone();
+                if endpoint.trim().is_empty() {
+                    browser_state.set(ApiLoadState::empty("Select an ObjectStore."));
+                } else {
+                    let path = crate::api::object_browser_api_path(
+                        api_base_path,
+                        &endpoint,
+                        prefix,
+                        search,
+                        sort,
+                        true,
+                    );
+                    browser_state.set(ApiLoadState::Loading);
+                    wasm_bindgen_futures::spawn_local(async move {
+                        browser_state.set(page_load_state_from_result(
+                            crate::api::get_object_browser(&path).await,
+                            |view| {
+                                (view.folders.is_empty() && view.files.is_empty()).then(|| {
+                                    "No folders or objects match this browser view.".to_string()
+                                })
+                            },
+                        ));
+                    });
+                }
+                || ()
+            },
+        );
     }
 
     html! {
@@ -2522,7 +2695,18 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 title="ObjectStores"
                 summary="Operational view of store policies, capacity, and service state."
             />
-            { render_object_stores_state(&*object_stores_state, create_state, configure_state, subobject_state, props.api_base_path.clone()) }
+            { render_object_stores_state(
+                &*object_stores_state,
+                create_state,
+                configure_state,
+                subobject_state,
+                props.api_base_path.clone(),
+                browser_state,
+                browser_endpoint,
+                browser_prefix,
+                browser_search,
+                browser_sort,
+            ) }
         </section>
     }
 }
@@ -2534,6 +2718,11 @@ fn render_object_stores_state(
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
     subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
+    browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
+    browser_endpoint: UseStateHandle<String>,
+    browser_prefix: UseStateHandle<String>,
+    browser_search: UseStateHandle<String>,
+    browser_sort: UseStateHandle<String>,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
@@ -2553,6 +2742,11 @@ fn render_object_stores_state(
                 configure_state,
                 subobject_state,
                 api_base_path,
+                browser_state,
+                browser_endpoint,
+                browser_prefix,
+                browser_search,
+                browser_sort,
             )
         }
         ApiLoadState::Empty(message) => html! {
@@ -2581,6 +2775,11 @@ fn render_object_store_inventory(
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
     subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
+    browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
+    browser_endpoint: UseStateHandle<String>,
+    browser_prefix: UseStateHandle<String>,
+    browser_search: UseStateHandle<String>,
+    browser_sort: UseStateHandle<String>,
 ) -> Html {
     html! {
         <div class="dos-store-grid">
@@ -2588,6 +2787,271 @@ fn render_object_store_inventory(
             { render_subobject_create_card(view, subobject_state, api_base_path.clone()) }
             { render_object_store_configure_card(view, configure_state, api_base_path) }
             { for object_store_card_summaries(view).into_iter().map(render_object_store_card) }
+            { render_object_browser_panel(
+                view,
+                &*browser_state,
+                browser_endpoint,
+                browser_prefix,
+                browser_search,
+                browser_sort,
+            ) }
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_panel(
+    view: &ObjectStoresPageResponse,
+    browser_state: &ApiLoadState<ObjectBrowserResponse>,
+    browser_endpoint: UseStateHandle<String>,
+    browser_prefix: UseStateHandle<String>,
+    browser_search: UseStateHandle<String>,
+    browser_sort: UseStateHandle<String>,
+) -> Html {
+    let selected_endpoint = (*browser_endpoint).clone();
+    let search_value = (*browser_search).clone();
+    let sort_value = (*browser_sort).clone();
+    let on_endpoint_change = {
+        let browser_endpoint = browser_endpoint.clone();
+        let browser_prefix = browser_prefix.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlSelectElement = event.target_unchecked_into();
+            browser_endpoint.set(input.value());
+            browser_prefix.set(String::new());
+        })
+    };
+    let on_search = {
+        let browser_search = browser_search.clone();
+        Callback::from(move |event: InputEvent| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            browser_search.set(input.value());
+        })
+    };
+    let on_sort = {
+        let browser_sort = browser_sort.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlSelectElement = event.target_unchecked_into();
+            browser_sort.set(input.value());
+        })
+    };
+
+    html! {
+        <section class="dos-card dos-wide-card dos-object-browser" data-state={browser_state.state_name()}>
+            <div class="dos-card-row">
+                <div>
+                    <span class="dos-card-label">{ "Browse objects" }</span>
+                    <h2>{ "ObjectStore contents" }</h2>
+                </div>
+                <span class="dos-status-pill">{ browser_state.state_name() }</span>
+            </div>
+            <div class="dos-object-browser-controls">
+                <label>
+                    <span>{ "Endpoint" }</span>
+                    <select onchange={on_endpoint_change} value={selected_endpoint}>
+                        { for view.stores.iter().map(|store| {
+                            html! {
+                                <option value={store.store_id.clone()}>{ store.display_name.clone() }</option>
+                            }
+                        }) }
+                    </select>
+                </label>
+                <label>
+                    <span>{ "Search" }</span>
+                    <input
+                        type="search"
+                        value={search_value}
+                        oninput={on_search}
+                        placeholder="Object name or path"
+                    />
+                </label>
+                <label>
+                    <span>{ "Sort" }</span>
+                    <select onchange={on_sort} value={sort_value}>
+                        <option value="name_asc">{ "Name A-Z" }</option>
+                        <option value="name_desc">{ "Name Z-A" }</option>
+                        <option value="size_desc">{ "Size largest" }</option>
+                        <option value="size_asc">{ "Size smallest" }</option>
+                        <option value="modified_desc">{ "Modified newest" }</option>
+                        <option value="modified_asc">{ "Modified oldest" }</option>
+                    </select>
+                </label>
+            </div>
+            { render_object_browser_state(browser_state, browser_prefix) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_state(
+    state: &ApiLoadState<ObjectBrowserResponse>,
+    browser_prefix: UseStateHandle<String>,
+) -> Html {
+    match state {
+        ApiLoadState::Loading => render_object_browser_message(
+            "Loading",
+            "Requesting daemon-authorized object metadata.",
+        ),
+        ApiLoadState::Empty(message) => render_object_browser_message("Empty", message),
+        ApiLoadState::PermissionDenied(message) => {
+            render_object_browser_message("Permission denied", message)
+        }
+        ApiLoadState::TransportError(message) => render_object_browser_message("Error", message),
+        ApiLoadState::Success(response) => render_object_browser_body(response, browser_prefix),
+        ApiLoadState::StaleData { value, message } => html! {
+            <>
+                { render_object_browser_message("Stale", message) }
+                { render_object_browser_body(value, browser_prefix) }
+            </>
+        },
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_message(label: &str, message: &str) -> Html {
+    html! {
+        <div class="dos-object-browser-message">
+            <span class="dos-card-label">{ label }</span>
+            <p>{ message }</p>
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_body(
+    response: &ObjectBrowserResponse,
+    browser_prefix: UseStateHandle<String>,
+) -> Html {
+    let folders = object_browser_folder_summaries(&response.folders);
+    let files = object_browser_file_summaries(&response.files);
+    html! {
+        <div class="dos-object-browser-body" data-endpoint={response.endpoint.clone()} data-prefix={response.prefix.clone()}>
+            { render_object_browser_breadcrumbs(response, browser_prefix.clone()) }
+            <div class="dos-object-browser-summary">
+                <span>{ format!("{} folder(s)", folders.len()) }</span>
+                <span>{ format!("{} file(s)", files.len()) }</span>
+                <span>{ response.total_entries.map(|entries| format!("{entries} total entries")).unwrap_or_else(|| "total pending".to_string()) }</span>
+            </div>
+            { render_object_browser_folders(folders, browser_prefix.clone()) }
+            { render_object_browser_files(files) }
+            {
+                if response.next_cursor.is_some() {
+                    html! { <p class="dos-object-browser-note">{ "More entries are available; pagination controls will be enabled in the download/action slice." }</p> }
+                } else {
+                    html! {}
+                }
+            }
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_breadcrumbs(
+    response: &ObjectBrowserResponse,
+    browser_prefix: UseStateHandle<String>,
+) -> Html {
+    let root_click = {
+        let browser_prefix = browser_prefix.clone();
+        Callback::from(move |_| browser_prefix.set(String::new()))
+    };
+    html! {
+        <nav class="dos-object-browser-breadcrumbs" aria-label="ObjectStore folder path">
+            <button type="button" onclick={root_click}>{ response.endpoint.clone() }</button>
+            { for response.breadcrumbs.iter().map(|breadcrumb| {
+                let prefix = breadcrumb.prefix.clone();
+                let label = breadcrumb.name.clone();
+                let browser_prefix = browser_prefix.clone();
+                html! {
+                    <button type="button" onclick={Callback::from(move |_| browser_prefix.set(prefix.clone()))}>{ label }</button>
+                }
+            }) }
+        </nav>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_folders(
+    folders: Vec<ObjectBrowserFolderSummary>,
+    browser_prefix: UseStateHandle<String>,
+) -> Html {
+    if folders.is_empty() {
+        return html! {};
+    }
+    html! {
+        <div class="dos-object-browser-folders">
+            { for folders.into_iter().map(|folder| {
+                let prefix = folder.prefix.clone();
+                let browser_prefix = browser_prefix.clone();
+                html! {
+                    <button type="button" class="dos-object-browser-folder" onclick={Callback::from(move |_| browser_prefix.set(prefix.clone()))}>
+                        <strong>{ folder.name }</strong>
+                        <span>{ folder.objects }</span>
+                        <span>{ folder.size }</span>
+                        <span class="dos-status-pill">{ folder.readiness }</span>
+                    </button>
+                }
+            }) }
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_files(files: Vec<ObjectBrowserFileSummary>) -> Html {
+    if files.is_empty() {
+        return render_object_browser_message("Files", "No files in this folder.");
+    }
+    html! {
+        <div class="dos-object-browser-table-wrap">
+            <table class="dos-object-browser-table">
+                <thead>
+                    <tr>
+                        <th>{ "Name" }</th>
+                        <th>{ "Type" }</th>
+                        <th>{ "Size" }</th>
+                        <th>{ "Readiness" }</th>
+                        <th>{ "Lifecycle" }</th>
+                        <th>{ "Copies" }</th>
+                        <th>{ "Placement" }</th>
+                        <th>{ "Modified" }</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    { for files.into_iter().map(|file| html! {
+                        <tr title={file.path.clone()}>
+                            <td><strong>{ file.name }</strong><span>{ file.object_id }</span></td>
+                            <td>{ file.object_type }</td>
+                            <td>{ file.size }</td>
+                            <td><span class="dos-status-pill">{ file.readiness }</span></td>
+                            <td>{ file.lifecycle }</td>
+                            <td>{ file.copies }</td>
+                            <td>{ render_object_browser_placements(&file.placements) }</td>
+                            <td>{ file.modified }</td>
+                        </tr>
+                    }) }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_placements(placements: &[ObjectBrowserPlacementResponse]) -> Html {
+    if placements.is_empty() {
+        return html! { <span class="dos-object-browser-placement" data-state="pending">{ "placement pending" }</span> };
+    }
+    html! {
+        <div class="dos-object-browser-placements">
+            { for placements.iter().map(|placement| {
+                let disk = placement
+                    .disk_label
+                    .as_deref()
+                    .or(placement.disk_id.as_deref())
+                    .unwrap_or("external");
+                html! {
+                    <span class="dos-object-browser-placement" data-state={placement.state.clone()} title={format!("{} · {}", placement.location, placement.state)}>
+                        { format!("{} · {} · {}", disk, labelize_state(&placement.location), labelize_state(&placement.state)) }
+                    </span>
+                }
+            }) }
         </div>
     }
 }
@@ -5383,7 +5847,8 @@ mod tests {
         enclosure_prepare_candidate, enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
         enclosure_ssd_root, enclosures_workspace_api_path, endpoints_workspace_api_path,
         home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
-        object_store_bucket_default, object_store_card_summaries,
+        object_browser_file_summaries, object_browser_folder_summaries,
+        object_browser_initial_endpoint, object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
         objectstores_workspace_api_path, primary_navigation_for_host,
@@ -5407,7 +5872,8 @@ mod tests {
         DriveCountSummaryResponse, EnclosureConnectionResponse, EnclosurePrepareAcceptedResponse,
         EnclosurePrepareHddDevice, EnclosurePrepareResponse, EnclosuresPageResponse,
         HomeDashboardResponse, IngestQueueSummaryResponse, LocalGroupMembershipResponse,
-        LocalGroupOperationResponse, LocalUserAuthorityResponse, ObjectStoresPageResponse,
+        LocalGroupOperationResponse, LocalUserAuthorityResponse, ObjectBrowserFileNodeResponse,
+        ObjectBrowserFolderNodeResponse, ObjectBrowserPlacementResponse, ObjectStoresPageResponse,
         StandaloneUserAccountResponse, StorageGroupResponse, UsersGroupsCapabilitiesResponse,
         UsersGroupsWorkspaceResponse,
     };
@@ -6274,6 +6740,99 @@ mod tests {
         assert_eq!(summaries[0].writer_group, "bioinformatics");
         assert_eq!(summaries[0].endpoint, "s3_bucket");
         assert_eq!(summaries[0].warning_count, 1);
+    }
+
+    #[test]
+    fn object_browser_payload_maps_to_dense_view_summaries() {
+        let view = serde_json::from_value::<ObjectStoresPageResponse>(serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-09T10:00:00Z",
+            "stores": [{
+                "store_id": "ENA",
+                "display_name": "ENA",
+                "store_class": "reproducible_cache",
+                "object_type": "ena_sra",
+                "health": "healthy",
+                "required_copies": 1,
+                "object_count": 2,
+                "capacity": null,
+                "placement_policy": "fractional_free_space",
+                "endpoint_export_mode": "s3_bucket",
+                "writer_group": "mnemosyne",
+                "public": true,
+                "writeable": true,
+                "created_at_utc": null,
+                "last_ingested_at_utc": null,
+                "warnings": []
+            }],
+            "selected_store_id": "ENA",
+            "create_object_store": {
+                "enabled": false,
+                "action_kind": "store_create",
+                "label": "Create ObjectStore",
+                "required_fields": [],
+                "optional_fields": [],
+                "defaults": {
+                    "store_class": "generated_data",
+                    "required_copies": 1,
+                    "endpoint_export_mode": "s3_bucket"
+                },
+                "store_class_options": [],
+                "copy_count_options": [1],
+                "confirmation_required": true,
+                "blocked_reason": "admin required"
+            },
+            "warnings": []
+        }))
+        .expect("object store view decodes");
+        let folders = vec![ObjectBrowserFolderNodeResponse {
+            name: "Xenognostikon".to_string(),
+            prefix: "Xenognostikon".to_string(),
+            object_count: Some(2),
+            total_size_bytes: Some(2 * 1024 * 1024 * 1024),
+            readiness: "available".to_string(),
+        }];
+        let files = vec![ObjectBrowserFileNodeResponse {
+            object_id: "Xenognostikon/Vervet/sample.fastq.gz".to_string(),
+            name: "sample.fastq.gz".to_string(),
+            path: "Xenognostikon/Vervet/sample.fastq.gz".to_string(),
+            object_type: "fastq".to_string(),
+            size_bytes: 1536,
+            modified_at_utc: Some("2026-07-09T10:00:00Z".to_string()),
+            checksum: None,
+            readiness: "ssd_only".to_string(),
+            lifecycle_state: "ReceivedOnSsd".to_string(),
+            copy_count: 1,
+            placements: vec![ObjectBrowserPlacementResponse {
+                disk_id: Some("qnap-1057".to_string()),
+                disk_label: Some("QNAP bay 1".to_string()),
+                location: "hdd_settled".to_string(),
+                state: "verified".to_string(),
+                size_bytes: 1536,
+                checksum: None,
+                verified_at_utc: Some("2026-07-09T10:01:00Z".to_string()),
+            }],
+        }];
+
+        let folder_summaries = object_browser_folder_summaries(&folders);
+        let file_summaries = object_browser_file_summaries(&files);
+
+        assert_eq!(
+            object_browser_initial_endpoint(&view).as_deref(),
+            Some("ENA")
+        );
+        assert_eq!(folder_summaries[0].objects, "2 object(s)");
+        assert_eq!(folder_summaries[0].size, "2.0 GiB");
+        assert_eq!(folder_summaries[0].readiness, "Available");
+        assert_eq!(file_summaries[0].object_type, "Fastq");
+        assert_eq!(file_summaries[0].size, "1.5 KiB");
+        assert_eq!(file_summaries[0].readiness, "Ssd Only");
+        assert_eq!(file_summaries[0].lifecycle, "ReceivedOnSsd");
+        assert_eq!(file_summaries[0].copies, "1 copy/copies");
+        assert_eq!(
+            file_summaries[0].placements[0].disk_label.as_deref(),
+            Some("QNAP bay 1")
+        );
     }
 
     #[test]
