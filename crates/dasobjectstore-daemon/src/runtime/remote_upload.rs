@@ -815,6 +815,72 @@ impl RemoteUploadCancellationCleanupPlan {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupRunReport {
+    pub plan: RemoteUploadCancellationCleanupPlan,
+    pub action_reports: Vec<RemoteUploadCancellationCleanupActionReport>,
+}
+
+impl RemoteUploadCancellationCleanupRunReport {
+    pub fn completed(&self) -> bool {
+        self.action_reports
+            .iter()
+            .all(|report| report.state == RemoteUploadCancellationCleanupActionState::Complete)
+    }
+
+    pub fn failed_actions(&self) -> Vec<&RemoteUploadCancellationCleanupActionReport> {
+        self.action_reports
+            .iter()
+            .filter(|report| report.state == RemoteUploadCancellationCleanupActionState::Failed)
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupActionReport {
+    pub action: RemoteUploadCancellationCleanupAction,
+    pub state: RemoteUploadCancellationCleanupActionState,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoteUploadCancellationCleanupActionState {
+    Complete,
+    Failed,
+}
+
+pub trait RemoteUploadCancellationCleanupWorker {
+    fn cleanup(
+        &self,
+        action: &RemoteUploadCancellationCleanupAction,
+    ) -> Result<(), RemoteUploadCancellationCleanupError>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupError {
+    message: String,
+}
+
+impl RemoteUploadCancellationCleanupError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for RemoteUploadCancellationCleanupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RemoteUploadCancellationCleanupError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteUploadCancellationCleanupAction {
     pub scope: RemoteUploadCancellationCleanupScope,
     pub identifier: String,
@@ -895,6 +961,34 @@ pub fn plan_remote_upload_cancellation_cleanup(
     }
 }
 
+pub fn run_remote_upload_cancellation_cleanup(
+    plan: RemoteUploadCancellationCleanupPlan,
+    worker: &dyn RemoteUploadCancellationCleanupWorker,
+) -> RemoteUploadCancellationCleanupRunReport {
+    let action_reports = plan
+        .actions
+        .iter()
+        .cloned()
+        .map(|action| match worker.cleanup(&action) {
+            Ok(()) => RemoteUploadCancellationCleanupActionReport {
+                action,
+                state: RemoteUploadCancellationCleanupActionState::Complete,
+                error: None,
+            },
+            Err(error) => RemoteUploadCancellationCleanupActionReport {
+                action,
+                state: RemoteUploadCancellationCleanupActionState::Failed,
+                error: Some(error.to_string()),
+            },
+        })
+        .collect();
+
+    RemoteUploadCancellationCleanupRunReport {
+        plan,
+        action_reports,
+    }
+}
+
 fn non_blank(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
@@ -918,9 +1012,12 @@ fn admission_decision_for_state(
 mod tests {
     use super::{
         plan_remote_upload_cancellation_cleanup, record_remote_upload_s3_transfer_job,
-        run_remote_easyconnect_aws_cli_upload_job, RemoteEasyconnectAwsCliUploadJobRequest,
-        RemoteUploadAdmissionGate, RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
-        RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupScope,
+        run_remote_easyconnect_aws_cli_upload_job, run_remote_upload_cancellation_cleanup,
+        RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
+        RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
+        RemoteUploadCancellationCleanupAction, RemoteUploadCancellationCleanupActionState,
+        RemoteUploadCancellationCleanupError, RemoteUploadCancellationCleanupRequest,
+        RemoteUploadCancellationCleanupScope, RemoteUploadCancellationCleanupWorker,
         RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
         RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
         RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressReporter,
@@ -1740,6 +1837,109 @@ mod tests {
             RemoteUploadCancellationCleanupScope::InterruptedBrowserHandoff
         );
         assert!(plan.actions.iter().all(|action| !action.required));
+    }
+
+    #[test]
+    fn cancellation_cleanup_worker_runs_all_actions_and_reports_success() {
+        let worker = RecordingCleanupWorker::default();
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-022".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: Some("ssd/remote-upload-job-022".to_string()),
+                multipart_upload_id: Some("multipart-123".to_string()),
+                session_id: None,
+                pairing_id: None,
+                browser_handoff_id: None,
+                reason: Some("operator cancelled upload".to_string()),
+            });
+
+        let report = run_remote_upload_cancellation_cleanup(plan, &worker);
+
+        assert!(report.completed());
+        assert!(report.failed_actions().is_empty());
+        assert_eq!(
+            worker.calls.borrow().as_slice(),
+            [
+                RemoteUploadCancellationCleanupScope::PartialSsdStage,
+                RemoteUploadCancellationCleanupScope::FailedMultipartUpload,
+            ]
+        );
+        assert_eq!(report.action_reports.len(), 2);
+        assert_eq!(
+            report.action_reports[0].state,
+            RemoteUploadCancellationCleanupActionState::Complete
+        );
+    }
+
+    #[test]
+    fn cancellation_cleanup_worker_continues_after_failed_action() {
+        let worker = RecordingCleanupWorker {
+            fail_scope: Some(RemoteUploadCancellationCleanupScope::FailedMultipartUpload),
+            ..RecordingCleanupWorker::default()
+        };
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-023".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: Some("ssd/remote-upload-job-023".to_string()),
+                multipart_upload_id: Some("multipart-456".to_string()),
+                session_id: Some("session-1".to_string()),
+                pairing_id: None,
+                browser_handoff_id: None,
+                reason: Some("network interrupted upload".to_string()),
+            });
+
+        let report = run_remote_upload_cancellation_cleanup(plan, &worker);
+        let failed_actions = report.failed_actions();
+
+        assert!(!report.completed());
+        assert_eq!(failed_actions.len(), 1);
+        assert_eq!(
+            failed_actions[0].action.scope,
+            RemoteUploadCancellationCleanupScope::FailedMultipartUpload
+        );
+        assert!(failed_actions[0]
+            .error
+            .as_deref()
+            .expect("failed action has an error")
+            .contains("cleanup failed"));
+        assert_eq!(
+            worker.calls.borrow().as_slice(),
+            [
+                RemoteUploadCancellationCleanupScope::PartialSsdStage,
+                RemoteUploadCancellationCleanupScope::FailedMultipartUpload,
+                RemoteUploadCancellationCleanupScope::AbandonedSession,
+            ]
+        );
+        assert_eq!(
+            report.action_reports[2].state,
+            RemoteUploadCancellationCleanupActionState::Complete
+        );
+    }
+
+    #[derive(Default)]
+    struct RecordingCleanupWorker {
+        calls: std::cell::RefCell<Vec<RemoteUploadCancellationCleanupScope>>,
+        fail_scope: Option<RemoteUploadCancellationCleanupScope>,
+    }
+
+    impl RemoteUploadCancellationCleanupWorker for RecordingCleanupWorker {
+        fn cleanup(
+            &self,
+            action: &RemoteUploadCancellationCleanupAction,
+        ) -> Result<(), RemoteUploadCancellationCleanupError> {
+            self.calls.borrow_mut().push(action.scope);
+            if self.fail_scope == Some(action.scope) {
+                return Err(RemoteUploadCancellationCleanupError::new(format!(
+                    "cleanup failed for {:?}",
+                    action.scope
+                )));
+            }
+            Ok(())
+        }
     }
 
     struct RecordingByteTransfer {

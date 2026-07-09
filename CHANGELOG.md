@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.7 - 2026-07-09
 
+- Add a daemon runtime cleanup worker facade for remote-upload cancellation
+  plans so cleanup execution reports per-action success or failure and
+  continues after non-blocking cleanup failures.
 - Add a typed daemon runtime cleanup plan for cancelled or interrupted remote
   uploads, covering partial SSD staging, failed multipart uploads, abandoned
   sessions, expired pairings, and interrupted browser handoffs.

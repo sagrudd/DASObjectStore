@@ -369,7 +369,9 @@ abandoned remote sessions, expired pairings, and interrupted browser handoffs
 before cleanup workers mutate any state. Required destructive cleanup, such as
 partial SSD-stage removal or multipart abort, is distinguished from resumable
 session and browser-handoff cleanup so later progress views can report what is
-safe to retry.
+safe to retry. The runtime cleanup worker facade records per-action completion
+or failure and continues through the plan, so a failed multipart abort does not
+hide session or handoff cleanup status.
 
 Credential Helper Contract
 --------------------------
