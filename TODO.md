@@ -810,6 +810,80 @@ planning are tracked under Milestones 21 and 22.
   per-HDD writer exclusivity, SSD pressure behavior, and how to diagnose slow
   remote uploads.
 
+## Milestone 23: Appliance Telemetry, Home Dashboard Graphs, and floundeR Time-Series Contracts
+
+- [ ] Define a versioned appliance telemetry JSON schema covering timestamped
+  CPU usage, memory usage, disk capacity, per-disk read/write IO counters,
+  enclosure/disk identity, DASObjectStore Web/session user counts, and
+  collection quality/missing-data markers.
+- [ ] Choose and document the managed telemetry state location under the
+  appliance-owned state tree, including file ownership, permissions, atomic
+  write strategy, recovery from partial writes, and migration behavior for
+  future schema versions.
+- [ ] Implement daemon-owned telemetry collection as a managed service loop
+  rather than a Web/API side effect, with configurable sampling cadence and
+  initial supported cadences around 6 seconds and 30 seconds.
+- [ ] Add platform collectors for CPU and memory usage on supported Linux
+  appliance hosts, with unit tests using fixture `/proc` or command-output data
+  rather than relying on live host state.
+- [ ] Add per-enclosure disk capacity collection for every disk physically
+  associated with known DAS enclosures, preserving disk ID, label, mount path,
+  role, and enclosure association in each sample.
+- [ ] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
+  read operations/s, write operations/s, queue or await signals where available,
+  and explicit missing-counter reasons when the host cannot provide a metric.
+- [ ] Add active-user/session telemetry for local Web sessions and remote-agent
+  sessions, including total active sessions, distinct logged-in users, and
+  administrator/non-administrator counts where policy permits exposure.
+- [ ] Implement bounded JSON retention so telemetry cannot grow without limit,
+  with retention/downsampling policy sufficient for 1 hour, 1 day, 10 day, and
+  3 month chart windows.
+- [ ] Add daemon tests for telemetry cadence, bounded retention, atomic rewrite,
+  corrupt JSON recovery, missing metric markers, and preservation of
+  enclosure/disk identity across samples.
+- [ ] Expose authenticated telemetry API routes for current summaries,
+  downsampled time-series windows, per-disk IO series, capacity history,
+  session/user history, available time windows, and missing-data intervals.
+- [ ] Add API tests proving telemetry windows are downsampled consistently,
+  unauthorized users cannot access protected telemetry, missing data is not
+  interpolated, and response sizes remain bounded for 3 month windows.
+- [ ] Extend the Home dashboard API payload so existing Capacity, Throughput,
+  and Memory Stress cards consume telemetry-backed summaries where available.
+- [ ] Add Home dashboard cards for IO, logged-in users, and CPU usage, with
+  compact operator wording, stable card dimensions, and no dependence on
+  placeholder/fallback text once telemetry is available.
+- [ ] Implement a global Home telemetry time-window control with 1 hour, 1 day,
+  10 days, and 3 months options that applies consistently to all telemetry
+  charts on the page.
+- [ ] Ensure telemetry charts update on cadence without jitter: stable chart
+  containers, stable axes/labels, bounded redraw work, no card resizing, and no
+  text overlap on desktop or mobile.
+- [ ] Define reusable floundeR data contracts for Mnemosyne appliance
+  telemetry: line charts with missing-data gaps, point/step summaries,
+  capacity bands, per-disk IO traces, and small-multiple chart layouts.
+- [ ] Implement floundeR rendering support for scientifically correct missing
+  intervals so absent samples, service restarts, unknown devices, and
+  unavailable counters are shown as gaps or labelled missing intervals rather
+  than interpolated lines.
+- [ ] Ensure the floundeR telemetry chart contract can be used both by the Web
+  dashboard and by Grammateus formal reports without DASObjectStore-specific
+  hard-coding.
+- [ ] Add Yew DTO/component tests for CPU, memory, IO, capacity, throughput,
+  and active-user charts with full data, sparse data, missing intervals,
+  changing time windows, and per-disk series.
+- [ ] Add screenshot or DOM regression coverage proving the Home telemetry
+  cards and charts do not jitter, overlap, or resize unexpectedly across
+  desktop and mobile layouts.
+- [ ] Update `docs/user/web-interface.rst` with the Home telemetry cards,
+  time-window control, missing-data interpretation, update cadence, and
+  administrator/operator expectations.
+- [ ] Update `docs/standalone-service.md` with telemetry state file location,
+  retention policy, ownership, cadence configuration, and how to reset or
+  inspect telemetry safely.
+- [ ] Add cross-product notes for floundeR documenting the generalized
+  telemetry chart grammar so Monas, Synoptikon, Mnematikon, and future
+  Mnemosyne products can reuse the same plotting semantics.
+
 ## Cross-Cutting Tasks
 
 - [x] Keep CLI examples synchronized between `README.md`,

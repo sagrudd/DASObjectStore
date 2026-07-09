@@ -742,6 +742,73 @@ Exit criteria:
   model, ObjectStore selection, drag-and-drop behavior, ingress placement rules,
   failure states, and recovery expectations.
 
+## Milestone 23: Appliance Telemetry, Home Dashboard Graphs, and floundeR Time-Series Contracts
+
+Goal: turn the Home dashboard into a live appliance observability surface with
+scientifically defensible telemetry charts for CPU, memory, IO, capacity,
+throughput, and active users, while extracting general floundeR plotting
+contracts that can be reused across the broader Mnemosyne product family.
+
+Priority: this milestone builds on the Web console Home dashboard and the DAS
+enclosure identity model. Operators need to understand current system stress,
+historical IO behavior, and active-user state without shell access. The charts
+must be useful during real ingestion and benchmarking, must update without
+screen jitter, and must treat missing development data honestly rather than
+drawing misleading interpolated lines.
+
+Scope:
+
+- add a daemon-owned telemetry collector for appliance CPU usage, memory usage,
+  active DASObjectStore/Web sessions, disk capacity, and per-disk IO for every
+  disk physically associated with known DAS enclosures;
+- store telemetry in a bounded, appropriately sized JSON time-series file under
+  the managed appliance state tree, with explicit schema versioning, retention
+  limits, atomic writes, and crash-tolerant recovery from partial/corrupt files;
+- support configurable sampling cadence, initially allowing practical values
+  such as 6 seconds for high-resolution operator views and 30 seconds for
+  lower-overhead long-running appliance monitoring;
+- expose telemetry API contracts for recent samples, downsampled historical
+  windows, current point-in-time summaries, missing-data intervals, and
+  enclosure/disk identity labels;
+- add Home dashboard cards for IO, logged-in users, and CPU usage alongside
+  existing Capacity, Throughput, and Memory Stress cards;
+- ensure cards whose values overlap telemetry use the telemetry stream as the
+  authoritative source and include compact sparkline or chart summaries where
+  appropriate;
+- implement global Web time-window controls for telemetry graphs with at least
+  `1 hour`, `1 day`, `10 days`, and `3 months` windows, applied consistently to
+  all Home dashboard telemetry charts;
+- update charts at the telemetry cadence without layout shift, card resizing,
+  text overlap, or jitter, using stable dimensions and bounded redraw work;
+- define and implement floundeR general-purpose chart contracts for appliance
+  time-series and interval data, including line charts with gaps, stepped or
+  point summaries where scientifically more appropriate, capacity bands,
+  per-disk IO traces, and small-multiple views;
+- ensure floundeR chart semantics avoid false continuity: missing samples,
+  service downtime, unknown devices, and unavailable counters must be shown as
+  gaps or explicitly labelled missing intervals rather than interpolated lines;
+- produce Web-consumable chart artifacts or data contracts that can be rendered
+  efficiently in Yew while remaining compatible with formal report generation
+  in Grammateus/floundeR;
+- add tests for telemetry sampling, JSON retention and truncation, corrupt-file
+  recovery, cadence configuration, per-enclosure disk filtering, downsampling,
+  missing-data handling, Web chart DTOs, and stable dashboard rendering.
+
+Exit criteria:
+
+- the daemon continuously records bounded telemetry for CPU, memory, capacity,
+  per-enclosure disk IO, and active users without unbounded JSON growth;
+- the Home dashboard exposes Capacity, Throughput, Memory Stress, IO, logged-in
+  users, and CPU cards backed by the same telemetry model;
+- operators can switch all Home telemetry charts between 1 hour, 1 day, 10 day,
+  and 3 month windows without page jitter or misleading redraw behavior;
+- missing telemetry is represented honestly as gaps or labelled missing
+  intervals, never as fabricated continuity;
+- floundeR gains reusable, Mnemosyne-wide chart contracts for appliance
+  telemetry and scientifically correct missing-data rendering;
+- API, daemon, Web, and floundeR regression tests cover normal collection,
+  missing/corrupt data, time-window changes, and chart rendering contracts.
+
 ## Post-MVP Direction
 
 Post-MVP work may include:
