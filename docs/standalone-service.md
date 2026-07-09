@@ -231,9 +231,9 @@ hourly buckets for 3 months.
 Each sample includes CPU, memory, and managed HDD capacity data when
 `/srv/dasobjectstore/hdd/<disk-id>/.dasobjectstore/device.env` declares
 `role=hdd:<disk-id>`. The collector preserves disk ID, label, mount path,
-role, filesystem, device marker data, and marker-provided `enclosure_id` values
-so Web/API readers can group capacity by enclosure when that association is
-available.
+role, filesystem, device marker data, marker-provided `enclosure_id` values,
+and marker-provided `bay_label` values so Web/API readers can group capacity
+and IO by known enclosure bays while the physical bay registry matures.
 The schema also includes a `disk_io` array for per-disk read/write throughput,
 operation rate, await, and IO-time metrics. On Linux, the daemon retains the
 previous `/proc/diskstats` sample internally and calculates rates over the

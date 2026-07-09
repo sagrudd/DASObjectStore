@@ -111,6 +111,8 @@ pub struct ApplianceDiskCapacityTelemetry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enclosure_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub bay_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filesystem: Option<String>,
@@ -129,6 +131,8 @@ pub struct ApplianceDiskIoTelemetry {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enclosure_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bay_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

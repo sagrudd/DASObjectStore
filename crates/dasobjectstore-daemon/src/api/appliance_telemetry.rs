@@ -111,6 +111,7 @@ pub struct ApplianceTelemetryDiskCapacitySummary {
     pub mount_path: String,
     pub role: String,
     pub enclosure_id: Option<String>,
+    pub bay_label: Option<String>,
     pub total_bytes: Option<u64>,
     pub available_bytes: Option<u64>,
     pub used_percent_basis_points: Option<u16>,
@@ -123,6 +124,7 @@ pub struct ApplianceTelemetryDiskIoSummary {
     pub mount_path: String,
     pub role: String,
     pub enclosure_id: Option<String>,
+    pub bay_label: Option<String>,
     pub read_bytes_per_second: Option<u64>,
     pub write_bytes_per_second: Option<u64>,
     pub read_operations_per_second: Option<u64>,
@@ -168,6 +170,8 @@ pub struct ApplianceTelemetrySessionPoint {
 pub struct ApplianceTelemetryDiskIoSeries {
     pub disk_id: String,
     pub label: Option<String>,
+    pub enclosure_id: Option<String>,
+    pub bay_label: Option<String>,
     pub points: Vec<ApplianceTelemetryDiskIoPoint>,
 }
 
@@ -321,6 +325,7 @@ fn disk_capacity_summary(
         mount_path: disk.mount_path.clone(),
         role: disk.role.clone(),
         enclosure_id: disk.enclosure_id.clone(),
+        bay_label: disk.bay_label.clone(),
         total_bytes: disk.total_bytes,
         available_bytes: disk.available_bytes,
         used_percent_basis_points: percent_basis_points(disk.used_percent),
@@ -334,6 +339,7 @@ fn disk_io_summary(disk_io: &ApplianceDiskIoTelemetry) -> ApplianceTelemetryDisk
         mount_path: disk_io.mount_path.clone(),
         role: disk_io.role.clone(),
         enclosure_id: disk_io.enclosure_id.clone(),
+        bay_label: disk_io.bay_label.clone(),
         read_bytes_per_second: rounded_u64(disk_io.read_bytes_per_second),
         write_bytes_per_second: rounded_u64(disk_io.write_bytes_per_second),
         read_operations_per_second: rounded_u64(disk_io.read_operations_per_second),
@@ -354,6 +360,8 @@ fn series_from_samples(samples: &[ApplianceTelemetrySample]) -> ApplianceTelemet
                 .or_insert_with(|| ApplianceTelemetryDiskIoSeries {
                     disk_id: disk_io.disk_id.clone(),
                     label: disk_io.label.clone(),
+                    enclosure_id: disk_io.enclosure_id.clone(),
+                    bay_label: disk_io.bay_label.clone(),
                     points: Vec::new(),
                 });
             series.points.push(ApplianceTelemetryDiskIoPoint {
@@ -585,10 +593,13 @@ mod tests {
         assert_eq!(current.capacity.total_bytes, Some(1_000));
         assert_eq!(current.capacity.available_bytes, Some(700));
         assert_eq!(current.capacity.used_percent_basis_points, Some(3_000));
+        assert_eq!(current.disks[0].bay_label.as_deref(), Some("1"));
         assert_eq!(current.disk_io[0].read_bytes_per_second, Some(512));
+        assert_eq!(current.disk_io[0].bay_label.as_deref(), Some("1"));
 
         assert_eq!(response.series.cpu_usage.len(), 3);
         assert_eq!(response.series.disk_io[0].points.len(), 3);
+        assert_eq!(response.series.disk_io[0].bay_label.as_deref(), Some("1"));
         assert_eq!(
             response.available_windows[0].window,
             ApplianceTelemetryWindow::OneHour
@@ -789,6 +800,7 @@ mod tests {
                 mount_path: "/srv/dasobjectstore/hdd/qnap-a".to_string(),
                 role: "hdd".to_string(),
                 enclosure_id: Some("qnap-tl-d800c-01".to_string()),
+                bay_label: Some("1".to_string()),
                 device_path: Some("/dev/disk/by-id/fixture-a".to_string()),
                 filesystem: Some("ext4".to_string()),
                 total_bytes: Some(1_000),
@@ -802,6 +814,7 @@ mod tests {
                 mount_path: "/srv/dasobjectstore/hdd/qnap-a".to_string(),
                 role: "hdd".to_string(),
                 enclosure_id: Some("qnap-tl-d800c-01".to_string()),
+                bay_label: Some("1".to_string()),
                 device_path: Some("/dev/disk/by-id/fixture-a".to_string()),
                 device_name: Some("sda".to_string()),
                 read_bytes_per_second: Some(512.0),

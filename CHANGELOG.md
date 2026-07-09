@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.0 - 2026-07-09
+
+- Preserve marker-provided DAS bay labels in daemon appliance telemetry,
+  current capacity and disk IO API summaries, and per-disk IO series while the
+  authoritative physical enclosure/bay registry remains future work.
+
 ## 0.68.0 - 2026-07-09
 
 - Add a product-neutral floundeR telemetry chart contract for shared Web

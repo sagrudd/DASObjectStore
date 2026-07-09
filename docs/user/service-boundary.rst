@@ -61,7 +61,10 @@ When managed HDD roots contain ``.dasobjectstore/device.env`` markers with
 ``role=hdd:<disk-id>``, the daemon records their capacity in the same telemetry
 sample. Marker fields such as ``label``, ``device``, ``filesystem``, and
 ``enclosure_id`` are preserved when present so operator surfaces can group disk
-capacity by enclosure as the hardware registry matures.
+capacity by enclosure as the hardware registry matures. Marker-provided
+``bay_label`` values are also preserved in capacity and disk IO telemetry so
+current deployments can correlate known bays before the authoritative physical
+bay registry exists.
 The telemetry schema also records ``disk_io`` entries for per-disk throughput
 and operation-rate data. On Linux, the daemon retains the previous
 ``/proc/diskstats`` sample internally and calculates rates over the configured

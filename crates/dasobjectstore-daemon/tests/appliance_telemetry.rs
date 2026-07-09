@@ -130,7 +130,7 @@ fn disk_capacity_telemetry_reads_managed_hdd_root_markers() {
     fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
     fs::write(
         disk_root.join(".dasobjectstore/device.env"),
-        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\ndevice=/dev/disk/by-id/fixture-a\nfilesystem=ext4\n",
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\nbay_label=1\ndevice=/dev/disk/by-id/fixture-a\nfilesystem=ext4\n",
     )
     .expect("device marker written");
 
@@ -144,6 +144,7 @@ fn disk_capacity_telemetry_reads_managed_hdd_root_markers() {
     assert!(disks[0].mount_path.ends_with("/hdd/disk-a"));
     assert_eq!(disks[0].role, "hdd");
     assert_eq!(disks[0].enclosure_id.as_deref(), Some("qnap-tl-d800c-01"));
+    assert_eq!(disks[0].bay_label.as_deref(), Some("1"));
     assert_eq!(
         disks[0].device_path.as_deref(),
         Some("/dev/disk/by-id/fixture-a")
@@ -182,7 +183,7 @@ fn disk_io_telemetry_uses_managed_hdd_markers_and_diskstats_deltas() {
     fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
     fs::write(
         disk_root.join(".dasobjectstore/device.env"),
-        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\ndevice=/dev/disk/by-id/fixture-a\ndiskstats_device=sda\nfilesystem=ext4\n",
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\nbay_label=1\ndevice=/dev/disk/by-id/fixture-a\ndiskstats_device=sda\nfilesystem=ext4\n",
     )
     .expect("device marker written");
     let previous = parse_linux_diskstats(PROC_DISKSTATS_1).expect("previous diskstats");
@@ -196,6 +197,7 @@ fn disk_io_telemetry_uses_managed_hdd_markers_and_diskstats_deltas() {
     assert_eq!(telemetry[0].disk_id, "qnap-a");
     assert_eq!(telemetry[0].label.as_deref(), Some("QNAP bay 1"));
     assert_eq!(telemetry[0].device_name.as_deref(), Some("sda"));
+    assert_eq!(telemetry[0].bay_label.as_deref(), Some("1"));
     assert_eq!(telemetry[0].read_bytes_per_second, Some(51_200.0));
     assert_eq!(telemetry[0].write_bytes_per_second, Some(51_200.0));
     assert_eq!(telemetry[0].read_operations_per_second, Some(5.0));
@@ -410,6 +412,7 @@ fn file_backed_sink_preserves_enclosure_and_disk_identity_across_samples() {
         assert_eq!(sample["disks"][0]["disk_id"], "qnap-a");
         assert_eq!(sample["disks"][0]["label"], "QNAP bay 1");
         assert_eq!(sample["disks"][0]["enclosure_id"], "qnap-tl-d800c-01");
+        assert_eq!(sample["disks"][0]["bay_label"], "1");
         assert_eq!(
             sample["disks"][0]["device_path"],
             "/dev/disk/by-id/fixture-a"
@@ -453,7 +456,7 @@ fn proc_collector_retains_diskstats_for_cadence_aware_disk_io_rates() {
         .expect("first diskstats fixture written");
     fs::write(
         disk_root.join(".dasobjectstore/device.env"),
-        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\ndevice=/dev/disk/by-id/fixture-a\ndiskstats_device=sda\nfilesystem=ext4\n",
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\nbay_label=1\ndevice=/dev/disk/by-id/fixture-a\ndiskstats_device=sda\nfilesystem=ext4\n",
     )
     .expect("device marker written");
 
@@ -637,6 +640,7 @@ fn sample_set_with_disk_identity(
                 mount_path: "/srv/dasobjectstore/hdd/qnap-a".to_string(),
                 role: "hdd".to_string(),
                 enclosure_id: Some("qnap-tl-d800c-01".to_string()),
+                bay_label: Some("1".to_string()),
                 device_path: Some("/dev/disk/by-id/fixture-a".to_string()),
                 filesystem: Some("ext4".to_string()),
                 total_bytes: Some(1_000),

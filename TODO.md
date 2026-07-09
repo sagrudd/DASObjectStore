@@ -938,9 +938,13 @@ planning are tracked under Milestones 21 and 22.
   - [x] Collect capacity for managed HDD roots declared by
     `.dasobjectstore/device.env`, preserving disk ID, label, mount path, role,
     filesystem/device marker data, and any marker-provided enclosure ID.
+  - [x] Preserve marker-provided bay labels in capacity telemetry and daemon
+    API summaries so current operators can correlate known bays while the
+    authoritative physical enclosure/bay registry is still pending.
   - [ ] Tie capacity samples to the future physical enclosure/bay registry so
     every disk physically associated with a known DAS enclosure carries the
     authoritative enclosure association in each sample.
+    Blocked until the physical enclosure/bay registry is implemented.
 - [ ] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
   read operations/s, write operations/s, queue or await signals where available,
   and explicit missing-counter reasons when the host cannot provide a metric:
@@ -948,8 +952,11 @@ planning are tracked under Milestones 21 and 22.
     per-disk IO rate calculation using fixture data.
   - [x] Wire disk IO counters into the daemon telemetry service loop with
     retained previous samples and cadence-aware rate calculation.
+  - [x] Preserve marker-provided bay labels in disk IO telemetry, current IO
+    summaries, and per-disk IO series for stable current grouping.
   - [ ] Tie disk IO samples to the future physical enclosure/bay registry so
     per-enclosure IO grouping uses authoritative hardware association.
+    Blocked until the physical enclosure/bay registry is implemented.
 - [x] Add active-user/session telemetry for local Web sessions and remote-agent
   sessions, including total active sessions, distinct logged-in users, and
   administrator/non-administrator counts where policy permits exposure.
