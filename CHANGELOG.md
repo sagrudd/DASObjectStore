@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Add a daemon runtime remote-upload admission gate that tracks active S3
+  transfers plus SSD staging, HDD landing, and verification queue depths before
+  accepting more remote intake.
 - Wire remote-upload admission decisions into the daemon request/response,
   request handler, and typed client boundary so upload executors can ask the
   daemon before admitting more intake.

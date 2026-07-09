@@ -1,9 +1,9 @@
 use crate::api::{
-    decide_remote_easyconnect_upload_admission, AssignLocalUserToLocalGroupRequest,
-    AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
-    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
-    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
+    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
+    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobKind,
+    DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
@@ -24,7 +24,7 @@ use crate::runtime::{
     AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    RemoteUploadAdmissionGate, ServiceCommandRunner, SystemLocalAdminCommandRunner,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
@@ -45,6 +45,7 @@ pub struct DaemonRequestHandler<S, C> {
     subobject_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
     hdd_root_path: PathBuf,
+    remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -61,6 +62,7 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
         }
     }
 
@@ -77,6 +79,7 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
         }
     }
 
@@ -97,6 +100,14 @@ where
 
     pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
         self.hdd_root_path = hdd_root_path.into();
+        self
+    }
+
+    pub fn with_remote_upload_admission_gate(
+        mut self,
+        remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
+    ) -> Self {
+        self.remote_upload_admission_gate = remote_upload_admission_gate;
         self
     }
 
@@ -306,7 +317,8 @@ where
             }
             DaemonApiRequest::RemoteEasyconnectUploadAdmission(request) => {
                 Ok(DaemonApiResponse::RemoteEasyconnectUploadAdmission(
-                    decide_remote_easyconnect_upload_admission(request),
+                    self.remote_upload_admission_gate
+                        .admission_decision_from_request(request),
                 ))
             }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -1162,6 +1174,7 @@ mod tests {
     use crate::runtime::{
         admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
         FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
+        RemoteUploadAdmissionGate,
     };
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
@@ -2264,6 +2277,44 @@ mod tests {
             decision.reason,
             RemoteEasyconnectUploadBackpressureReason::SsdCriticalPressure
         );
+    }
+
+    #[test]
+    fn daemon_remote_upload_admission_uses_runtime_gate_state() {
+        let service = FakeService::default();
+        let policy = RemoteUploadBackpressurePolicy::default();
+        let gate = Arc::new(RemoteUploadAdmissionGate::new());
+        gate.try_begin_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites);
+        gate.try_begin_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites);
+        let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"))
+            .with_remote_upload_admission_gate(Arc::clone(&gate));
+
+        let response = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectUploadAdmission(
+                RemoteEasyconnectUploadAdmissionRequest {
+                    policy,
+                    ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                    active_s3_transfers: 0,
+                    ssd_stage_queue_depth: 0,
+                    hdd_landing_queue_depth: 0,
+                    verification_queue_depth: 0,
+                },
+            ))
+            .expect("request handled");
+
+        let DaemonApiResponse::RemoteEasyconnectUploadAdmission(decision) = response else {
+            panic!("expected remote upload admission decision");
+        };
+
+        assert_eq!(
+            decision.action,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+        );
+        assert_eq!(
+            decision.reason,
+            RemoteEasyconnectUploadBackpressureReason::S3TransferConcurrencyFull
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 2);
     }
 
     #[test]

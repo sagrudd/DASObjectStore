@@ -8,6 +8,7 @@ mod local_admin;
 mod object_browser;
 mod object_download;
 mod performance_policy;
+mod remote_upload;
 mod service;
 
 pub use admin_jobs::{
@@ -49,6 +50,9 @@ pub use performance_policy::{
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
+};
+pub use remote_upload::{
+    RemoteUploadAdmissionGate, RemoteUploadQueueDepths, RemoteUploadRuntimeSnapshot,
 };
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,

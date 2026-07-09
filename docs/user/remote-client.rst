@@ -301,7 +301,9 @@ intake. The decision can accept intake, pause new transfers with a retry hint
 when S3 concurrency or SSD/HDD/verification queues are full, or reject new
 transfers while SSD pressure is critical. Remote upload executors should call
 the daemon admission API before starting additional intake rather than applying
-local-only queue guesses.
+local-only queue guesses. The daemon runtime maintains the active S3 transfer
+count and queue depths used by this decision, so clients should treat
+``pause_new_transfers`` and ``reject_new_transfers`` as authoritative.
 
 Credential Helper Contract
 --------------------------
