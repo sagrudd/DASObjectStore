@@ -19,5 +19,6 @@ stabilized in the current MVP.
    subobjects
    ingesting-files
    performance-test
+   remote-upload
    remote-s3-uploads
    remote-client

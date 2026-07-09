@@ -903,7 +903,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add scheduler tests for the HDD worker formula across 1, 2, 3, 4, 5, and
   8 HDD enclosures, including one-writer-per-HDD and redundancy placement
   constraints.
-- [ ] Update `docs/user/remote-upload.rst` with easyconnect setup, browser
+- [x] Update `docs/user/remote-upload.rst` with easyconnect setup, browser
   authentication, ObjectStore selection, drag-and-drop upload, session renewal,
   cancellation, and recovery behavior.
 - [ ] Update `docs/user/ingesting-files.rst`, `docs/user/object-stores.rst`,
