@@ -68,12 +68,12 @@ pub use local_admin::{
     DaemonLocalAdminCommand, DaemonLocalAdminValidationError,
 };
 pub use object_browser::{
-    ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserFileNode, ObjectBrowserFolderNode,
-    ObjectBrowserPageRequest, ObjectBrowserPlacement, ObjectBrowserPlacementLocation,
-    ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-    ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
-    ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    OBJECT_BROWSER_MAX_PAGE_LIMIT,
+    ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserDelegatedActor,
+    ObjectBrowserFileNode, ObjectBrowserFolderNode, ObjectBrowserPageRequest,
+    ObjectBrowserPlacement, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
+    ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
+    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
+    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
 };
 pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
@@ -657,6 +657,7 @@ mod tests {
             sort: ObjectBrowserSort::NameAsc,
             page: ObjectBrowserPageRequest::default(),
             include_placement: true,
+            delegated_actor: None,
         });
 
         request.validate().expect("request validates");
@@ -672,6 +673,7 @@ mod tests {
         let request = DaemonApiRequest::ObjectDownload(ObjectDownloadRequest {
             endpoint: StoreId::new("ena").expect("store id"),
             object_id: ObjectId::new("ena/raw/metadata.tsv").expect("object id"),
+            delegated_actor: None,
         });
 
         request.validate().expect("request validates");
@@ -686,6 +688,7 @@ mod tests {
         let request = DaemonApiRequest::ObjectFolderDownload(ObjectFolderDownloadRequest {
             endpoint: StoreId::new("ena").expect("store id"),
             prefix: "ena/raw".to_string(),
+            delegated_actor: None,
         });
 
         request.validate().expect("request validates");

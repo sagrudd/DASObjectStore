@@ -9,17 +9,17 @@ use crate::api::{
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectDownloadRequest,
-    ObjectFolderDownloadRequest, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, StoreInventoryItem, StoreInventoryRequest,
-    StoreInventoryResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectBrowserDelegatedActor,
+    ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionRenewal,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -42,7 +42,8 @@ use crate::runtime::{
     RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
     RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
     RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_STATE_DIR,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -323,8 +324,10 @@ where
                 }
             }
             DaemonApiRequest::ObjectBrowser(request) => {
-                let store_id = match self.authorize_endpoint_read(actor, &request.endpoint) {
-                    Ok(store_id) => store_id,
+                let delegated_actor = match self
+                    .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
+                {
+                    Ok(actor) => actor,
                     Err(error) => {
                         return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                             error.code(),
@@ -332,6 +335,17 @@ where
                         )));
                     }
                 };
+                let effective_actor = delegated_actor.as_ref().or(actor);
+                let store_id =
+                    match self.authorize_endpoint_read(effective_actor, &request.endpoint) {
+                        Ok(store_id) => store_id,
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                error.code(),
+                                error.to_string(),
+                            )));
+                        }
+                    };
                 let entries = match read_object_browser_metadata(&self.live_sqlite_path, store_id) {
                     Ok(entries) => entries,
                     Err(error) => {
@@ -346,7 +360,19 @@ where
                     .map_err(Into::into)
             }
             DaemonApiRequest::ObjectDownload(request) => {
-                let store_id = match self.authorize_object_download(actor, &request) {
+                let delegated_actor = match self
+                    .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
+                {
+                    Ok(actor) => actor,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            error.code(),
+                            error.to_string(),
+                        )));
+                    }
+                };
+                let effective_actor = delegated_actor.as_ref().or(actor);
+                let store_id = match self.authorize_object_download(effective_actor, &request) {
                     Ok(store_id) => store_id,
                     Err(error) => {
                         return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -369,8 +395,10 @@ where
                 }
             }
             DaemonApiRequest::ObjectFolderDownload(request) => {
-                let store_id = match self.authorize_object_folder_download(actor, &request) {
-                    Ok(store_id) => store_id,
+                let delegated_actor = match self
+                    .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
+                {
+                    Ok(actor) => actor,
                     Err(error) => {
                         return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                             error.code(),
@@ -378,6 +406,17 @@ where
                         )));
                     }
                 };
+                let effective_actor = delegated_actor.as_ref().or(actor);
+                let store_id =
+                    match self.authorize_object_folder_download(effective_actor, &request) {
+                        Ok(store_id) => store_id,
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                error.code(),
+                                error.to_string(),
+                            )));
+                        }
+                    };
                 match resolve_object_folder_download_with_hdd_root(
                     &self.live_sqlite_path,
                     &self.hdd_root_path,
@@ -867,6 +906,31 @@ where
         }
     }
 
+    fn delegated_object_browser_actor(
+        &self,
+        peer_actor: Option<&DaemonLocalActor>,
+        delegated_actor: Option<&ObjectBrowserDelegatedActor>,
+    ) -> Result<Option<DaemonLocalActor>, ObjectBrowserAccessFailure> {
+        let Some(delegated_actor) = delegated_actor else {
+            return Ok(None);
+        };
+        let peer_actor = peer_actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
+        if peer_actor.uid != 0
+            && peer_actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER)
+        {
+            return Err(ObjectBrowserAccessFailure::DelegationNotAllowed {
+                peer_actor: peer_actor.display_name(),
+            });
+        }
+        let mut actor = DaemonLocalActor::new(delegated_actor.uid.unwrap_or(peer_actor.uid))
+            .with_username(delegated_actor.username.clone())
+            .with_groups(delegated_actor.groups.clone());
+        if let Some(primary_gid) = delegated_actor.primary_gid {
+            actor = actor.with_primary_gid(primary_gid);
+        }
+        Ok(Some(actor))
+    }
+
     fn authorize_endpoint_read(
         &self,
         actor: Option<&DaemonLocalActor>,
@@ -1353,6 +1417,9 @@ impl Display for ApplianceTelemetryAccessFailure {
 #[derive(Debug)]
 enum ObjectBrowserAccessFailure {
     MissingActor,
+    DelegationNotAllowed {
+        peer_actor: String,
+    },
     Authorization(DaemonAuthorizationError),
     ObjectService(ObjectServiceError),
     Endpoint(IngestAuthorizationFailure),
@@ -1365,7 +1432,9 @@ enum ObjectBrowserAccessFailure {
 impl ObjectBrowserAccessFailure {
     fn code(&self) -> &'static str {
         match self {
-            Self::MissingActor | Self::Authorization(_) => "permission_denied",
+            Self::MissingActor | Self::DelegationNotAllowed { .. } | Self::Authorization(_) => {
+                "permission_denied"
+            }
             Self::ObjectService(_) | Self::Endpoint(_) | Self::MissingStore { .. } => {
                 "object_browser_authorization_failed"
             }
@@ -1378,6 +1447,10 @@ impl Display for ObjectBrowserAccessFailure {
         match self {
             Self::MissingActor => formatter
                 .write_str("authenticated daemon actor is required to browse ObjectStore metadata"),
+            Self::DelegationNotAllowed { peer_actor } => write!(
+                formatter,
+                "actor {peer_actor} is not authorized to delegate ObjectStore browser access"
+            ),
             Self::Authorization(error) => Display::fmt(error, formatter),
             Self::ObjectService(error) => Display::fmt(error, formatter),
             Self::Endpoint(error) => Display::fmt(error, formatter),
@@ -2047,18 +2120,19 @@ mod tests {
         DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserPageRequest,
-        ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
-        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserDelegatedActor,
+        ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
+        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
+        ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -2977,6 +3051,80 @@ mod tests {
     }
 
     #[test]
+    fn daemon_object_browser_allows_service_peer_to_delegate_authenticated_local_actor() {
+        let root = temp_root("browser-delegated-allowed");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let peer_actor = DaemonLocalActor::new(997)
+            .with_username("dasobjectstore")
+            .with_groups(["dasobjectstore"]);
+        let mut request = object_browser_request("ena");
+        request.delegated_actor = Some(ObjectBrowserDelegatedActor {
+            username: "stephen".to_string(),
+            uid: None,
+            primary_gid: None,
+            groups: vec!["mnemosyne".to_string()],
+        });
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(request),
+                Some(&peer_actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(response, DaemonApiResponse::ObjectBrowser(_)));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_browser_rejects_delegation_from_non_service_peer() {
+        let root = temp_root("browser-delegated-denied");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let peer_actor = DaemonLocalActor::new(1001)
+            .with_username("guest")
+            .with_groups(["users"]);
+        let mut request = object_browser_request("ena");
+        request.delegated_actor = Some(ObjectBrowserDelegatedActor {
+            username: "stephen".to_string(),
+            uid: None,
+            primary_gid: None,
+            groups: vec!["mnemosyne".to_string()],
+        });
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(request),
+                Some(&peer_actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("not authorized to delegate")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn daemon_object_browser_allows_reader_group_without_writer_membership() {
         let root = temp_root("browser-reader-allowed");
         let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
@@ -3041,6 +3189,7 @@ mod tests {
                 DaemonApiRequest::ObjectDownload(ObjectDownloadRequest {
                     endpoint: StoreId::new("ena").expect("store id"),
                     object_id: ObjectId::new("ena/raw/sample.fastq.gz").expect("object id"),
+                    delegated_actor: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -3097,6 +3246,7 @@ mod tests {
                 DaemonApiRequest::ObjectFolderDownload(ObjectFolderDownloadRequest {
                     endpoint: StoreId::new("ena").expect("store id"),
                     prefix: "ena/raw/Xeno".to_string(),
+                    delegated_actor: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -3923,6 +4073,7 @@ mod tests {
             sort: ObjectBrowserSort::NameAsc,
             page: ObjectBrowserPageRequest::default(),
             include_placement: false,
+            delegated_actor: None,
         }
     }
 

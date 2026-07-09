@@ -15,12 +15,16 @@ pub struct ObjectBrowserRequest {
     pub sort: ObjectBrowserSort,
     pub page: ObjectBrowserPageRequest,
     pub include_placement: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ObjectDownloadRequest {
     pub endpoint: StoreId,
     pub object_id: ObjectId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
 }
 
 impl ObjectDownloadRequest {
@@ -31,6 +35,7 @@ impl ObjectDownloadRequest {
         if self.object_id.as_str().trim().is_empty() {
             return Err(DaemonRequestValidationError::BlankField { field: "object_id" });
         }
+        validate_delegated_actor(self.delegated_actor.as_ref())?;
         Ok(())
     }
 }
@@ -50,6 +55,8 @@ pub struct ObjectDownloadResponse {
 pub struct ObjectFolderDownloadRequest {
     pub endpoint: StoreId,
     pub prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
 }
 
 impl ObjectFolderDownloadRequest {
@@ -60,6 +67,7 @@ impl ObjectFolderDownloadRequest {
         if self.prefix.trim().is_empty() {
             return Err(DaemonRequestValidationError::BlankField { field: "prefix" });
         }
+        validate_delegated_actor(self.delegated_actor.as_ref())?;
         Ok(())
     }
 }
@@ -89,11 +97,35 @@ impl ObjectBrowserRequest {
         reject_blank_optional("prefix", self.prefix.as_deref())?;
         reject_blank_optional("search", self.search.as_deref())?;
         reject_blank_optional("cursor", self.page.cursor.as_deref())?;
+        validate_delegated_actor(self.delegated_actor.as_ref())?;
         if self.page.limit == 0 || self.page.limit > OBJECT_BROWSER_MAX_PAGE_LIMIT {
             return Err(DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "limit",
                 value: self.page.limit.to_string(),
             });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectBrowserDelegatedActor {
+    pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_gid: Option<u32>,
+    #[serde(default)]
+    pub groups: Vec<String>,
+}
+
+impl ObjectBrowserDelegatedActor {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        reject_blank_required("delegated_actor.username", &self.username)?;
+        reject_unsafe_local_name("delegated_actor.username", &self.username)?;
+        for group in &self.groups {
+            reject_blank_required("delegated_actor.groups", group)?;
+            reject_unsafe_local_name("delegated_actor.groups", group)?;
         }
         Ok(())
     }
@@ -223,6 +255,40 @@ fn reject_blank_optional(
     Ok(())
 }
 
+fn reject_blank_required(
+    field: &'static str,
+    value: &str,
+) -> Result<(), DaemonRequestValidationError> {
+    if value.trim().is_empty() {
+        return Err(DaemonRequestValidationError::BlankField { field });
+    }
+    Ok(())
+}
+
+fn reject_unsafe_local_name(
+    field: &'static str,
+    value: &str,
+) -> Result<(), DaemonRequestValidationError> {
+    if value.chars().any(|candidate| {
+        !(candidate.is_ascii_alphanumeric() || matches!(candidate, '_' | '-' | '.'))
+    }) {
+        return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+            field,
+            value: value.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_delegated_actor(
+    actor: Option<&ObjectBrowserDelegatedActor>,
+) -> Result<(), DaemonRequestValidationError> {
+    if let Some(actor) = actor {
+        actor.validate()?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -250,6 +316,7 @@ mod tests {
                 limit: 50,
             },
             include_placement: true,
+            delegated_actor: None,
         };
 
         request.validate().expect("request is valid");
@@ -265,6 +332,7 @@ mod tests {
         let request = ObjectDownloadRequest {
             endpoint: StoreId::new("ena").expect("store id"),
             object_id: ObjectId::new("ENA/Xenognostikon/metadata.tsv").expect("object id"),
+            delegated_actor: None,
         };
 
         request.validate().expect("request is valid");
@@ -293,6 +361,7 @@ mod tests {
         let request = ObjectFolderDownloadRequest {
             endpoint: StoreId::new("ena").expect("store id"),
             prefix: "ENA/Xenognostikon".to_string(),
+            delegated_actor: None,
         };
 
         request.validate().expect("request is valid");
@@ -389,6 +458,7 @@ mod tests {
                 limit: OBJECT_BROWSER_MAX_PAGE_LIMIT + 1,
             },
             include_placement: false,
+            delegated_actor: None,
         };
 
         let err = request.validate().expect_err("oversized page rejected");
@@ -411,6 +481,7 @@ mod tests {
             sort: ObjectBrowserSort::NameAsc,
             page: ObjectBrowserPageRequest::default(),
             include_placement: false,
+            delegated_actor: None,
         };
 
         assert!(matches!(

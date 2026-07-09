@@ -680,6 +680,7 @@ mod tests {
                 limit,
             },
             include_placement: false,
+            delegated_actor: None,
         }
     }
 

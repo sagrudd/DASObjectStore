@@ -62,6 +62,7 @@ pub(crate) fn resolve_object_folder_download_with_hdd_root(
             &ObjectDownloadRequest {
                 endpoint: request.endpoint.clone(),
                 object_id: metadata.object_id,
+                delegated_actor: request.delegated_actor.clone(),
             },
         )?;
         total_source_bytes = total_source_bytes.saturating_add(download.size_bytes);
@@ -445,6 +446,7 @@ mod tests {
             &ObjectDownloadRequest {
                 endpoint: store_id(),
                 object_id: object_id("ena/raw/metadata.tsv"),
+                delegated_actor: None,
             },
         )
         .expect("download resolves");
@@ -504,6 +506,7 @@ mod tests {
             &ObjectDownloadRequest {
                 endpoint: store_id(),
                 object_id: object_id("ena/raw/metadata.tsv"),
+                delegated_actor: None,
             },
         )
         .expect("download resolves from managed verified copy");
@@ -531,6 +534,7 @@ mod tests {
             &ObjectDownloadRequest {
                 endpoint: store_id(),
                 object_id: object_id("ena/raw/metadata.tsv"),
+                delegated_actor: None,
             },
         )
         .expect_err("unverified object is rejected");
@@ -583,6 +587,7 @@ mod tests {
             &ObjectFolderDownloadRequest {
                 endpoint: store_id(),
                 prefix: "/ena/raw/Xeno/".to_string(),
+                delegated_actor: None,
             },
         )
         .expect("folder download resolves");
@@ -626,6 +631,7 @@ mod tests {
             &ObjectFolderDownloadRequest {
                 endpoint: store_id(),
                 prefix: "ena/raw/Xeno".to_string(),
+                delegated_actor: None,
             },
         )
         .expect_err("folder download rejects unverified object");

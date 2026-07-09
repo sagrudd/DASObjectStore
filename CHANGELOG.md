@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.62.2 - 2026-07-09
+
+- Fix the standalone Web ObjectStore browser so browse, file download, and
+  folder archive requests delegate the authenticated local browser user to the
+  daemon instead of authorizing as the ``dasobjectstore`` service account.
+- Restrict object-browser delegated authorization to root or the packaged
+  daemon service peer and add regression coverage for trusted service
+  delegation and rejected non-service impersonation.
+
 ## 0.62.1 - 2026-07-09
 
 - Fix server-local ``ingest direct-import`` so checksum calculation happens

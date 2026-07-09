@@ -1,4 +1,7 @@
-use crate::{AuthRouteError, AuthenticatedGuiActor, LocalAuthStore};
+use crate::{
+    discover_local_user, AuthRouteError, AuthenticatedGuiActor, LocalAuthStore,
+    LocalUserDiscoveryError, LocalUserMetadata,
+};
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -13,10 +16,10 @@ use axum::{
 use bytes::Bytes;
 use dasobjectstore_core::ids::{ObjectId, StoreId};
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserPageRequest,
-    ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-    ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    UnixSocketDaemonTransport,
+    DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserDelegatedActor,
+    ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
+    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
+    ObjectFolderDownloadResponse, UnixSocketDaemonTransport,
 };
 use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
@@ -56,6 +59,7 @@ pub(crate) fn standalone_object_browser_router_with_state(
 pub(crate) struct StandaloneObjectBrowserRouteState {
     auth_store: LocalAuthStore,
     object_browser_client: Option<Arc<dyn StandaloneObjectBrowserClient>>,
+    local_user_provider: Arc<dyn ObjectBrowserLocalUserProvider>,
 }
 
 impl StandaloneObjectBrowserRouteState {
@@ -65,7 +69,20 @@ impl StandaloneObjectBrowserRouteState {
             object_browser_client: Some(Arc::new(
                 DaemonStandaloneObjectBrowserClient::default_packaged(),
             )),
+            local_user_provider: Arc::new(SystemObjectBrowserLocalUserProvider),
         }
+    }
+}
+
+trait ObjectBrowserLocalUserProvider: Send + Sync {
+    fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError>;
+}
+
+struct SystemObjectBrowserLocalUserProvider;
+
+impl ObjectBrowserLocalUserProvider for SystemObjectBrowserLocalUserProvider {
+    fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
+        discover_local_user(username)
     }
 }
 
@@ -159,11 +176,12 @@ struct ObjectBrowserQuery {
 
 async fn object_store_browser(
     State(state): State<StandaloneObjectBrowserRouteState>,
-    _actor: AuthenticatedGuiActor,
+    actor: AuthenticatedGuiActor,
     Path(endpoint): Path<String>,
     Query(query): Query<ObjectBrowserQuery>,
 ) -> Result<Json<ObjectBrowserResponse>, (StatusCode, Json<AuthRouteError>)> {
-    let request = object_browser_request(endpoint, query)?;
+    let delegated_actor = delegated_object_browser_actor(&state, &actor)?;
+    let request = object_browser_request(endpoint, query, Some(delegated_actor))?;
     request.validate().map_err(|err| {
         route_error(
             StatusCode::BAD_REQUEST,
@@ -189,10 +207,11 @@ async fn object_store_browser(
 
 async fn object_store_object_download(
     State(state): State<StandaloneObjectBrowserRouteState>,
-    _actor: AuthenticatedGuiActor,
+    actor: AuthenticatedGuiActor,
     Path((endpoint, object_id)): Path<(String, String)>,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
-    let request = object_download_request(endpoint, object_id)?;
+    let delegated_actor = delegated_object_browser_actor(&state, &actor)?;
+    let request = object_download_request(endpoint, object_id, Some(delegated_actor))?;
     request.validate().map_err(|err| {
         route_error(
             StatusCode::BAD_REQUEST,
@@ -230,10 +249,11 @@ async fn object_store_object_download(
 
 async fn object_store_folder_download(
     State(state): State<StandaloneObjectBrowserRouteState>,
-    _actor: AuthenticatedGuiActor,
+    actor: AuthenticatedGuiActor,
     Path((endpoint, prefix)): Path<(String, String)>,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
-    let request = object_folder_download_request(endpoint, prefix)?;
+    let delegated_actor = delegated_object_browser_actor(&state, &actor)?;
+    let request = object_folder_download_request(endpoint, prefix, Some(delegated_actor))?;
     request.validate().map_err(|err| {
         route_error(
             StatusCode::BAD_REQUEST,
@@ -267,6 +287,7 @@ async fn object_store_folder_download(
 fn object_browser_request(
     endpoint: String,
     query: ObjectBrowserQuery,
+    delegated_actor: Option<ObjectBrowserDelegatedActor>,
 ) -> Result<ObjectBrowserRequest, (StatusCode, Json<AuthRouteError>)> {
     let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
         route_error(
@@ -287,12 +308,14 @@ fn object_browser_request(
                 .unwrap_or_else(|| ObjectBrowserPageRequest::default().limit),
         },
         include_placement: query.include_placement.unwrap_or(false),
+        delegated_actor,
     })
 }
 
 fn object_download_request(
     endpoint: String,
     object_id: String,
+    delegated_actor: Option<ObjectBrowserDelegatedActor>,
 ) -> Result<ObjectDownloadRequest, (StatusCode, Json<AuthRouteError>)> {
     let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
         route_error(
@@ -315,12 +338,14 @@ fn object_download_request(
     Ok(ObjectDownloadRequest {
         endpoint,
         object_id,
+        delegated_actor,
     })
 }
 
 fn object_folder_download_request(
     endpoint: String,
     prefix: String,
+    delegated_actor: Option<ObjectBrowserDelegatedActor>,
 ) -> Result<ObjectFolderDownloadRequest, (StatusCode, Json<AuthRouteError>)> {
     let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
         route_error(
@@ -332,6 +357,39 @@ fn object_folder_download_request(
     Ok(ObjectFolderDownloadRequest {
         endpoint,
         prefix: required_field("prefix", prefix.trim_start_matches('/').to_string())?,
+        delegated_actor,
+    })
+}
+
+fn delegated_object_browser_actor(
+    state: &StandaloneObjectBrowserRouteState,
+    actor: &AuthenticatedGuiActor,
+) -> Result<ObjectBrowserDelegatedActor, (StatusCode, Json<AuthRouteError>)> {
+    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "standalone_local_user_required",
+            "ObjectStore browser access requires a local standalone browser session",
+        ));
+    }
+    let local_user = state
+        .local_user_provider
+        .local_user(&actor.subject_id)
+        .map_err(|err| {
+            route_error(
+                StatusCode::FORBIDDEN,
+                "local_user_discovery_failed",
+                format!(
+                    "ObjectStore browser access could not resolve local user {}: {err}",
+                    actor.subject_id
+                ),
+            )
+        })?;
+    Ok(ObjectBrowserDelegatedActor {
+        username: local_user.username,
+        uid: None,
+        primary_gid: None,
+        groups: local_user.groups,
     })
 }
 
@@ -564,20 +622,23 @@ fn route_error(
 mod tests {
     use super::{
         standalone_object_browser_router_with_state, write_folder_archive,
-        StandaloneObjectBrowserClient, StandaloneObjectBrowserClientError,
-        StandaloneObjectBrowserRouteState,
+        ObjectBrowserLocalUserProvider, StandaloneObjectBrowserClient,
+        StandaloneObjectBrowserClientError, StandaloneObjectBrowserRouteState,
     };
-    use crate::{LocalAuthStore, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER};
+    use crate::{
+        LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata,
+        STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+    };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::lifecycle::ObjectState;
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_daemon::{
-        ObjectBrowserFileNode, ObjectBrowserPageRequest, ObjectBrowserReadinessState,
-        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
-        ObjectFolderDownloadResponse,
+        ObjectBrowserDelegatedActor, ObjectBrowserFileNode, ObjectBrowserPageRequest,
+        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
+        ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
     };
     use flate2::read::GzDecoder;
     use std::fs;
@@ -646,6 +707,7 @@ mod tests {
                     limit: 50,
                 },
                 include_placement: true,
+                delegated_actor: Some(expected_delegated_actor("admin")),
             }]
         );
 
@@ -761,6 +823,7 @@ mod tests {
             vec![ObjectDownloadRequest {
                 endpoint: StoreId::new("ena").expect("store id"),
                 object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
+                delegated_actor: Some(expected_delegated_actor("admin")),
             }]
         );
         let body = to_bytes(response.into_body(), 64 * 1024)
@@ -902,6 +965,7 @@ mod tests {
             vec![ObjectFolderDownloadRequest {
                 endpoint: StoreId::new("ena").expect("store id"),
                 prefix: "ENA/Xeno".to_string(),
+                delegated_actor: Some(expected_delegated_actor("admin")),
             }]
         );
         let body = to_bytes(response.into_body(), 1024 * 1024)
@@ -997,6 +1061,7 @@ mod tests {
         standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState {
             auth_store,
             object_browser_client: Some(client),
+            local_user_provider: Arc::new(FixedObjectBrowserLocalUserProvider),
         })
     }
 
@@ -1014,6 +1079,30 @@ mod tests {
 
     fn recording_browser_client() -> Arc<RecordingObjectBrowserClient> {
         Arc::new(RecordingObjectBrowserClient::default())
+    }
+
+    struct FixedObjectBrowserLocalUserProvider;
+
+    impl ObjectBrowserLocalUserProvider for FixedObjectBrowserLocalUserProvider {
+        fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
+            Ok(LocalUserMetadata::from_username_and_groups(
+                username,
+                vec!["mnemosyne".to_string(), "users".to_string()],
+            ))
+        }
+    }
+
+    fn expected_delegated_actor(username: &str) -> ObjectBrowserDelegatedActor {
+        let user = LocalUserMetadata::from_username_and_groups(
+            username,
+            vec!["mnemosyne".to_string(), "users".to_string()],
+        );
+        ObjectBrowserDelegatedActor {
+            username: user.username,
+            uid: None,
+            primary_gid: None,
+            groups: user.groups,
+        }
     }
 
     #[derive(Default)]
