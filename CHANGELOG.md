@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.17 - 2026-07-09
+
+- Reduce and constrain the Mnemosyne Biosciences login wordmark so the brand
+  lockup reads as a balanced signature rather than dominating the appliance
+  login pane.
+
 ## 0.54.16 - 2026-07-09
 
 - Add first-class ObjectStore reader-group and authenticated public-read policy

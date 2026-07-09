@@ -131,12 +131,14 @@ h2 {
   align-items: center;
   justify-content: center;
   width: 100%;
+  min-height: 142px;
 }
 
 .dos-auth-wordmark {
   display: block;
-  width: clamp(190px, 22vw, 248px);
+  width: clamp(152px, 16vw, 184px);
   max-width: 100%;
+  max-height: 122px;
   height: auto;
 }
 
@@ -1019,7 +1021,8 @@ h2 {
   }
 
   .dos-auth-wordmark {
-    width: clamp(172px, 58vw, 220px);
+    width: clamp(146px, 48vw, 178px);
+    max-height: 118px;
   }
 
   .dos-auth-summary h1 {
