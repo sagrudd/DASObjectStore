@@ -749,7 +749,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Implement a Web remote-upload page reached after easyconnect login that
   lists accessible ObjectStores with writer readiness, object type, capacity
   warnings, public/export state, and whether uploads are currently allowed.
-- [ ] Add a polished drag-and-drop file/folder upload panel to the remote-upload
+- [x] Add a polished drag-and-drop file/folder upload panel to the remote-upload
   page, using browser filesystem metadata for selection while delegating actual
   byte transfer to the paired `dasobjectstore-remote` process.
 - [ ] Define the browser-to-local-agent coordination mechanism for drag/drop

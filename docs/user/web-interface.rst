@@ -699,10 +699,15 @@ whether upload is currently allowed. Upload readiness is stricter than
 visibility: the store must be writable, exported through S3, and writable by
 the current user's writer-group policy.
 
-File and folder selection is intentionally not performed by the appliance
-browser page yet. Drag/drop selection, path privacy, cancellation, resumability,
-and byte transfer are reserved for the paired ``dasobjectstore-remote`` local
-agent so appliance S3 credentials do not need to be exposed in browser UI.
+The page includes a drag/drop file and folder selection panel. Browser
+filesystem metadata is used to summarize the selected target, file count,
+folder count, total bytes, largest file, and representative paths before any
+transfer begins. The browser does not perform the byte transfer itself:
+confirmed uploads are handed to the paired ``dasobjectstore-remote`` local
+agent so appliance S3 credentials do not need to be exposed in browser UI. The
+local-agent coordination mechanism is still a reserved workflow, so the panel
+is currently a selection and confirmation-preparation surface rather than an
+active transfer control.
 
 Bioinformatics Workspace
 ------------------------

@@ -909,6 +909,70 @@ pub struct ObjectBrowserFileSummary {
     pub placements: Vec<ObjectBrowserPlacementResponse>,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadSelectedFile {
+    pub display_path: String,
+    pub size_bytes: u64,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadSelectionSummary {
+    pub file_count: usize,
+    pub folder_count: usize,
+    pub total_bytes: u64,
+    pub largest_file: Option<RemoteUploadSelectedFile>,
+    pub sample_paths: Vec<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+impl RemoteUploadSelectionSummary {
+    pub fn from_files(files: &[RemoteUploadSelectedFile]) -> Self {
+        let folder_count = remote_upload_folder_count(files);
+        let largest_file = files.iter().max_by_key(|file| file.size_bytes).cloned();
+        let sample_paths = files
+            .iter()
+            .take(5)
+            .map(|file| file.display_path.clone())
+            .collect();
+        Self {
+            file_count: files.len(),
+            folder_count,
+            total_bytes: files.iter().map(|file| file.size_bytes).sum(),
+            largest_file,
+            sample_paths,
+        }
+    }
+
+    pub fn total_size_label(&self) -> String {
+        format_browser_bytes(self.total_bytes)
+    }
+
+    pub fn largest_file_label(&self) -> String {
+        self.largest_file
+            .as_ref()
+            .map(|file| {
+                format!(
+                    "{} ({})",
+                    file.display_path,
+                    format_browser_bytes(file.size_bytes)
+                )
+            })
+            .unwrap_or_else(|| "no file selected".to_string())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn remote_upload_folder_count(files: &[RemoteUploadSelectedFile]) -> usize {
+    files
+        .iter()
+        .filter_map(|file| file.display_path.rsplit_once('/').map(|(folder, _)| folder))
+        .filter(|folder| !folder.trim().is_empty())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ObjectBrowserDownloadState {
@@ -2931,6 +2995,8 @@ pub struct RemoteUploadPageProps {
 pub fn remote_upload_page(props: &RemoteUploadPageProps) -> Html {
     let api_path = WorkspacePage::RemoteUpload.api_path(&props.api_base_path);
     let remote_upload_state = use_state(|| ApiLoadState::<RemoteUploadWorkspaceResponse>::Loading);
+    let selected_store = use_state(String::new);
+    let selected_files = use_state(Vec::<RemoteUploadSelectedFile>::new);
 
     {
         let api_path = api_path.clone();
@@ -2963,13 +3029,17 @@ pub fn remote_upload_page(props: &RemoteUploadPageProps) -> Html {
                 title="Remote Upload"
                 summary="Browser-approved ObjectStore selection for paired remote upload agents."
             />
-            { render_remote_upload_state(&*remote_upload_state) }
+            { render_remote_upload_state(&*remote_upload_state, selected_store, selected_files) }
         </section>
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_remote_upload_state(state: &ApiLoadState<RemoteUploadWorkspaceResponse>) -> Html {
+fn render_remote_upload_state(
+    state: &ApiLoadState<RemoteUploadWorkspaceResponse>,
+    selected_store: UseStateHandle<String>,
+    selected_files: UseStateHandle<Vec<RemoteUploadSelectedFile>>,
+) -> Html {
     match state {
         ApiLoadState::Loading => render_remote_upload_state_message(
             "Loading",
@@ -2977,7 +3047,7 @@ fn render_remote_upload_state(state: &ApiLoadState<RemoteUploadWorkspaceResponse
             "The Web console is requesting accessible ObjectStores and writer readiness.",
         ),
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_remote_upload_workspace(view)
+            render_remote_upload_workspace(view, selected_store, selected_files)
         }
         ApiLoadState::Empty(message) => {
             render_remote_upload_state_message("Inventory", "No remote uploads available", message)
@@ -2996,7 +3066,11 @@ fn render_remote_upload_state(state: &ApiLoadState<RemoteUploadWorkspaceResponse
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_remote_upload_workspace(view: &RemoteUploadWorkspaceResponse) -> Html {
+fn render_remote_upload_workspace(
+    view: &RemoteUploadWorkspaceResponse,
+    selected_store: UseStateHandle<String>,
+    selected_files: UseStateHandle<Vec<RemoteUploadSelectedFile>>,
+) -> Html {
     let ready_count = view
         .stores
         .iter()
@@ -3015,13 +3089,165 @@ fn render_remote_upload_workspace(view: &RemoteUploadWorkspaceResponse) -> Html 
             </section>
             { for view.warnings.iter().map(render_remote_upload_warning) }
             { for view.stores.iter().map(render_remote_upload_store_card) }
-            <section class="dos-card dos-wide-card" data-state="planned">
-                <span class="dos-card-label">{ "Agent handoff" }</span>
-                <h2>{ "File selection is reserved for the paired local agent." }</h2>
-                <p>{ "Drag-and-drop folder selection, path privacy, cancellation, and resumable transfer will use this store-readiness payload without exposing appliance S3 credentials in the browser." }</p>
-            </section>
+            { render_remote_upload_selection_panel(view, selected_store, selected_files) }
         </div>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_selection_panel(
+    view: &RemoteUploadWorkspaceResponse,
+    selected_store: UseStateHandle<String>,
+    selected_files: UseStateHandle<Vec<RemoteUploadSelectedFile>>,
+) -> Html {
+    let ready_stores = view
+        .stores
+        .iter()
+        .filter(|store| store.upload_allowed)
+        .collect::<Vec<_>>();
+    let effective_store_id = if selected_store.trim().is_empty() {
+        ready_stores
+            .first()
+            .map(|store| store.store_id.clone())
+            .unwrap_or_default()
+    } else {
+        (*selected_store).clone()
+    };
+    let selected_target = ready_stores
+        .iter()
+        .find(|store| store.store_id == effective_store_id)
+        .copied();
+    let summary = RemoteUploadSelectionSummary::from_files(&selected_files);
+    let ready_for_handoff = selected_target.is_some() && summary.file_count > 0;
+    let on_store_change = {
+        let selected_store = selected_store.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlSelectElement = event.target_unchecked_into();
+            selected_store.set(input.value());
+        })
+    };
+    let on_file_input = {
+        let selected_files = selected_files.clone();
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            if let Some(files) = input.files() {
+                selected_files.set(remote_upload_selected_files_from_list(files));
+            }
+        })
+    };
+    let on_drop = {
+        let selected_files = selected_files.clone();
+        Callback::from(move |event: DragEvent| {
+            event.prevent_default();
+            if let Some(data_transfer) = event.data_transfer() {
+                if let Some(files) = data_transfer.files() {
+                    selected_files.set(remote_upload_selected_files_from_list(files));
+                }
+            }
+        })
+    };
+    let on_drag_over = Callback::from(|event: DragEvent| event.prevent_default());
+    let on_clear = {
+        let selected_files = selected_files.clone();
+        Callback::from(move |_| selected_files.set(Vec::new()))
+    };
+
+    html! {
+        <section class="dos-card dos-wide-card dos-remote-upload-panel" data-state={if ready_for_handoff { "ready" } else { "waiting" }}>
+            <div class="dos-card-row">
+                <div>
+                    <span class="dos-card-label">{ "Agent handoff" }</span>
+                    <h2>{ "Select files or folders for remote ingress" }</h2>
+                </div>
+                <span class="dos-status-pill">{ if ready_for_handoff { "ready to confirm" } else { "waiting" } }</span>
+            </div>
+            <div class="dos-remote-upload-grid">
+                <div class="dos-form-field">
+                    <span>{ "Target ObjectStore" }</span>
+                    <select onchange={on_store_change} value={effective_store_id.clone()} disabled={ready_stores.is_empty()}>
+                        { for ready_stores.iter().map(|store| html! {
+                            <option value={store.store_id.clone()}>{ format!("{} · {}", store.display_name, store.object_type) }</option>
+                        }) }
+                    </select>
+                </div>
+                <label class="dos-remote-upload-dropzone" ondrop={on_drop} ondragover={on_drag_over}>
+                    <strong>{ "Drop files or folders here" }</strong>
+                    <span>{ "The browser records local metadata only; bytes transfer through the paired dasobjectstore-remote agent after confirmation." }</span>
+                    <input
+                        type="file"
+                        multiple=true
+                        webkitdirectory=true
+                        directory=true
+                        onchange={on_file_input}
+                        disabled={ready_stores.is_empty()}
+                    />
+                </label>
+            </div>
+            { render_remote_upload_selection_summary(&summary, selected_target.map(|store| store.display_name.as_str())) }
+            <div class="dos-job-actions">
+                <button type="button" onclick={on_clear} disabled={summary.file_count == 0}>{ "Clear selection" }</button>
+                <button type="button" disabled=true title="Loopback agent coordination is the next remote-upload task.">
+                    { if ready_for_handoff { "Confirm with local agent" } else { "Select a writable store and files" } }
+                </button>
+            </div>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_selection_summary(
+    summary: &RemoteUploadSelectionSummary,
+    target_name: Option<&str>,
+) -> Html {
+    let target_name = target_name.unwrap_or("no writable ObjectStore selected");
+    html! {
+        <div class="dos-remote-upload-summary">
+            <div><dt>{ "Target" }</dt><dd>{ target_name.to_string() }</dd></div>
+            <div><dt>{ "Files" }</dt><dd>{ summary.file_count }</dd></div>
+            <div><dt>{ "Folders" }</dt><dd>{ summary.folder_count }</dd></div>
+            <div><dt>{ "Bytes selected" }</dt><dd>{ summary.total_size_label() }</dd></div>
+            <div><dt>{ "Largest file" }</dt><dd>{ summary.largest_file_label() }</dd></div>
+            <div class="dos-remote-upload-samples">
+                <dt>{ "Sample paths" }</dt>
+                <dd>
+                    { if summary.sample_paths.is_empty() {
+                        html! { <span>{ "no browser selection yet" }</span> }
+                    } else {
+                        html! {
+                            <ol>
+                                { for summary.sample_paths.iter().map(|path| html! { <li>{ path.clone() }</li> }) }
+                            </ol>
+                        }
+                    } }
+                </dd>
+            </div>
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remote_upload_selected_files_from_list(
+    files: web_sys::FileList,
+) -> Vec<RemoteUploadSelectedFile> {
+    (0..files.length())
+        .filter_map(|index| files.item(index))
+        .map(|file| RemoteUploadSelectedFile {
+            display_path: remote_upload_file_display_path(&file),
+            size_bytes: file.size() as u64,
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remote_upload_file_display_path(file: &File) -> String {
+    js_sys::Reflect::get(
+        file.as_ref(),
+        &wasm_bindgen::JsValue::from_str("webkitRelativePath"),
+    )
+    .ok()
+    .and_then(|value| value.as_string())
+    .filter(|path| !path.trim().is_empty())
+    .unwrap_or_else(|| file.name())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -6569,13 +6795,14 @@ mod tests {
         object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
-        objectstores_workspace_api_path, primary_navigation_for_host,
+        objectstores_workspace_api_path, primary_navigation_for_host, remote_upload_folder_count,
         remote_upload_workspace_api_path, subobject_registry_preview_from_values,
         users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
-        EnclosureWizardState, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
-        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
-        HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE,
-        PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
+        EnclosureWizardState, RemoteUploadSelectedFile, RemoteUploadSelectionSummary,
+        WorkspacePage, ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE,
+        ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
+        LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        REMOTE_UPLOAD_WORKSPACE_ROUTE,
     };
     use super::{
         local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
@@ -8160,6 +8387,59 @@ mod tests {
         assert_eq!(attention[0].title, "No operator attention required");
         assert!(!attention[0].detail.contains("bootstrapped"));
         assert!(!attention[0].detail.contains("fixture"));
+    }
+
+    #[test]
+    fn remote_upload_selection_summary_counts_files_folders_and_bytes() {
+        let files = vec![
+            RemoteUploadSelectedFile {
+                display_path: "study-a/raw/r1.fastq.gz".to_string(),
+                size_bytes: 2 * 1024 * 1024 * 1024,
+            },
+            RemoteUploadSelectedFile {
+                display_path: "study-a/raw/r2.fastq.gz".to_string(),
+                size_bytes: 3 * 1024 * 1024 * 1024,
+            },
+            RemoteUploadSelectedFile {
+                display_path: "study-b/manifest.tsv".to_string(),
+                size_bytes: 4096,
+            },
+        ];
+
+        let summary = RemoteUploadSelectionSummary::from_files(&files);
+
+        assert_eq!(remote_upload_folder_count(&files), 2);
+        assert_eq!(summary.file_count, 3);
+        assert_eq!(summary.folder_count, 2);
+        assert_eq!(summary.total_size_label(), "5.0 GiB");
+        assert_eq!(
+            summary.largest_file_label(),
+            "study-a/raw/r2.fastq.gz (3.0 GiB)"
+        );
+        assert_eq!(summary.sample_paths.len(), 3);
+    }
+
+    #[test]
+    fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
+        let source = include_str!("workspace.rs");
+        let css = include_str!("../styles.css");
+
+        assert!(source.contains("dos-remote-upload-panel"));
+        assert!(source.contains("dos-remote-upload-dropzone"));
+        assert!(source.contains("Drop files or folders here"));
+        assert!(source.contains("webkitdirectory=true"));
+        assert!(source.contains("remote_upload_selected_files_from_list"));
+        assert!(source.contains("webkitRelativePath"));
+        assert!(source.contains("Confirm with local agent"));
+        assert!(source.contains("Loopback agent coordination is the next remote-upload task."));
+        assert!(source.contains("RemoteUploadSelectionSummary::from_files"));
+
+        assert!(css.contains(".dos-remote-upload-panel"));
+        assert!(css.contains(".dos-remote-upload-grid"));
+        assert!(css.contains(".dos-remote-upload-dropzone"));
+        assert!(css.contains(".dos-remote-upload-summary"));
+        assert!(css.contains(".dos-remote-upload-samples"));
+        assert!(css.contains(".dos-remote-upload-grid,\n  .dos-remote-upload-summary"));
     }
 
     fn users_groups_workspace_fixture() -> UsersGroupsWorkspaceResponse {

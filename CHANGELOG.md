@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Add a Web ``Remote Upload`` drag/drop selection panel that captures browser
+  file/folder metadata, target ObjectStore choice, byte totals, folder counts,
+  largest-file summaries, and an explicit paired-agent handoff state.
 - Delegate standalone DASObjectStore authentication registry, session, token,
   and local PAM plumbing to Prosopikon while preserving existing DAS route
   response contracts.
