@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.0 - 2026-07-09
+
+- Add daemon-owned remote easyconnect ObjectStore grant filtering so remote
+  upload sessions only list ObjectStores readable by the authenticated actor
+  and only grant upload rights when daemon writer authorization allows ingest.
+
 ## 0.59.1 - 2026-07-09
 
 - Rename the standalone Users/Groups console to Local Access, declare the

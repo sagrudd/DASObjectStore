@@ -1,3 +1,7 @@
+use crate::auth::{
+    authorize_store_read, authorize_store_write, DaemonLocalActor, DaemonStoreAccessPolicy,
+};
+use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
 
 pub const REMOTE_EASYCONNECT_DISCOVERY_ROUTE: &str = "/api/v1/remote/easyconnect/discovery";
@@ -242,6 +246,73 @@ impl RemoteEasyconnectObjectStoreGrant {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectObjectStoreAccessPolicy {
+    pub object_store: String,
+    pub bucket: String,
+    pub reader_group: Option<String>,
+    pub writer_group: Option<String>,
+    pub admin_group: Option<String>,
+    pub public_read: bool,
+    pub writable: bool,
+    pub object_type: String,
+}
+
+impl RemoteEasyconnectObjectStoreAccessPolicy {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        require_non_blank("object_store", &self.object_store)?;
+        require_non_blank("bucket", &self.bucket)?;
+        validate_optional_non_blank("reader_group", self.reader_group.as_deref())?;
+        validate_optional_non_blank("writer_group", self.writer_group.as_deref())?;
+        validate_optional_non_blank("admin_group", self.admin_group.as_deref())?;
+        require_non_blank("object_type", &self.object_type)
+    }
+
+    fn daemon_policy(&self) -> DaemonStoreAccessPolicy {
+        let mut policy = DaemonStoreAccessPolicy::new(
+            StoreId::new(self.object_store.clone())
+                .expect("object_store was checked non-blank before building daemon access policy"),
+        )
+        .with_public_read(self.public_read);
+        if let Some(reader_group) = &self.reader_group {
+            policy = policy.with_reader_group(reader_group.clone());
+        }
+        if let Some(writer_group) = &self.writer_group {
+            policy = policy.with_writer_group(writer_group.clone());
+        }
+        if let Some(admin_group) = &self.admin_group {
+            policy = policy.with_admin_group(admin_group.clone());
+        }
+        policy
+    }
+}
+
+pub fn remote_easyconnect_object_store_grants_for_actor(
+    actor: &DaemonLocalActor,
+    stores: &[RemoteEasyconnectObjectStoreAccessPolicy],
+) -> Result<Vec<RemoteEasyconnectObjectStoreGrant>, RemoteEasyconnectValidationError> {
+    let mut grants = Vec::new();
+
+    for store in stores {
+        store.validate()?;
+        let policy = store.daemon_policy();
+        let can_read = authorize_store_read(actor, &policy).is_ok();
+        let can_write = store.writable && authorize_store_write(actor, &policy).is_ok();
+        if can_read || can_write {
+            grants.push(RemoteEasyconnectObjectStoreGrant {
+                object_store: store.object_store.clone(),
+                bucket: store.bucket.clone(),
+                can_read,
+                can_write,
+                writer_group: store.writer_group.clone(),
+                object_type: store.object_type.clone(),
+            });
+        }
+    }
+
+    Ok(grants)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RemoteEasyconnectValidationError {
     BlankField { field: &'static str },
@@ -345,14 +416,16 @@ fn validate_requested_lifetime(
 #[cfg(test)]
 mod tests {
     use super::{
+        remote_easyconnect_object_store_grants_for_actor,
         remote_easyconnect_renew_after_offset_seconds,
         resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectSessionPolicy,
-        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
-        REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
-        REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
+        RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectSessionPolicy, RemoteEasyconnectValidationError,
+        REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
+        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
     };
+    use crate::auth::DaemonLocalActor;
 
     #[test]
     fn validates_create_pairing_contract() {
@@ -475,5 +548,132 @@ mod tests {
             err,
             RemoteEasyconnectValidationError::GrantWithoutAccess { .. }
         ));
+    }
+
+    #[test]
+    fn filters_remote_grants_to_actor_read_and_write_membership() {
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("stephen")
+            .with_groups(["mnemosyne", "readers"]);
+        let stores = vec![
+            store("generated", "dos-generated")
+                .with_reader_group("readers")
+                .with_writer_group("mnemosyne"),
+            store("archive", "dos-archive")
+                .with_reader_group("readers")
+                .with_writer_group("archive-writers"),
+            store("private", "dos-private").with_writer_group("private-writers"),
+        ];
+
+        let grants =
+            remote_easyconnect_object_store_grants_for_actor(&actor, &stores).expect("grants");
+
+        assert_eq!(grants.len(), 2);
+        assert_eq!(grants[0].object_store, "generated");
+        assert!(grants[0].can_read);
+        assert!(grants[0].can_write);
+        assert_eq!(grants[1].object_store, "archive");
+        assert!(grants[1].can_read);
+        assert!(!grants[1].can_write);
+    }
+
+    #[test]
+    fn public_read_does_not_grant_remote_write_without_writer_membership() {
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("guest")
+            .with_groups(["users"]);
+        let stores = vec![store("public-cache", "dos-public-cache")
+            .with_public_read(true)
+            .with_writer_group("cache-writers")];
+
+        let grants =
+            remote_easyconnect_object_store_grants_for_actor(&actor, &stores).expect("grants");
+
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].object_store, "public-cache");
+        assert!(grants[0].can_read);
+        assert!(!grants[0].can_write);
+    }
+
+    #[test]
+    fn locked_store_never_grants_remote_write_even_for_writer_member() {
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("stephen")
+            .with_groups(["mnemosyne"]);
+        let stores = vec![store("locked", "dos-locked")
+            .with_writer_group("mnemosyne")
+            .with_writable(false)];
+
+        let grants =
+            remote_easyconnect_object_store_grants_for_actor(&actor, &stores).expect("grants");
+
+        assert_eq!(grants.len(), 1);
+        assert!(grants[0].can_read);
+        assert!(!grants[0].can_write);
+    }
+
+    #[test]
+    fn admin_group_can_receive_remote_write_grant() {
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("operator")
+            .with_groups(["dasobjectstore-admin"]);
+        let stores = vec![store("generated", "dos-generated")
+            .with_writer_group("mnemosyne")
+            .with_admin_group("dasobjectstore-admin")];
+
+        let grants =
+            remote_easyconnect_object_store_grants_for_actor(&actor, &stores).expect("grants");
+
+        assert_eq!(grants.len(), 1);
+        assert!(grants[0].can_read);
+        assert!(grants[0].can_write);
+    }
+
+    fn store(object_store: &str, bucket: &str) -> RemoteEasyconnectObjectStoreAccessPolicy {
+        RemoteEasyconnectObjectStoreAccessPolicy {
+            object_store: object_store.to_string(),
+            bucket: bucket.to_string(),
+            reader_group: None,
+            writer_group: None,
+            admin_group: None,
+            public_read: false,
+            writable: true,
+            object_type: "fastq".to_string(),
+        }
+    }
+
+    trait StorePolicyFixture {
+        fn with_reader_group(self, group: &str) -> Self;
+        fn with_writer_group(self, group: &str) -> Self;
+        fn with_admin_group(self, group: &str) -> Self;
+        fn with_public_read(self, public_read: bool) -> Self;
+        fn with_writable(self, writable: bool) -> Self;
+    }
+
+    impl StorePolicyFixture for RemoteEasyconnectObjectStoreAccessPolicy {
+        fn with_reader_group(mut self, group: &str) -> Self {
+            self.reader_group = Some(group.to_string());
+            self
+        }
+
+        fn with_writer_group(mut self, group: &str) -> Self {
+            self.writer_group = Some(group.to_string());
+            self
+        }
+
+        fn with_admin_group(mut self, group: &str) -> Self {
+            self.admin_group = Some(group.to_string());
+            self
+        }
+
+        fn with_public_read(mut self, public_read: bool) -> Self {
+            self.public_read = public_read;
+            self
+        }
+
+        fn with_writable(mut self, writable: bool) -> Self {
+            self.writable = writable;
+            self
+        }
     }
 }

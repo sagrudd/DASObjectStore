@@ -743,7 +743,7 @@ planning are tracked under Milestones 21 and 22.
   passwords in memory longer than required.
 - [x] Support standalone local-user authentication for easyconnect first, while
   keeping the API shape ready for Synoptikon/Mneion identity providers.
-- [ ] Add permission checks so remote upload sessions can list only the
+- [x] Add permission checks so remote upload sessions can list only the
   ObjectStores available to the authenticated user and can write only to stores
   where writer-group policy allows ingest.
 - [ ] Implement a Web remote-upload page reached after easyconnect login that

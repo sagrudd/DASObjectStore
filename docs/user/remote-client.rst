@@ -89,6 +89,14 @@ ObjectStore grants, expiry time, and renewal metadata. Those credentials are
 intended for the paired ``dasobjectstore-remote`` process only and must not be
 pasted into terminal commands or support tickets.
 
+The accessible ObjectStore list is filtered by the daemon before a remote
+session is issued. A remote user can only see ObjectStores that the same
+authenticated local account may read through public-read, reader-group,
+writer-group, or configured administrator-group policy. Upload permission is
+stricter: the store must be writable and the account must satisfy the daemon
+writer authorization policy, usually by membership in the ObjectStore writer
+group. Public-read access never grants upload rights by itself.
+
 Remote upload sessions default to eight hours. The appliance advertises that
 default in discovery and the remote client treats renewal as an explicit
 session operation rather than a password replay. For the default eight-hour
