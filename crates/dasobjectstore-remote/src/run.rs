@@ -7,7 +7,7 @@ use crate::cli::{
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
-    RemoteConfigOverrides, DEFAULT_PROFILE, DEFAULT_REGION,
+    RemoteConfigOverrides, RemoteUploadSession, DEFAULT_PROFILE, DEFAULT_REGION,
 };
 use crate::easyconnect::{
     define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
@@ -16,7 +16,8 @@ use crate::easyconnect::{
     RemoteEasyconnectPairingOutcome, SystemBrowserLauncher,
 };
 use crate::s3::{
-    execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload, RemoteS3Error,
+    execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload_with_credentials,
+    AwsS3CredentialSource, RemoteS3Error,
 };
 use std::fmt;
 use std::io::Write;
@@ -271,17 +272,27 @@ fn run_upload(
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
     let config = resolved_valid_config(cli)?;
-    let credentials = resolve_credentials(cli, &config)?;
-    let plan = plan_upload(
+    let route = resolve_upload_route(&config, args.store())?;
+    let credentials = match route.credentials.clone() {
+        Some(credentials) => Some(credentials),
+        None => resolve_credentials(cli, &config)?,
+    };
+    let plan = plan_upload_with_credentials(
         &config,
-        args.store(),
+        &route.bucket,
         args.source(),
         args.prefix(),
         args.key(),
         args.dry_run(),
         args.progress(),
+        route.credential_source,
     )?;
     if args.dry_run() {
+        writeln!(
+            writer,
+            "ObjectStore: {} -> bucket {}",
+            route.object_store, route.bucket
+        )?;
         writeln!(writer, "{}", plan.display_command())?;
         return Ok(());
     }
@@ -291,6 +302,58 @@ fn run_upload(
     }
     writeln!(writer, "Upload complete")?;
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct RemoteUploadRoute {
+    object_store: String,
+    bucket: String,
+    credentials: Option<RemoteS3Credentials>,
+    credential_source: AwsS3CredentialSource,
+}
+
+fn resolve_upload_route(
+    config: &RemoteConfig,
+    requested_object_store: &str,
+) -> Result<RemoteUploadRoute, RemoteRunError> {
+    if config.paired_appliances.is_empty() {
+        return Ok(RemoteUploadRoute {
+            object_store: requested_object_store.to_string(),
+            bucket: requested_object_store.to_string(),
+            credentials: None,
+            credential_source: AwsS3CredentialSource::AwsProfile,
+        });
+    }
+
+    let Some((appliance, grant)) = config.paired_appliances.iter().find_map(|appliance| {
+        appliance
+            .writable_object_store(requested_object_store)
+            .map(|grant| (appliance, grant))
+    }) else {
+        return Err(RemoteRunError::UploadRouting(format!(
+            "ObjectStore {requested_object_store} is not writable in the paired appliance grants; run easyconnect again or choose a writable ObjectStore name"
+        )));
+    };
+    let session = appliance.session.as_ref().ok_or_else(|| {
+        RemoteRunError::UploadRouting(format!(
+            "ObjectStore {requested_object_store} is paired but has no active remote upload session; run dasobjectstore-remote easyconnect"
+        ))
+    })?;
+
+    Ok(RemoteUploadRoute {
+        object_store: grant.object_store.clone(),
+        bucket: grant.bucket.clone(),
+        credentials: Some(session_credentials(session)),
+        credential_source: AwsS3CredentialSource::Environment,
+    })
+}
+
+fn session_credentials(session: &RemoteUploadSession) -> RemoteS3Credentials {
+    RemoteS3Credentials {
+        access_key_id: session.credentials.access_key_id.clone(),
+        secret_access_key: session.credentials.secret_access_key.clone(),
+        session_token: session.credentials.session_token.clone(),
+    }
 }
 
 fn resolved_valid_config(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError> {
@@ -364,6 +427,7 @@ pub enum RemoteRunError {
     EasyconnectPairing(RemoteEasyconnectPairingError),
     Auth(RemoteAuthError),
     S3(RemoteS3Error),
+    UploadRouting(String),
 }
 
 impl fmt::Display for RemoteRunError {
@@ -376,6 +440,7 @@ impl fmt::Display for RemoteRunError {
             Self::EasyconnectPairing(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
+            Self::UploadRouting(message) => formatter.write_str(message),
         }
     }
 }
@@ -430,8 +495,8 @@ mod tests {
     use crate::auth::RemoteAuthAuthority;
     use crate::cli::RemoteCli;
     use crate::config::{
-        read_optional_config, write_config, RemoteConfig, RemotePairedAppliance,
-        RemoteSessionCredentials, RemoteUploadSession,
+        read_optional_config, write_config, RemoteConfig, RemoteObjectStoreGrant,
+        RemotePairedAppliance, RemoteSessionCredentials, RemoteUploadSession,
     };
     use clap::Parser;
 
@@ -496,6 +561,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn upload_dry_run_routes_object_store_through_paired_bucket_and_session() {
+        let path = temp_config_path("upload-routes");
+        let root = temp_source_root("upload-routes-source");
+        std::fs::create_dir_all(&root).expect("create source");
+        let source = root.join("reads.fastq.gz");
+        std::fs::write(&source, b"ACGT").expect("write source");
+        write_config(&path, &paired_config()).expect("write config");
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "--config",
+            path.to_str().expect("utf8 path"),
+            "upload",
+            "zymo_fecal_2025.05",
+            "--source",
+            source.to_str().expect("utf8 source"),
+            "--prefix",
+            "raw/PAW10254",
+            "--dry-run",
+        ])
+        .expect("cli parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("dry run succeeds");
+
+        let rendered = String::from_utf8(output).expect("utf8 output");
+        assert!(
+            rendered.contains("ObjectStore: zymo_fecal_2025.05 -> bucket dos-zymo-fecal-2025-05")
+        );
+        assert!(rendered.contains("s3://dos-zymo-fecal-2025-05/raw/PAW10254/reads.fastq.gz"));
+        assert!(!rendered.contains("--profile"));
+        assert!(!rendered.contains("s3://zymo_fecal_2025.05/"));
+        std::fs::remove_dir_all(root).expect("cleanup source");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn paired_upload_rejects_ungranted_bucket_name() {
+        let path = temp_config_path("upload-rejects-bucket");
+        let root = temp_source_root("upload-rejects-bucket-source");
+        std::fs::create_dir_all(&root).expect("create source");
+        let source = root.join("reads.fastq.gz");
+        std::fs::write(&source, b"ACGT").expect("write source");
+        write_config(&path, &paired_config()).expect("write config");
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "--config",
+            path.to_str().expect("utf8 path"),
+            "upload",
+            "dos-zymo-fecal-2025-05",
+            "--source",
+            source.to_str().expect("utf8 source"),
+            "--dry-run",
+        ])
+        .expect("cli parses");
+        let mut output = Vec::new();
+
+        let err = run(&cli, &mut output).expect_err("bucket name rejected");
+
+        assert!(err
+            .to_string()
+            .contains("choose a writable ObjectStore name"));
+        std::fs::remove_dir_all(root).expect("cleanup source");
+        let _ = std::fs::remove_file(path);
+    }
+
     fn paired_config() -> RemoteConfig {
         RemoteConfig {
             endpoint_url: "https://192.168.1.192:3900".to_string(),
@@ -515,6 +646,14 @@ mod tests {
                 auth_authority: RemoteAuthAuthority::LocalPassword,
                 paired_actor: Some("stephen".to_string()),
                 default_object_store: Some("zymo_fecal_2025.05".to_string()),
+                object_stores: vec![RemoteObjectStoreGrant {
+                    object_store: "zymo_fecal_2025.05".to_string(),
+                    bucket: "dos-zymo-fecal-2025-05".to_string(),
+                    can_read: true,
+                    can_write: true,
+                    writer_group: Some("mnemosyne".to_string()),
+                    object_type: "metagenomics".to_string(),
+                }],
                 session: Some(RemoteUploadSession {
                     session_id: "SESSIONREFERENCE7890".to_string(),
                     issued_at: "2026-07-09T11:30:00Z".to_string(),
@@ -537,6 +676,17 @@ mod tests {
             .as_nanos();
         std::env::temp_dir().join(format!(
             "dasobjectstore-remote-{name}-{}-{nanos}.json",
+            std::process::id()
+        ))
+    }
+
+    fn temp_source_root(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-remote-{name}-{}-{nanos}",
             std::process::id()
         ))
     }

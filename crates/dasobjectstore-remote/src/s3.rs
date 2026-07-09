@@ -25,6 +25,12 @@ pub enum AwsS3Operation {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AwsS3CredentialSource {
+    AwsProfile,
+    Environment,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AwsS3CommandPlan {
     pub program: String,
@@ -68,12 +74,34 @@ pub fn plan_upload(
     dry_run: bool,
     progress: bool,
 ) -> Result<AwsS3CommandPlan, RemoteS3Error> {
+    plan_upload_with_credentials(
+        config,
+        store,
+        source,
+        prefix,
+        key,
+        dry_run,
+        progress,
+        AwsS3CredentialSource::AwsProfile,
+    )
+}
+
+pub fn plan_upload_with_credentials(
+    config: &RemoteConfig,
+    store: &str,
+    source: &Path,
+    prefix: Option<&str>,
+    key: Option<&str>,
+    dry_run: bool,
+    progress: bool,
+    credential_source: AwsS3CredentialSource,
+) -> Result<AwsS3CommandPlan, RemoteS3Error> {
     let metadata = std::fs::metadata(source)?;
     validate_store_name(store)?;
     if metadata.is_file() {
         let object_key = file_destination_key(source, prefix, key)?;
         let destination = format!("s3://{store}/{object_key}");
-        let mut args = aws_base_args(config);
+        let mut args = aws_base_args(config, credential_source);
         args.extend(["s3".to_string(), "cp".to_string()]);
         if dry_run {
             args.push("--dryrun".to_string());
@@ -98,7 +126,7 @@ pub fn plan_upload(
             ));
         }
         let destination = folder_destination_uri(store, prefix);
-        let mut args = aws_base_args(config);
+        let mut args = aws_base_args(config, credential_source);
         args.extend(["s3".to_string(), "sync".to_string()]);
         if dry_run {
             args.push("--dryrun".to_string());
@@ -162,13 +190,13 @@ pub fn parse_list_buckets(raw: &str) -> Result<Vec<AccessibleStore>, RemoteS3Err
         .collect())
 }
 
-fn aws_base_args(config: &RemoteConfig) -> Vec<String> {
-    vec![
-        "--profile".to_string(),
-        config.profile.clone(),
-        "--endpoint-url".to_string(),
-        config.endpoint_url.clone(),
-    ]
+fn aws_base_args(config: &RemoteConfig, credential_source: AwsS3CredentialSource) -> Vec<String> {
+    let mut args = Vec::new();
+    if credential_source == AwsS3CredentialSource::AwsProfile {
+        args.extend(["--profile".to_string(), config.profile.clone()]);
+    }
+    args.extend(["--endpoint-url".to_string(), config.endpoint_url.clone()]);
+    args
 }
 
 fn file_destination_key(
@@ -300,7 +328,10 @@ impl From<serde_json::Error> for RemoteS3Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_list_buckets, plan_upload, AwsS3Operation};
+    use super::{
+        parse_list_buckets, plan_upload, plan_upload_with_credentials, AwsS3CredentialSource,
+        AwsS3Operation,
+    };
     use crate::auth::RemoteAuthAuthority;
     use crate::config::RemoteConfig;
     use std::fs;
@@ -356,6 +387,30 @@ mod tests {
         assert!(plan.args.contains(&"sync".to_string()));
         assert!(plan.args.contains(&"--dryrun".to_string()));
         assert_eq!(plan.args.last().unwrap(), "s3://dos-generated/runs/001/");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn session_credential_upload_plan_omits_aws_profile() {
+        let root = temp_root("remote-session-credentials");
+        let file = root.join("sample.fastq.gz");
+        fs::create_dir_all(&root).expect("create temp");
+        fs::write(&file, b"ACGT").expect("write file");
+
+        let plan = plan_upload_with_credentials(
+            &config(),
+            "dos-generated",
+            &file,
+            None,
+            None,
+            true,
+            true,
+            AwsS3CredentialSource::Environment,
+        )
+        .expect("upload plan");
+
+        assert!(!plan.args.contains(&"--profile".to_string()));
+        assert!(plan.args.contains(&"--endpoint-url".to_string()));
         fs::remove_dir_all(root).expect("cleanup");
     }
 

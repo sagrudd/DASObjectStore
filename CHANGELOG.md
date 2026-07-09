@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Route ``dasobjectstore-remote upload`` through paired easyconnect ObjectStore
+  grants so users pass ObjectStore names, the client derives bucket routing,
+  and appliance-issued session credentials are used for S3 transfer planning.
 - Define the remote easyconnect browser-to-local-agent upload handoff contract
   with loopback-only agent URLs, explicit confirmation text, relative-path
   privacy, byte-total validation, and named unreachable/cancelled failure

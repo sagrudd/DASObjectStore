@@ -121,6 +121,8 @@ pub struct RemotePairedAppliance {
     pub default_object_store: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<RemoteUploadSession>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub object_stores: Vec<RemoteObjectStoreGrant>,
 }
 
 impl RemotePairedAppliance {
@@ -134,8 +136,26 @@ impl RemotePairedAppliance {
             paired_actor: self.paired_actor.clone(),
             default_object_store: self.default_object_store.clone(),
             session: self.session.as_ref().map(RemoteUploadSession::redacted),
+            object_stores: self.object_stores.clone(),
         }
     }
+
+    pub fn writable_object_store(&self, object_store: &str) -> Option<&RemoteObjectStoreGrant> {
+        self.object_stores
+            .iter()
+            .find(|grant| grant.object_store == object_store && grant.can_write)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteObjectStoreGrant {
+    pub object_store: String,
+    pub bucket: String,
+    pub can_read: bool,
+    pub can_write: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writer_group: Option<String>,
+    pub object_type: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -240,6 +260,8 @@ pub struct RedactedRemotePairedAppliance {
     pub default_object_store: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<RedactedRemoteUploadSession>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub object_stores: Vec<RemoteObjectStoreGrant>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -392,8 +414,9 @@ impl From<serde_json::Error> for RemoteConfigError {
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteConfig, RemoteConfigOverrides, RemotePairedAppliance, RemoteSessionCredentials,
-        RemoteSessionRenewalMetadata, RemoteUploadSession, REDACTED_SECRET,
+        RemoteConfig, RemoteConfigOverrides, RemoteObjectStoreGrant, RemotePairedAppliance,
+        RemoteSessionCredentials, RemoteSessionRenewalMetadata, RemoteUploadSession,
+        REDACTED_SECRET,
     };
     use crate::auth::RemoteAuthAuthority;
 
@@ -418,6 +441,7 @@ mod tests {
                 paired_actor: Some("alice".to_string()),
                 default_object_store: Some("generated-data".to_string()),
                 session: None,
+                object_stores: Vec::new(),
             }],
         };
 
@@ -471,6 +495,14 @@ mod tests {
                 auth_authority: RemoteAuthAuthority::LocalPassword,
                 paired_actor: Some("stephen".to_string()),
                 default_object_store: Some("zymo_fecal_2025.05".to_string()),
+                object_stores: vec![RemoteObjectStoreGrant {
+                    object_store: "zymo_fecal_2025.05".to_string(),
+                    bucket: "dos-zymo-fecal-2025-05".to_string(),
+                    can_read: true,
+                    can_write: true,
+                    writer_group: Some("mnemosyne".to_string()),
+                    object_type: "metagenomics".to_string(),
+                }],
                 session: Some(RemoteUploadSession {
                     session_id: "SESSIONREFERENCE7890".to_string(),
                     issued_at: "2026-07-09T11:30:00Z".to_string(),
@@ -496,6 +528,8 @@ mod tests {
         assert!(rendered.contains("DOSR...1234"));
         assert!(rendered.contains("SESS...7890"));
         assert!(rendered.contains(REDACTED_SECRET));
+        assert!(rendered.contains("zymo_fecal_2025.05"));
+        assert!(rendered.contains("dos-zymo-fecal-2025-05"));
         assert!(!rendered.contains("SESSIONREFERENCE7890"));
         assert!(!rendered.contains("super-secret"));
         assert!(!rendered.contains("temporary-token"));

@@ -756,7 +756,7 @@ planning are tracked under Milestones 21 and 22.
   selections, including local loopback or browser-mediated handoff, explicit
   user confirmation, path privacy, and clear errors when the paired agent is not
   reachable.
-- [ ] Implement remote CLI upload execution through the intended
+- [x] Implement remote CLI upload execution through the intended
   S3-compatible ObjectStore path, using appliance-issued credentials/session
   material and derived bucket/store routing rather than user-entered S3 names.
 - [ ] Ensure remote-agent uploads and direct Web uploads always stage data to

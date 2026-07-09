@@ -262,7 +262,7 @@ impl StoreListArgs {
 
 #[derive(Debug, Args)]
 pub struct UploadArgs {
-    /// Store name or S3 bucket receiving the upload.
+    /// ObjectStore name receiving the upload. Paired easyconnect sessions derive the S3 bucket.
     store: String,
     /// Local file or folder to upload.
     #[arg(long)]

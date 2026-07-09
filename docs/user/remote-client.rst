@@ -241,11 +241,18 @@ Inspect the AWS command without running it:
 Upload Files and Folders
 ------------------------
 
+For paired easyconnect sessions, the upload argument is the ObjectStore name,
+not an S3 bucket. The client resolves that ObjectStore against appliance-issued
+writer grants, derives the backing bucket, and uses the stored temporary
+session credentials for the AWS CLI environment. If a bucket name is passed
+while a paired appliance is configured, the command is rejected and asks for a
+writable ObjectStore name.
+
 Upload a single file to a prefix. The filename is preserved:
 
 .. code-block:: console
 
-   dasobjectstore-remote upload dos-generated-data \
+   dasobjectstore-remote upload zymo_fecal_2025.05 \
      --source ./report.json \
      --prefix experiments/run-001
 
@@ -253,7 +260,7 @@ Upload a single file with an exact object key:
 
 .. code-block:: console
 
-   dasobjectstore-remote upload dos-generated-data \
+   dasobjectstore-remote upload zymo_fecal_2025.05 \
      --source ./report.json \
      --key experiments/run-001/report.json
 
@@ -261,7 +268,7 @@ Upload a folder recursively:
 
 .. code-block:: console
 
-   dasobjectstore-remote upload dos-generated-data \
+   dasobjectstore-remote upload zymo_fecal_2025.05 \
      --source ./run-001 \
      --prefix experiments/run-001
 
@@ -270,7 +277,7 @@ For folders, ``dasobjectstore-remote`` uses ``aws s3 sync``. For files, it uses
 
 .. code-block:: console
 
-   dasobjectstore-remote upload dos-generated-data \
+   dasobjectstore-remote upload zymo_fecal_2025.05 \
      --source ./run-001 \
      --prefix experiments/run-001 \
      --dry-run
