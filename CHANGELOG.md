@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.0 - 2026-07-09
+
+- Add an authenticated Activity Reporting card with drag-and-drop benchmarking
+  JSON upload for rebuilding formal DASObjectStore performance reports.
+- Stream rebuilt performance reports back to the browser as PDF downloads using
+  the existing `dasobjectstore performance-report` Grammateus rendering path.
+- Add bounded report-rebuild request handling, schema validation, renderer
+  timeout handling, Web upload/download helpers, and documentation for the
+  Activity reporting workflow.
+
 ## 0.53.5 - 2026-07-09
 
 - Add the full Mnemosyne Biosciences wordmark to the Web login page using a

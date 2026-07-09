@@ -60,7 +60,7 @@ const authenticatedPages = [
     name: "activity",
     selector: "button[data-page='activity']",
     pageSelector: "section[data-page='activity']",
-    readySelector: "text=Daemon task stream",
+    readySelector: "[data-panel='reporting']",
   },
   {
     name: "users-groups",
@@ -369,6 +369,9 @@ async function assertUsersGroupsWorkflow(page, role) {
 }
 
 async function assertActivityWorkflow(page) {
+  await page.locator("[data-panel='reporting']").waitFor();
+  await page.getByText("Rebuild performance report").waitFor();
+  await page.getByText("Drop benchmarking JSON here").waitFor();
   await page.getByText("Administrator jobs", { exact: true }).waitFor();
   await page.getByText("Enclosure preparation", { exact: true }).waitFor();
   await page.getByText("ObjectStore creation", { exact: true }).waitFor();

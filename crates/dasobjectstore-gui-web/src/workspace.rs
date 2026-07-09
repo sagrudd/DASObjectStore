@@ -1295,7 +1295,12 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
 }
 
 #[cfg(target_arch = "wasm32")]
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use web_sys::{
+    Blob, BlobPropertyBag, DragEvent, File, HtmlAnchorElement, HtmlInputElement, HtmlSelectElement,
+    Url,
+};
 #[cfg(target_arch = "wasm32")]
 use yew::prelude::*;
 
@@ -4320,10 +4325,29 @@ pub struct ActivityPageProps {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ReportUploadState {
+    Idle,
+    Rendering {
+        filename: String,
+        size_label: String,
+    },
+    Downloaded {
+        filename: String,
+    },
+    Failed {
+        message: String,
+    },
+}
+
+#[cfg(target_arch = "wasm32")]
 #[function_component(ActivityPage)]
 pub fn activity_page(props: &ActivityPageProps) -> Html {
     let api_path = WorkspacePage::Activity.api_path(&props.api_base_path);
+    let report_upload_path =
+        crate::api::activity_performance_report_upload_path(&props.api_base_path);
     let activity_state = use_state(|| ApiLoadState::<ActivityWorkspaceResponse>::Loading);
+    let report_upload_state = use_state(|| ReportUploadState::Idle);
 
     {
         let api_path = api_path.clone();
@@ -4345,6 +4369,76 @@ pub fn activity_page(props: &ActivityPageProps) -> Html {
         });
     }
 
+    let submit_report_file = {
+        let report_upload_path = report_upload_path.clone();
+        let report_upload_state = report_upload_state.clone();
+        Callback::from(move |file: File| {
+            let filename = file.name();
+            let size_label = format_file_size(file.size());
+            if !filename.to_ascii_lowercase().ends_with(".json") {
+                report_upload_state.set(ReportUploadState::Failed {
+                    message: "Select a DASObjectStore benchmarking JSON artifact.".to_string(),
+                });
+                return;
+            }
+            report_upload_state.set(ReportUploadState::Rendering {
+                filename: filename.clone(),
+                size_label,
+            });
+            let report_upload_path = report_upload_path.clone();
+            let report_upload_state = report_upload_state.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                match crate::api::upload_performance_report_json(&report_upload_path, file).await {
+                    Ok(download) => match download_pdf_to_host(&download.filename, &download.bytes)
+                    {
+                        Ok(()) => report_upload_state.set(ReportUploadState::Downloaded {
+                            filename: download.filename,
+                        }),
+                        Err(message) => {
+                            report_upload_state.set(ReportUploadState::Failed { message })
+                        }
+                    },
+                    Err(err) => report_upload_state.set(ReportUploadState::Failed {
+                        message: err.message,
+                    }),
+                }
+            });
+        })
+    };
+
+    let on_report_file_change = {
+        let submit_report_file = submit_report_file.clone();
+        Callback::from(move |event: Event| {
+            let Some(input) = event
+                .target()
+                .and_then(|target| target.dyn_into::<HtmlInputElement>().ok())
+            else {
+                return;
+            };
+            if let Some(file) = input.files().and_then(|files| files.item(0)) {
+                submit_report_file.emit(file);
+            }
+            input.set_value("");
+        })
+    };
+
+    let on_report_drag_over = Callback::from(|event: DragEvent| {
+        event.prevent_default();
+    });
+    let on_report_drop = {
+        let submit_report_file = submit_report_file.clone();
+        Callback::from(move |event: DragEvent| {
+            event.prevent_default();
+            if let Some(file) = event
+                .data_transfer()
+                .and_then(|transfer| transfer.files())
+                .and_then(|files| files.item(0))
+            {
+                submit_report_file.emit(file);
+            }
+        })
+    };
+
     html! {
         <section class="dos-page" data-page="activity" data-api-route={api_path}>
             <PageHeader
@@ -4352,13 +4446,25 @@ pub fn activity_page(props: &ActivityPageProps) -> Html {
                 title="Activity"
                 summary="Administrator work, ingest, settlement, repair, and endpoint validation from the shared daemon job model."
             />
-            { render_activity_state(&*activity_state) }
+            { render_activity_state(
+                &*activity_state,
+                &*report_upload_state,
+                on_report_file_change,
+                on_report_drag_over,
+                on_report_drop,
+            ) }
         </section>
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_activity_state(state: &ApiLoadState<ActivityWorkspaceResponse>) -> Html {
+fn render_activity_state(
+    state: &ApiLoadState<ActivityWorkspaceResponse>,
+    report_upload_state: &ReportUploadState,
+    on_report_file_change: Callback<Event>,
+    on_report_drag_over: Callback<DragEvent>,
+    on_report_drop: Callback<DragEvent>,
+) -> Html {
     match state {
         ApiLoadState::Loading => render_activity_state_message(
             "Loading",
@@ -4366,7 +4472,13 @@ fn render_activity_state(state: &ApiLoadState<ActivityWorkspaceResponse>) -> Htm
             "The Web console is requesting the shared daemon activity workspace.",
         ),
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_activity_workspace(view)
+            render_activity_workspace(
+                view,
+                report_upload_state,
+                on_report_file_change,
+                on_report_drag_over,
+                on_report_drop,
+            )
         }
         ApiLoadState::Empty(message) => {
             render_activity_state_message("Inventory", "No daemon activity data", message)
@@ -4383,7 +4495,13 @@ fn render_activity_state(state: &ApiLoadState<ActivityWorkspaceResponse>) -> Htm
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_activity_workspace(view: &ActivityWorkspaceResponse) -> Html {
+fn render_activity_workspace(
+    view: &ActivityWorkspaceResponse,
+    report_upload_state: &ReportUploadState,
+    on_report_file_change: Callback<Event>,
+    on_report_drag_over: Callback<DragEvent>,
+    on_report_drop: Callback<DragEvent>,
+) -> Html {
     html! {
         <>
             <div class="dos-metric-grid dos-activity-queues">
@@ -4392,6 +4510,12 @@ fn render_activity_workspace(view: &ActivityWorkspaceResponse) -> Html {
             <div class="dos-activity-grid">
                 { for activity_category_summaries(view).into_iter().map(render_activity_category_card) }
             </div>
+            { render_activity_reporting_card(
+                report_upload_state,
+                on_report_file_change,
+                on_report_drag_over,
+                on_report_drop,
+            ) }
             <section class="dos-card dos-wide-card dos-activity-tasks">
                 <div class="dos-card-row">
                     <span class="dos-card-label">{ "Daemon task stream" }</span>
@@ -4416,6 +4540,137 @@ fn render_activity_workspace(view: &ActivityWorkspaceResponse) -> Html {
                 </section>
             }
         </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_activity_reporting_card(
+    state: &ReportUploadState,
+    on_report_file_change: Callback<Event>,
+    on_report_drag_over: Callback<DragEvent>,
+    on_report_drop: Callback<DragEvent>,
+) -> Html {
+    let disabled = matches!(state, ReportUploadState::Rendering { .. });
+    html! {
+        <section class="dos-card dos-wide-card dos-reporting-card" data-panel="reporting">
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ "Reporting" }</span>
+                <span class="dos-status-pill">{ report_upload_state_label(state) }</span>
+            </div>
+            <h2>{ "Rebuild performance report" }</h2>
+            <p>{ "Drop a DASObjectStore benchmarking JSON artifact to regenerate the formal Mnemosyne PDF report. The PDF downloads automatically when rendering completes." }</p>
+            <label
+                class={classes!("dos-report-dropzone", disabled.then_some("disabled"))}
+                ondragover={on_report_drag_over}
+                ondrop={on_report_drop}
+            >
+                <strong>{ "Drop benchmarking JSON here" }</strong>
+                <span>{ "or choose a .json artifact generated by dasobjectstore performance-test" }</span>
+                <input
+                    type="file"
+                    accept=".json,application/json"
+                    disabled={disabled}
+                    onchange={on_report_file_change}
+                />
+            </label>
+            { render_report_upload_progress(state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn report_upload_state_label(state: &ReportUploadState) -> &'static str {
+    match state {
+        ReportUploadState::Idle => "ready",
+        ReportUploadState::Rendering { .. } => "rendering",
+        ReportUploadState::Downloaded { .. } => "downloaded",
+        ReportUploadState::Failed { .. } => "review",
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_report_upload_progress(state: &ReportUploadState) -> Html {
+    match state {
+        ReportUploadState::Idle => html! {
+            <div class="dos-report-progress" data-state="idle">
+                <span>{ "Accepted input: DASObjectStore performance-test JSON." }</span>
+            </div>
+        },
+        ReportUploadState::Rendering {
+            filename,
+            size_label,
+        } => html! {
+            <div class="dos-report-progress" data-state="rendering">
+                <div class="dos-report-progress-meta">
+                    <span>{ filename.clone() }</span>
+                    <span>{ size_label.clone() }</span>
+                </div>
+                <div class="dos-report-progress-bar">
+                    <span class="dos-report-progress-fill"></span>
+                </div>
+                <span>{ "Uploading JSON and rendering the formal PDF report." }</span>
+            </div>
+        },
+        ReportUploadState::Downloaded { filename } => html! {
+            <div class="dos-report-progress" data-state="downloaded">
+                <strong>{ "PDF report prepared" }</strong>
+                <span>{ format!("{filename} has been sent to the browser download manager.") }</span>
+            </div>
+        },
+        ReportUploadState::Failed { message } => html! {
+            <div class="dos-report-progress" data-state="error">
+                <strong>{ "Report rebuild failed" }</strong>
+                <span>{ message.clone() }</span>
+            </div>
+        },
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn download_pdf_to_host(filename: &str, bytes: &[u8]) -> Result<(), String> {
+    let array = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&array);
+    let mut options = BlobPropertyBag::new();
+    options.set_type("application/pdf");
+    let blob = Blob::new_with_u8_array_sequence_and_options(&parts, &options)
+        .map_err(|_| "could not prepare PDF download blob".to_string())?;
+    let url = Url::create_object_url_with_blob(&blob)
+        .map_err(|_| "could not create browser download URL".to_string())?;
+    let result = (|| {
+        let document = web_sys::window()
+            .and_then(|window| window.document())
+            .ok_or_else(|| "browser document is unavailable".to_string())?;
+        let anchor = document
+            .create_element("a")
+            .map_err(|_| "could not create browser download link".to_string())?
+            .dyn_into::<HtmlAnchorElement>()
+            .map_err(|_| "browser download link is not an anchor".to_string())?;
+        anchor.set_href(&url);
+        anchor.set_download(filename);
+        let body = document
+            .body()
+            .ok_or_else(|| "browser document body is unavailable".to_string())?;
+        body.append_child(&anchor)
+            .map_err(|_| "could not attach browser download link".to_string())?;
+        anchor.click();
+        anchor.remove();
+        Ok(())
+    })();
+    let _ = Url::revoke_object_url(&url);
+    result
+}
+
+#[cfg(target_arch = "wasm32")]
+fn format_file_size(bytes: f64) -> String {
+    const MIB: f64 = 1024.0 * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes / MIB)
+    } else {
+        format!("{:.0} B", bytes)
     }
 }
 

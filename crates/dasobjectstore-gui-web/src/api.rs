@@ -935,6 +935,82 @@ pub async fn get_activity_workspace(path: &str) -> Result<ActivityWorkspaceRespo
     get_json(path).await
 }
 
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub fn activity_performance_report_upload_path(api_base_path: &str) -> String {
+    format!(
+        "{}/workspaces/activity/reporting/performance-report",
+        api_base_path.trim_end_matches('/')
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+pub struct PerformanceReportDownload {
+    pub filename: String,
+    pub bytes: Vec<u8>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn upload_performance_report_json(
+    path: &str,
+    file: web_sys::File,
+) -> Result<PerformanceReportDownload, ApiError> {
+    let file_name = file.name();
+    let mut request = Request::post(path)
+        .header("content-type", "application/json")
+        .header("x-dasobjectstore-filename", &file_name);
+    if let Some((username, session_token)) = crate::storage::stored_session() {
+        request = request
+            .header("x-dasobjectstore-username", &username)
+            .header("x-dasobjectstore-session-token", &session_token)
+            .header("authorization", &format!("Bearer {session_token}"));
+    }
+    let response = request.body(file)?.send().await?;
+    let status = response.status();
+    if !(200..300).contains(&status) {
+        let message = response
+            .json::<ErrorResponse>()
+            .await
+            .map(|error| error.message)
+            .unwrap_or_else(|_| format!("DASObjectStore server returned HTTP {status}"));
+        return Err(ApiError {
+            message,
+            status: Some(status),
+        });
+    }
+    let filename = response
+        .headers()
+        .get("content-disposition")
+        .as_deref()
+        .and_then(filename_from_content_disposition)
+        .unwrap_or_else(|| default_report_pdf_name(&file_name));
+    let bytes = response.binary().await?;
+    Ok(PerformanceReportDownload { filename, bytes })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn filename_from_content_disposition(value: &str) -> Option<String> {
+    value.split(';').find_map(|part| {
+        let part = part.trim();
+        part.strip_prefix("filename=")
+            .map(|filename| filename.trim_matches('"').to_string())
+            .filter(|filename| !filename.is_empty())
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn default_report_pdf_name(file_name: &str) -> String {
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name)
+        .trim();
+    if stem.is_empty() {
+        "dasobjectstore-performance-report.pdf".to_string()
+    } else {
+        format!("{stem}.pdf")
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub async fn get_endpoints_workspace(path: &str) -> Result<EndpointsWorkspaceResponse, ApiError> {
     get_json(path).await
@@ -1140,12 +1216,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        admin_job_cancel_path, admin_job_status_path, auth_path, endpoint_inventory_upsert_path,
-        object_store_create_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
-        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
-        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
-        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
-        LocalGroupAdminResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+        activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
+        auth_path, endpoint_inventory_upsert_path, object_store_create_path,
+        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
+        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
+        EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
+        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
+        ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
 
     #[test]
@@ -1153,6 +1230,14 @@ mod tests {
         assert_eq!(
             auth_path("/products/dasobjectstore/api", "login"),
             "/products/dasobjectstore/api/login"
+        );
+    }
+
+    #[test]
+    fn builds_activity_report_upload_route_under_product_mount() {
+        assert_eq!(
+            activity_performance_report_upload_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/workspaces/activity/reporting/performance-report"
         );
     }
 

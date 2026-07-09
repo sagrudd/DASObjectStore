@@ -15,7 +15,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.53.5"
+version = "0.54.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -38,6 +38,7 @@ dasobjectstore-remote = { path = "crates/dasobjectstore-remote" }
 dasobjectstore-tui = { path = "crates/dasobjectstore-tui" }
 gloo-net = "0.5.0"
 gloo-timers = "0.3.0"
+js-sys = "0.3.83"
 plist = "1"
 pam-client = { version = "0.5.0", default-features = false }
 rcgen = "0.14.8"
@@ -53,6 +54,7 @@ sha2 = "0.10.9"
 tokio = { version = "1.48.0", features = ["macros", "net", "rt", "rt-multi-thread"] }
 tower = { version = "0.5.2", features = ["util"] }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
+wasm-bindgen = "0.2.106"
 wasm-bindgen-futures = "0.4.76"
 web-sys = "0.3.82"
 yew = { version = "0.23.0", features = ["csr"] }

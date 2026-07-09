@@ -13,6 +13,7 @@ mod endpoints_registry;
 mod groups_registry;
 mod home_aggregator;
 mod object_stores_aggregator;
+mod reporting;
 pub mod routes;
 pub mod server_config;
 pub mod tls_assets;

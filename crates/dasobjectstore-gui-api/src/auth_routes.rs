@@ -6,8 +6,13 @@ use crate::{
     UsersGroupsWorkspaceView,
 };
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    body::{Body, Bytes},
+    extract::{DefaultBodyLimit, Path, State},
+    http::{
+        header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
+    response::{IntoResponse, Response},
     routing::{get, post},
     Extension, Json, Router,
 };
@@ -55,7 +60,8 @@ pub fn gui_api_router_for_host_mode(
             .merge(standalone_dashboard_router(auth_store.clone()))
             .merge(standalone_auth_router(auth_store.clone()))
             .merge(standalone_users_groups_router(auth_store.clone()))
-            .merge(standalone_enclosure_admin_router(auth_store)),
+            .merge(standalone_enclosure_admin_router(auth_store.clone()))
+            .merge(standalone_reporting_router(auth_store)),
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
 }
@@ -148,6 +154,23 @@ fn standalone_enclosure_admin_router_with_state(
         .with_state(state)
 }
 
+pub fn standalone_reporting_router(auth_store: LocalAuthStore) -> Router {
+    standalone_reporting_router_with_state(StandaloneReportingRouteState::system(auth_store))
+}
+
+fn standalone_reporting_router_with_state(state: StandaloneReportingRouteState) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/workspaces/activity/reporting/performance-report",
+            post(rebuild_performance_report),
+        )
+        .layer(DefaultBodyLimit::max(
+            crate::reporting::PERFORMANCE_REPORT_UPLOAD_MAX_BYTES,
+        ))
+        .layer(Extension(state.auth_store.clone()))
+        .with_state(state)
+}
+
 #[derive(Clone)]
 struct StandaloneUsersGroupsRouteState {
     auth_store: LocalAuthStore,
@@ -169,6 +192,12 @@ struct StandaloneEnclosureAdminRouteState {
     enclosure_admin_client: Option<Arc<dyn StandaloneEnclosureAdminClient>>,
 }
 
+#[derive(Clone)]
+struct StandaloneReportingRouteState {
+    auth_store: LocalAuthStore,
+    local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
+}
+
 impl StandaloneEnclosureAdminRouteState {
     fn system(auth_store: LocalAuthStore) -> Self {
         Self {
@@ -177,6 +206,15 @@ impl StandaloneEnclosureAdminRouteState {
             enclosure_admin_client: Some(Arc::new(
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             )),
+        }
+    }
+}
+
+impl StandaloneReportingRouteState {
+    fn system(auth_store: LocalAuthStore) -> Self {
+        Self {
+            auth_store,
+            local_user_provider: Arc::new(SystemLocalUserAuthorityProvider),
         }
     }
 }
@@ -934,6 +972,68 @@ async fn upsert_endpoint_inventory(
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
     submit_endpoint_inventory_upsert_request(&state, request).map(Json)
+}
+
+async fn rebuild_performance_report(
+    State(state): State<StandaloneReportingRouteState>,
+    actor: AuthenticatedGuiActor,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    let uploaded_filename = headers
+        .get("x-dasobjectstore-filename")
+        .and_then(|value| value.to_str().ok());
+    let report = crate::reporting::rebuild_performance_report_pdf_from_upload(
+        &body,
+        uploaded_filename,
+        &current_user.username,
+    )
+    .map_err(performance_report_rebuild_route_error)?;
+
+    let mut response = Body::from(report.bytes).into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/pdf"));
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "attachment; filename=\"{}\"",
+            report.filename.replace('"', "")
+        ))
+        .map_err(|err| {
+            route_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "invalid_report_filename",
+                err.to_string(),
+            )
+        })?,
+    );
+    Ok(response)
+}
+
+fn performance_report_rebuild_route_error(
+    err: crate::reporting::PerformanceReportRebuildError,
+) -> (StatusCode, Json<AuthRouteError>) {
+    match err {
+        crate::reporting::PerformanceReportRebuildError::EmptyUpload
+        | crate::reporting::PerformanceReportRebuildError::TooLarge { .. }
+        | crate::reporting::PerformanceReportRebuildError::InvalidJson(_)
+        | crate::reporting::PerformanceReportRebuildError::UnsupportedSchema(_) => route_error(
+            StatusCode::BAD_REQUEST,
+            "performance_report_rebuild_failed",
+            err.to_string(),
+        ),
+        crate::reporting::PerformanceReportRebuildError::Io(_)
+        | crate::reporting::PerformanceReportRebuildError::RendererFailed(_) => route_error(
+            StatusCode::BAD_GATEWAY,
+            "performance_report_renderer_failed",
+            err.to_string(),
+        ),
+    }
 }
 
 async fn admin_job_status(
@@ -1833,18 +1933,18 @@ mod tests {
     use super::{
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
         standalone_dashboard_router_with_state, standalone_enclosure_admin_router_with_state,
-        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
-        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointBindingReadiness,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
-        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
-        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
-        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
-        StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
+        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
+        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
+        DaemonEndpointBindingReadiness, DaemonEndpointKind, DaemonEndpointValidation,
+        DaemonEndpointValidationState, DaemonUpsertEndpointInventoryRequest,
+        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
+        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, PrepareEnclosureHddDeviceRequest,
+        PrepareEnclosureRequest, RegisterRequest, SessionCheckRequest,
+        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
+        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
+        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEnclosureAdminClient,
         StandaloneEnclosureAdminClientError, StandaloneEnclosureAdminRouteState,
@@ -1853,9 +1953,10 @@ mod tests {
         StandaloneEndpointInventoryUpsertResponse, StandaloneLocalGroupAdminAcceptedResponse,
         StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
         StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
-        StandaloneLocalGroupOperation, StandaloneUsersGroupsRouteState,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
-        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
+        StandaloneLocalGroupOperation, StandaloneReportingRouteState,
+        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -2918,6 +3019,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn performance_report_rebuild_requires_session() {
+        let root = temp_root("performance-report-rebuild-session");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_reporting_router_with_state(test_reporting_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/workspaces/activity/reporting/performance-report")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn performance_report_rebuild_rejects_wrong_schema_before_rendering() {
+        let root = temp_root("performance-report-rebuild-schema");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_reporting_router_with_state(test_reporting_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+        ));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/workspaces/activity/reporting/performance-report")
+                    .header("content-type", "application/json")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .header("x-dasobjectstore-filename", "wrong.json")
+                    .body(Body::from(r#"{"schema":"wrong"}"#))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response_json(response).await;
+        assert_eq!(body["code"], "performance_report_rebuild_failed");
+        assert!(body["message"]
+            .as_str()
+            .expect("message")
+            .contains("unsupported benchmark JSON schema"));
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn endpoint_inventory_upsert_rejects_invalid_endpoint_kind() {
         let root = temp_root("endpoint-upsert-invalid-kind");
         let auth_store = registered_auth_store(&root);
@@ -3298,6 +3461,16 @@ mod tests {
             local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
             enclosure_admin_client: enclosure_admin_client
                 .map(|client| client as Arc<dyn StandaloneEnclosureAdminClient>),
+        }
+    }
+
+    fn test_reporting_state(
+        auth_store: LocalAuthStore,
+        current_user: LocalUserMetadata,
+    ) -> StandaloneReportingRouteState {
+        StandaloneReportingRouteState {
+            auth_store,
+            local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
         }
     }
 
