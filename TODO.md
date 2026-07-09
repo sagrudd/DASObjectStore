@@ -783,7 +783,7 @@ planning are tracked under Milestones 21 and 22.
 - [ ] Wire centralized ingress-origin classification through future Web
   direct-upload execution and concrete Synoptikon/Mneion submission clients
   once those byte-transfer/client paths are implemented.
-- [ ] Implement the default HDD landing worker rule as
+- [x] Implement the default HDD landing worker rule as
   `max(number_of_hdds_in_enclosure - 2, 2)` for SSD destage and local
   direct-to-HDD ingest, with one active writer per physical HDD and bounded
   behavior when there are too few eligible HDDs.

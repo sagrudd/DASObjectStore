@@ -13,6 +13,9 @@ agreement before landing.
 - Advertise shared ``web_upload``, ``remote_s3``, ``synoptikon``, and
   ``mneion`` ingress placement contracts through Web remote-upload and
   Mnemosyne/Synoptikon binding payloads.
+- Update default HDD landing worker fan-out to
+  ``max(managed_hdd_count - 2, 2)`` capped by available HDDs, with one worker
+  only for one-HDD/degraded cases.
 - Carry typed ingress origin through daemon file-ingest requests, default
   legacy requests to ``local_server``, and have the daemon runtime use the
   request origin when deciding SSD-first versus direct-to-HDD landing.

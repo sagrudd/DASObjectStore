@@ -111,10 +111,12 @@ reproducible or externally recoverable datasets; protected generated or
 critical stores remain SSD-first.
 
 By default, the daemon derives HDD settlement fan-out from the managed HDDs in
-the target DAS: ``managed_hdd_count - 2``, bounded to at least one worker and
-never more workers than available HDDs. This keeps source-to-SSD staging moving
-while leaving headroom for the appliance and avoiding multiple concurrent
-writes to the same disk. Operators may override this for a run:
+the target DAS: ``max(managed_hdd_count - 2, 2)``, capped at the available HDD
+count. A one-HDD test or degraded enclosure therefore uses one worker, two to
+four HDDs use two workers, five HDDs use three workers, and an eight-HDD DAS
+uses six workers by default. This keeps source-to-SSD staging moving while
+leaving headroom for the appliance and avoiding multiple concurrent writes to
+the same disk. Operators may override this for a run:
 
 .. code-block:: console
 

@@ -715,7 +715,10 @@ fn resolve_hdd_worker_count(
 }
 
 fn default_hdd_worker_count(managed_hdd_count: usize) -> usize {
-    managed_hdd_count.saturating_sub(2).max(1)
+    managed_hdd_count
+        .saturating_sub(2)
+        .max(2)
+        .min(managed_hdd_count)
 }
 
 #[derive(Debug)]
@@ -2066,11 +2069,14 @@ mod tests {
     }
 
     #[test]
-    fn hdd_workers_default_to_managed_hdd_count_minus_two() {
-        assert_eq!(default_hdd_worker_count(7), 5);
-        assert_eq!(resolve_hdd_worker_count(None, 7).expect("workers"), 5);
-        assert_eq!(resolve_hdd_worker_count(None, 3).expect("workers"), 1);
-        assert_eq!(resolve_hdd_worker_count(None, 1).expect("workers"), 1);
+    fn hdd_workers_default_to_minus_two_with_two_worker_floor_when_possible() {
+        for (hdd_count, expected_workers) in [(1, 1), (2, 2), (3, 2), (4, 2), (5, 3), (8, 6)] {
+            assert_eq!(default_hdd_worker_count(hdd_count), expected_workers);
+            assert_eq!(
+                resolve_hdd_worker_count(None, hdd_count).expect("workers"),
+                expected_workers
+            );
+        }
     }
 
     #[test]
