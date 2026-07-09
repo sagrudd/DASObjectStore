@@ -845,9 +845,9 @@ planning are tracked under Milestones 21 and 22.
 - [x] Wire remote upload transfer-worker execution to the cleanup worker facade
   so failed transfer jobs can run a cancellation cleanup plan and return the
   cleanup report to daemon callers.
-- [ ] Add concrete cleanup workers for partial SSD-staged objects, failed S3
+- [x] Add concrete cleanup workers for partial SSD-staged objects, failed S3
   multipart uploads, abandoned sessions, expired pairings, and interrupted
-  browser tabs.
+  browser handoff records.
 - [ ] Extend daemon progress/events so remote uploads show source scan count,
   staged bytes, S3 transfer rate, SSD queue depth, HDD landing queue depth,
   active per-HDD writers, verification state, and session-renewal status.

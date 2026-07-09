@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Add a concrete daemon remote-upload cancellation cleanup runtime for managed
+  SSD stage cleanup, local session/pairing/browser-handoff state cleanup, and
+  AWS CLI multipart aborts with managed-root path containment checks.
 - Wire remote upload transfer-worker execution to cancellation cleanup plans so
   failed transfers can return daemon-visible cleanup reports without holding S3
   admission capacity during cleanup.

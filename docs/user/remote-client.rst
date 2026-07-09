@@ -373,8 +373,10 @@ safe to retry. The runtime cleanup worker facade records per-action completion
 or failure and continues through the plan, so a failed multipart abort does not
 hide session or handoff cleanup status. Remote upload transfer workers can now
 run that cleanup plan after a failed transfer and return the cleanup report to
-the daemon caller; concrete SSD, S3 multipart, session, pairing, and browser
-handoff cleanup adapters are the next implementation step.
+the daemon caller. The daemon cleanup runtime removes only configured managed
+SSD-stage and local state-record paths, rejects path-escape identifiers, and
+uses the configured AWS CLI environment to abort incomplete multipart uploads
+against the object service.
 
 Credential Helper Contract
 --------------------------

@@ -12,7 +12,8 @@ use dasobjectstore_core::remote_upload::{
     RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
 };
 use std::{
-    fmt,
+    fmt, fs,
+    path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -896,6 +897,126 @@ pub trait RemoteUploadCancellationCleanupWorker {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupRuntimeConfig {
+    pub ssd_stage_root: PathBuf,
+    pub session_state_root: PathBuf,
+    pub pairing_state_root: PathBuf,
+    pub browser_handoff_state_root: PathBuf,
+    pub multipart_abort: Option<RemoteUploadMultipartAbortConfig>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadMultipartAbortConfig {
+    pub program: String,
+    pub endpoint_url: String,
+    pub bucket: String,
+    pub object_key: String,
+    pub environment: Vec<(String, String)>,
+}
+
+pub struct RemoteUploadCancellationCleanupRuntime<'a> {
+    config: RemoteUploadCancellationCleanupRuntimeConfig,
+    runner: &'a dyn ServiceCommandRunner,
+}
+
+impl<'a> RemoteUploadCancellationCleanupRuntime<'a> {
+    pub fn new(
+        config: RemoteUploadCancellationCleanupRuntimeConfig,
+        runner: &'a dyn ServiceCommandRunner,
+    ) -> Self {
+        Self { config, runner }
+    }
+
+    fn remove_managed_path(
+        root: &Path,
+        identifier: &str,
+    ) -> Result<(), RemoteUploadCancellationCleanupError> {
+        let path = safe_child_path(root, identifier)?;
+        if !path.exists() {
+            return Ok(());
+        }
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            RemoteUploadCancellationCleanupError::new(format!(
+                "inspect cleanup target {} failed: {error}",
+                path.display()
+            ))
+        })?;
+        if metadata.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        }
+        .map_err(|error| {
+            RemoteUploadCancellationCleanupError::new(format!(
+                "remove cleanup target {} failed: {error}",
+                path.display()
+            ))
+        })
+    }
+
+    fn abort_multipart_upload(
+        &self,
+        upload_id: &str,
+    ) -> Result<(), RemoteUploadCancellationCleanupError> {
+        let multipart = self.config.multipart_abort.as_ref().ok_or_else(|| {
+            RemoteUploadCancellationCleanupError::new(
+                "remote upload multipart cleanup is not configured",
+            )
+        })?;
+        require_cleanup_field("multipart upload id", upload_id)?;
+        require_cleanup_field("multipart cleanup program", &multipart.program)?;
+        require_cleanup_field("multipart cleanup endpoint URL", &multipart.endpoint_url)?;
+        require_cleanup_field("multipart cleanup bucket", &multipart.bucket)?;
+        require_cleanup_field("multipart cleanup object key", &multipart.object_key)?;
+
+        let args = vec![
+            "--endpoint-url".to_string(),
+            multipart.endpoint_url.clone(),
+            "s3api".to_string(),
+            "abort-multipart-upload".to_string(),
+            "--bucket".to_string(),
+            multipart.bucket.clone(),
+            "--key".to_string(),
+            multipart.object_key.clone(),
+            "--upload-id".to_string(),
+            upload_id.to_string(),
+        ];
+        self.runner
+            .run_with_display_args_and_env(&multipart.program, &args, &args, &multipart.environment)
+            .map(|_| ())
+            .map_err(|error| RemoteUploadCancellationCleanupError::new(error.to_string()))
+    }
+}
+
+impl RemoteUploadCancellationCleanupWorker for RemoteUploadCancellationCleanupRuntime<'_> {
+    fn cleanup(
+        &self,
+        action: &RemoteUploadCancellationCleanupAction,
+    ) -> Result<(), RemoteUploadCancellationCleanupError> {
+        match action.scope {
+            RemoteUploadCancellationCleanupScope::PartialSsdStage => {
+                Self::remove_managed_path(&self.config.ssd_stage_root, &action.identifier)
+            }
+            RemoteUploadCancellationCleanupScope::FailedMultipartUpload => {
+                self.abort_multipart_upload(&action.identifier)
+            }
+            RemoteUploadCancellationCleanupScope::AbandonedSession => {
+                Self::remove_managed_path(&self.config.session_state_root, &action.identifier)
+            }
+            RemoteUploadCancellationCleanupScope::ExpiredPairing => {
+                Self::remove_managed_path(&self.config.pairing_state_root, &action.identifier)
+            }
+            RemoteUploadCancellationCleanupScope::InterruptedBrowserHandoff => {
+                Self::remove_managed_path(
+                    &self.config.browser_handoff_state_root,
+                    &action.identifier,
+                )
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteUploadCancellationCleanupError {
     message: String,
 }
@@ -1033,6 +1154,44 @@ fn non_blank(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
+fn require_cleanup_field(
+    field: &str,
+    value: &str,
+) -> Result<(), RemoteUploadCancellationCleanupError> {
+    if value.trim().is_empty() {
+        return Err(RemoteUploadCancellationCleanupError::new(format!(
+            "{field} must not be blank"
+        )));
+    }
+    Ok(())
+}
+
+fn safe_child_path(
+    root: &Path,
+    identifier: &str,
+) -> Result<PathBuf, RemoteUploadCancellationCleanupError> {
+    require_cleanup_field("cleanup identifier", identifier)?;
+    let relative = Path::new(identifier);
+    let mut child = PathBuf::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => child.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(RemoteUploadCancellationCleanupError::new(format!(
+                    "cleanup identifier must stay under managed root: {identifier}"
+                )));
+            }
+        }
+    }
+    if child.as_os_str().is_empty() {
+        return Err(RemoteUploadCancellationCleanupError::new(
+            "cleanup identifier must not be empty",
+        ));
+    }
+    Ok(root.join(child))
+}
+
 fn admission_decision_for_state(
     policy: RemoteUploadBackpressurePolicy,
     ssd_pressure: DaemonSsdPressure,
@@ -1057,12 +1216,14 @@ mod tests {
         RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
         RemoteUploadCancellationCleanupAction, RemoteUploadCancellationCleanupActionState,
         RemoteUploadCancellationCleanupError, RemoteUploadCancellationCleanupPlan,
-        RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupScope,
-        RemoteUploadCancellationCleanupWorker, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
-        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
-        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
-        RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
-        RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
+        RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupRuntime,
+        RemoteUploadCancellationCleanupRuntimeConfig, RemoteUploadCancellationCleanupScope,
+        RemoteUploadCancellationCleanupWorker, RemoteUploadMultipartAbortConfig,
+        RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
+        RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
+        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressReporter,
+        RemoteUploadS3TransferProgressUpdate, RemoteUploadS3TransferWorker,
+        RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
         DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonJobEvent, DaemonJobKind,
@@ -2027,6 +2188,155 @@ mod tests {
         );
     }
 
+    #[test]
+    fn concrete_cleanup_worker_removes_managed_stage_and_state_records() {
+        let root = temp_root("remote-upload-concrete-cleanup");
+        let stage_root = root.join("ssd-stage");
+        let session_root = root.join("sessions");
+        let pairing_root = root.join("pairings");
+        let handoff_root = root.join("handoffs");
+        std::fs::create_dir_all(stage_root.join("remote-upload-job-024"))
+            .expect("stage dir created");
+        std::fs::write(
+            stage_root.join("remote-upload-job-024").join("part"),
+            b"partial",
+        )
+        .expect("stage file written");
+        std::fs::create_dir_all(&session_root).expect("session dir created");
+        std::fs::create_dir_all(&pairing_root).expect("pairing dir created");
+        std::fs::create_dir_all(&handoff_root).expect("handoff dir created");
+        std::fs::write(session_root.join("session-1"), b"session").expect("session written");
+        std::fs::write(pairing_root.join("pairing-1"), b"pairing").expect("pairing written");
+        std::fs::write(handoff_root.join("handoff-1"), b"handoff").expect("handoff written");
+        let runner = FakeRemoteUploadCommandRunner::default();
+        let worker = RemoteUploadCancellationCleanupRuntime::new(
+            cleanup_runtime_config(&root, None),
+            &runner,
+        );
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-024".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: Some("remote-upload-job-024".to_string()),
+                multipart_upload_id: None,
+                session_id: Some("session-1".to_string()),
+                pairing_id: Some("pairing-1".to_string()),
+                browser_handoff_id: Some("handoff-1".to_string()),
+                reason: Some("user cancelled upload".to_string()),
+            });
+
+        let report = run_remote_upload_cancellation_cleanup(plan, &worker);
+
+        assert!(report.completed());
+        assert!(!stage_root.join("remote-upload-job-024").exists());
+        assert!(!session_root.join("session-1").exists());
+        assert!(!pairing_root.join("pairing-1").exists());
+        assert!(!handoff_root.join("handoff-1").exists());
+        assert!(runner.calls.borrow().is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn concrete_cleanup_worker_aborts_multipart_upload_with_aws_cli() {
+        let root = temp_root("remote-upload-concrete-multipart-cleanup");
+        let runner = FakeRemoteUploadCommandRunner::default();
+        let worker = RemoteUploadCancellationCleanupRuntime::new(
+            cleanup_runtime_config(
+                &root,
+                Some(RemoteUploadMultipartAbortConfig {
+                    program: "aws".to_string(),
+                    endpoint_url: "http://127.0.0.1:3900".to_string(),
+                    bucket: "dos-zymo".to_string(),
+                    object_key: "raw/reads.fastq.gz".to_string(),
+                    environment: vec![("AWS_ACCESS_KEY_ID".to_string(), "AKIAEXAMPLE".to_string())],
+                }),
+            ),
+            &runner,
+        );
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-025".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: None,
+                multipart_upload_id: Some("upload-123".to_string()),
+                session_id: None,
+                pairing_id: None,
+                browser_handoff_id: None,
+                reason: Some("transfer failed".to_string()),
+            });
+
+        let report = run_remote_upload_cancellation_cleanup(plan, &worker);
+
+        assert!(report.completed());
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "aws");
+        assert_eq!(
+            calls[0].args,
+            [
+                "--endpoint-url",
+                "http://127.0.0.1:3900",
+                "s3api",
+                "abort-multipart-upload",
+                "--bucket",
+                "dos-zymo",
+                "--key",
+                "raw/reads.fastq.gz",
+                "--upload-id",
+                "upload-123"
+            ]
+        );
+        assert_eq!(
+            calls[0].environment,
+            [("AWS_ACCESS_KEY_ID".to_string(), "AKIAEXAMPLE".to_string())]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn concrete_cleanup_worker_rejects_path_escape_identifiers() {
+        let root = temp_root("remote-upload-concrete-cleanup-escape");
+        std::fs::create_dir_all(root.join("ssd-stage")).expect("stage dir created");
+        let outside = root.join("outside");
+        std::fs::write(&outside, b"must remain").expect("outside file written");
+        let runner = FakeRemoteUploadCommandRunner::default();
+        let worker = RemoteUploadCancellationCleanupRuntime::new(
+            cleanup_runtime_config(&root, None),
+            &runner,
+        );
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-026".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: Some("../outside".to_string()),
+                multipart_upload_id: None,
+                session_id: None,
+                pairing_id: None,
+                browser_handoff_id: None,
+                reason: Some("malformed cleanup request".to_string()),
+            });
+
+        let report = run_remote_upload_cancellation_cleanup(plan, &worker);
+        let failed_actions = report.failed_actions();
+
+        assert!(!report.completed());
+        assert_eq!(failed_actions.len(), 1);
+        assert!(failed_actions[0]
+            .error
+            .as_deref()
+            .expect("failure message")
+            .contains("managed root"));
+        assert!(outside.exists());
+        assert!(runner.calls.borrow().is_empty());
+
+        cleanup(&root);
+    }
+
     #[derive(Default)]
     struct RecordingCleanupWorker {
         calls: std::cell::RefCell<Vec<RemoteUploadCancellationCleanupScope>>,
@@ -2061,6 +2371,19 @@ mod tests {
             browser_handoff_id: None,
             reason: Some("transfer failed".to_string()),
         })
+    }
+
+    fn cleanup_runtime_config(
+        root: &std::path::Path,
+        multipart_abort: Option<RemoteUploadMultipartAbortConfig>,
+    ) -> RemoteUploadCancellationCleanupRuntimeConfig {
+        RemoteUploadCancellationCleanupRuntimeConfig {
+            ssd_stage_root: root.join("ssd-stage"),
+            session_state_root: root.join("sessions"),
+            pairing_state_root: root.join("pairings"),
+            browser_handoff_state_root: root.join("handoffs"),
+            multipart_abort,
+        }
     }
 
     struct RecordingByteTransfer {
