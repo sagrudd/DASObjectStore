@@ -248,6 +248,38 @@ pub fn record_remote_upload_s3_transfer_job(
     Ok(event)
 }
 
+pub trait RemoteUploadS3ByteTransfer {
+    fn transfer(
+        &self,
+        progress: &mut RemoteUploadS3TransferProgressReporter<'_>,
+    ) -> Result<(), RemoteUploadS3ByteTransferError>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadS3ByteTransferError {
+    message: String,
+}
+
+impl RemoteUploadS3ByteTransferError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl fmt::Display for RemoteUploadS3ByteTransferError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RemoteUploadS3ByteTransferError {}
+
 pub struct RemoteUploadS3TransferWorker<'a> {
     gate: Arc<RemoteUploadAdmissionGate>,
     registry: &'a dyn AdminJobRegistry,
@@ -267,6 +299,14 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         E: fmt::Display,
     {
         self.run_with_progress(request, |_| transfer())
+    }
+
+    pub fn run_byte_transfer(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        transfer: &(impl RemoteUploadS3ByteTransfer + ?Sized),
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+        self.run_with_progress(request, |progress| transfer.transfer(progress))
     }
 
     pub fn run_with_progress<E>(
@@ -604,8 +644,9 @@ fn admission_decision_for_state(
 mod tests {
     use super::{
         record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
-        RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressUpdate,
+        RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
+        RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
         RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
@@ -1161,6 +1202,98 @@ mod tests {
         assert_eq!(report.runtime_after.active_s3_transfers, 0);
 
         cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_runs_typed_byte_transfer_under_admission_gate() {
+        let root = temp_root("remote-upload-worker-byte-transfer");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let transfer = RecordingByteTransfer { bytes_done: 32 };
+
+        let report = worker
+            .run_byte_transfer(worker_request("remote-upload-job-008"), &transfer)
+            .expect("byte transfer completed");
+
+        assert_eq!(report.progress_events.len(), 1);
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event");
+        };
+        assert_eq!(progress_job.progress.work_bytes_done, 32);
+        assert_eq!(
+            progress_job.progress.message.as_deref(),
+            Some("typed byte transfer copied 32 bytes")
+        );
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected complete final event");
+        };
+        assert_eq!(final_job.progress.stage, "remote_s3_transfer_complete");
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_records_typed_byte_transfer_error_and_releases_capacity() {
+        let root = temp_root("remote-upload-worker-byte-transfer-error");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let transfer = FailingByteTransfer;
+
+        let report = worker
+            .run_byte_transfer(worker_request("remote-upload-job-009"), &transfer)
+            .expect("byte transfer failure recorded");
+
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Failed);
+        assert_eq!(final_job.progress.stage, "remote_s3_transfer_failed");
+        assert_eq!(
+            final_job.failure_message.as_deref(),
+            Some("object service rejected part")
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    struct RecordingByteTransfer {
+        bytes_done: u64,
+    }
+
+    impl RemoteUploadS3ByteTransfer for RecordingByteTransfer {
+        fn transfer(
+            &self,
+            progress: &mut RemoteUploadS3TransferProgressReporter<'_>,
+        ) -> Result<(), RemoteUploadS3ByteTransferError> {
+            progress
+                .record_progress(RemoteUploadS3TransferProgressUpdate {
+                    bytes_done: self.bytes_done,
+                    updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                    message: Some(format!(
+                        "typed byte transfer copied {} bytes",
+                        self.bytes_done
+                    )),
+                })
+                .map_err(|error| RemoteUploadS3ByteTransferError::new(error.to_string()))?;
+            Ok(())
+        }
+    }
+
+    struct FailingByteTransfer;
+
+    impl RemoteUploadS3ByteTransfer for FailingByteTransfer {
+        fn transfer(
+            &self,
+            _progress: &mut RemoteUploadS3TransferProgressReporter<'_>,
+        ) -> Result<(), RemoteUploadS3ByteTransferError> {
+            Err(RemoteUploadS3ByteTransferError::new(
+                "object service rejected part",
+            ))
+        }
     }
 
     fn transfer_job(policy: RemoteUploadBackpressurePolicy) -> RemoteUploadS3TransferJob {

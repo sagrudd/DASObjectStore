@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.4 - 2026-07-09
 
+- Add a typed daemon remote-upload byte-transfer adapter so concrete
+  S3/object-service transfer implementations run through the admission-gated
+  worker and shared job-progress recorder.
 - Add live byte-progress reporting to the daemon remote-upload transfer worker
   so concrete byte-transfer implementations can persist intermediate job
   progress while admission capacity is held.

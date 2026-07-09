@@ -324,7 +324,10 @@ byte-transfer implementation, releases capacity after completion or failure,
 and records the final job state. Concrete byte-transfer implementations can
 also publish intermediate byte progress through the worker while the admission
 permit is held; those updates are persisted as normal daemon job progress
-events.
+events. The daemon exposes a typed byte-transfer adapter for concrete
+S3/object-service upload engines; those engines should implement the adapter
+instead of invoking raw upload code directly, so admission, progress recording,
+and permit release stay centralized.
 
 Credential Helper Contract
 --------------------------

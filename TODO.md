@@ -821,9 +821,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add live byte-progress reporting to the daemon remote-upload transfer
   worker so concrete byte-transfer implementations can persist intermediate
   progress events while admission capacity is held.
-- [ ] Wire the daemon runtime remote-upload admission gate into concrete upload
-  byte-transfer implementations so SSD staging, S3/object-service intake, HDD
-  landing workers, and verification cannot grow without bounds.
+- [x] Add a typed daemon remote-upload byte-transfer adapter so concrete
+  S3/object-service implementations run through the admission-gated worker,
+  shared byte-progress reporter, and capacity-release path.
+- [ ] Wire the actual S3/object-service multipart upload implementation into
+  the typed daemon byte-transfer adapter so SSD staging, S3/object-service
+  intake, HDD landing workers, and verification cannot grow without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
   expired pairings, and interrupted browser tabs.
