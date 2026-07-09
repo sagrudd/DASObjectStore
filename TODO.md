@@ -812,9 +812,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add daemon job registry persistence for remote-upload S3 transfer
   summaries so completed, waiting, rejected, and failed transfer attempts can be
   queried through the common job status/list path.
+- [x] Add a daemon remote-upload S3 transfer worker facade that acquires
+  admission capacity, records running/final job states, executes the provided
+  byte-transfer closure, and releases capacity on completion or failure.
 - [ ] Wire the daemon runtime remote-upload admission gate into concrete upload
-  byte-transfer workers, live progress streams, and HDD/verify queue observers
-  so SSD staging, S3/object-service intake, HDD landing workers, and
+  byte-transfer implementations, live progress streams, and HDD/verify queue
+  observers so SSD staging, S3/object-service intake, HDD landing workers, and
   verification cannot grow without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,

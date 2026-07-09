@@ -2046,6 +2046,7 @@ fn admin_job_kind_label(kind: DaemonJobKind) -> &'static str {
         DaemonJobKind::EndpointValidation => "endpoint_validation",
         DaemonJobKind::ObjectStoreCreation => "object_store_creation",
         DaemonJobKind::Repair => "repair",
+        DaemonJobKind::RemoteUpload => "remote_upload",
         DaemonJobKind::ServiceOperation => "service_operation",
         DaemonJobKind::SystemAdministration => "system_administration",
     }
@@ -2396,6 +2397,15 @@ mod tests {
             .expect("request completes");
 
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn standalone_host_mode_router_builds_without_overlapping_routes() {
+        let root = temp_root("standalone-host-mode-route-overlap");
+        let auth_store = LocalAuthStore::new(&root);
+        let _app = gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store);
 
         cleanup(&root);
     }

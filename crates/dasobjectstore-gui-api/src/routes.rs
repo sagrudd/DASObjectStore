@@ -20,6 +20,10 @@ pub fn gui_api_router() -> Router {
             "/api/v1/dashboard/object-stores",
             get(object_stores_dashboard),
         )
+        .route(
+            "/api/v1/workspaces/remote-upload",
+            get(remote_upload_workspace),
+        )
 }
 
 pub(crate) fn gui_api_router_without_redesign_dashboards() -> Router {
@@ -40,10 +44,6 @@ pub(crate) fn gui_api_router_without_redesign_dashboards() -> Router {
         .route(
             "/api/v1/workspaces/bioinformatics",
             get(product_bioinformatics_workspace),
-        )
-        .route(
-            "/api/v1/workspaces/remote-upload",
-            get(remote_upload_workspace),
         )
         // Legacy operations workspace routes remain available for compatibility.
         // The browser console now exposes Home, Enclosures, ObjectStores, and

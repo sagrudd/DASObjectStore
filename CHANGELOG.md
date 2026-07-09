@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.4 - 2026-07-09
+
+- Add a daemon remote-upload S3 transfer worker facade that acquires admission
+  capacity, records running/final job states, executes a byte-transfer closure,
+  and releases capacity after completion or failure.
+- Fix the standalone web server startup panic caused by duplicate
+  ``/api/v1/workspaces/remote-upload`` route registration during Axum router
+  assembly.
+- Include remote-upload daemon jobs in GUI activity and admin job rendering so
+  the latest daemon job model remains buildable and visible through the web
+  API.
+
 ## 0.60.3 - 2026-07-09
 
 - Add daemon job registry persistence for remote-upload S3 transfer summaries

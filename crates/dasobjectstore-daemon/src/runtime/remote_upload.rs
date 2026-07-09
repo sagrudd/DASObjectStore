@@ -223,6 +223,116 @@ pub fn record_remote_upload_s3_transfer_job(
     Ok(event)
 }
 
+pub struct RemoteUploadS3TransferWorker<'a> {
+    gate: Arc<RemoteUploadAdmissionGate>,
+    registry: &'a dyn AdminJobRegistry,
+}
+
+impl<'a> RemoteUploadS3TransferWorker<'a> {
+    pub fn new(gate: Arc<RemoteUploadAdmissionGate>, registry: &'a dyn AdminJobRegistry) -> Self {
+        Self { gate, registry }
+    }
+
+    pub fn run<E>(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        transfer: impl FnOnce() -> Result<(), E>,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+    where
+        E: fmt::Display,
+    {
+        let RemoteUploadS3TransferWorkerRequest {
+            job,
+            submitted_at_utc,
+            started_at_utc,
+            finished_at_utc,
+            actor,
+        } = request;
+
+        let permit = match self
+            .gate
+            .try_acquire_s3_transfer(job.policy, job.ssd_pressure)
+        {
+            Ok(permit) => permit,
+            Err(decision) => {
+                let summary = RemoteUploadS3TransferJobSummary {
+                    job_id: job.job_id,
+                    object_store: job.object_store,
+                    source_bytes: job.source_bytes,
+                    outcome: RemoteUploadS3TransferJobOutcome::NotAdmitted(decision),
+                    runtime_after: self.gate.snapshot(),
+                };
+                let final_event = record_remote_upload_s3_transfer_job(
+                    self.registry,
+                    &summary,
+                    submitted_at_utc,
+                    finished_at_utc,
+                    actor,
+                )?;
+                return Ok(RemoteUploadS3TransferWorkerReport {
+                    running_event: None,
+                    final_event,
+                    runtime_after: summary.runtime_after,
+                });
+            }
+        };
+
+        let running_job = running_daemon_job_for_s3_transfer(
+            &job,
+            submitted_at_utc.clone(),
+            started_at_utc,
+            actor.clone(),
+        )?;
+        let running_event = daemon_job_event_for_summary(running_job.clone());
+        self.registry.record(running_job)?;
+
+        let outcome = match transfer() {
+            Ok(()) => RemoteUploadS3TransferJobOutcome::Completed,
+            Err(error) => RemoteUploadS3TransferJobOutcome::Failed {
+                error: error.to_string(),
+            },
+        };
+        drop(permit);
+
+        let summary = RemoteUploadS3TransferJobSummary {
+            job_id: job.job_id,
+            object_store: job.object_store,
+            source_bytes: job.source_bytes,
+            outcome,
+            runtime_after: self.gate.snapshot(),
+        };
+        let final_event = record_remote_upload_s3_transfer_job(
+            self.registry,
+            &summary,
+            submitted_at_utc,
+            finished_at_utc,
+            actor,
+        )?;
+
+        Ok(RemoteUploadS3TransferWorkerReport {
+            running_event: Some(running_event),
+            final_event,
+            runtime_after: summary.runtime_after,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadS3TransferWorkerRequest {
+    pub job: RemoteUploadS3TransferJob,
+    pub submitted_at_utc: String,
+    pub started_at_utc: String,
+    pub finished_at_utc: String,
+    pub actor: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadS3TransferWorkerReport {
+    pub running_event: Option<DaemonJobEvent>,
+    pub final_event: DaemonJobEvent,
+    pub runtime_after: RemoteUploadRuntimeSnapshot,
+}
+
 impl RemoteUploadS3TransferJobSummary {
     pub fn daemon_job_summary(
         &self,
@@ -330,6 +440,37 @@ fn daemon_job_event_for_summary(job: DaemonJobSummary) -> DaemonJobEvent {
     }
 }
 
+fn running_daemon_job_for_s3_transfer(
+    job: &RemoteUploadS3TransferJob,
+    submitted_at_utc: String,
+    updated_at_utc: String,
+    actor: Option<String>,
+) -> Result<DaemonJobSummary, DaemonServiceRuntimeError> {
+    let job_id = DaemonJobId::new(job.job_id.clone())
+        .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job.job_id.clone()))?;
+
+    Ok(DaemonJobSummary {
+        job_id,
+        kind: DaemonJobKind::RemoteUpload,
+        state: DaemonJobState::Running,
+        progress: DaemonJobProgress {
+            stage: "remote_s3_transfer_running".to_string(),
+            work_bytes_done: 0,
+            work_bytes_total: job.source_bytes,
+            work_units_done: 0,
+            work_units_total: 1,
+            message: Some(format!(
+                "remote upload S3 transfer running for {}",
+                job.object_store
+            )),
+        },
+        submitted_at_utc,
+        updated_at_utc,
+        actor,
+        failure_message: None,
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RemoteUploadS3TransferJobOutcome {
     Completed,
@@ -357,7 +498,8 @@ mod tests {
     use super::{
         record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
         RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-        RemoteUploadS3TransferJobSummary,
+        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferWorker,
+        RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
         DaemonJobEvent, DaemonJobKind, DaemonJobState, DaemonJobStatusRequest, DaemonSsdPressure,
@@ -728,6 +870,89 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn transfer_worker_records_running_then_complete_and_releases_capacity() {
+        let root = temp_root("remote-upload-worker-complete");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let mut called = false;
+
+        let report = worker
+            .run(worker_request("remote-upload-job-005"), || {
+                called = true;
+                assert_eq!(gate.snapshot().active_s3_transfers, 1);
+                Ok::<(), &'static str>(())
+            })
+            .expect("worker completed");
+
+        assert!(called);
+        let Some(DaemonJobEvent::Progress(running_job)) = report.running_event else {
+            panic!("expected running progress event");
+        };
+        assert_eq!(running_job.state, DaemonJobState::Running);
+        assert_eq!(running_job.progress.stage, "remote_s3_transfer_running");
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected complete final event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Complete);
+        assert_eq!(report.runtime_after.active_s3_transfers, 0);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        let status = registry
+            .status(DaemonJobStatusRequest {
+                job_id: final_job.job_id,
+            })
+            .expect("final status");
+        assert_eq!(status.job.state, DaemonJobState::Complete);
+        assert_eq!(status.job.progress.stage, "remote_s3_transfer_complete");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_records_waiting_without_running_transfer_when_admission_blocks() {
+        let root = temp_root("remote-upload-worker-blocked");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let policy = RemoteUploadBackpressurePolicy::default();
+        let _first = gate
+            .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
+            .expect("first transfer admitted");
+        let _second = gate
+            .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
+            .expect("second transfer admitted");
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+
+        let report = worker
+            .run(
+                worker_request("remote-upload-job-006"),
+                || -> Result<(), &'static str> {
+                    panic!("blocked worker transfer must not execute")
+                },
+            )
+            .expect("blocked worker reported");
+
+        assert_eq!(report.running_event, None);
+        let DaemonJobEvent::Progress(final_job) = report.final_event else {
+            panic!("expected waiting progress event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Waiting);
+        assert_eq!(final_job.progress.stage, "remote_s3_admission_wait");
+        assert_eq!(report.runtime_after.active_s3_transfers, 2);
+        assert_eq!(gate.snapshot().active_s3_transfers, 2);
+
+        let status = registry
+            .status(DaemonJobStatusRequest {
+                job_id: final_job.job_id,
+            })
+            .expect("waiting status");
+        assert_eq!(status.job.state, DaemonJobState::Waiting);
+        assert_eq!(status.job.progress.stage, "remote_s3_admission_wait");
+
+        cleanup(&root);
+    }
+
     fn transfer_job(policy: RemoteUploadBackpressurePolicy) -> RemoteUploadS3TransferJob {
         RemoteUploadS3TransferJob {
             job_id: "remote-upload-job-001".to_string(),
@@ -735,6 +960,22 @@ mod tests {
             source_bytes: 42,
             policy,
             ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+        }
+    }
+
+    fn worker_request(job_id: &str) -> RemoteUploadS3TransferWorkerRequest {
+        RemoteUploadS3TransferWorkerRequest {
+            job: RemoteUploadS3TransferJob {
+                job_id: job_id.to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                policy: RemoteUploadBackpressurePolicy::default(),
+                ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+            },
+            submitted_at_utc: "2026-07-09T14:10:00Z".to_string(),
+            started_at_utc: "2026-07-09T14:10:05Z".to_string(),
+            finished_at_utc: "2026-07-09T14:11:00Z".to_string(),
+            actor: Some("stephen".to_string()),
         }
     }
 

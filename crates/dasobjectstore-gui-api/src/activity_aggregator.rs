@@ -365,7 +365,9 @@ fn activity_task_from_daemon_job(job: &DaemonJobSummary) -> ActivityTaskView {
 
 fn activity_kind_from_daemon_job(kind: &DaemonJobKind) -> ActivityTaskKindView {
     match kind {
-        DaemonJobKind::IngestFiles | DaemonJobKind::DirectImport => ActivityTaskKindView::Ingest,
+        DaemonJobKind::IngestFiles | DaemonJobKind::DirectImport | DaemonJobKind::RemoteUpload => {
+            ActivityTaskKindView::Ingest
+        }
         DaemonJobKind::DiskDrain
         | DaemonJobKind::DiskRetire
         | DaemonJobKind::DiskReplace
