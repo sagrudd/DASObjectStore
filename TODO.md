@@ -707,7 +707,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add Web download controls for file and folder rows, including disabled
   states for unavailable data, confirmation/preflight for large folder archives,
   progress/started feedback, and permission-denied messaging.
-- [ ] Surface physical placement faithfully in the browser: SSD-only, HDD
+- [x] Surface physical placement faithfully in the browser: SSD-only, HDD
   settled, multi-copy disk IDs/labels, degraded/missing-copy warnings,
   redownload-required state, and unavailable objects.
 - [ ] Add tests for file browser API paging/search/sort, permission denial,

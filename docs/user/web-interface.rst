@@ -388,6 +388,14 @@ readiness, lifecycle state, copy count, and placement badges. Placement badges
 name the managed disk label or external endpoint but do not expose writable
 managed-disk paths to the browser.
 
+Placement summaries distinguish SSD landing copies, verified settled HDD
+copies, external endpoint records, pending placements, and degraded or missing
+copies. A multi-copy object shows both the individual disk labels and the
+verified HDD copy count. ``SSD only``, ``redownload required``, ``degraded``,
+and ``unavailable`` readiness states are highlighted so operators can tell
+whether an object is still settling, needs repair/redownload, or has no usable
+local copy.
+
 File download buttons are enabled only when the browser metadata reports an
 available object with a verified settled HDD placement. Folder archive buttons
 are enabled only for available folders. Large folder archives prompt for

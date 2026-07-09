@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.25 - 2026-07-09
+
+- Improve Web ObjectStore browser placement fidelity with SSD landing,
+  verified settled HDD, external endpoint, pending, degraded, missing,
+  redownload-required, and unavailable state summaries.
+
 ## 0.54.24 - 2026-07-09
 
 - Render DASObjectStore performance report figures as container-generated

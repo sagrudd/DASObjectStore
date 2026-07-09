@@ -881,6 +881,7 @@ pub struct ObjectBrowserFileSummary {
     pub readiness: String,
     pub lifecycle: String,
     pub copies: String,
+    pub placement_summary: String,
     pub placements: Vec<ObjectBrowserPlacementResponse>,
 }
 
@@ -1412,6 +1413,7 @@ pub fn object_browser_file_summaries(
             readiness: labelize_state(&file.readiness),
             lifecycle: labelize_state(&file.lifecycle_state),
             copies: format!("{} copy/copies", file.copy_count),
+            placement_summary: object_browser_placement_summary(&file.placements),
             placements: file.placements.clone(),
         })
         .collect()
@@ -1439,18 +1441,96 @@ fn format_browser_bytes(bytes: u64) -> String {
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn labelize_state(value: &str) -> String {
-    value
+    let normalized = value.replace('-', "_");
+    normalized
         .split('_')
         .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        })
+        .flat_map(split_camel_token)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn split_camel_token(value: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    for character in value.chars() {
+        if character.is_uppercase() && !current.is_empty() {
+            words.push(titlecase_word(&current));
+            current.clear();
+        }
+        current.push(character);
+    }
+    if !current.is_empty() {
+        words.push(titlecase_word(&current));
+    }
+    words
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn titlecase_word(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+        None => String::new(),
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_placement_summary(placements: &[ObjectBrowserPlacementResponse]) -> String {
+    if placements.is_empty() {
+        return "placement pending".to_string();
+    }
+    let ssd = placements
+        .iter()
+        .filter(|placement| placement.location == "ssd_landing")
+        .count();
+    let hdd = placements
+        .iter()
+        .filter(|placement| placement.location == "hdd_settled")
+        .count();
+    let external = placements
+        .iter()
+        .filter(|placement| placement.location == "external_endpoint")
+        .count();
+    let degraded_or_missing = placements
+        .iter()
+        .filter(|placement| matches!(placement.state.as_str(), "degraded" | "missing"))
+        .count();
+    let pending = placements
+        .iter()
+        .filter(|placement| placement.state == "pending")
+        .count();
+    let verified_hdd = placements
+        .iter()
+        .filter(|placement| placement.location == "hdd_settled" && placement.state == "verified")
+        .count();
+
+    let mut parts = Vec::new();
+    if ssd > 0 {
+        parts.push(format!("{ssd} SSD landing"));
+    }
+    if hdd > 0 {
+        parts.push(format!("{hdd} HDD settled"));
+    }
+    if external > 0 {
+        parts.push(format!("{external} external endpoint"));
+    }
+    if verified_hdd > 1 {
+        parts.push(format!("{verified_hdd} verified HDD copies"));
+    }
+    if degraded_or_missing > 0 {
+        parts.push(format!("{degraded_or_missing} degraded/missing"));
+    }
+    if pending > 0 {
+        parts.push(format!("{pending} pending"));
+    }
+    parts.join(" · ")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_state_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace(' ', "_")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -3153,10 +3233,10 @@ fn render_object_browser_files(
                                 <td><strong>{ file.name }</strong><span>{ file.object_id }</span></td>
                                 <td>{ file.object_type }</td>
                                 <td>{ file.size }</td>
-                                <td><span class="dos-status-pill">{ file.readiness }</span></td>
+                                <td><span class="dos-status-pill" data-state={object_browser_state_key(&file.readiness)}>{ file.readiness }</span></td>
                                 <td>{ file.lifecycle }</td>
                                 <td>{ file.copies }</td>
-                                <td>{ render_object_browser_placements(&file.placements) }</td>
+                                <td>{ render_object_browser_placements(&file.placement_summary, &file.placements) }</td>
                                 <td>{ file.modified }</td>
                                 <td>
                                     <button
@@ -3189,25 +3269,69 @@ fn render_object_browser_files(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_object_browser_placements(placements: &[ObjectBrowserPlacementResponse]) -> Html {
+fn render_object_browser_placements(
+    summary: &str,
+    placements: &[ObjectBrowserPlacementResponse],
+) -> Html {
     if placements.is_empty() {
-        return html! { <span class="dos-object-browser-placement" data-state="pending">{ "placement pending" }</span> };
+        return html! {
+            <div class="dos-object-browser-placement-stack">
+                <span class="dos-object-browser-placement-summary" data-state="pending">{ summary }</span>
+                <span class="dos-object-browser-placement" data-state="pending">{ "placement pending" }</span>
+            </div>
+        };
     }
     html! {
-        <div class="dos-object-browser-placements">
-            { for placements.iter().map(|placement| {
-                let disk = placement
-                    .disk_label
-                    .as_deref()
-                    .or(placement.disk_id.as_deref())
-                    .unwrap_or("external");
-                html! {
-                    <span class="dos-object-browser-placement" data-state={placement.state.clone()} title={format!("{} · {}", placement.location, placement.state)}>
-                        { format!("{} · {} · {}", disk, labelize_state(&placement.location), labelize_state(&placement.state)) }
-                    </span>
-                }
-            }) }
+        <div class="dos-object-browser-placement-stack">
+            <span class="dos-object-browser-placement-summary" data-state={object_browser_placement_summary_state(placements)}>{ summary }</span>
+            <div class="dos-object-browser-placements">
+                { for placements.iter().map(|placement| {
+                    let location = labelize_state(&placement.location);
+                    let state = labelize_state(&placement.state);
+                    let disk = placement
+                        .disk_label
+                        .as_deref()
+                        .or(placement.disk_id.as_deref())
+                        .unwrap_or("external endpoint");
+                    let size = format_browser_bytes(placement.size_bytes);
+                    html! {
+                        <span
+                            class="dos-object-browser-placement"
+                            data-location={placement.location.clone()}
+                            data-state={placement.state.clone()}
+                            title={format!("{} · {} · {} · {}", disk, location, state, size)}
+                        >
+                            { format!("{} · {} · {} · {}", disk, location, state, size) }
+                        </span>
+                    }
+                }) }
+            </div>
         </div>
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_placement_summary_state(placements: &[ObjectBrowserPlacementResponse]) -> String {
+    if placements
+        .iter()
+        .any(|placement| matches!(placement.state.as_str(), "degraded" | "missing"))
+    {
+        "degraded".to_string()
+    } else if placements
+        .iter()
+        .any(|placement| placement.location == "ssd_landing")
+        && !placements
+            .iter()
+            .any(|placement| placement.location == "hdd_settled" && placement.state == "verified")
+    {
+        "ssd_only".to_string()
+    } else if placements
+        .iter()
+        .any(|placement| placement.state == "pending")
+    {
+        "pending".to_string()
+    } else {
+        "verified".to_string()
     }
 }
 
@@ -3232,16 +3356,45 @@ fn object_browser_download_disabled_reason(
     readiness: &str,
     placements: &[ObjectBrowserPlacementResponse],
 ) -> String {
-    if !readiness.eq_ignore_ascii_case("Available") {
+    let readiness_key = object_browser_state_key(readiness);
+    if readiness_key == "redownload_required" {
+        return "Download disabled: daemon metadata marks this object redownload-required."
+            .to_string();
+    }
+    if readiness_key == "unavailable" {
+        return "Download disabled: no available local or external object copy is reported."
+            .to_string();
+    }
+    if readiness_key == "ssd_only" {
+        return "Download disabled until the object has a verified settled HDD copy.".to_string();
+    }
+    if readiness_key == "degraded" {
+        return "Download disabled until degraded or missing placements are repaired.".to_string();
+    }
+    if readiness_key != "available" {
         return format!(
             "Download disabled until daemon readiness is Available; current state is {readiness}."
         );
+    }
+    if placements
+        .iter()
+        .any(|placement| matches!(placement.state.as_str(), "degraded" | "missing"))
+    {
+        return "Download disabled because at least one placement is degraded or missing."
+            .to_string();
     }
     if !placements.is_empty()
         && !placements
             .iter()
             .any(|placement| placement.location == "hdd_settled" && placement.state == "verified")
     {
+        if placements
+            .iter()
+            .any(|placement| placement.location == "ssd_landing")
+        {
+            return "Download disabled: only SSD landing placement is currently reported."
+                .to_string();
+        }
         return "Download disabled until a verified settled HDD copy is available.".to_string();
     }
     "Download through the daemon-authorized Web API.".to_string()
@@ -6140,6 +6293,7 @@ mod tests {
         object_browser_download_disabled_reason, object_browser_file_download_available,
         object_browser_file_summaries, object_browser_folder_download_available,
         object_browser_folder_summaries, object_browser_initial_endpoint,
+        object_browser_placement_summary, object_browser_placement_summary_state,
         object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
@@ -7119,8 +7273,9 @@ mod tests {
         assert_eq!(file_summaries[0].object_type, "Fastq");
         assert_eq!(file_summaries[0].size, "1.5 KiB");
         assert_eq!(file_summaries[0].readiness, "Ssd Only");
-        assert_eq!(file_summaries[0].lifecycle, "ReceivedOnSsd");
+        assert_eq!(file_summaries[0].lifecycle, "Received On Ssd");
         assert_eq!(file_summaries[0].copies, "1 copy/copies");
+        assert_eq!(file_summaries[0].placement_summary, "1 HDD settled");
         assert_eq!(
             file_summaries[0].placements[0].disk_label.as_deref(),
             Some("QNAP bay 1")
@@ -7136,7 +7291,7 @@ mod tests {
             &file_summaries[0].readiness,
             &file_summaries[0].placements,
         )
-        .contains("current state is Ssd Only"));
+        .contains("verified settled HDD"));
 
         let mut available_file = file_summaries[0].clone();
         available_file.readiness = "Available".to_string();
@@ -7144,6 +7299,62 @@ mod tests {
             &available_file.readiness,
             &available_file.placements,
         ));
+
+        let multi_copy = vec![
+            ObjectBrowserPlacementResponse {
+                disk_id: Some("qnap-1057".to_string()),
+                disk_label: Some("QNAP bay 1".to_string()),
+                location: "hdd_settled".to_string(),
+                state: "verified".to_string(),
+                size_bytes: 1536,
+                checksum: None,
+                verified_at_utc: Some("2026-07-09T10:01:00Z".to_string()),
+            },
+            ObjectBrowserPlacementResponse {
+                disk_id: Some("qnap-1058".to_string()),
+                disk_label: Some("QNAP bay 2".to_string()),
+                location: "hdd_settled".to_string(),
+                state: "verified".to_string(),
+                size_bytes: 1536,
+                checksum: None,
+                verified_at_utc: Some("2026-07-09T10:01:00Z".to_string()),
+            },
+            ObjectBrowserPlacementResponse {
+                disk_id: Some("ssd-landing".to_string()),
+                disk_label: Some("Landing SSD".to_string()),
+                location: "ssd_landing".to_string(),
+                state: "pending".to_string(),
+                size_bytes: 1536,
+                checksum: None,
+                verified_at_utc: None,
+            },
+        ];
+        assert_eq!(
+            object_browser_placement_summary(&multi_copy),
+            "1 SSD landing · 2 HDD settled · 2 verified HDD copies · 1 pending"
+        );
+        assert_eq!(
+            object_browser_placement_summary_state(&multi_copy),
+            "pending"
+        );
+
+        let degraded = vec![ObjectBrowserPlacementResponse {
+            disk_id: Some("qnap-1059".to_string()),
+            disk_label: None,
+            location: "hdd_settled".to_string(),
+            state: "missing".to_string(),
+            size_bytes: 1536,
+            checksum: None,
+            verified_at_utc: None,
+        }];
+        assert_eq!(
+            object_browser_placement_summary(&degraded),
+            "1 HDD settled · 1 degraded/missing"
+        );
+        assert_eq!(
+            object_browser_placement_summary_state(&degraded),
+            "degraded"
+        );
     }
 
     #[test]

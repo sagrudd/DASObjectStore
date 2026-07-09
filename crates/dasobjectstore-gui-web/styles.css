@@ -642,15 +642,59 @@ h2 {
   font-weight: 700;
 }
 
+.dos-object-browser-placement-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.dos-object-browser-placement-summary {
+  color: #42515a;
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.dos-object-browser-placement-summary[data-state="verified"] {
+  color: #1f6740;
+}
+
+.dos-object-browser-placement-summary[data-state="ssd_only"],
+.dos-status-pill[data-state="ssd_only"] {
+  color: #6f5410;
+  background: #fff1c7;
+}
+
+.dos-object-browser-placement-summary[data-state="pending"],
+.dos-status-pill[data-state="settling"] {
+  color: #6f5410;
+}
+
+.dos-object-browser-placement-summary[data-state="degraded"],
+.dos-status-pill[data-state="degraded"],
+.dos-status-pill[data-state="redownload_required"],
+.dos-status-pill[data-state="unavailable"] {
+  color: #8a3d24;
+  background: #f8e8e3;
+}
+
 .dos-object-browser-placement[data-state="verified"] {
   background: #e4f2ea;
   color: #1f6740;
+}
+
+.dos-object-browser-placement[data-location="ssd_landing"] {
+  background: #fff1c7;
+  color: #6f5410;
 }
 
 .dos-object-browser-placement[data-state="missing"],
 .dos-object-browser-placement[data-state="degraded"] {
   background: #f8e8e3;
   color: #8a3d24;
+}
+
+.dos-object-browser-placement[data-state="pending"] {
+  background: #eef3f5;
+  color: #42515a;
 }
 
 .dos-object-browser-note {
