@@ -37,6 +37,7 @@ use dasobjectstore_daemon::{
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -1107,6 +1108,7 @@ fn validate_prepare_enclosure_request(
         .map(|value| required_field("mount_root", value))
         .transpose()?
         .unwrap_or_else(|| "/srv/dasobjectstore".to_string());
+    reject_known_managed_enclosure_mount_root(&mount_root)?;
     let filesystem = parse_prepare_enclosure_filesystem(request.filesystem.as_deref())?;
     validate_client_request_id(request.client_request_id.as_deref())?;
     let owner = request
@@ -1148,6 +1150,33 @@ fn validate_prepare_enclosure_request(
         existing_data_acknowledged: request.existing_data_acknowledged,
         confirmation_marker,
     })
+}
+
+fn reject_known_managed_enclosure_mount_root(
+    mount_root: &str,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    let mount_root = PathBuf::from(mount_root);
+    let ssd_marker = mount_root
+        .join("ssd")
+        .join(".dasobjectstore")
+        .join("device.env");
+    let hdd_root = mount_root.join("hdd");
+    let hdd_marker_present = fs::read_dir(&hdd_root)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
+        .map(|entry| entry.path().join(".dasobjectstore").join("device.env"))
+        .any(|marker| marker.exists());
+
+    if ssd_marker.exists() || hdd_marker_present {
+        return Err(route_error(
+            StatusCode::CONFLICT,
+            "enclosure_already_managed",
+            "enclosure preparation through the Web UI is available only for unprepared DAS enclosures; this mount root is already known to DASObjectStore",
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_create_object_store_request(
@@ -2629,6 +2658,46 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let encoded = response_json(response).await;
         assert_eq!(encoded["code"], "unsupported_das");
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn prepare_enclosure_rejects_already_managed_mount_root() {
+        let root = temp_root("prepare-enclosure-known-root");
+        let managed_root = root.join("managed");
+        fs::create_dir_all(managed_root.join("ssd/.dasobjectstore")).expect("managed marker dir");
+        fs::write(
+            managed_root.join("ssd/.dasobjectstore/device.env"),
+            "role=ssd\ndevice=/dev/disk/by-id/nvme-existing\nfilesystem=ext4\n",
+        )
+        .expect("managed marker");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client.clone()),
+        ));
+        let request = PrepareEnclosureRequest {
+            mount_root: Some(managed_root.display().to_string()),
+            ..prepare_enclosure_request()
+        };
+
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/enclosures/prepare",
+            "admin",
+            &login.session_token,
+            &request,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "enclosure_already_managed");
+        assert!(client.requests().is_empty());
 
         cleanup(&root);
     }

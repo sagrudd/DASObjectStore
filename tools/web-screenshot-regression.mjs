@@ -285,12 +285,20 @@ async function assertWorkflowContract(page, pageName, role) {
 
 async function assertEnclosureWorkflow(page, role) {
   const card = page.locator("[data-action='enclosure_add']");
-  await card.waitFor();
-  const planButton = card.getByRole("button", { name: "Plan preparation" });
+  const cardCount = await card.count();
+  if (cardCount === 0) {
+    await page.getByText("QNAP TL-D800C").first().waitFor();
+    return;
+  }
 
   if (!role.administrator) {
-    await expectDisabled(planButton, "non-admin enclosure preparation must be disabled");
-    await card.getByText("Admin required").waitFor();
+    throw new Error("non-admin enclosure preparation action must not be exposed");
+  }
+
+  await card.first().waitFor();
+  const planButton = card.first().getByRole("button", { name: "Plan preparation" });
+  if (!(await planButton.isEnabled())) {
+    await card.first().getByText("Already managed").waitFor();
     return;
   }
 
@@ -636,20 +644,18 @@ function enclosuresDashboard(role = roles[1]) {
     schema_version: "dasobjectstore.enclosures_page.v1",
     generated_at_utc: "2026-07-08T19:00:00Z",
     add_enclosure: {
-      enabled: canAdmin,
+      enabled: false,
       action_kind: "enclosure_add",
       label: "Add enclosure",
-      state: canAdmin ? "ready" : "admin_required",
+      state: "already_managed",
       administrator: canAdmin,
-      supported_enclosure_detected: true,
+      supported_enclosure_detected: false,
       daemon_ready: true,
       confirmation_required: true,
-      blocked_reason: canAdmin
-        ? null
-        : "Administrator rights are required before preparing DAS media.",
-      next_step: canAdmin
-        ? "Review detected SSD/HDD devices before submitting the daemon preparation job."
-        : "Sign in as a sudo-capable operator to prepare an enclosure.",
+      blocked_reason:
+        "A managed DAS enclosure is already known to DASObjectStore.",
+      next_step:
+        "Use the CLI for deliberate destructive enclosure re-preparation or removal workflow.",
     },
     enclosures: [enclosureCard()],
     selected_enclosure_id: "qnap-tl-d800c-visual",

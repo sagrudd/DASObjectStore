@@ -1566,12 +1566,14 @@ fn render_enclosure_inventory(
     html! {
         <div class="dos-two-column">
             <div class="dos-card-list">
-                { render_add_enclosure_card(
-                    &view.add_enclosure,
-                    enclosure_prepare_candidate(view, &active_id),
-                    wizard_state,
-                    api_base_path,
-                ) }
+                if view.add_enclosure.enabled {
+                    { render_add_enclosure_card(
+                        &view.add_enclosure,
+                        enclosure_prepare_candidate(view, &active_id),
+                        wizard_state,
+                        api_base_path,
+                    ) }
+                }
                 { for enclosure_card_summaries(view).into_iter().map(|summary| {
                     render_enclosure_card(summary, &active_id, selected_id.clone())
                 }) }
@@ -1745,6 +1747,7 @@ fn render_add_enclosure_card(
 ) -> Html {
     let state_label = match affordance.state.as_str() {
         "ready" => "Ready",
+        "already_managed" => "Already managed",
         "admin_required" => "Admin required",
         "unsupported_or_absent" => "No supported DAS",
         "daemon_unavailable" => "Daemon not ready",

@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.3 - 2026-07-09
+
+- Hide Web enclosure preparation controls unless the API can advertise a valid
+  unprepared DAS enclosure candidate for an administrator session.
+- Block Web enclosure preparation requests against mount roots that already
+  contain DASObjectStore managed enclosure metadata; deliberate destructive
+  re-preparation remains a CLI-only workflow.
+
 ## 0.54.2 - 2026-07-09
 
 - Invalidate standalone Web browser session tokens on server startup so a

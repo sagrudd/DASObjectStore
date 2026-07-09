@@ -89,11 +89,13 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
         .iter()
         .map(|root| marker_for_root(root))
         .collect::<Vec<_>>();
-    let supported_enclosure_detected = !hdd_roots.is_empty();
+    let managed_enclosure_known = !hdd_roots.is_empty();
+    let supported_enclosure_detected = false;
     let daemon_ready = daemon_ready_for_affordance(&warnings);
     let add_enclosure = add_enclosure_affordance(
         config.administrator,
         supported_enclosure_detected,
+        managed_enclosure_known,
         daemon_ready,
     );
 
@@ -165,8 +167,23 @@ fn daemon_ready_for_affordance(warnings: &[DashboardWarning]) -> bool {
 fn add_enclosure_affordance(
     administrator: bool,
     supported_enclosure_detected: bool,
+    managed_enclosure_known: bool,
     daemon_ready: bool,
 ) -> AddEnclosureAffordanceView {
+    if managed_enclosure_known {
+        return AddEnclosureAffordanceView {
+            administrator,
+            supported_enclosure_detected,
+            ..AddEnclosureAffordanceView::blocked(
+                "already_managed",
+                administrator,
+                daemon_ready,
+                "A managed DAS enclosure is already known to DASObjectStore. Web preparation is available only for unprepared, supported enclosures.",
+                "Use the CLI for any deliberate destructive enclosure re-preparation or removal workflow.",
+            )
+        };
+    }
+
     if !administrator {
         return AddEnclosureAffordanceView {
             administrator,
@@ -388,11 +405,16 @@ mod tests {
         });
 
         assert_eq!(view.enclosures.len(), 1);
-        assert!(view.add_enclosure.enabled);
-        assert_eq!(view.add_enclosure.state, "ready");
+        assert!(!view.add_enclosure.enabled);
+        assert_eq!(view.add_enclosure.state, "already_managed");
         assert!(view.add_enclosure.administrator);
-        assert!(view.add_enclosure.supported_enclosure_detected);
+        assert!(!view.add_enclosure.supported_enclosure_detected);
         assert!(view.add_enclosure.daemon_ready);
+        assert!(view
+            .add_enclosure
+            .blocked_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("already known")));
         assert_eq!(view.enclosures[0].display_name, "QNAP TL-D800C");
         assert_eq!(view.enclosures[0].health, DashboardHealthStateView::Healthy);
         assert_eq!(view.enclosures[0].drive_count.mounted, 3);

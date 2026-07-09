@@ -271,12 +271,12 @@ health, SMART warning count, and the daemon-managed actions currently available
 for that member. These controls are informational until the administrator
 workflow routes submit confirmed daemon jobs.
 
-The ``Add enclosure`` card is no longer static placeholder text. The dashboard
-payload carries a live affordance state that combines administrator capability,
-supported enclosure discovery, and daemon inventory readiness. Non-admin users
-see the card disabled with an explicit reason. Administrator-capable sessions
-may see the card become ready only when a supported DAS enclosure is visible to
-the daemon and the inventory path is healthy enough to plan preparation.
+The ``Add enclosure`` card is exposed only when the dashboard payload advertises
+a valid unprepared DAS enclosure candidate for the authenticated administrator
+session. Existing managed DAS roots are inventory, not preparation candidates:
+if DASObjectStore already knows the enclosure, the Web UI must not show a
+preparation workflow for it. Deliberate destructive re-preparation, removal, or
+replacement of an existing enclosure is a CLI-only administrative workflow.
 
 When the affordance is ready, the browser presents a preparation wizard for the
 selected enclosure. The wizard derives candidate SSD and HDD devices from the
@@ -289,7 +289,8 @@ acknowledge that existing data on selected devices may be destroyed. The Web API
 validates these same fields server-side before forwarding the confirmed request
 to the daemon; callers cannot submit an enclosure-preparation job without SSD
 media, at least one HDD, format allowance, existing-data acknowledgement, and
-the confirmation phrase.
+the confirmation phrase. The Web API also rejects preparation requests whose
+mount root already contains DASObjectStore managed SSD or HDD marker metadata.
 
 The daemon API now exposes a typed enclosure-preparation request and response
 contract for that handoff. The request includes SSD media, HDD media, mount
