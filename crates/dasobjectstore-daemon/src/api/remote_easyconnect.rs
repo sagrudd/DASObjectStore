@@ -807,12 +807,16 @@ mod tests {
         resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
         RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectSessionPolicy, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, RemoteEasyconnectUploadHandoffMode,
-        RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffState,
-        RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
-        REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
-        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+        RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSessionPolicy, RemoteEasyconnectSessionRenewal,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
+        RemoteEasyconnectUploadHandoffState, RemoteEasyconnectUploadSelectionEntry,
+        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+        REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+        REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
     };
     use crate::auth::DaemonLocalActor;
     use dasobjectstore_core::remote_upload::{
@@ -920,6 +924,104 @@ mod tests {
         assert_eq!(
             REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
             "/api/v1/remote/easyconnect/sessions/{session_id}/renew"
+        );
+    }
+
+    #[test]
+    fn validates_session_revoke_contract() {
+        let request = RemoteEasyconnectRevokeSessionRequest {
+            session_id: "session-1".to_string(),
+            reason: Some("operator requested revocation".to_string()),
+        };
+
+        request.validate().expect("request validates");
+        let encoded = serde_json::to_value(&request).expect("request serializes");
+        assert_eq!(encoded["session_id"], "session-1");
+        assert_eq!(encoded["reason"], "operator requested revocation");
+        assert_eq!(
+            REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
+            "/api/v1/remote/easyconnect/sessions/{session_id}"
+        );
+
+        let blank_reason = RemoteEasyconnectRevokeSessionRequest {
+            session_id: "session-1".to_string(),
+            reason: Some(" ".to_string()),
+        };
+        assert!(matches!(
+            blank_reason.validate().expect_err("blank reason rejected"),
+            RemoteEasyconnectValidationError::BlankField { field: "reason" }
+        ));
+
+        let response = RemoteEasyconnectRevokeSessionResponse {
+            session_id: "session-1".to_string(),
+            revoked: true,
+            revoked_at_utc: "2026-07-09T13:20:00Z".to_string(),
+        };
+        let encoded = serde_json::to_value(response).expect("response serializes");
+        assert_eq!(encoded["revoked"], true);
+        assert_eq!(encoded["revoked_at_utc"], "2026-07-09T13:20:00Z");
+    }
+
+    #[test]
+    fn validates_session_renewal_contract_for_active_uploads() {
+        let request = RemoteEasyconnectRenewSessionRequest {
+            session_id: "session-1".to_string(),
+            renewal_token: "old-renewal-token".to_string(),
+            requested_lifetime_seconds: Some(28_800),
+        };
+
+        request.validate().expect("request validates");
+
+        let blank_token = RemoteEasyconnectRenewSessionRequest {
+            session_id: "session-1".to_string(),
+            renewal_token: " ".to_string(),
+            requested_lifetime_seconds: Some(28_800),
+        };
+        assert!(matches!(
+            blank_token
+                .validate()
+                .expect_err("blank renewal token rejected"),
+            RemoteEasyconnectValidationError::BlankField {
+                field: "renewal_token"
+            }
+        ));
+
+        let too_short = RemoteEasyconnectRenewSessionRequest {
+            session_id: "session-1".to_string(),
+            renewal_token: "old-renewal-token".to_string(),
+            requested_lifetime_seconds: Some(59),
+        };
+        assert!(matches!(
+            too_short.validate().expect_err("short lifetime rejected"),
+            RemoteEasyconnectValidationError::InvalidRequestedLifetime { seconds: 59 }
+        ));
+
+        let response = RemoteEasyconnectRenewSessionResponse {
+            session: RemoteEasyconnectSession {
+                session_id: "session-1".to_string(),
+                issued_at_utc: "2026-07-09T13:20:00Z".to_string(),
+                expires_at_utc: "2026-07-09T21:20:00Z".to_string(),
+                credentials: RemoteEasyconnectSessionCredentials {
+                    access_key_id: "AKIAEXAMPLE".to_string(),
+                    secret_access_key: "redacted-in-tests".to_string(),
+                    session_token: Some("session-token".to_string()),
+                },
+                renewal: RemoteEasyconnectSessionRenewal {
+                    renew_url: "/api/v1/remote/easyconnect/sessions/session-1/renew".to_string(),
+                    renew_after_utc: "2026-07-09T20:20:00Z".to_string(),
+                    renewal_token: "rotated-renewal-token".to_string(),
+                },
+            },
+        };
+        let encoded = serde_json::to_value(response).expect("response serializes");
+        assert_eq!(encoded["session"]["expires_at_utc"], "2026-07-09T21:20:00Z");
+        assert_eq!(
+            encoded["session"]["renewal"]["renew_after_utc"],
+            "2026-07-09T20:20:00Z"
+        );
+        assert_eq!(
+            encoded["session"]["renewal"]["renewal_token"],
+            "rotated-renewal-token"
         );
     }
 

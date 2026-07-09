@@ -801,6 +801,36 @@ mod tests {
     }
 
     #[test]
+    fn remote_easyconnect_session_commands_validate_revocation_and_renewal_contracts() {
+        let revoke = DaemonApiRequest::RemoteEasyconnectRevokeSession(
+            RemoteEasyconnectRevokeSessionRequest {
+                session_id: " ".to_string(),
+                reason: Some("operator requested revocation".to_string()),
+            },
+        );
+        let renew =
+            DaemonApiRequest::RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionRequest {
+                session_id: "session-1".to_string(),
+                renewal_token: "renewal-token".to_string(),
+                requested_lifetime_seconds: Some(59),
+            });
+
+        assert!(matches!(
+            revoke.validate().expect_err("blank session id rejected"),
+            crate::api::DaemonRequestValidationError::BlankField {
+                field: "session_id"
+            }
+        ));
+        assert!(matches!(
+            renew.validate().expect_err("short renewal lifetime rejected"),
+            crate::api::DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "requested_session_lifetime_seconds",
+                value
+            } if value == "59"
+        ));
+    }
+
+    #[test]
     fn remote_easyconnect_approval_validates_object_store_grants() {
         let request = DaemonApiRequest::RemoteEasyconnectApprovePairing(
             crate::api::RemoteEasyconnectApprovePairingRequest {

@@ -872,9 +872,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add remote-client tests for easyconnect pairing success, expired pairing,
   denied login, missing/expired paired upload sessions, and renewal telemetry
   states.
-- [ ] Add server-side tests for easyconnect revoked session handling,
-  eight-hour expiry and renewal during active upload, and standalone local-user
-  permission checks.
+- [x] Add server-side easyconnect API contract tests for revocation request
+  validation, eight-hour renewal policy, active-upload renewal responses, and
+  standalone local-user grant filtering.
+- [ ] Add persisted-session route/runtime tests for easyconnect revoked session
+  handling, renewal during active upload, and standalone local-user permission
+  checks.
 - [ ] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.
