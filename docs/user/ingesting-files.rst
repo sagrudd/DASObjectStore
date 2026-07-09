@@ -93,6 +93,24 @@ verification, metadata mutation, and progress events. During normal CLI
 operation the operator sees daemon-emitted byte-level progress lines as the job
 runs, followed by the final daemon job submission summary.
 
+Ingress-origin rules are deliberately simple:
+
+* ``local_server`` is used for normal ``dasobjectstore ingest files`` jobs
+  submitted from the DAS appliance host. If the target store policy permits
+  direct HDD ingest, the daemon may hash the source file and write verified
+  copies directly to selected HDDs. If the policy does not permit direct HDD
+  ingest, the job stages through SSD first.
+* ``remote_s3`` is used for paired ``dasobjectstore-remote`` uploads and raw
+  S3-compatible remote upload plans. These uploads always stage through the
+  selected ObjectStore SSD before daemon-owned HDD settlement.
+* ``web_upload`` is used for browser-mediated upload workflows. Web-origin
+  bytes also always stage through the selected ObjectStore SSD before HDD
+  settlement.
+
+Clients do not override the ingress origin to force a disk placement. The
+daemon derives the landing mode from the authenticated submission path and the
+target store policy.
+
 File ingest uses a bounded split SSD pipeline by default. The source reader
 writes staged payload bytes to SSD and then moves on to the next file when
 queue pressure allows. A bounded side worker syncs the staged SSD payload and
@@ -303,10 +321,13 @@ Example line:
 Stages:
 
 * ``ssd-ingest`` means DASObjectStore is reading from the mounted source disk
-  and landing the file on the mandatory SSD.
+  and landing the file on SSD because the request is SSD-first.
+* ``source-read`` means the daemon is hashing a local-server source file before
+  direct-to-HDD placement when the target store policy allows that path.
 * ``hdd-copy:<disk-id>:<copy-number>`` means DASObjectStore is settling and
-  verifying one HDD copy from the SSD payload. The disk ID is reported for
-  auditability; it is selected by DASObjectStore.
+  verifying one HDD copy from the staged SSD payload or verified local source
+  hash. The disk ID is reported for auditability; it is selected by
+  DASObjectStore.
 
 SSD Stress
 ----------
@@ -397,5 +418,5 @@ stopping accidental work from continuing through the settlement path.
 The operations TUI provides the console workflow contract for planning,
 confirmation, launch, monitoring, reconnect, and completion review. It uses the
 same daemon job model as the CLI and Web UI, with visibility into file counts,
-scaled data volume, SSD staging, HDD fan-out, verification, resource policy,
-worker queues, pressure, bottlenecks, and throughput trends.
+scaled data volume, SSD staging when used, HDD fan-out, verification, resource
+policy, worker queues, pressure, bottlenecks, and throughput trends.

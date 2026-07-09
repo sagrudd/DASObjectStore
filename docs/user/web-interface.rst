@@ -166,6 +166,15 @@ code. Those operations belong behind ``dasobjectstored`` so CLI, Web, TUI, and
 future Synoptikon/Mneion adapters share the same policy checks, confirmation
 phrases, audit metadata, cancellation, and recovery behavior.
 
+The browser also does not choose the storage landing mode. Normal CLI ingest
+submitted from the DAS appliance host is classified as ``local_server`` and may
+write directly to daemon-selected HDDs only when the target ObjectStore policy
+permits direct HDD ingest. Web-origin upload workflows are classified as
+``web_upload`` and always stage bytes to the selected ObjectStore SSD first.
+Paired remote-agent/S3 uploads are classified as ``remote_s3`` and also always
+stage to SSD before daemon-owned HDD settlement. These origin labels and
+landing modes are daemon/API contract values, not browser-controlled options.
+
 Milestone 19 removes the old holder-page pattern from the primary browser
 experience. The active Web console surfaces are:
 
@@ -374,6 +383,10 @@ The ObjectStores page is the Web counterpart to ``dasobjectstore store`` and
 managed store policy. It should list each store with class, writer group,
 copy/redundancy policy, ingest mode, bucket or endpoint identity, capacity
 behavior, and current health.
+Ingest mode is shown as a policy summary, not as a per-upload disk selector:
+local-server ingest may use direct-to-HDD placement when policy allows, while
+Web and remote/S3 uploads remain SSD-first regardless of the store's local
+direct-ingest allowance.
 It shows explicit loading, empty-inventory, permission-denied, and
 transport-error states instead of using fixture store cards. The create card
 reflects the daemon/API create affordance, including whether creation is

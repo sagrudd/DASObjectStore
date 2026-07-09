@@ -906,7 +906,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Update `docs/user/remote-upload.rst` with easyconnect setup, browser
   authentication, ObjectStore selection, drag-and-drop upload, session renewal,
   cancellation, and recovery behavior.
-- [ ] Update `docs/user/ingesting-files.rst`, `docs/user/object-stores.rst`,
+- [x] Update `docs/user/ingesting-files.rst`, `docs/user/object-stores.rst`,
   and `docs/user/web-interface.rst` with the simplified ingress-origin rules:
   local server ingest writes direct to HDD, while S3/Web/remote upload stages to
   SSD first.

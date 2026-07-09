@@ -21,6 +21,22 @@ The command uses built-in defaults for the class. For ``generated_data`` this
 currently means two verified HDD copies, SSD-first ingest, and acknowledgement
 after HDD placement.
 
+Ingress landing is determined by the daemon from both the store policy and the
+submission origin:
+
+* local-server CLI ingest may write directly to selected HDDs only when the
+  store policy permits direct HDD ingest;
+* local-server ingest for protected or non-direct policies stages through SSD
+  first;
+* remote S3/easyconnect uploads always stage through the selected ObjectStore
+  SSD before HDD settlement; and
+* browser/Web upload workflows also always stage through the selected
+  ObjectStore SSD before HDD settlement.
+
+Users never choose a physical disk or managed path for normal ingest. The store
+policy describes the required copies and safety rules; ``dasobjectstored``
+chooses the landing mode, disk placement, verification, and settlement work.
+
 ``--writer-group`` is the Unix group whose members may ingest files into the
 store without root privileges. A store without a writer group is not writable by
 normal users. On Linux, ``store create`` grants that group ACL access to the
@@ -58,6 +74,9 @@ Override the copy count only when the policy is intentional:
 The S3 bucket identity is derived from the store name by default. The Web
 console displays the derived bucket name as an immutable outcome during store
 creation so operators do not have to choose a second object-service name.
+Remote upload sessions and Web upload workspaces use the ObjectStore name and
+daemon-derived bucket mapping; they do not accept an internal bucket name as a
+way to bypass ObjectStore write policy or SSD-first remote landing.
 
 Portable Registry
 -----------------
