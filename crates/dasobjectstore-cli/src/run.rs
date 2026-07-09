@@ -8,10 +8,11 @@ use crate::cli::{
     ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder,
     PerformanceFileSelection, PerformanceReportArgs, PerformanceScenarioSelection,
     PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
-    ServiceCommand, ServiceComposeArgs, ServiceRenderComposeArgs, ServiceStatusArgs, StatusArgs,
-    StoreAdoptArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs,
-    StoreDeleteArgs, StoreDrainArgs, StoreListArgs, StoreS3UploadArgs, StoreValidateArgs,
-    SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
+    ServiceCommand, ServiceComposeArgs, ServiceProvisionArgs, ServiceRenderComposeArgs,
+    ServiceStatusArgs, StatusArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
+    StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs,
+    StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand, SubobjectCreateArgs,
+    SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -48,8 +49,9 @@ use dasobjectstore_core::DEFAULT_STANDALONE_CONFIG_PATH;
 use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
-    DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UnixSocketDaemonTransport, DEFAULT_DAEMON_STATE_DIR,
+    DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig, DaemonServiceProvisionRequest,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_gui_api::StandaloneServerConfig;
 use dasobjectstore_metadata::{
@@ -283,6 +285,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Service(args)) => match args.command() {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
+            ServiceCommand::Provision(args) => run_service_provision(args, writer),
             ServiceCommand::Up(args) => run_service_up(args, writer),
             ServiceCommand::Down(args) => run_service_down(args, writer),
             ServiceCommand::Status(args) => run_service_status(args, writer),
@@ -7501,6 +7504,36 @@ fn run_service_up(args: &ServiceComposeArgs, writer: &mut impl Write) -> Result<
         return Ok(());
     }
     writeln!(writer, "Object service started")?;
+
+    Ok(())
+}
+
+fn run_service_provision(
+    args: &ServiceProvisionArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+    let response = client.service_provision(DaemonServiceProvisionRequest {
+        provider_id: args.provider(),
+        dry_run: args.dry_run(),
+        client_request_id: None,
+    })?;
+
+    writeln!(writer, "Object service provisioning submitted")?;
+    writeln!(writer, "Provider: {}", response.provider_id)?;
+    writeln!(writer, "Registry: {}", response.registry_path)?;
+    writeln!(writer, "Stores: {}", response.stores)?;
+    writeln!(writer, "Buckets: {}", response.buckets)?;
+    writeln!(writer, "Garage commands: {}", response.commands)?;
+    writeln!(writer, "Dry run: {}", response.accepted.dry_run)?;
+    writeln!(writer, "Job: {}", response.accepted.job_id)?;
+    writeln!(
+        writer,
+        "Accepted at UTC: {}",
+        response.accepted.accepted_at_utc
+    )?;
+    writeln!(writer, "Daemon socket: {}", config.socket_path.display())?;
 
     Ok(())
 }
@@ -15514,10 +15547,12 @@ mod tests {
         assert!(output.contains("name: dasobjectstore-dev"));
         assert!(output.contains("image: garage:latest"));
         assert!(output.contains("DASOBJECTSTORE_PROVIDER: garage"));
-        assert!(output.contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
+        assert!(!output.contains("DASOBJECTSTORE_BUCKETS"));
+        assert!(!output.contains("GARAGE_DEFAULT_ACCESS_KEY"));
         assert!(output.contains("\"0.0.0.0:3900:3900\""));
         assert!(output.contains("/etc/dasobjectstore/garage.toml:/etc/garage.toml:ro"));
-        assert!(output.contains("command: [\"/garage\", \"server\", \"--single-node\""));
+        assert!(output.contains("command: [\"/garage\", \"server\", \"--single-node\"]"));
+        assert!(output.contains("bucket_provisioning: live-garage-admin"));
         assert!(
             output.contains("credential_reference: secret://dasobjectstore/stores/generated/s3")
         );

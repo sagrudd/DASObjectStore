@@ -1826,12 +1826,34 @@ impl ServiceArgs {
 pub(crate) enum ServiceCommand {
     /// Render Docker Compose YAML for store-aware object service access.
     RenderCompose(ServiceRenderComposeArgs),
+    /// Provision S3 buckets and credentials from the live ObjectStore registry without restarting the service.
+    Provision(ServiceProvisionArgs),
     /// Start the rendered object service with Docker Compose.
     Up(ServiceComposeArgs),
     /// Stop the rendered object service with Docker Compose.
     Down(ServiceComposeArgs),
     /// Inspect the rendered object service with Docker Compose.
     Status(ServiceStatusArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ServiceProvisionArgs {
+    /// Object service provider to provision.
+    #[arg(long, default_value = "garage")]
+    provider: ObjectServiceProviderId,
+    /// Show the provisioning plan counts without applying Garage bucket/key changes.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+impl ServiceProvisionArgs {
+    pub(crate) fn provider(&self) -> ObjectServiceProviderId {
+        self.provider
+    }
+
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -2591,6 +2613,30 @@ mod tests {
                 assert_eq!(render.api_port(), 3900);
             }
             _ => panic!("expected render-compose command"),
+        }
+    }
+
+    #[test]
+    fn parses_service_provision_dry_run() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "provision",
+            "--provider",
+            "garage",
+            "--dry-run",
+        ])
+        .expect("service provision parses");
+
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command");
+        };
+        match args.command() {
+            ServiceCommand::Provision(provision) => {
+                assert_eq!(provision.provider().name(), "garage");
+                assert!(provision.dry_run());
+            }
+            _ => panic!("expected provision command"),
         }
     }
 

@@ -124,13 +124,6 @@ impl ObjectServiceProvider for GarageProvider {
         validate_render_request(request)?;
         validate_config(&self.config)?;
 
-        let buckets = request
-            .store_bindings
-            .iter()
-            .map(|binding| binding.bucket_name.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
-
         let mut yaml = String::new();
         yaml.push_str(&format!("name: {}\n", request.project_name));
         yaml.push_str("services:\n");
@@ -169,25 +162,11 @@ impl ObjectServiceProvider for GarageProvider {
         ));
         yaml.push_str("    environment:\n");
         yaml.push_str("      DASOBJECTSTORE_PROVIDER: garage\n");
-        yaml.push_str(&format!("      DASOBJECTSTORE_BUCKETS: {}\n", buckets));
-        if let Some(default_bucket) = request.store_bindings.first() {
-            yaml.push_str(
-                "      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY:?set GARAGE_DEFAULT_ACCESS_KEY in the Garage project .env}\n",
-            );
-            yaml.push_str(
-                "      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY:?set GARAGE_DEFAULT_SECRET_KEY in the Garage project .env}\n",
-            );
-            yaml.push_str(&format!(
-                "      GARAGE_DEFAULT_BUCKET: ${{GARAGE_DEFAULT_BUCKET:-{}}}\n",
-                default_bucket.bucket_name
-            ));
-        }
-        yaml.push_str(
-            "    command: [\"/garage\", \"server\", \"--single-node\", \"--default-bucket\"]\n",
-        );
+        yaml.push_str("    command: [\"/garage\", \"server\", \"--single-node\"]\n");
         yaml.push_str("x-dasobjectstore:\n");
         yaml.push_str("  provider: garage\n");
         yaml.push_str(&format!("  config_path: {}\n", self.config.config_path));
+        yaml.push_str("  bucket_provisioning: live-garage-admin\n");
         yaml.push_str("  stores:\n");
         for binding in &request.store_bindings {
             yaml.push_str(&render_store_binding(binding));
@@ -311,13 +290,14 @@ mod tests {
         assert!(rendered.compose_yaml.contains("/etc/garage.toml:ro"));
         assert!(rendered.compose_yaml.contains("/var/lib/garage/meta"));
         assert!(rendered.compose_yaml.contains("/var/lib/garage/data"));
+        assert!(!rendered.compose_yaml.contains("DASOBJECTSTORE_BUCKETS"));
+        assert!(!rendered.compose_yaml.contains("GARAGE_DEFAULT_ACCESS_KEY"));
         assert!(rendered
             .compose_yaml
-            .contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
-        assert!(rendered.compose_yaml.contains("GARAGE_DEFAULT_ACCESS_KEY"));
+            .contains("command: [\"/garage\", \"server\", \"--single-node\"]"));
         assert!(rendered
             .compose_yaml
-            .contains("GARAGE_DEFAULT_BUCKET: ${GARAGE_DEFAULT_BUCKET:-dos-generated}"));
+            .contains("bucket_provisioning: live-garage-admin"));
         assert!(rendered.compose_yaml.contains("\"127.0.0.1:3900:3900\""));
         assert!(rendered
             .compose_yaml

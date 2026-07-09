@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.61.1 - 2026-07-09
+
+- Decouple Garage Docker Compose rendering from static ObjectStore bucket lists
+  and default Garage key environment variables so adding an ObjectStore does not
+  require rebuilding or restarting the object-service container.
+- Add ``dasobjectstore service provision`` to apply the live ObjectStore
+  registry through the daemon, creating Garage buckets and grants against the
+  running service.
+- Document Garage bucket provisioning and S3 credential custody as
+  DASObjectStore-managed operations rather than manual Docker Compose shell
+  environment workflows.
+
 ## 0.61.0 - 2026-07-09
 
 - Rework ``dasobjectstore ingest direct-import`` so it materially mirrors

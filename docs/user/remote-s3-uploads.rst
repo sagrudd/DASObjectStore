@@ -56,6 +56,36 @@ local health check for a remote-upload-ready endpoint. Use
 clients ``object_service.remote_url`` only when
 ``object_service.remote_ready`` is ``true``.
 
+Bucket provisioning and service restarts
+----------------------------------------
+
+Garage buckets and S3 keys are live service state, not Docker Compose
+configuration. Adding a new DASObjectStore ObjectStore must not require
+rerendering or restarting the Garage container. The Compose file should define
+the Garage process, ports, volumes, and ``garage.toml`` only. After an
+S3-exported ObjectStore is created, an administrator applies the ObjectStore
+registry to the running service with:
+
+.. code-block:: console
+
+   dasobjectstore service provision --provider garage
+
+The command asks the DASObjectStore daemon to create the required Garage bucket
+and grant the appropriate per-store S3 key. Use ``--dry-run`` to inspect how
+many stores, buckets, and Garage admin commands would be applied. Avoid manual
+``docker compose exec garage /garage ...`` flows for routine ObjectStore
+creation; they bypass DASObjectStore's registry and credential custody model.
+
+Credential handling
+-------------------
+
+Do not distribute the Garage default key as a shared appliance credential.
+Remote users should receive store-scoped S3 credentials from the DASObjectStore
+remote/easyconnect flow, Mneion/Synoptikon integration, or an administrator-run
+DASObjectStore credential issuance path. Local shell exports such as
+``GARAGE_DEFAULT_ACCESS_KEY`` and ``GARAGE_DEFAULT_SECRET_KEY`` are suitable
+only for break-glass provider administration by trusted appliance operators.
+
 On a remote computer that does not have the DASObjectStore store registry, pass
 the bucket name explicitly:
 

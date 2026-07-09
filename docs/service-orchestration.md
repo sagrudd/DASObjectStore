@@ -11,9 +11,11 @@ S3-compatible object service selected by the benchmark milestone.
 The service orchestration layer should:
 
 - generate reviewable Compose configuration;
-- keep store-to-bucket layout explicit;
+- keep store-to-bucket layout explicit in DASObjectStore metadata;
 - use per-store credentials;
 - support CLI start, stop, and status flows;
+- provision S3 buckets and credentials against the running service without
+  requiring object-service restarts;
 - keep native service management possible later.
 
 Linux is the intended full-operation target for the MVP. macOS is a supported
@@ -28,6 +30,7 @@ Current service orchestration commands:
 
 ```bash
 dasobjectstore service render-compose
+dasobjectstore service provision
 dasobjectstore service up
 dasobjectstore service down
 dasobjectstore service status --json
@@ -57,6 +60,21 @@ dasobjectstore service up \
   --compose-file /etc/dasobjectstore/garage.compose.yml \
   --project-directory /var/lib/dasobjectstore/garage
 ```
+
+The rendered Garage Compose file is process configuration: image, ports,
+volumes, and `garage.toml`. It is not the authoritative bucket registry and
+does not contain per-ObjectStore access keys. Adding an ObjectStore must not
+require rebuilding or restarting Garage. After creating or changing S3-exported
+ObjectStores, apply the live registry to the running service through the daemon:
+
+```bash
+dasobjectstore service provision --provider garage
+```
+
+Use `--dry-run` to inspect the number of stores, buckets, and Garage admin
+commands that would be applied. The daemon runs Garage admin commands inside
+the running Compose service, creating buckets and granting per-store keys
+without changing `/etc/dasobjectstore/garage.compose.yml`.
 
 Use the top-level runtime status command as the appliance healthcheck. Its JSON
 payload includes the active S3 bind address, port, `remote_ready` flag, and
