@@ -11,7 +11,8 @@ hardening items still tracked under Milestone 12. Milestone 12 remains recorded
 below as the daemon/client boundary that all normal CLI, HTTPS API, Web UI, TUI,
 and Synoptikon-facing storage mutation flows must preserve. New Web console
 completion scope is tracked under Milestones 19 and 20 rather than reopening
-older checklist claims.
+older checklist claims. ObjectStore file browsing and remote easyconnect upload
+planning are tracked under Milestones 21 and 22.
 
 ## Working Rules
 
@@ -711,6 +712,103 @@ older checklist claims.
 - [ ] Update `docs/user/web-interface.rst` and ObjectStore user docs with
   browser behavior, permission boundaries, download/archive semantics,
   performance limits, and expected failure states.
+
+## Milestone 22: Remote Easyconnect Uploads and Ingress Policy Simplification
+
+- [ ] Define the remote easyconnect product contract for
+  `dasobjectstore-remote easyconnect <host-or-ip>`, including discovery URL,
+  browser launch, pairing lifecycle, local callback/polling fallback, failure
+  states, and CLI output.
+- [ ] Add remote CLI configuration storage for paired DAS appliances, issued
+  session credentials, expiry time, renewal metadata, selected default
+  ObjectStore, and secure redaction in logs/help output.
+- [ ] Implement the remote CLI browser-launch flow that opens the appliance Web
+  authentication page for a host such as `192.168.1.192` and waits for a
+  one-time pairing result without requiring the user to paste passwords or S3
+  keys into the terminal.
+- [ ] Add server-side pairing/session API contracts for remote agents: create
+  pairing challenge, approve after authenticated browser login, exchange for a
+  remote upload session, revoke session, and renew an active session during
+  long uploads.
+- [ ] Set the default remote upload session lifetime to eight hours and add
+  renewal semantics that are safe for long-running ingress jobs without keeping
+  passwords in memory longer than required.
+- [ ] Support standalone local-user authentication for easyconnect first, while
+  keeping the API shape ready for Synoptikon/Mneion identity providers.
+- [ ] Add permission checks so remote upload sessions can list only the
+  ObjectStores available to the authenticated user and can write only to stores
+  where writer-group policy allows ingest.
+- [ ] Implement a Web remote-upload page reached after easyconnect login that
+  lists accessible ObjectStores with writer readiness, object type, capacity
+  warnings, public/export state, and whether uploads are currently allowed.
+- [ ] Add a polished drag-and-drop file/folder upload panel to the remote-upload
+  page, using browser filesystem metadata for selection while delegating actual
+  byte transfer to the paired `dasobjectstore-remote` process.
+- [ ] Define the browser-to-local-agent coordination mechanism for drag/drop
+  selections, including local loopback or browser-mediated handoff, explicit
+  user confirmation, path privacy, and clear errors when the paired agent is not
+  reachable.
+- [ ] Implement remote CLI upload execution through the intended
+  S3-compatible ObjectStore path, using appliance-issued credentials/session
+  material and derived bucket/store routing rather than user-entered S3 names.
+- [ ] Ensure remote-agent uploads and direct Web uploads always stage data to
+  the selected ObjectStore SSD before daemon-owned HDD settlement.
+- [ ] Change server-side/local-appliance ingest policy so ingest performed on
+  the DAS server itself uses direct-to-HDD writing when policy permits, rather
+  than unnecessarily staging through SSD.
+- [ ] Centralize ingress-origin classification (`local_server`, `remote_s3`,
+  `web_upload`, and future Synoptikon/Mneion origins) so placement behavior is
+  deterministic and testable across CLI, Web, daemon, and object-service paths.
+- [ ] Implement the default HDD landing worker rule as
+  `max(number_of_hdds_in_enclosure - 2, 2)` for SSD destage and local
+  direct-to-HDD ingest, with one active writer per physical HDD and bounded
+  behavior when there are too few eligible HDDs.
+- [ ] Ensure the landing worker scheduler never assigns two active writes to
+  the same HDD and never places redundant copies of one object on the same disk.
+- [ ] Add queue/backpressure behavior for remote uploads so SSD staging,
+  S3/object-service intake, HDD landing workers, and verification cannot grow
+  without bounds.
+- [ ] Add resumable and cancellable remote upload jobs, including cleanup of
+  partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
+  expired pairings, and interrupted browser tabs.
+- [ ] Extend daemon progress/events so remote uploads show source scan count,
+  staged bytes, S3 transfer rate, SSD queue depth, HDD landing queue depth,
+  active per-HDD writers, verification state, and session-renewal status.
+- [ ] Add Web progress rendering for remote uploads that remains accurate when
+  the browser refreshes, disconnects, or reconnects while the paired CLI agent
+  continues transfer.
+- [ ] Add remote CLI progress rendering for easyconnect uploads using the same
+  daemon job/event model as normal CLI ingest and embedded TUI views.
+- [ ] Add tests for easyconnect pairing success, expired pairing, denied login,
+  revoked session, eight-hour expiry, renewal during active upload, and
+  standalone local-user permission checks.
+- [ ] Add tests for ObjectStore listing through a remote upload session,
+  including non-writer denial, read-only/locked store denial, and missing writer
+  group diagnostics.
+- [ ] Add tests for browser/agent coordination, drag/drop folder expansion,
+  local path privacy, agent unreachable state, and user cancellation before
+  transfer begins.
+- [ ] Add S3 upload integration tests or fakes for multipart transfer,
+  interrupted transfer cleanup, credential expiry, and derived store/bucket
+  routing.
+- [ ] Add daemon ingest policy tests proving remote/Web/S3 origins stage to SSD
+  and local server origins use direct-to-HDD placement when safe.
+- [ ] Add scheduler tests for the HDD worker formula across 1, 2, 3, 4, 5, and
+  8 HDD enclosures, including one-writer-per-HDD and redundancy placement
+  constraints.
+- [ ] Update `docs/user/remote-upload.rst` with easyconnect setup, browser
+  authentication, ObjectStore selection, drag-and-drop upload, session renewal,
+  cancellation, and recovery behavior.
+- [ ] Update `docs/user/ingesting-files.rst`, `docs/user/object-stores.rst`,
+  and `docs/user/web-interface.rst` with the simplified ingress-origin rules:
+  local server ingest writes direct to HDD, while S3/Web/remote upload stages to
+  SSD first.
+- [ ] Update packaging docs and Makefile notes for `make remote`, `make
+  remote-deb`, and `make remote-rpm` so remote easyconnect dependencies and
+  browser-launch expectations are explicit.
+- [ ] Add operator documentation for the default HDD landing concurrency rule,
+  per-HDD writer exclusivity, SSD pressure behavior, and how to diagnose slow
+  remote uploads.
 
 ## Cross-Cutting Tasks
 

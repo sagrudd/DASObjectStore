@@ -3,7 +3,8 @@
 Status: Draft  
 Tracked TODO status: complete through Milestone 18 as of 2026-07-07;
 new Web console completion work is tracked in Milestones 19 and 20 as of
-2026-07-08
+2026-07-08; ObjectStore file browsing and remote easyconnect upload planning
+are tracked in Milestones 21 and 22
 Scope: MVP for a DAS-based object store for bioinformatics development  
 Target platforms: Linux full support, macOS development/read-export support
 
@@ -669,6 +670,77 @@ Exit criteria:
   require the browser to hold the full object inventory in memory;
 - API, daemon, archive, permission, and Yew regression tests cover the primary
   and failure paths.
+
+## Milestone 22: Remote Easyconnect Uploads and Ingress Policy Simplification
+
+Goal: make remote uploads from laboratory, analysis, and laptop workstations as
+simple as authenticating to the DAS appliance in a browser, selecting an
+ObjectStore, and dragging local files or folders into a browser-assisted upload
+surface powered by the `dasobjectstore-remote` CLI agent.
+
+Priority: this milestone builds on the existing `make remote` client packaging
+and Web ObjectStore work. It is a product workflow, not a developer diagnostic:
+users with data on remote computers should not have to manually configure S3
+credentials, bucket names, temporary policy files, or daemon socket details
+before uploading to the DAS.
+
+Scope:
+
+- add `dasobjectstore-remote easyconnect <host-or-ip>` so a remote workstation
+  can discover a DASObjectStore appliance such as `192.168.1.192`, open the
+  system browser to the appliance Web authentication flow, and bind the local
+  remote CLI agent to an authenticated upload session;
+- implement a browser-mediated device/session authorization flow with local OS
+  browser launch, short-lived one-time pairing tokens, secure local callback or
+  polling fallback, and a renewable session suitable for at least eight hours
+  of upload work;
+- support standalone local-user authentication on the appliance first, while
+  keeping the flow compatible with later Synoptikon/Mneion identity providers;
+- expose an authenticated remote upload page listing the ObjectStores available
+  to the user, including writer/readiness state, object type, capacity signals,
+  and whether uploads are currently allowed;
+- implement drag-and-drop file and folder selection in the Web page while the
+  actual byte transfer is performed by the paired `dasobjectstore-remote`
+  process on the remote workstation;
+- drive uploads through intended S3-compatible object-service capabilities
+  where practical, using credentials/session material issued by the appliance
+  and not requiring the user to type S3 bucket names or keys;
+- ensure remote uploads and direct Web uploads are staged to the ObjectStore
+  SSD first, then settled to HDD through the daemon-owned ingress pipeline;
+- simplify server-side ingress placement policy: local server-side ingress uses
+  direct-to-HDD writing, while S3, Web, and remote-agent ingress always stages
+  to SSD before HDD settlement;
+- define the default HDD landing concurrency as
+  `max(number_of_hdds_in_enclosure - 2, 2)`, subject to one active writer per
+  physical HDD and never placing redundant copies on the same disk;
+- apply the same landing-worker rule for SSD destage and local direct-to-HDD
+  ingress, with bounded queues, visible backpressure, and clear behavior when
+  the enclosure has too few eligible HDDs to satisfy policy safely;
+- add resumable/cancellable remote upload semantics so interrupted browser
+  sessions, closed laptops, expired sessions, and network loss do not leave
+  orphaned partial objects or ambiguous metadata;
+- add Web, remote CLI, daemon, object-service, and documentation coverage for
+  large folders, large files, many small files, session renewal, permission
+  denial, and upload cancellation.
+
+Exit criteria:
+
+- `dasobjectstore-remote easyconnect 192.168.1.192` opens the appliance browser
+  login flow and pairs the remote CLI without exposing passwords or S3 keys on
+  screen;
+- the authenticated remote upload session lasts for eight hours by default and
+  can renew safely during long ingress operations;
+- users can select an ObjectStore from the browser and drag-drop files or
+  folders for upload, while the remote CLI agent performs the actual transfer;
+- remote and Web uploads land on SSD first and then settle to HDD using the
+  daemon job model, telemetry, cancellation, and cleanup semantics;
+- local server-side ingest bypasses SSD staging only when it is truly local to
+  the DAS appliance and policy permits direct-to-HDD writes;
+- landing concurrency is deterministic from enclosure HDD count, never assigns
+  two active writers to the same HDD, and preserves redundancy rules;
+- user documentation explains the easyconnect workflow, authentication/session
+  model, ObjectStore selection, drag-and-drop behavior, ingress placement rules,
+  failure states, and recovery expectations.
 
 ## Post-MVP Direction
 
