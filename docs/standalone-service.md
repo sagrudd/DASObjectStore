@@ -143,6 +143,11 @@ group and restarts `dasobjectstore-server.service`. If Docker is repaired or
 reinstalled later, run `sudo usermod -aG docker dasobjectstore` and restart the
 Web service so the process receives the updated supplementary group.
 
+Web report rebuild scratch space lives under
+`/var/lib/dasobjectstore/report-rebuild` rather than `/tmp`. This path is
+visible to both `dasobjectstore-server.service` and the Docker daemon even when
+the systemd unit uses `PrivateTmp=true`.
+
 ## TLS Assets
 
 Default standalone TLS assets live under the product root:

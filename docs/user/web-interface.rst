@@ -479,9 +479,13 @@ using the authenticated Web session headers. Standalone appliances require the
 logged-in local user to have sudo-derived DASObjectStore administrator authority
 before report rendering is attempted. The API validates the JSON schema
 ``dasobjectstore.performance_test.recommendation.v1``, writes the artifact into
-a temporary rebuild directory, invokes ``dasobjectstore performance-report`` with
-a bounded renderer timeout, and removes the temporary directory after completion
-or failure.
+a host-visible rebuild directory under
+``/var/lib/dasobjectstore/report-rebuild``, invokes
+``dasobjectstore performance-report`` with a bounded renderer timeout, and
+removes the per-upload temporary directory after completion or failure. The
+state-directory location is intentional: packaged ``dasobjectstore-server`` uses
+systemd ``PrivateTmp=true``, and Docker cannot bind-mount paths that exist only
+inside the Web service's private ``/tmp`` namespace.
 
 On success, the API streams the regenerated PDF directly back to the browser with
 ``Content-Type: application/pdf`` and an attachment filename derived from the

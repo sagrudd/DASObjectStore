@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -11,6 +11,8 @@ pub const PERFORMANCE_REPORT_JSON_SCHEMA: &str =
 pub const PERFORMANCE_REPORT_UPLOAD_MAX_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_REPORT_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
 const REPORT_COMMAND_ENV: &str = "DASOBJECTSTORE_REPORT_REBUILD_COMMAND";
+const DEFAULT_REPORT_REBUILD_ROOT: &str = "/var/lib/dasobjectstore/report-rebuild";
+const REPORT_REBUILD_ROOT_ENV: &str = "DASOBJECTSTORE_REPORT_REBUILD_ROOT";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PerformanceReportPdf {
@@ -63,6 +65,7 @@ pub fn rebuild_performance_report_pdf_from_upload(
         uploaded_filename,
         operator,
         report_command(),
+        report_rebuild_root(),
         DEFAULT_REPORT_COMMAND_TIMEOUT,
     )
 }
@@ -72,6 +75,7 @@ fn rebuild_performance_report_pdf_with_command(
     uploaded_filename: Option<&str>,
     operator: &str,
     report_command: OsString,
+    rebuild_root: PathBuf,
     timeout: Duration,
 ) -> Result<PerformanceReportPdf, PerformanceReportRebuildError> {
     validate_performance_json_upload(upload_bytes)?;
@@ -88,8 +92,7 @@ fn rebuild_performance_report_pdf_with_command(
         .unwrap_or_else(|| sanitize_filename_component(&run_id));
     let report_filename = format!("{upload_stem}.pdf");
 
-    let temp_root =
-        std::env::temp_dir().join(format!("dasobjectstore-report-rebuild-{}", Uuid::new_v4()));
+    let temp_root = rebuild_root.join(format!("dasobjectstore-report-rebuild-{}", Uuid::new_v4()));
     let json_path = temp_root.join(format!("{upload_stem}.json"));
     let report_path = temp_root.join(&report_filename);
     fs::create_dir_all(&temp_root)
@@ -206,6 +209,12 @@ fn report_command() -> OsString {
     std::env::var_os(REPORT_COMMAND_ENV).unwrap_or_else(|| OsString::from("dasobjectstore"))
 }
 
+fn report_rebuild_root() -> PathBuf {
+    std::env::var_os(REPORT_REBUILD_ROOT_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_REPORT_REBUILD_ROOT))
+}
+
 fn json_string(value: &Value, path: &[&str]) -> Option<String> {
     let mut current = value;
     for key in path {
@@ -264,6 +273,7 @@ mod tests {
             Some("empty.json"),
             "operator",
             OsString::from("definitely-not-used"),
+            std::env::temp_dir(),
             Duration::from_secs(1),
         )
         .expect_err("empty upload rejected");
@@ -298,12 +308,60 @@ mod tests {
             Some("benchmark.json"),
             "stephen",
             renderer.into_os_string(),
+            temp_root.join("rebuild-root"),
             Duration::from_secs(5),
         )
         .expect("report rebuild succeeds");
 
         assert_eq!(rebuilt.filename, "benchmark.pdf");
         assert_eq!(rebuilt.bytes, b"%PDF-FAKE");
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_uses_supplied_host_visible_rebuild_root_for_renderer_paths() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_root = std::env::temp_dir().join(format!(
+            "dasobjectstore-reporting-root-test-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&temp_root).expect("temp root");
+        let renderer = temp_root.join("path-capturing-renderer.sh");
+        let marker = temp_root.join("renderer-args.txt");
+        fs::write(
+            &renderer,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '%s' '%PDF-FAKE' > \"$5\"\n",
+                marker.display()
+            ),
+        )
+        .expect("fake renderer written");
+        let mut permissions = fs::metadata(&renderer).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&renderer, permissions).expect("permissions");
+
+        let rebuild_root = temp_root.join("host-visible-rebuild-root");
+        let artifact = json!({
+            "schema": PERFORMANCE_REPORT_JSON_SCHEMA,
+            "run": {"run_id": "host-visible-run"}
+        })
+        .to_string();
+        rebuild_performance_report_pdf_with_command(
+            artifact.as_bytes(),
+            Some("benchmark.json"),
+            "stephen",
+            renderer.into_os_string(),
+            rebuild_root.clone(),
+            Duration::from_secs(5),
+        )
+        .expect("report rebuild succeeds");
+
+        let args = fs::read_to_string(&marker).expect("renderer args");
+        assert!(args.contains(&rebuild_root.display().to_string()));
+        assert!(!args.contains("dasobjectstore-report-rebuild-session"));
 
         let _ = fs::remove_dir_all(temp_root);
     }

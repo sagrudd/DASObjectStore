@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.12 - 2026-07-09
+
+- Move Web performance-report rebuild scratch space out of systemd private
+  ``/tmp`` and into ``/var/lib/dasobjectstore/report-rebuild`` so Docker can
+  bind-mount the renderer inputs and outputs.
+- Package the report rebuild scratch directory through tmpfiles and DEB/RPM
+  post-install setup.
+
 ## 0.54.11 - 2026-07-09
 
 - Add the packaged ``dasobjectstore`` service user to the ``docker`` group

@@ -66,6 +66,7 @@ require_text "$sysusers" "g dasobjectstore"
 
 require_text "$tmpfiles" "z /srv/dasobjectstore 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /opt/dasobjectstore 0750 dasobjectstore dasobjectstore -"
+require_text "$tmpfiles" "d /var/lib/dasobjectstore/report-rebuild 0750 dasobjectstore dasobjectstore -"
 require_text "$web_config" "\"bind_address\": \"0.0.0.0\""
 require_text "$web_config" "\"https_port\": 8448"
 require_text "$daemon_config" "\"socket_path\": \"/run/dasobjectstore/dasobjectstored.sock\""
@@ -75,6 +76,7 @@ require_text "$pam_service" "account required pam_unix.so"
 require_text "$postinst" "service_user=\"dasobjectstore\""
 require_text "$postinst" "managed_root=\"/srv/dasobjectstore\""
 require_text "$postinst" "product_root=\"/opt/dasobjectstore\""
+require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750'
 require_text "$postinst" 'ensure_container_runtime_access'
 require_text "$postinst" 'usermod -aG docker "$service_user"'
 require_text "$postinst" 'restart dasobjectstore-server.service'
@@ -130,6 +132,7 @@ require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf'
+require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/report-rebuild'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_rpm" 'BuildRequires:  clang'
