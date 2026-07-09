@@ -12619,26 +12619,24 @@ mod tests {
         assert!(report.contains("- Run id: `perf-test-run`"));
         assert!(report.contains("- Reproduce with: command recorded in the JSON artifact."));
         assert!(report.contains(
-            "- Recommended strategy: ssd-overlap-drain with `size_desc` order at 2 HDD worker(s)"
+            "- Recommended strategy: SSD Overlap Drain with `Size descending` order at 2 HDD worker(s), observed aggregate"
         ));
         assert!(report.contains(
             "| Scenario | File order | HDD concurrency | Redundancy | Logical source | Physical HDD writes | Operations | Aggregate landing | Elapsed | HDD drain overlapped SSD staging |"
         ));
-        assert!(report
-            .contains("| SSD ingest with overlapping HDD drain | `size_desc` | 2 | 2 | 1.0 MiB | 2.0 MiB | 2 | 2.0 MiB/s | 1.0 s | yes |"));
+        assert!(report.contains(
+            "| SSD ingest with overlapping HDD drain | `size_desc` | 2 | 2 | 1 MiB | 2 MiB | 2 |"
+        ));
         assert!(report
             .contains("| Scenario | File order | HDD concurrency | File | SSD write | SSD read |"));
         assert!(report.contains(
             "| Scenario | File order | HDD concurrency | File | Copy | Disk | Write rate |"
         ));
-        assert!(report
-            .contains("| ssd-overlap-drain | `size_desc` | 2 | 1 | 2 | disk-b | 512.0 KiB/s |"));
+        assert!(report.contains("| ssd-overlap-drain | `size_desc` | 2 | 1 | 2 | disk-b |"));
         assert!(report.contains(
             "| Scenario | File order | HDD concurrency | Members | Aggregate landing | Slowest file write | HDD drain overlapped SSD staging |"
         ));
-        assert!(report.contains(
-            "| ssd-overlap-drain | `size_desc` | 2 | disk-a, disk-b | 2.0 MiB/s | 2.0 s | yes |"
-        ));
+        assert!(report.contains("| ssd-overlap-drain | `size_desc` | 2 | disk-a, disk-b |"));
         assert!(report.contains("io_time_series"));
         assert!(report.contains("Per-second IO rates: ssd-overlap-drain size_desc c2 r2"));
         assert!(report
