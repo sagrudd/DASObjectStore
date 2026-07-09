@@ -526,7 +526,12 @@ administrator jobs, enclosure preparation, ObjectStore creation, SubObject
 creation, ingest, destage, repair, and endpoint validation.
 
 When daemon sources report work, the page shows active task rows with task ID,
-kind, state, label, and update timestamp. Ingest and destage queue summaries
+kind, state, label, update timestamp, and daemon progress when available.
+Remote upload jobs are ordinary daemon activity rows: their stage, byte
+counters, unit counters, percent complete, and daemon message are read from the
+persisted daemon job registry. A browser refresh, disconnect, or reconnect
+therefore recovers the latest daemon-recorded transfer progress while the
+paired CLI upload agent continues running. Ingest and destage queue summaries
 are rendered separately so SSD upload pressure and HDD settlement activity are
 visible even when no administrator job is active. If the daemon returns no task
 rows, the page must state that no active tasks are currently reported rather

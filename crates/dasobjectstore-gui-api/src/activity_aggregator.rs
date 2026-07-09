@@ -6,8 +6,8 @@ use crate::endpoints::{
     EndpointInventoryItemView, EndpointInventoryView, EndpointValidationStateView,
 };
 use crate::workspaces::{
-    default_activity_categories, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
-    ActivityWorkspaceView,
+    default_activity_categories, ActivityTaskKindView, ActivityTaskProgressView,
+    ActivityTaskStateView, ActivityTaskView, ActivityWorkspaceView,
 };
 use dasobjectstore_core::lifecycle::{ObjectState, PoolState};
 use dasobjectstore_daemon::{
@@ -130,6 +130,7 @@ fn activity_task_from_repair_event(event: &PoolRepairActivityEvent) -> ActivityT
         kind: ActivityTaskKindView::Repair,
         state,
         label,
+        progress: None,
         updated_at_utc: event.updated_at_utc.clone(),
         warnings,
     }
@@ -173,6 +174,7 @@ fn activity_task_from_endpoint(endpoint: &EndpointInventoryItemView) -> Activity
         kind: ActivityTaskKindView::EndpointValidation,
         state,
         label,
+        progress: None,
         updated_at_utc: endpoint
             .validation
             .checked_at_utc
@@ -358,9 +360,31 @@ fn activity_task_from_daemon_job(job: &DaemonJobSummary) -> ActivityTaskView {
         kind: activity_kind_from_daemon_job(&job.kind),
         state: activity_state_from_daemon_job(&job.state),
         label: activity_label_from_daemon_job(job),
+        progress: activity_progress_from_daemon_job(job),
         updated_at_utc: job.updated_at_utc.clone(),
         warnings,
     }
+}
+
+fn activity_progress_from_daemon_job(job: &DaemonJobSummary) -> Option<ActivityTaskProgressView> {
+    let progress = &job.progress;
+    if progress.stage.is_empty()
+        && progress.work_bytes_total == 0
+        && progress.work_units_total == 0
+        && progress.message.is_none()
+    {
+        return None;
+    }
+
+    Some(ActivityTaskProgressView {
+        stage: progress.stage.clone(),
+        work_bytes_done: progress.work_bytes_done,
+        work_bytes_total: progress.work_bytes_total,
+        work_units_done: progress.work_units_done,
+        work_units_total: progress.work_units_total,
+        percent_complete: progress.percent_complete(),
+        message: progress.message.clone(),
+    })
 }
 
 fn activity_kind_from_daemon_job(kind: &DaemonJobKind) -> ActivityTaskKindView {
@@ -449,6 +473,44 @@ mod tests {
         assert_eq!(view.tasks[1].kind, crate::ActivityTaskKindView::Repair);
         assert_eq!(view.tasks[1].state, crate::ActivityTaskStateView::Cancelled);
         assert_eq!(view.tasks[1].warnings[0].code, "daemon_job_message");
+    }
+
+    #[test]
+    fn maps_remote_upload_daemon_progress_into_activity_task() {
+        let view = activity_workspace_from_daemon_jobs(DaemonJobListResponse {
+            jobs: vec![DaemonJobSummary {
+                job_id: DaemonJobId::new("remote-upload-job-1").expect("job id"),
+                kind: DaemonJobKind::RemoteUpload,
+                state: DaemonJobState::Running,
+                progress: DaemonJobProgress {
+                    stage: "remote_s3_transfer_running".to_string(),
+                    work_bytes_done: 512,
+                    work_bytes_total: 1024,
+                    work_units_done: 3,
+                    work_units_total: 9,
+                    message: Some("remote upload copied 512 bytes".to_string()),
+                },
+                submitted_at_utc: "2026-07-09T00:00:00Z".to_string(),
+                updated_at_utc: "2026-07-09T00:01:00Z".to_string(),
+                actor: Some("operator".to_string()),
+                failure_message: None,
+            }],
+        });
+
+        assert_eq!(view.tasks[0].kind, crate::ActivityTaskKindView::Ingest);
+        assert_eq!(view.tasks[0].state, crate::ActivityTaskStateView::Running);
+        assert_eq!(view.tasks[0].label, "remote upload copied 512 bytes");
+        let progress = view.tasks[0].progress.as_ref().expect("activity progress");
+        assert_eq!(progress.stage, "remote_s3_transfer_running");
+        assert_eq!(progress.work_bytes_done, 512);
+        assert_eq!(progress.work_bytes_total, 1024);
+        assert_eq!(progress.work_units_done, 3);
+        assert_eq!(progress.work_units_total, 9);
+        assert_eq!(progress.percent_complete, Some(50));
+        assert_eq!(
+            progress.message.as_deref(),
+            Some("remote upload copied 512 bytes")
+        );
     }
 
     #[test]

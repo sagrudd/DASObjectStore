@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Render daemon-recorded remote-upload progress in Web Activity task rows so
+  browser refresh, disconnect, and reconnect recover current transfer stage,
+  byte counters, percent complete, and daemon messages from persisted job state.
 - Populate remote-upload progress with session-renewal status telemetry from
   paired easyconnect session renewal metadata.
 - Populate remote-upload progress with active HDD writer count and pending

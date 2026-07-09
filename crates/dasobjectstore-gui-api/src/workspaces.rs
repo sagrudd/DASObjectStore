@@ -956,8 +956,21 @@ pub struct ActivityTaskView {
     pub kind: ActivityTaskKindView,
     pub state: ActivityTaskStateView,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ActivityTaskProgressView>,
     pub updated_at_utc: String,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ActivityTaskProgressView {
+    pub stage: String,
+    pub work_bytes_done: u64,
+    pub work_bytes_total: u64,
+    pub work_units_done: u64,
+    pub work_units_total: u64,
+    pub percent_complete: Option<u8>,
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1287,6 +1300,7 @@ mod tests {
                 kind: ActivityTaskKindView::EndpointValidation,
                 state: ActivityTaskStateView::Complete,
                 label: "Validate endpoint".to_string(),
+                progress: None,
                 updated_at_utc: "2026-07-06T11:00:00Z".to_string(),
                 warnings: Vec::new(),
             }],

@@ -665,9 +665,22 @@ pub struct ActivityTaskResponse {
     pub kind: String,
     pub state: String,
     pub label: String,
+    #[serde(default)]
+    pub progress: Option<ActivityTaskProgressResponse>,
     pub updated_at_utc: String,
     #[serde(default)]
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ActivityTaskProgressResponse {
+    pub stage: String,
+    pub work_bytes_done: u64,
+    pub work_bytes_total: u64,
+    pub work_units_done: u64,
+    pub work_units_total: u64,
+    pub percent_complete: Option<u8>,
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -2197,6 +2210,15 @@ mod tests {
                 "kind": "system_administration",
                 "state": "running",
                 "label": "Create local writer group",
+                "progress": {
+                    "stage": "remote_s3_transfer_running",
+                    "work_bytes_done": 512,
+                    "work_bytes_total": 1024,
+                    "work_units_done": 3,
+                    "work_units_total": 9,
+                    "percent_complete": 50,
+                    "message": "remote upload copied 512 bytes"
+                },
                 "updated_at_utc": "2026-07-09T00:00:00Z",
                 "warnings": []
             }],
@@ -2210,6 +2232,11 @@ mod tests {
         assert_eq!(decoded.destage.expect("destage").pending_objects, 4);
         assert_eq!(decoded.categories[0].kind, "system_administration");
         assert_eq!(decoded.tasks[0].state, "running");
+        let progress = decoded.tasks[0].progress.as_ref().expect("progress");
+        assert_eq!(progress.stage, "remote_s3_transfer_running");
+        assert_eq!(progress.work_bytes_done, 512);
+        assert_eq!(progress.work_bytes_total, 1024);
+        assert_eq!(progress.percent_complete, Some(50));
     }
 
     #[test]

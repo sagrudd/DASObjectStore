@@ -864,7 +864,7 @@ planning are tracked under Milestones 21 and 22.
   writer count and pending verification state.
 - [x] Wire the remote easyconnect/AWS CLI submit path to populate
   session-renewal status telemetry from paired session renewal metadata.
-- [ ] Add Web progress rendering for remote uploads that remains accurate when
+- [x] Add Web progress rendering for remote uploads that remains accurate when
   the browser refreshes, disconnects, or reconnects while the paired CLI agent
   continues transfer.
 - [ ] Add remote CLI progress rendering for easyconnect uploads using the same

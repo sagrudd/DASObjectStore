@@ -6373,9 +6373,42 @@ fn render_activity_task(task: &crate::api::ActivityTaskResponse) -> Html {
                 <span class="dos-card-label">{ activity_task_kind_label(&task.kind) }</span>
                 <strong>{ task.label.clone() }</strong>
                 <p>{ format!("{} · updated {}", task.task_id, task.updated_at_utc) }</p>
+                if let Some(progress) = &task.progress {
+                    <p>{ activity_task_progress_label(progress) }</p>
+                }
             </div>
             <span class="dos-status-pill">{ activity_task_state_label(&task.state) }</span>
         </article>
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn activity_task_progress_label(progress: &crate::api::ActivityTaskProgressResponse) -> String {
+    let mut parts = Vec::new();
+    if !progress.stage.is_empty() {
+        parts.push(progress.stage.clone());
+    }
+    if let Some(percent) = progress.percent_complete {
+        parts.push(format!("{percent}%"));
+    }
+    if progress.work_bytes_total > 0 {
+        parts.push(format!(
+            "{} / {} bytes",
+            progress.work_bytes_done, progress.work_bytes_total
+        ));
+    } else if progress.work_units_total > 0 {
+        parts.push(format!(
+            "{} / {} units",
+            progress.work_units_done, progress.work_units_total
+        ));
+    }
+    if parts.is_empty() {
+        progress
+            .message
+            .clone()
+            .unwrap_or_else(|| "Progress pending".to_string())
+    } else {
+        parts.join(" · ")
     }
 }
 
@@ -6827,28 +6860,28 @@ fn page_header(props: &PageHeaderProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::{
-        activity_category_summaries, activity_queue_summary, activity_workspace_api_path,
-        admin_job_percent, admin_job_progress_text, admin_job_state_is_terminal,
-        bioinformatics_derivation_source_summaries, bioinformatics_readiness_summaries,
-        bioinformatics_summary_cards, bioinformatics_workspace_api_path, enclosure_card_summaries,
-        enclosure_prepare_candidate, enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
-        enclosure_ssd_root, enclosures_workspace_api_path, endpoints_workspace_api_path,
-        home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
-        object_browser_download_disabled_reason, object_browser_file_download_available,
-        object_browser_file_summaries, object_browser_folder_download_available,
-        object_browser_folder_summaries, object_browser_initial_endpoint,
-        object_browser_placement_summary, object_browser_placement_summary_state,
-        object_store_bucket_default, object_store_card_summaries,
-        object_store_configure_review_from_values, object_store_create_confirmation_matches,
-        object_store_create_review_from_values, object_store_creation_fields_ready,
-        objectstores_workspace_api_path, primary_navigation_for_host, remote_upload_folder_count,
-        remote_upload_workspace_api_path, subobject_registry_preview_from_values,
-        users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
-        EnclosureWizardState, RemoteUploadSelectedFile, RemoteUploadSelectionSummary,
-        WorkspacePage, ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE,
-        ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-        LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
-        REMOTE_UPLOAD_WORKSPACE_ROUTE,
+        activity_category_summaries, activity_queue_summary, activity_task_progress_label,
+        activity_workspace_api_path, admin_job_percent, admin_job_progress_text,
+        admin_job_state_is_terminal, bioinformatics_derivation_source_summaries,
+        bioinformatics_readiness_summaries, bioinformatics_summary_cards,
+        bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
+        enclosure_prepare_confirmed, enclosure_retry_clears_job_state, enclosure_ssd_root,
+        enclosures_workspace_api_path, endpoints_workspace_api_path, home_dashboard_attention,
+        home_dashboard_metrics, home_workspace_api_path, object_browser_download_disabled_reason,
+        object_browser_file_download_available, object_browser_file_summaries,
+        object_browser_folder_download_available, object_browser_folder_summaries,
+        object_browser_initial_endpoint, object_browser_placement_summary,
+        object_browser_placement_summary_state, object_store_bucket_default,
+        object_store_card_summaries, object_store_configure_review_from_values,
+        object_store_create_confirmation_matches, object_store_create_review_from_values,
+        object_store_creation_fields_ready, objectstores_workspace_api_path,
+        primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
+        subobject_registry_preview_from_values, users_groups_summary_cards,
+        users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState,
+        RemoteUploadSelectedFile, RemoteUploadSelectionSummary, WorkspacePage,
+        ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+        ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
     };
     use super::{
         local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
@@ -6856,18 +6889,18 @@ mod tests {
         users_groups_view_with_group_assignment, users_groups_view_with_writer_group,
     };
     use crate::api::{
-        ActivityCategoryResponse, ActivityTaskResponse, ActivityWorkspaceResponse,
-        AdminJobCancelResponse, AdminJobProgress, AdminJobStatusResponse, AdminJobSummary,
-        BioinformaticsContextCardResponse, BioinformaticsDerivationSourceResponse,
-        BioinformaticsReadinessCardResponse, BioinformaticsWorkspaceResponse,
-        CapacitySummaryResponse, DasEnclosureCardResponse, DestageQueueSummaryResponse,
-        DriveCountSummaryResponse, EnclosureConnectionResponse, EnclosurePrepareAcceptedResponse,
-        EnclosurePrepareHddDevice, EnclosurePrepareResponse, EnclosuresPageResponse,
-        HomeDashboardResponse, IngestQueueSummaryResponse, LocalGroupMembershipResponse,
-        LocalGroupOperationResponse, LocalUserAuthorityResponse, ObjectBrowserFileNodeResponse,
-        ObjectBrowserFolderNodeResponse, ObjectBrowserPlacementResponse, ObjectStoresPageResponse,
-        StandaloneUserAccountResponse, StorageGroupResponse, UsersGroupsCapabilitiesResponse,
-        UsersGroupsWorkspaceResponse,
+        ActivityCategoryResponse, ActivityTaskProgressResponse, ActivityTaskResponse,
+        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobProgress,
+        AdminJobStatusResponse, AdminJobSummary, BioinformaticsContextCardResponse,
+        BioinformaticsDerivationSourceResponse, BioinformaticsReadinessCardResponse,
+        BioinformaticsWorkspaceResponse, CapacitySummaryResponse, DasEnclosureCardResponse,
+        DestageQueueSummaryResponse, DriveCountSummaryResponse, EnclosureConnectionResponse,
+        EnclosurePrepareAcceptedResponse, EnclosurePrepareHddDevice, EnclosurePrepareResponse,
+        EnclosuresPageResponse, HomeDashboardResponse, IngestQueueSummaryResponse,
+        LocalGroupMembershipResponse, LocalGroupOperationResponse, LocalUserAuthorityResponse,
+        ObjectBrowserFileNodeResponse, ObjectBrowserFolderNodeResponse,
+        ObjectBrowserPlacementResponse, ObjectStoresPageResponse, StandaloneUserAccountResponse,
+        StorageGroupResponse, UsersGroupsCapabilitiesResponse, UsersGroupsWorkspaceResponse,
     };
     use crate::mount::FrontendHost;
     use crate::stores::STORES_WORKSPACE_ROUTE;
@@ -7050,6 +7083,7 @@ mod tests {
                     kind: "system_administration".to_string(),
                     state: "running".to_string(),
                     label: "Create local writer group".to_string(),
+                    progress: None,
                     updated_at_utc: "2026-07-09T00:00:00Z".to_string(),
                     warnings: Vec::new(),
                 },
@@ -7058,6 +7092,7 @@ mod tests {
                     kind: "ingest".to_string(),
                     state: "queued".to_string(),
                     label: "Ingest zymo".to_string(),
+                    progress: None,
                     updated_at_utc: "2026-07-09T00:01:00Z".to_string(),
                     warnings: Vec::new(),
                 },
@@ -7066,6 +7101,7 @@ mod tests {
                     kind: "repair".to_string(),
                     state: "failed".to_string(),
                     label: "Restore copy".to_string(),
+                    progress: None,
                     updated_at_utc: "2026-07-09T00:02:00Z".to_string(),
                     warnings: Vec::new(),
                 },
@@ -7074,6 +7110,7 @@ mod tests {
                     kind: "repair".to_string(),
                     state: "cancelled".to_string(),
                     label: "Cancelled replacement".to_string(),
+                    progress: None,
                     updated_at_utc: "2026-07-09T00:03:00Z".to_string(),
                     warnings: Vec::new(),
                 },
@@ -7093,6 +7130,21 @@ mod tests {
         assert_eq!(summaries[2].state, "critical");
         assert_eq!(queues[0].value, "1 active");
         assert_eq!(queues[1].value, "1 copying");
+    }
+
+    #[test]
+    fn activity_task_progress_label_prefers_stage_percent_and_bytes() {
+        let label = activity_task_progress_label(&ActivityTaskProgressResponse {
+            stage: "remote_s3_transfer_running".to_string(),
+            work_bytes_done: 512,
+            work_bytes_total: 1024,
+            work_units_done: 3,
+            work_units_total: 9,
+            percent_complete: Some(50),
+            message: Some("remote upload copied 512 bytes".to_string()),
+        });
+
+        assert_eq!(label, "remote_s3_transfer_running · 50% · 512 / 1024 bytes");
     }
 
     #[test]
