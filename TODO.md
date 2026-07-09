@@ -1027,9 +1027,12 @@ planning are tracked under Milestones 21 and 22.
   Completed by documenting packaged telemetry ownership, config validation,
   supported cadences, bounded retention, read-only inspection commands, safe
   history reset steps, and daemon log checks for collection/write failures.
-- [ ] Add cross-product notes for floundeR documenting the generalized
+- [x] Add cross-product notes for floundeR documenting the generalized
   telemetry chart grammar so Monas, Synoptikon, Mnematikon, and future
   Mnemosyne products can reuse the same plotting semantics.
+  Completed by adding a product-neutral floundeR telemetry chart grammar note
+  and registering `mnemosyne.flounder.telemetry_chart_contract.v1` in the
+  public format registry.
 
 ## Cross-Cutting Tasks
 

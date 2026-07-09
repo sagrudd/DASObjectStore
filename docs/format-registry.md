@@ -71,11 +71,17 @@ interpolated silently in dashboards or reports.
 | Format | Current version | Version carrier | Notes |
 | --- | --- | --- | --- |
 | Host storage boundary | `mnemosyne.host_storage_boundary.v1` | `schema_version` field | Declares Synoptikon object-store boundary semantics. |
+| floundeR telemetry chart contract | `mnemosyne.flounder.telemetry_chart_contract.v1` | `schema_version` field | Product-neutral chart grammar for gap-aware telemetry plots shared by DASObjectStore, Monas, Synoptikon, Mnematikon, Grammateus reports, and future Mnemosyne products. |
 | Mneion object-store create request | Pre-1.0 draft | Mneion contract and adapter version | Exported by `dasobjectstore mnemosyne export`. |
 | Mneion object-store link request | Pre-1.0 draft | Mneion contract and adapter version | Exported with the binding snippet. |
 
 Mnemosyne formats must stay in the adapter boundary and must not make
 DASObjectStore public-core crates depend on Mnemosyne runtime state.
+
+The floundeR chart grammar is summarized in
+[floundeR Telemetry Chart Grammar](flounder-telemetry-chart-grammar.md).
+Renderers must preserve explicit gap semantics: null telemetry points and
+missing intervals are not zero values and must not be silently interpolated.
 
 ## Update Checklist
 
