@@ -528,7 +528,7 @@ where
         &self,
         request: &StoreInventoryRequest,
         session_id: &str,
-    ) -> Result<StoreInventoryResponse, RemoteEasyconnectPairedSessionStoreError> {
+    ) -> Result<StoreInventoryResponse, RemoteEasyconnectStoreInventoryError> {
         let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
             &self.remote_easyconnect_session_store_path,
         );
@@ -560,6 +560,19 @@ where
                     &actor,
                     &self.clock.now_utc(),
                 )?;
+                if definition.writer_group.is_none() {
+                    return Err(RemoteEasyconnectStoreInventoryError::MissingWriterGroup {
+                        object_store: definition.store_id.to_string(),
+                    });
+                }
+                if definition.policy.export_policy != ExportPolicy::S3 {
+                    return Err(
+                        RemoteEasyconnectStoreInventoryError::StoreNotRemoteWritable {
+                            object_store: definition.store_id.to_string(),
+                            export_policy: format!("{:?}", definition.policy.export_policy),
+                        },
+                    );
+                }
             } else if !grant.can_read && !grant.can_write {
                 continue;
             }
@@ -1014,6 +1027,45 @@ impl Display for RemoteEasyconnectRenewalDispatchError {
 }
 
 impl std::error::Error for RemoteEasyconnectRenewalDispatchError {}
+
+#[derive(Debug)]
+enum RemoteEasyconnectStoreInventoryError {
+    SessionStore(RemoteEasyconnectPairedSessionStoreError),
+    MissingWriterGroup {
+        object_store: String,
+    },
+    StoreNotRemoteWritable {
+        object_store: String,
+        export_policy: String,
+    },
+}
+
+impl Display for RemoteEasyconnectStoreInventoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SessionStore(error) => Display::fmt(error, formatter),
+            Self::MissingWriterGroup { object_store } => write!(
+                formatter,
+                "ObjectStore {object_store} cannot be listed for remote upload because it has no writer group"
+            ),
+            Self::StoreNotRemoteWritable {
+                object_store,
+                export_policy,
+            } => write!(
+                formatter,
+                "ObjectStore {object_store} cannot be listed for remote upload because export policy {export_policy} is not S3"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RemoteEasyconnectStoreInventoryError {}
+
+impl From<RemoteEasyconnectPairedSessionStoreError> for RemoteEasyconnectStoreInventoryError {
+    fn from(error: RemoteEasyconnectPairedSessionStoreError) -> Self {
+        Self::SessionStore(error)
+    }
+}
 
 #[derive(Debug)]
 enum RemoteEasyconnectExchangeDispatchError {
@@ -1918,7 +1970,7 @@ mod tests {
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
-    use dasobjectstore_core::store::{StoreClass, StorePolicy};
+    use dasobjectstore_core::store::{ExportPolicy, StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
         ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
@@ -3326,6 +3378,113 @@ mod tests {
     }
 
     #[test]
+    fn daemon_store_inventory_denies_remote_upload_listing_for_non_writer_session() {
+        let root = temp_root("remote-easyconnect-inventory-non-writer");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo_fecal_2025.05", Some("mnemosyne"));
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path);
+        let mut session = paired_session("session-1");
+        session.object_stores[0].can_write = false;
+        session_store.upsert(session).expect("session stored");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path)
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
+                include_policy: true,
+                remote_easyconnect_session_id: Some("session-1".to_string()),
+                remote_upload_writable_only: true,
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "store_inventory_failed"
+                && error.message.contains("does not allow writing ObjectStore zymo_fecal_2025.05")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_store_inventory_denies_remote_upload_listing_for_read_only_store() {
+        let root = temp_root("remote-easyconnect-inventory-read-only");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry_with_export_policy(
+                &root,
+                "zymo_fecal_2025.05",
+                Some("mnemosyne"),
+                ExportPolicy::ReadOnlyFileExport,
+            );
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path);
+        session_store
+            .upsert(paired_session("session-1"))
+            .expect("session stored");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path)
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
+                include_policy: true,
+                remote_easyconnect_session_id: Some("session-1".to_string()),
+                remote_upload_writable_only: true,
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "store_inventory_failed"
+                && error.message.contains("export policy ReadOnlyFileExport is not S3")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_store_inventory_reports_missing_writer_group_for_remote_upload_listing() {
+        let root = temp_root("remote-easyconnect-inventory-missing-writer-group");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo_fecal_2025.05", None);
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path);
+        session_store
+            .upsert(paired_session("session-1"))
+            .expect("session stored");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path)
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
+                include_policy: true,
+                remote_easyconnect_session_id: Some("session-1".to_string()),
+                remote_upload_writable_only: true,
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "store_inventory_failed"
+                && error.message.contains("has no writer group")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn reports_unwired_commands_as_api_errors() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -3453,6 +3612,34 @@ mod tests {
         writer_group: Option<&str>,
     ) -> (PathBuf, PathBuf) {
         write_test_store_registry_with_read_policy(root, store_id, None, writer_group, false)
+    }
+
+    fn write_test_store_registry_with_export_policy(
+        root: &PathBuf,
+        store_id: &str,
+        writer_group: Option<&str>,
+        export_policy: ExportPolicy,
+    ) -> (PathBuf, PathBuf) {
+        fs::create_dir_all(root).expect("temp registry dir");
+        let store_registry = root.join("stores.json");
+        let subobject_registry = root.join("subobjects.json");
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.export_policy = export_policy;
+        let definitions = vec![StoreServiceDefinition {
+            store_id: StoreId::new(store_id).expect("store id"),
+            policy,
+            bucket_name: None,
+            reader_group: None,
+            writer_group: writer_group.map(ToString::to_string),
+            public: false,
+        }];
+        fs::write(
+            &store_registry,
+            serde_json::to_string_pretty(&definitions).expect("registry JSON"),
+        )
+        .expect("store registry written");
+        fs::write(&subobject_registry, "[]").expect("subobject registry written");
+        (store_registry, subobject_registry)
     }
 
     fn write_test_store_registry_with_read_policy(

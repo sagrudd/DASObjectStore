@@ -37,6 +37,9 @@ agreement before landing.
 - Add daemon-backed remote easyconnect pairing create, approve, and exchange
   handling that persists paired sessions and filters ObjectStore inventory
   through persisted remote-upload session grants.
+- Tighten remote-upload ObjectStore inventory authorization with denial tests
+  for non-writer sessions, non-S3/read-only stores, and missing writer-group
+  diagnostics.
 - Add remote-client easyconnect regression coverage for successful, denied, and
   expired pairing callbacks, paired upload sessions, renewal metadata states,
   and local rejection of expired sessions before stored credentials are used.

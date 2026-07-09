@@ -889,7 +889,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Wire the persisted easyconnect paired-session store into daemon
   easyconnect create/exchange routes and remote-upload ObjectStore listing
   authorization.
-- [ ] Add tests for ObjectStore listing through a remote upload session,
+- [x] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.
 - [ ] Add tests for browser/agent coordination, drag/drop folder expansion,
