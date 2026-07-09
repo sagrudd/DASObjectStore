@@ -704,7 +704,7 @@ planning are tracked under Milestones 21 and 22.
   console style: compact professional cards/tables, minimal icons, dense but
   readable rows, no landing-page treatment, and responsive desktop/mobile
   behavior without text overlap.
-- [ ] Add Web download controls for file and folder rows, including disabled
+- [x] Add Web download controls for file and folder rows, including disabled
   states for unavailable data, confirmation/preflight for large folder archives,
   progress/started feedback, and permission-denied messaging.
 - [ ] Surface physical placement faithfully in the browser: SSD-only, HDD

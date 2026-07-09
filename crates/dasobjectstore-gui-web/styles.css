@@ -524,10 +524,10 @@ h2 {
   background: #fff;
   color: #172027;
   font: inherit;
-  cursor: pointer;
 }
 
 .dos-object-browser-breadcrumbs button {
+  cursor: pointer;
   min-height: 30px;
   padding: 0 10px;
 }
@@ -551,12 +551,43 @@ h2 {
   text-align: left;
 }
 
+.dos-object-browser-folder-open {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .dos-object-browser-folder strong,
 .dos-object-browser-table strong {
   overflow: hidden;
   color: #172027;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dos-object-browser-download {
+  min-height: 32px;
+  border: 1px solid #b8c5ca;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #172027;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 720;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dos-object-browser-download:disabled {
+  border-color: #d6dfe3;
+  background: #eef3f5;
+  color: #7a878e;
+  cursor: not-allowed;
 }
 
 .dos-object-browser-table-wrap {
@@ -567,7 +598,7 @@ h2 {
 
 .dos-object-browser-table {
   width: 100%;
-  min-width: 920px;
+  min-width: 1040px;
   border-collapse: collapse;
   background: #fff;
 }

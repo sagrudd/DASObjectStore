@@ -388,6 +388,14 @@ readiness, lifecycle state, copy count, and placement badges. Placement badges
 name the managed disk label or external endpoint but do not expose writable
 managed-disk paths to the browser.
 
+File download buttons are enabled only when the browser metadata reports an
+available object with a verified settled HDD placement. Folder archive buttons
+are enabled only for available folders. Large folder archives prompt for
+confirmation using the browser's current object-count and size summary before
+requesting the daemon-backed archive route. Downloads use the authenticated Web
+session headers, so permission failures are shown in the panel rather than
+falling back to direct managed-disk paths or anonymous links.
+
 Creating or changing an object store is an admin-only workflow. The Web UI
 presents controls for store name, writer group, mounted enclosure, object type,
 redundancy, store class, export mode, and public visibility. Bucket name and

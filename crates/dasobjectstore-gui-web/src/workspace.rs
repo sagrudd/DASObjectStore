@@ -886,6 +886,16 @@ pub struct ObjectBrowserFileSummary {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Debug, Eq, PartialEq)]
+enum ObjectBrowserDownloadState {
+    Idle,
+    Starting { label: String },
+    Started { filename: String, detail: String },
+    PermissionDenied { message: String },
+    Error { message: String },
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ObjectStoreCreateFormState {
     open: bool,
     store_id: String,
@@ -2618,6 +2628,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
     let browser_sort = use_state(|| "name_asc".to_string());
     let browser_state =
         use_state(|| ApiLoadState::<ObjectBrowserResponse>::Empty("Select an ObjectStore.".into()));
+    let browser_download_state = use_state(|| ObjectBrowserDownloadState::Idle);
 
     {
         let api_path = api_path.clone();
@@ -2702,6 +2713,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 subobject_state,
                 props.api_base_path.clone(),
                 browser_state,
+                browser_download_state,
                 browser_endpoint,
                 browser_prefix,
                 browser_search,
@@ -2719,6 +2731,7 @@ fn render_object_stores_state(
     subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
     browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
     browser_endpoint: UseStateHandle<String>,
     browser_prefix: UseStateHandle<String>,
     browser_search: UseStateHandle<String>,
@@ -2743,6 +2756,7 @@ fn render_object_stores_state(
                 subobject_state,
                 api_base_path,
                 browser_state,
+                browser_download_state,
                 browser_endpoint,
                 browser_prefix,
                 browser_search,
@@ -2776,6 +2790,7 @@ fn render_object_store_inventory(
     subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
     browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
     browser_endpoint: UseStateHandle<String>,
     browser_prefix: UseStateHandle<String>,
     browser_search: UseStateHandle<String>,
@@ -2785,11 +2800,13 @@ fn render_object_store_inventory(
         <div class="dos-store-grid">
             { render_object_store_create_card(Some(view), create_state, api_base_path.clone()) }
             { render_subobject_create_card(view, subobject_state, api_base_path.clone()) }
-            { render_object_store_configure_card(view, configure_state, api_base_path) }
+            { render_object_store_configure_card(view, configure_state, api_base_path.clone()) }
             { for object_store_card_summaries(view).into_iter().map(render_object_store_card) }
             { render_object_browser_panel(
                 view,
                 &*browser_state,
+                api_base_path.clone(),
+                browser_download_state,
                 browser_endpoint,
                 browser_prefix,
                 browser_search,
@@ -2803,6 +2820,8 @@ fn render_object_store_inventory(
 fn render_object_browser_panel(
     view: &ObjectStoresPageResponse,
     browser_state: &ApiLoadState<ObjectBrowserResponse>,
+    api_base_path: String,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
     browser_endpoint: UseStateHandle<String>,
     browser_prefix: UseStateHandle<String>,
     browser_search: UseStateHandle<String>,
@@ -2876,7 +2895,13 @@ fn render_object_browser_panel(
                     </select>
                 </label>
             </div>
-            { render_object_browser_state(browser_state, browser_prefix) }
+            { render_object_browser_download_state(&*browser_download_state) }
+            { render_object_browser_state(
+                browser_state,
+                browser_prefix,
+                api_base_path,
+                browser_download_state,
+            ) }
         </section>
     }
 }
@@ -2885,6 +2910,8 @@ fn render_object_browser_panel(
 fn render_object_browser_state(
     state: &ApiLoadState<ObjectBrowserResponse>,
     browser_prefix: UseStateHandle<String>,
+    api_base_path: String,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
 ) -> Html {
     match state {
         ApiLoadState::Loading => render_object_browser_message(
@@ -2896,12 +2923,53 @@ fn render_object_browser_state(
             render_object_browser_message("Permission denied", message)
         }
         ApiLoadState::TransportError(message) => render_object_browser_message("Error", message),
-        ApiLoadState::Success(response) => render_object_browser_body(response, browser_prefix),
+        ApiLoadState::Success(response) => render_object_browser_body(
+            response,
+            browser_prefix,
+            api_base_path,
+            browser_download_state,
+        ),
         ApiLoadState::StaleData { value, message } => html! {
             <>
                 { render_object_browser_message("Stale", message) }
-                { render_object_browser_body(value, browser_prefix) }
+                { render_object_browser_body(
+                    value,
+                    browser_prefix,
+                    api_base_path,
+                    browser_download_state,
+                ) }
             </>
+        },
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_download_state(state: &ObjectBrowserDownloadState) -> Html {
+    match state {
+        ObjectBrowserDownloadState::Idle => html! {},
+        ObjectBrowserDownloadState::Starting { label } => html! {
+            <div class="dos-object-browser-message" data-download-state="starting">
+                <span class="dos-card-label">{ "Preparing download" }</span>
+                <p>{ format!("{label} is being requested from the daemon-authorized Web API.") }</p>
+            </div>
+        },
+        ObjectBrowserDownloadState::Started { filename, detail } => html! {
+            <div class="dos-object-browser-message" data-download-state="started">
+                <span class="dos-card-label">{ "Download started" }</span>
+                <p>{ format!("{filename} has been sent to the browser download manager. {detail}") }</p>
+            </div>
+        },
+        ObjectBrowserDownloadState::PermissionDenied { message } => html! {
+            <div class="dos-object-browser-message" data-download-state="permission-denied">
+                <span class="dos-card-label">{ "Permission denied" }</span>
+                <p>{ message }</p>
+            </div>
+        },
+        ObjectBrowserDownloadState::Error { message } => html! {
+            <div class="dos-object-browser-message" data-download-state="error">
+                <span class="dos-card-label">{ "Download failed" }</span>
+                <p>{ message }</p>
+            </div>
         },
     }
 }
@@ -2920,6 +2988,8 @@ fn render_object_browser_message(label: &str, message: &str) -> Html {
 fn render_object_browser_body(
     response: &ObjectBrowserResponse,
     browser_prefix: UseStateHandle<String>,
+    api_base_path: String,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
 ) -> Html {
     let folders = object_browser_folder_summaries(&response.folders);
     let files = object_browser_file_summaries(&response.files);
@@ -2931,8 +3001,19 @@ fn render_object_browser_body(
                 <span>{ format!("{} file(s)", files.len()) }</span>
                 <span>{ response.total_entries.map(|entries| format!("{entries} total entries")).unwrap_or_else(|| "total pending".to_string()) }</span>
             </div>
-            { render_object_browser_folders(folders, browser_prefix.clone()) }
-            { render_object_browser_files(files) }
+            { render_object_browser_folders(
+                folders,
+                response.endpoint.clone(),
+                api_base_path.clone(),
+                browser_prefix.clone(),
+                browser_download_state.clone(),
+            ) }
+            { render_object_browser_files(
+                files,
+                response.endpoint.clone(),
+                api_base_path,
+                browser_download_state,
+            ) }
             {
                 if response.next_cursor.is_some() {
                     html! { <p class="dos-object-browser-note">{ "More entries are available; pagination controls will be enabled in the download/action slice." }</p> }
@@ -2971,7 +3052,10 @@ fn render_object_browser_breadcrumbs(
 #[cfg(target_arch = "wasm32")]
 fn render_object_browser_folders(
     folders: Vec<ObjectBrowserFolderSummary>,
+    endpoint: String,
+    api_base_path: String,
     browser_prefix: UseStateHandle<String>,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
 ) -> Html {
     if folders.is_empty() {
         return html! {};
@@ -2979,15 +3063,49 @@ fn render_object_browser_folders(
     html! {
         <div class="dos-object-browser-folders">
             { for folders.into_iter().map(|folder| {
+                let name = folder.name.clone();
+                let objects = folder.objects.clone();
+                let size = folder.size.clone();
+                let readiness = folder.readiness.clone();
                 let prefix = folder.prefix.clone();
+                let download_prefix = folder.prefix.clone();
+                let download_enabled = object_browser_folder_download_available(&readiness);
+                let download_title = object_browser_download_disabled_reason(&readiness, &[]);
                 let browser_prefix = browser_prefix.clone();
+                let endpoint = endpoint.clone();
+                let api_base_path = api_base_path.clone();
+                let browser_download_state = browser_download_state.clone();
                 html! {
-                    <button type="button" class="dos-object-browser-folder" onclick={Callback::from(move |_| browser_prefix.set(prefix.clone()))}>
-                        <strong>{ folder.name }</strong>
-                        <span>{ folder.objects }</span>
-                        <span>{ folder.size }</span>
-                        <span class="dos-status-pill">{ folder.readiness }</span>
-                    </button>
+                    <div class="dos-object-browser-folder">
+                        <button type="button" class="dos-object-browser-folder-open" onclick={Callback::from(move |_| browser_prefix.set(prefix.clone()))}>
+                            <strong>{ name.clone() }</strong>
+                        </button>
+                        <span>{ objects.clone() }</span>
+                        <span>{ size.clone() }</span>
+                        <span class="dos-status-pill">{ readiness }</span>
+                        <button
+                            type="button"
+                            class="dos-object-browser-download"
+                            disabled={!download_enabled}
+                            title={download_title}
+                            onclick={Callback::from(move |_| {
+                                let confirmed = confirm_large_folder_download(&download_prefix, &objects, &size);
+                                if confirmed {
+                                    start_object_browser_download(
+                                        api_base_path.clone(),
+                                        endpoint.clone(),
+                                        download_prefix.clone(),
+                                        true,
+                                        format!("folder {}", download_prefix),
+                                        format!("{name}.tar.gz"),
+                                        browser_download_state.clone(),
+                                    );
+                                }
+                            })}
+                        >
+                            { "Download folder" }
+                        </button>
+                    </div>
                 }
             }) }
         </div>
@@ -2995,7 +3113,12 @@ fn render_object_browser_folders(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_object_browser_files(files: Vec<ObjectBrowserFileSummary>) -> Html {
+fn render_object_browser_files(
+    files: Vec<ObjectBrowserFileSummary>,
+    endpoint: String,
+    api_base_path: String,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
+) -> Html {
     if files.is_empty() {
         return render_object_browser_message("Files", "No files in this folder.");
     }
@@ -3012,20 +3135,52 @@ fn render_object_browser_files(files: Vec<ObjectBrowserFileSummary>) -> Html {
                         <th>{ "Copies" }</th>
                         <th>{ "Placement" }</th>
                         <th>{ "Modified" }</th>
+                        <th>{ "Actions" }</th>
                     </tr>
                 </thead>
                 <tbody>
-                    { for files.into_iter().map(|file| html! {
-                        <tr title={file.path.clone()}>
-                            <td><strong>{ file.name }</strong><span>{ file.object_id }</span></td>
-                            <td>{ file.object_type }</td>
-                            <td>{ file.size }</td>
-                            <td><span class="dos-status-pill">{ file.readiness }</span></td>
-                            <td>{ file.lifecycle }</td>
-                            <td>{ file.copies }</td>
-                            <td>{ render_object_browser_placements(&file.placements) }</td>
-                            <td>{ file.modified }</td>
-                        </tr>
+                    { for files.into_iter().map(|file| {
+                        let download_enabled = object_browser_file_download_available(&file.readiness, &file.placements);
+                        let download_title = object_browser_download_disabled_reason(&file.readiness, &file.placements);
+                        let object_id = file.object_id.clone();
+                        let label = file.name.clone();
+                        let fallback_filename = file.name.clone();
+                        let endpoint = endpoint.clone();
+                        let api_base_path = api_base_path.clone();
+                        let browser_download_state = browser_download_state.clone();
+                        html! {
+                            <tr title={file.path.clone()}>
+                                <td><strong>{ file.name }</strong><span>{ file.object_id }</span></td>
+                                <td>{ file.object_type }</td>
+                                <td>{ file.size }</td>
+                                <td><span class="dos-status-pill">{ file.readiness }</span></td>
+                                <td>{ file.lifecycle }</td>
+                                <td>{ file.copies }</td>
+                                <td>{ render_object_browser_placements(&file.placements) }</td>
+                                <td>{ file.modified }</td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        class="dos-object-browser-download"
+                                        disabled={!download_enabled}
+                                        title={download_title}
+                                        onclick={Callback::from(move |_| {
+                                            start_object_browser_download(
+                                                api_base_path.clone(),
+                                                endpoint.clone(),
+                                                object_id.clone(),
+                                                false,
+                                                label.clone(),
+                                                fallback_filename.clone(),
+                                                browser_download_state.clone(),
+                                            );
+                                        })}
+                                    >
+                                        { "Download" }
+                                    </button>
+                                </td>
+                            </tr>
+                        }
                     }) }
                 </tbody>
             </table>
@@ -3053,6 +3208,136 @@ fn render_object_browser_placements(placements: &[ObjectBrowserPlacementResponse
                 }
             }) }
         </div>
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_file_download_available(
+    readiness: &str,
+    placements: &[ObjectBrowserPlacementResponse],
+) -> bool {
+    readiness.eq_ignore_ascii_case("Available")
+        && placements
+            .iter()
+            .any(|placement| placement.location == "hdd_settled" && placement.state == "verified")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_folder_download_available(readiness: &str) -> bool {
+    readiness.eq_ignore_ascii_case("Available")
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn object_browser_download_disabled_reason(
+    readiness: &str,
+    placements: &[ObjectBrowserPlacementResponse],
+) -> String {
+    if !readiness.eq_ignore_ascii_case("Available") {
+        return format!(
+            "Download disabled until daemon readiness is Available; current state is {readiness}."
+        );
+    }
+    if !placements.is_empty()
+        && !placements
+            .iter()
+            .any(|placement| placement.location == "hdd_settled" && placement.state == "verified")
+    {
+        return "Download disabled until a verified settled HDD copy is available.".to_string();
+    }
+    "Download through the daemon-authorized Web API.".to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn confirm_large_folder_download(prefix: &str, objects: &str, size: &str) -> bool {
+    let large = objects
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|count| count >= 100)
+        || size.ends_with("GiB")
+        || size.ends_with("TiB");
+    if !large {
+        return true;
+    }
+    web_sys::window()
+        .and_then(|window| {
+            window
+                .confirm_with_message(&format!(
+                    "Prepare archive download for folder {prefix} ({objects}, {size})?"
+                ))
+                .ok()
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn start_object_browser_download(
+    api_base_path: String,
+    endpoint: String,
+    object_or_prefix: String,
+    folder: bool,
+    label: String,
+    fallback_filename: String,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
+) {
+    browser_download_state.set(ObjectBrowserDownloadState::Starting {
+        label: label.clone(),
+    });
+    wasm_bindgen_futures::spawn_local(async move {
+        let path = if folder {
+            crate::api::object_folder_download_api_path(
+                &api_base_path,
+                &endpoint,
+                &object_or_prefix,
+            )
+        } else {
+            crate::api::object_download_api_path(&api_base_path, &endpoint, &object_or_prefix)
+        };
+        match crate::api::download_object_browser_asset(&path, &fallback_filename).await {
+            Ok(download) => {
+                let detail = object_browser_download_detail(&download);
+                match download_bytes_to_host(
+                    &download.filename,
+                    &download.bytes,
+                    &download.content_type,
+                ) {
+                    Ok(()) => browser_download_state.set(ObjectBrowserDownloadState::Started {
+                        filename: download.filename,
+                        detail,
+                    }),
+                    Err(message) => {
+                        browser_download_state.set(ObjectBrowserDownloadState::Error { message })
+                    }
+                }
+            }
+            Err(error) if error.is_permission_denied() => {
+                browser_download_state.set(ObjectBrowserDownloadState::PermissionDenied {
+                    message: error.message,
+                });
+            }
+            Err(error) => {
+                browser_download_state.set(ObjectBrowserDownloadState::Error {
+                    message: error.message,
+                });
+            }
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn object_browser_download_detail(download: &crate::api::ObjectBrowserDownload) -> String {
+    if let Some(files) = download.archive_files {
+        let bytes = download
+            .archive_source_bytes
+            .or(download.content_length)
+            .map(format_browser_bytes)
+            .unwrap_or_else(|| "size pending".to_string());
+        format!("Archive preflight reported {files} file(s), {bytes}.")
+    } else {
+        download
+            .content_length
+            .map(|bytes| format!("Reported size: {}.", format_browser_bytes(bytes)))
+            .unwrap_or_else(|| "Reported size pending.".to_string())
     }
 }
 
@@ -5313,13 +5598,18 @@ fn render_report_upload_progress(state: &ReportUploadState) -> Html {
 
 #[cfg(target_arch = "wasm32")]
 fn download_pdf_to_host(filename: &str, bytes: &[u8]) -> Result<(), String> {
+    download_bytes_to_host(filename, bytes, "application/pdf")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn download_bytes_to_host(filename: &str, bytes: &[u8], content_type: &str) -> Result<(), String> {
     let array = js_sys::Uint8Array::from(bytes);
     let parts = js_sys::Array::new();
     parts.push(&array);
     let options = BlobPropertyBag::new();
-    options.set_type("application/pdf");
+    options.set_type(content_type);
     let blob = Blob::new_with_u8_array_sequence_and_options(&parts, &options)
-        .map_err(|_| "could not prepare PDF download blob".to_string())?;
+        .map_err(|_| "could not prepare browser download blob".to_string())?;
     let url = Url::create_object_url_with_blob(&blob)
         .map_err(|_| "could not create browser download URL".to_string())?;
     let result = (|| {
@@ -5847,8 +6137,10 @@ mod tests {
         enclosure_prepare_candidate, enclosure_prepare_confirmed, enclosure_retry_clears_job_state,
         enclosure_ssd_root, enclosures_workspace_api_path, endpoints_workspace_api_path,
         home_dashboard_attention, home_dashboard_metrics, home_workspace_api_path,
-        object_browser_file_summaries, object_browser_folder_summaries,
-        object_browser_initial_endpoint, object_store_bucket_default, object_store_card_summaries,
+        object_browser_download_disabled_reason, object_browser_file_download_available,
+        object_browser_file_summaries, object_browser_folder_download_available,
+        object_browser_folder_summaries, object_browser_initial_endpoint,
+        object_store_bucket_default, object_store_card_summaries,
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
         objectstores_workspace_api_path, primary_navigation_for_host,
@@ -6833,6 +7125,25 @@ mod tests {
             file_summaries[0].placements[0].disk_label.as_deref(),
             Some("QNAP bay 1")
         );
+        assert!(object_browser_folder_download_available(
+            &folder_summaries[0].readiness
+        ));
+        assert!(!object_browser_file_download_available(
+            &file_summaries[0].readiness,
+            &file_summaries[0].placements,
+        ));
+        assert!(object_browser_download_disabled_reason(
+            &file_summaries[0].readiness,
+            &file_summaries[0].placements,
+        )
+        .contains("current state is Ssd Only"));
+
+        let mut available_file = file_summaries[0].clone();
+        available_file.readiness = "Available".to_string();
+        assert!(object_browser_file_download_available(
+            &available_file.readiness,
+            &available_file.placements,
+        ));
     }
 
     #[test]

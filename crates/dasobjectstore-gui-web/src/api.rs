@@ -1049,6 +1049,30 @@ pub fn object_browser_api_path(
 }
 
 #[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub fn object_download_api_path(api_base_path: &str, endpoint: &str, object_id: &str) -> String {
+    format!(
+        "{}/object-stores/{}/objects/download/{}",
+        api_base_path.trim_end_matches('/'),
+        percent_encode(endpoint.trim()),
+        percent_encode_path_segments(object_id)
+    )
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub fn object_folder_download_api_path(
+    api_base_path: &str,
+    endpoint: &str,
+    prefix: &str,
+) -> String {
+    format!(
+        "{}/object-stores/{}/folders/download/{}",
+        api_base_path.trim_end_matches('/'),
+        percent_encode(endpoint.trim()),
+        percent_encode_path_segments(prefix)
+    )
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 fn percent_encode(value: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut encoded = String::new();
@@ -1062,6 +1086,85 @@ fn percent_encode(value: &str) -> String {
         }
     }
     encoded
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+fn percent_encode_path_segments(value: &str) -> String {
+    value
+        .trim_matches('/')
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(percent_encode)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(target_arch = "wasm32")]
+pub struct ObjectBrowserDownload {
+    pub filename: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+    pub content_length: Option<u64>,
+    pub archive_files: Option<u64>,
+    pub archive_source_bytes: Option<u64>,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn download_object_browser_asset(
+    path: &str,
+    fallback_filename: &str,
+) -> Result<ObjectBrowserDownload, ApiError> {
+    let mut request = Request::get(path);
+    if let Some((username, session_token)) = crate::storage::stored_session() {
+        request = request
+            .header("x-dasobjectstore-username", &username)
+            .header("x-dasobjectstore-session-token", &session_token)
+            .header("authorization", &format!("Bearer {session_token}"));
+    }
+    let response = request.send().await?;
+    let status = response.status();
+    if !(200..300).contains(&status) {
+        let message = response
+            .json::<ErrorResponse>()
+            .await
+            .map(|error| error.message)
+            .unwrap_or_else(|_| format!("DASObjectStore server returned HTTP {status}"));
+        return Err(ApiError {
+            message,
+            status: Some(status),
+        });
+    }
+    let filename = response
+        .headers()
+        .get("content-disposition")
+        .as_deref()
+        .and_then(filename_from_content_disposition)
+        .unwrap_or_else(|| fallback_filename.to_string());
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let content_length = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.parse::<u64>().ok());
+    let archive_files = response
+        .headers()
+        .get("x-dasobjectstore-archive-files")
+        .and_then(|value| value.parse::<u64>().ok());
+    let archive_source_bytes = response
+        .headers()
+        .get("x-dasobjectstore-archive-source-bytes")
+        .and_then(|value| value.parse::<u64>().ok());
+    let bytes = response.binary().await?;
+    Ok(ObjectBrowserDownload {
+        filename,
+        content_type,
+        bytes,
+        content_length,
+        archive_files,
+        archive_source_bytes,
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1361,11 +1464,12 @@ mod tests {
     use super::{
         activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
         auth_path, endpoint_inventory_upsert_path, object_browser_api_path,
-        object_store_create_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
-        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
-        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
-        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
-        LocalGroupAdminResponse, ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+        object_download_api_path, object_folder_download_api_path, object_store_create_path,
+        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
+        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
+        EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
+        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
+        ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
 
     #[test]
@@ -2067,6 +2171,26 @@ mod tests {
         assert_eq!(
             path,
             "/products/dasobjectstore/api/v1/object-stores/ENA%20Primary/browser?sort=size_desc&limit=100&include_placement=true&prefix=Xenognostikon%2FVervet&search=sample%20fastq"
+        );
+    }
+
+    #[test]
+    fn object_download_paths_encode_endpoint_and_path_segments() {
+        assert_eq!(
+            object_download_api_path(
+                "/products/dasobjectstore/api/v1/",
+                "ENA Primary",
+                "Xenognostikon/Vervet/sample 01.fastq.gz",
+            ),
+            "/products/dasobjectstore/api/v1/object-stores/ENA%20Primary/objects/download/Xenognostikon/Vervet/sample%2001.fastq.gz"
+        );
+        assert_eq!(
+            object_folder_download_api_path(
+                "/products/dasobjectstore/api/v1/",
+                "ENA Primary",
+                "Xenognostikon/Vervet",
+            ),
+            "/products/dasobjectstore/api/v1/object-stores/ENA%20Primary/folders/download/Xenognostikon/Vervet"
         );
     }
 
