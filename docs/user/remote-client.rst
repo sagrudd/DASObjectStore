@@ -312,7 +312,10 @@ byte count, final outcome, and runtime queue snapshot back to the future job
 registry/event stream. Those summaries now map onto the common daemon job
 event model using the stable ``remote_upload`` job kind, with completed
 transfers emitted as complete events, temporary backpressure emitted as waiting
-progress events, and rejected/failed transfers emitted as failed events.
+progress events, and rejected/failed transfers emitted as failed events. The
+same summaries are persisted in the daemon job registry, so remote-upload
+transfer attempts can be inspected through the common job status/list path even
+before the final live progress stream is attached.
 
 Credential Helper Contract
 --------------------------

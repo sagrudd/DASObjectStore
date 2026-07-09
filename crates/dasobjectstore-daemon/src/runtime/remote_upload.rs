@@ -1,3 +1,4 @@
+use super::{admin_jobs::AdminJobRegistry, service::DaemonServiceRuntimeError};
 use crate::api::{
     decide_remote_easyconnect_upload_admission, DaemonJobEvent, DaemonJobId, DaemonJobIdError,
     DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobSummary, DaemonSsdPressure,
@@ -207,6 +208,21 @@ pub struct RemoteUploadS3TransferJobSummary {
     pub runtime_after: RemoteUploadRuntimeSnapshot,
 }
 
+pub fn record_remote_upload_s3_transfer_job(
+    registry: &(impl AdminJobRegistry + ?Sized),
+    summary: &RemoteUploadS3TransferJobSummary,
+    submitted_at_utc: impl Into<String>,
+    updated_at_utc: impl Into<String>,
+    actor: Option<String>,
+) -> Result<DaemonJobEvent, DaemonServiceRuntimeError> {
+    let job = summary
+        .daemon_job_summary(submitted_at_utc, updated_at_utc, actor)
+        .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(summary.job_id.clone()))?;
+    let event = daemon_job_event_for_summary(job.clone());
+    registry.record(job)?;
+    Ok(event)
+}
+
 impl RemoteUploadS3TransferJobSummary {
     pub fn daemon_job_summary(
         &self,
@@ -237,11 +253,7 @@ impl RemoteUploadS3TransferJobSummary {
         actor: Option<String>,
     ) -> Result<DaemonJobEvent, DaemonJobIdError> {
         let job = self.daemon_job_summary(submitted_at_utc, updated_at_utc, actor)?;
-        Ok(match job.state {
-            DaemonJobState::Complete => DaemonJobEvent::Complete(job),
-            DaemonJobState::Failed => DaemonJobEvent::Failed(job),
-            _ => DaemonJobEvent::Progress(job),
-        })
+        Ok(daemon_job_event_for_summary(job))
     }
 
     fn daemon_job_state(&self) -> DaemonJobState {
@@ -310,6 +322,14 @@ impl RemoteUploadS3TransferJobSummary {
     }
 }
 
+fn daemon_job_event_for_summary(job: DaemonJobSummary) -> DaemonJobEvent {
+    match job.state {
+        DaemonJobState::Complete => DaemonJobEvent::Complete(job),
+        DaemonJobState::Failed => DaemonJobEvent::Failed(job),
+        _ => DaemonJobEvent::Progress(job),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RemoteUploadS3TransferJobOutcome {
     Completed,
@@ -335,13 +355,15 @@ fn admission_decision_for_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteUploadAdmissionGate, RemoteUploadQueueDepths, RemoteUploadS3TransferJob,
-        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
+        record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
+        RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
+        RemoteUploadS3TransferJobSummary,
     };
     use crate::api::{
-        DaemonJobEvent, DaemonJobKind, DaemonJobState, DaemonSsdPressure,
+        DaemonJobEvent, DaemonJobKind, DaemonJobState, DaemonJobStatusRequest, DaemonSsdPressure,
         RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadBackpressureReason,
     };
+    use crate::runtime::{admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry};
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
@@ -667,6 +689,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn records_s3_transfer_job_summary_in_daemon_job_registry() {
+        let root = temp_root("remote-upload-registry");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let summary = RemoteUploadS3TransferJobSummary {
+            job_id: "remote-upload-job-004".to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            outcome: RemoteUploadS3TransferJobOutcome::Completed,
+            runtime_after: Default::default(),
+        };
+
+        let event = record_remote_upload_s3_transfer_job(
+            &registry,
+            &summary,
+            "2026-07-09T14:00:00Z",
+            "2026-07-09T14:01:00Z",
+            Some("stephen".to_string()),
+        )
+        .expect("job recorded");
+
+        let DaemonJobEvent::Complete(recorded_event_job) = event else {
+            panic!("expected complete event");
+        };
+        assert_eq!(recorded_event_job.kind, DaemonJobKind::RemoteUpload);
+
+        let status = registry
+            .status(DaemonJobStatusRequest {
+                job_id: recorded_event_job.job_id.clone(),
+            })
+            .expect("recorded job status");
+        assert_eq!(status.job.kind, DaemonJobKind::RemoteUpload);
+        assert_eq!(status.job.state, DaemonJobState::Complete);
+        assert_eq!(status.job.progress.stage, "remote_s3_transfer_complete");
+        assert_eq!(status.job.progress.work_bytes_total, 42);
+
+        cleanup(&root);
+    }
+
     fn transfer_job(policy: RemoteUploadBackpressurePolicy) -> RemoteUploadS3TransferJob {
         RemoteUploadS3TransferJob {
             job_id: "remote-upload-job-001".to_string(),
@@ -686,5 +747,13 @@ mod tests {
             retry_after_seconds: Some(30),
             message: "Remote upload intake is temporarily paused.".to_string(),
         }
+    }
+
+    fn temp_root(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("dasobjectstore-{label}-{}", std::process::id()))
+    }
+
+    fn cleanup(root: &std::path::Path) {
+        let _ = std::fs::remove_dir_all(root);
     }
 }
