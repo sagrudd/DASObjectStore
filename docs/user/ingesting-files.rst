@@ -116,7 +116,9 @@ count. A one-HDD test or degraded enclosure therefore uses one worker, two to
 four HDDs use two workers, five HDDs use three workers, and an eight-HDD DAS
 uses six workers by default. This keeps source-to-SSD staging moving while
 leaving headroom for the appliance and avoiding multiple concurrent writes to
-the same disk. Operators may override this for a run:
+the same disk. The daemon also rejects managed HDD inventories that present the
+same physical disk more than once, because redundant copies must land on
+distinct disks. Operators may override this for a run:
 
 .. code-block:: console
 

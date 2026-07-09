@@ -16,6 +16,9 @@ agreement before landing.
 - Update default HDD landing worker fan-out to
   ``max(managed_hdd_count - 2, 2)`` capped by available HDDs, with one worker
   only for one-HDD/degraded cases.
+- Reject duplicate managed HDD disk IDs in the daemon settlement scheduler so
+  active writers and redundant object copies remain tied to distinct physical
+  disks.
 - Carry typed ingress origin through daemon file-ingest requests, default
   legacy requests to ``local_server``, and have the daemon runtime use the
   request origin when deciding SSD-first versus direct-to-HDD landing.

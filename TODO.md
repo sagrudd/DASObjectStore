@@ -787,7 +787,7 @@ planning are tracked under Milestones 21 and 22.
   `max(number_of_hdds_in_enclosure - 2, 2)` for SSD destage and local
   direct-to-HDD ingest, with one active writer per physical HDD and bounded
   behavior when there are too few eligible HDDs.
-- [ ] Ensure the landing worker scheduler never assigns two active writes to
+- [x] Ensure the landing worker scheduler never assigns two active writes to
   the same HDD and never places redundant copies of one object on the same disk.
 - [ ] Add queue/backpressure behavior for remote uploads so SSD staging,
   S3/object-service intake, HDD landing workers, and verification cannot grow

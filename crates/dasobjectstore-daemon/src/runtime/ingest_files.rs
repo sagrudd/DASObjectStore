@@ -18,7 +18,7 @@ use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
     read_subobject_registry, ObjectServiceError, StoreServiceDefinition,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display};
 use std::fs;
 use std::io;
@@ -547,6 +547,16 @@ type SharedHddSettlementScheduler = Arc<(Mutex<HddSettlementScheduler>, Condvar)
 
 impl HddSettlementScheduler {
     fn new(roots: &[DiskCopyRoot]) -> Result<Self, DaemonIngestFilesRuntimeError> {
+        let mut seen_disk_ids = BTreeSet::new();
+        for root in roots {
+            if !seen_disk_ids.insert(root.disk_id.clone()) {
+                return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                    "managed HDD root inventory contains duplicate disk ID {}; redundant copies require distinct physical disks",
+                    root.disk_id
+                )));
+            }
+        }
+
         Ok(Self {
             disks: roots
                 .iter()
@@ -1735,7 +1745,8 @@ mod tests {
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
-        IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
+        DiskCopyRoot, IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage,
+        ObjectPutRequest,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
     use std::fs;
@@ -2066,6 +2077,22 @@ mod tests {
             blocked.is_none(),
             "active reservations must block instead of assigning a second writer to an HDD"
         );
+    }
+
+    #[test]
+    fn hdd_settlement_scheduler_rejects_duplicate_physical_disk_ids() {
+        let disk_a = dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id");
+        let roots = vec![
+            DiskCopyRoot::new(disk_a.clone(), PathBuf::from("/hdd/a1")),
+            DiskCopyRoot::new(disk_a, PathBuf::from("/hdd/a2")),
+        ];
+
+        let err = HddSettlementScheduler::new(&roots).expect_err("duplicate disk rejected");
+
+        assert!(err.to_string().contains("duplicate disk ID disk-a"));
+        assert!(err
+            .to_string()
+            .contains("redundant copies require distinct physical disks"));
     }
 
     #[test]
