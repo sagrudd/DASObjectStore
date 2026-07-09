@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.53.4 - 2026-07-09
+
+- Replace the Web UI boxed placeholder brand mark with the Mnemosyne
+  Biosciences icon asset in the login lockup and authenticated top bar.
+- Extend Web screenshot regression checks to assert the packaged Mnemosyne
+  brand icon is present and visibly rendered.
+
 ## 0.53.3 - 2026-07-09
 
 - Fix standalone Web administrator detection so sudo-derived authority is

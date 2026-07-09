@@ -222,6 +222,20 @@ async function assertVisualContract(page, { auth }) {
       issues.push("authenticated view is missing the top bar");
     }
 
+    const brandLogos = Array.from(document.querySelectorAll(".dos-brand-logo"));
+    if (brandLogos.length === 0) {
+      issues.push("Mnemosyne brand logo is missing");
+    }
+    for (const logo of brandLogos) {
+      const rect = logo.getBoundingClientRect();
+      if (!visible(logo)) {
+        issues.push("Mnemosyne brand logo is not visible");
+      }
+      if (rect.width < 10 || rect.height < 18) {
+        issues.push(`Mnemosyne brand logo renders too small: ${rect.width}x${rect.height}`);
+      }
+    }
+
     const layoutElements = Array.from(
       document.querySelectorAll(".dos-topbar, .dos-page-header, .dos-card, .dos-product-footer"),
     ).filter(visible);

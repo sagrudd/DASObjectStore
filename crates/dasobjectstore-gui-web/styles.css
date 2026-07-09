@@ -131,7 +131,7 @@ h2 {
   font-weight: 760;
 }
 
-.dos-brand-lockup span:not(.dos-brand-mark) {
+.dos-brand-lockup > div > span {
   display: block;
   color: #64707a;
   font-size: 0.84rem;
@@ -143,15 +143,28 @@ h2 {
   height: 42px;
   place-items: center;
   border-radius: 8px;
-  color: #ffffff;
-  background: #0f6b78;
-  font-weight: 800;
+  border: 1px solid #d6dee2;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(30, 37, 43, 0.08);
+}
+
+.dos-brand-logo {
+  display: block;
+  width: auto;
+  max-width: 68%;
+  height: 76%;
+  object-fit: contain;
 }
 
 .dos-brand-mark--small {
   width: 30px;
   height: 30px;
-  font-size: 0.82rem;
+  border-radius: 7px;
+}
+
+.dos-brand-mark--small .dos-brand-logo {
+  max-width: 66%;
+  height: 74%;
 }
 
 .dos-auth-summary {

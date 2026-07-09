@@ -11,6 +11,7 @@ use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 const DASOBJECTSTORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+const MNEMOSYNE_LOGO_ICON_SRC: &str = "mnemosyne-biosciences-logo-icon-black.png";
 
 #[function_component(App)]
 pub fn app() -> Html {
@@ -172,13 +173,28 @@ struct LandingPageProps {
     on_login: Callback<SubmitEvent>,
 }
 
+fn brand_mark(small: bool) -> Html {
+    html! {
+        <span
+            class={classes!("dos-brand-mark", small.then_some("dos-brand-mark--small"))}
+            aria-hidden="true"
+        >
+            <img
+                class="dos-brand-logo"
+                src={MNEMOSYNE_LOGO_ICON_SRC}
+                alt=""
+            />
+        </span>
+    }
+}
+
 #[function_component(LandingPage)]
 fn landing_page(props: &LandingPageProps) -> Html {
     html! {
         <section class="dos-auth-shell">
             <aside class="dos-auth-brand">
                 <div class="dos-brand-lockup" aria-label="Mnemosyne Biosciences DASObjectStore">
-                    <span class="dos-brand-mark">{ "M" }</span>
+                    { brand_mark(false) }
                     <div>
                         <strong>{ "Mnemosyne Biosciences" }</strong>
                         <span>{ "DASObjectStore" }</span>
@@ -245,7 +261,7 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
             <header class="dos-topbar">
                 <div class="dos-topbar-left">
                     <div class="dos-topbar-brand">
-                        <span class="dos-brand-mark dos-brand-mark--small">{ "M" }</span>
+                        { brand_mark(true) }
                         <strong>{ "DASObjectStore" }</strong>
                     </div>
                     <nav class="dos-primary-nav" aria-label="Primary">
