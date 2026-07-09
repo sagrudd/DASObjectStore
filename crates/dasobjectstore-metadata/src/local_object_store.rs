@@ -1,6 +1,11 @@
-use crate::copy::{write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest};
+use crate::copy::{
+    write_hdd_copy_with_inline_hash_with_controlled_progress,
+    write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest,
+    HddInlineHashCopyRequest,
+};
 use crate::evacuation::DiskCopyRoot;
 use crate::ingest::{encode_path_component, IngestStagingLayout};
+use crate::secure_fs::{create_private_dir_all, set_private_dir_permissions};
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId};
 use dasobjectstore_core::object_type::ObjectType;
 use serde::Serialize;
@@ -17,6 +22,37 @@ pub struct ObjectPutRequest {
     pub disk_roots: Vec<DiskCopyRoot>,
     pub copy_count: u8,
     pub object_type: ObjectType,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectObjectPutRequest {
+    pub object_id: ObjectId,
+    pub source_path: PathBuf,
+    pub disk_roots: Vec<DiskCopyRoot>,
+    pub copy_count: u8,
+    pub object_type: ObjectType,
+}
+
+impl DirectObjectPutRequest {
+    pub fn new(
+        object_id: ObjectId,
+        source_path: impl Into<PathBuf>,
+        disk_roots: Vec<DiskCopyRoot>,
+        copy_count: u8,
+    ) -> Self {
+        Self {
+            object_id,
+            source_path: source_path.into(),
+            disk_roots,
+            copy_count,
+            object_type: ObjectType::Naive,
+        }
+    }
+
+    pub fn with_object_type(mut self, object_type: ObjectType) -> Self {
+        self.object_type = object_type;
+        self
+    }
 }
 
 impl ObjectPutRequest {
@@ -171,6 +207,32 @@ pub fn settle_staged_object_to_hdd_with_controlled_progress(
     report
 }
 
+pub fn put_object_direct_to_hdd_with_controlled_progress(
+    request: DirectObjectPutRequest,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<ObjectPutReport, ObjectPutError> {
+    validate_direct_request(&request)?;
+    let placements = write_direct_requested_copies(&request, &mut progress)?;
+    let content_hash = placements
+        .first()
+        .map(|placement| placement.content_hash.clone())
+        .unwrap_or_default();
+
+    Ok(ObjectPutReport {
+        object_id: request.object_id,
+        object_type: request.object_type,
+        source_path: request.source_path.clone(),
+        staged_payload_path: request.source_path,
+        bytes_staged: placements
+            .first()
+            .map(|placement| placement.bytes_written)
+            .unwrap_or(0),
+        content_hash_algorithm: crate::copy::HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
+        content_hash,
+        placements,
+    })
+}
+
 fn stage_object_on_ssd_inner(
     request: &ObjectPutRequest,
     job_paths: &crate::ingest::IngestJobPaths,
@@ -202,6 +264,19 @@ fn stage_object_on_ssd_inner(
     })
 }
 
+fn validate_direct_request(request: &DirectObjectPutRequest) -> Result<(), ObjectPutError> {
+    if request.copy_count == 0 {
+        return Err(ObjectPutError::InvalidCopyCount);
+    }
+    if request.disk_roots.len() < request.copy_count as usize {
+        return Err(ObjectPutError::NotEnoughDiskRoots {
+            requested_copies: request.copy_count,
+            disk_roots: request.disk_roots.len(),
+        });
+    }
+    Ok(())
+}
+
 fn settle_staged_object_to_hdd_inner(
     staged: &StagedObjectPut,
     progress: &mut impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
@@ -218,6 +293,67 @@ fn settle_staged_object_to_hdd_inner(
         content_hash: staged.content_hash.clone(),
         placements,
     })
+}
+
+fn write_direct_requested_copies(
+    request: &DirectObjectPutRequest,
+    progress: &mut impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<Vec<ObjectPutPlacementReport>, ObjectPutError> {
+    let mut expected_hash = None::<String>;
+    request
+        .disk_roots
+        .iter()
+        .take(request.copy_count as usize)
+        .enumerate()
+        .map(|(index, disk_root)| {
+            let copy_number = (index + 1) as u8;
+            let temporary_path =
+                direct_object_copy_temporary_path(disk_root, &request.object_id, copy_number);
+            let mut copy_report = write_hdd_copy_with_inline_hash_with_controlled_progress(
+                &HddInlineHashCopyRequest::new(
+                    request.object_id.clone(),
+                    disk_root.disk_id.clone(),
+                    copy_number,
+                    &request.source_path,
+                    &temporary_path,
+                ),
+                |bytes_written| {
+                    progress(ObjectPutProgress {
+                        object_id: request.object_id.clone(),
+                        stage: ObjectPutProgressStage::HddCopy {
+                            disk_id: disk_root.disk_id.as_str().to_string(),
+                            copy_number,
+                        },
+                        bytes_written,
+                    })
+                    .map_err(object_put_error_to_hdd_copy_error)
+                },
+            )?;
+            if let Some(expected_hash) = &expected_hash {
+                if &copy_report.content_hash != expected_hash {
+                    return Err(ObjectPutError::Copy(HddCopyError::HashMismatch {
+                        expected: expected_hash.clone(),
+                        actual: copy_report.content_hash,
+                    }));
+                }
+            } else {
+                expected_hash = Some(copy_report.content_hash.clone());
+            }
+
+            let final_path =
+                object_copy_path(disk_root, &request.object_id, &copy_report.content_hash);
+            move_direct_copy_into_place(&temporary_path, &final_path)?;
+            copy_report.destination_path = final_path;
+
+            Ok(ObjectPutPlacementReport {
+                disk_id: copy_report.disk_id.as_str().to_string(),
+                copy_number,
+                destination_path: copy_report.destination_path,
+                bytes_written: copy_report.bytes_written,
+                content_hash: copy_report.content_hash,
+            })
+        })
+        .collect()
 }
 
 fn validate_request(request: &ObjectPutRequest) -> Result<(), ObjectPutError> {
@@ -288,6 +424,53 @@ fn object_copy_path(disk_root: &DiskCopyRoot, object_id: &ObjectId, content_hash
         .join(prefix)
         .join(encode_path_component(object_id.as_str()))
         .join("payload")
+}
+
+fn direct_object_copy_temporary_path(
+    disk_root: &DiskCopyRoot,
+    object_id: &ObjectId,
+    copy_number: u8,
+) -> PathBuf {
+    disk_root
+        .root_path
+        .join(".dasobjectstore")
+        .join("direct-import")
+        .join(encode_path_component(object_id.as_str()))
+        .join(format!("copy-{copy_number}.payload"))
+}
+
+fn move_direct_copy_into_place(
+    temporary_path: &std::path::Path,
+    final_path: &std::path::Path,
+) -> Result<(), ObjectPutError> {
+    if let Some(parent) = final_path.parent() {
+        create_private_dir_all(parent)?;
+        restrict_object_tree_dirs(parent)?;
+    }
+    if final_path.exists() {
+        fs::remove_file(temporary_path)?;
+        return Err(ObjectPutError::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            format!("object payload already exists: {}", final_path.display()),
+        )));
+    }
+    fs::rename(temporary_path, final_path)?;
+    if let Some(parent) = temporary_path.parent() {
+        let _ = fs::remove_dir_all(parent);
+    }
+    Ok(())
+}
+
+fn restrict_object_tree_dirs(payload_parent: &std::path::Path) -> Result<(), ObjectPutError> {
+    set_private_dir_permissions(payload_parent)?;
+    if let Some(prefix_dir) = payload_parent.parent() {
+        set_private_dir_permissions(prefix_dir)?;
+        if let Some(objects_dir) = prefix_dir.parent() {
+            set_private_dir_permissions(objects_dir)?;
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -390,7 +573,8 @@ impl From<HddCopyError> for ObjectPutError {
 #[cfg(test)]
 mod tests {
     use super::{
-        put_object_ssd_first, put_object_ssd_first_with_controlled_progress, ObjectPutError,
+        put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,
+        put_object_ssd_first_with_controlled_progress, DirectObjectPutRequest, ObjectPutError,
         ObjectPutRequest,
     };
     use crate::evacuation::DiskCopyRoot;
@@ -469,6 +653,52 @@ mod tests {
                 disk_roots: 1
             }
         ));
+    }
+
+    #[test]
+    fn direct_hdd_put_hashes_inline_and_moves_payload_into_content_addressed_path() {
+        let root = temp_root("object-put-direct-hdd");
+        let source_path = root.join("source.fastq.gz");
+        let disk_a = root.join("disk-a");
+        let payload = b"direct HDD object payload";
+        fs::create_dir_all(&root).expect("create temp root");
+        fs::write(&source_path, payload).expect("write source");
+        let request = DirectObjectPutRequest::new(
+            ObjectId::new("object-a").expect("object id"),
+            &source_path,
+            vec![DiskCopyRoot::new(
+                DiskId::new("disk-a").expect("disk id"),
+                &disk_a,
+            )],
+            1,
+        );
+        let mut progress_events = Vec::new();
+
+        let report = put_object_direct_to_hdd_with_controlled_progress(request, |progress| {
+            progress_events.push(progress);
+            Ok(())
+        })
+        .expect("direct HDD put succeeds");
+
+        let expected_hash = hash_file_sha256(&source_path).expect("hash source");
+        assert_eq!(report.content_hash, expected_hash);
+        assert_eq!(report.placements.len(), 1);
+        assert_eq!(report.placements[0].content_hash, expected_hash);
+        assert_eq!(
+            fs::read(&report.placements[0].destination_path).expect("read placement"),
+            payload
+        );
+        assert!(
+            !disk_a
+                .join(".dasobjectstore/direct-import/object-a")
+                .exists(),
+            "direct import should remove temporary HDD copy path after content-addressed rename"
+        );
+        assert!(progress_events
+            .iter()
+            .any(|event| matches!(event.stage, super::ObjectPutProgressStage::HddCopy { .. })));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
     #[test]

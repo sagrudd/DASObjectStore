@@ -18,6 +18,33 @@ pub struct HddCopyRequest {
     pub expected_content_hash: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HddInlineHashCopyRequest {
+    pub object_id: ObjectId,
+    pub disk_id: DiskId,
+    pub copy_number: u8,
+    pub source_path: PathBuf,
+    pub destination_path: PathBuf,
+}
+
+impl HddInlineHashCopyRequest {
+    pub fn new(
+        object_id: ObjectId,
+        disk_id: DiskId,
+        copy_number: u8,
+        source_path: impl Into<PathBuf>,
+        destination_path: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            object_id,
+            disk_id,
+            copy_number,
+            source_path: source_path.into(),
+            destination_path: destination_path.into(),
+        }
+    }
+}
+
 impl HddCopyRequest {
     pub fn new(
         object_id: ObjectId,
@@ -118,6 +145,23 @@ pub fn write_verified_hdd_copy_with_controlled_progress(
     report
 }
 
+pub fn write_hdd_copy_with_inline_hash_with_controlled_progress(
+    request: &HddInlineHashCopyRequest,
+    progress: impl FnMut(u64) -> Result<(), HddCopyError>,
+) -> Result<HddCopyReport, HddCopyError> {
+    if let Some(parent) = request.destination_path.parent() {
+        create_private_dir_all(parent)?;
+        restrict_object_tree_dirs(parent)?;
+    }
+
+    let report = write_hdd_copy_with_inline_hash_inner(request, progress);
+    if report.is_err() {
+        let _ = fs::remove_file(&request.destination_path);
+    }
+
+    report
+}
+
 fn write_verified_hdd_copy_inner(
     request: &HddCopyRequest,
     mut progress: impl FnMut(u64) -> Result<(), HddCopyError>,
@@ -146,6 +190,30 @@ fn write_verified_hdd_copy_inner(
         bytes_written: write_report.bytes_written,
         content_hash_algorithm: HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
         content_hash: request.expected_content_hash.clone(),
+    })
+}
+
+fn write_hdd_copy_with_inline_hash_inner(
+    request: &HddInlineHashCopyRequest,
+    mut progress: impl FnMut(u64) -> Result<(), HddCopyError>,
+) -> Result<HddCopyReport, HddCopyError> {
+    let mut source = File::open(&request.source_path)?;
+    let mut destination = create_private_file(&request.destination_path)?;
+    let write_report =
+        copy_and_hash_with_controlled_progress(&mut source, &mut destination, |bytes_written| {
+            progress(bytes_written).map_err(hdd_copy_error_to_io)
+        })
+        .map_err(hdd_copy_error_from_io)?;
+    destination.sync_all()?;
+
+    Ok(HddCopyReport {
+        object_id: request.object_id.clone(),
+        disk_id: request.disk_id.clone(),
+        copy_number: request.copy_number,
+        destination_path: request.destination_path.clone(),
+        bytes_written: write_report.bytes_written,
+        content_hash_algorithm: HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
+        content_hash: write_report.content_hash,
     })
 }
 

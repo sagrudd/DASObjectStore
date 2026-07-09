@@ -40,8 +40,9 @@ pub use contents::{
     StoreContentsSnapshot,
 };
 pub use copy::{
-    verify_hdd_copy_hash, write_verified_hdd_copy, write_verified_hdd_copy_with_progress,
-    HddCopyError, HddCopyReport, HddCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
+    verify_hdd_copy_hash, write_hdd_copy_with_inline_hash_with_controlled_progress,
+    write_verified_hdd_copy, write_verified_hdd_copy_with_progress, HddCopyError, HddCopyReport,
+    HddCopyRequest, HddInlineHashCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
@@ -76,10 +77,12 @@ pub use initialize::{
 };
 pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
 pub use local_object_store::{
-    put_object_ssd_first, put_object_ssd_first_with_controlled_progress,
-    put_object_ssd_first_with_progress, settle_staged_object_to_hdd_with_controlled_progress,
-    stage_object_on_ssd_with_controlled_progress, ObjectPutError, ObjectPutPlacementReport,
-    ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport, ObjectPutRequest, StagedObjectPut,
+    put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,
+    put_object_ssd_first_with_controlled_progress, put_object_ssd_first_with_progress,
+    settle_staged_object_to_hdd_with_controlled_progress,
+    stage_object_on_ssd_with_controlled_progress, DirectObjectPutRequest, ObjectPutError,
+    ObjectPutPlacementReport, ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport,
+    ObjectPutRequest, StagedObjectPut,
 };
 pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,
