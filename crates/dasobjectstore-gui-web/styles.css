@@ -1205,6 +1205,78 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.dos-prosopikon-widget-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.prosopikon-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dce5e8;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.prosopikon-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e8eef1;
+}
+
+.prosopikon-panel-heading h2 {
+  margin: 0;
+  color: #172127;
+  font-size: 0.95rem;
+}
+
+.prosopikon-list {
+  display: grid;
+}
+
+.prosopikon-list-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid #edf2f4;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.prosopikon-list-row.active {
+  background: #eef7f5;
+}
+
+.prosopikon-list-row span {
+  font-weight: 700;
+}
+
+.prosopikon-list-row small,
+.prosopikon-table {
+  color: #5f6d75;
+  font-size: 0.84rem;
+}
+
+.prosopikon-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.prosopikon-table th,
+.prosopikon-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf2f4;
+  text-align: left;
+  vertical-align: top;
+}
+
 @media (max-width: 980px) {
   .dos-auth-shell,
   .dos-two-column {
@@ -1228,6 +1300,10 @@ h2 {
 
   .dos-object-browser-controls,
   .dos-object-browser-folders {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dos-prosopikon-widget-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1283,6 +1359,10 @@ h2 {
   .dos-form-grid,
   .dos-object-browser-controls,
   .dos-object-browser-folders {
+    grid-template-columns: 1fr;
+  }
+
+  .dos-prosopikon-widget-grid {
     grid-template-columns: 1fr;
   }
 

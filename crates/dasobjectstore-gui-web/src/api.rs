@@ -1,5 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 use gloo_net::http::Request;
+use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 use serde::Deserialize;
 #[cfg(any(target_arch = "wasm32", test))]
 use serde::Serialize;
@@ -323,6 +324,8 @@ pub struct StorageGroupResponse {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct UsersGroupsWorkspaceResponse {
     pub host_mode: String,
+    pub authentication_framework: ProsopikonAuthenticationFramework,
+    pub device_token_requirement: ProsopikonDeviceTokenRequirement,
     pub current_user: Option<LocalUserAuthorityResponse>,
     pub users: Vec<StandaloneUserAccountResponse>,
     pub groups: Vec<LocalGroupMembershipResponse>,
@@ -1471,6 +1474,7 @@ mod tests {
         GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
         ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
     };
+    use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 
     #[test]
     fn builds_auth_routes_under_product_mount() {
@@ -2100,6 +2104,8 @@ mod tests {
     fn decodes_users_groups_workspace_response_subset() {
         let payload = serde_json::json!({
             "host_mode": "standalone",
+            "authentication_framework": "hybrid",
+            "device_token_requirement": "not_required",
             "current_user": {
                 "username": "operator",
                 "groups": ["sudo", "mnemosyne"],
@@ -2146,6 +2152,14 @@ mod tests {
             .expect("users/groups workspace decodes");
 
         assert_eq!(decoded.host_mode, "standalone");
+        assert_eq!(
+            decoded.authentication_framework,
+            ProsopikonAuthenticationFramework::Hybrid
+        );
+        assert_eq!(
+            decoded.device_token_requirement,
+            ProsopikonDeviceTokenRequirement::NotRequired
+        );
         assert!(
             decoded
                 .current_user

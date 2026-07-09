@@ -28,7 +28,10 @@ fn prosopikon_store() -> InMemoryProsopikonStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prosopikon_core::{ProsopikonHost, ProsopikonStorageBackend};
+    use prosopikon_core::{
+        ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement, ProsopikonHost,
+        ProsopikonStorageBackend,
+    };
 
     #[test]
     fn dasobjectstore_prosopikon_profile_keeps_storage_mutation_with_daemon() {
@@ -36,6 +39,14 @@ mod tests {
 
         assert_eq!(profile.host, ProsopikonHost::DasObjectStore);
         assert_eq!(profile.identity_authority, "prosopikon");
+        assert_eq!(
+            profile.authentication_framework,
+            ProsopikonAuthenticationFramework::Hybrid
+        );
+        assert_eq!(
+            profile.device_token_requirement,
+            ProsopikonDeviceTokenRequirement::NotRequired
+        );
         assert_eq!(
             profile.storage_backend,
             ProsopikonStorageBackend::DasObjectStoreDaemon

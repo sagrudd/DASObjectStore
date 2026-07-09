@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.59.1 - 2026-07-09
+
+- Rename the standalone Users/Groups console to Local Access, declare the
+  DASObjectStore Prosopikon authentication framework as `Hybrid`, expose
+  device-token readiness metadata, and start rendering Prosopikon-owned local
+  user/group/membership selector widgets in the Web console.
+
 ## 0.59.0 - 2026-07-09
 
 - Set remote easyconnect upload sessions to an eight-hour default contract,

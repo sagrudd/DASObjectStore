@@ -5,6 +5,7 @@ use crate::dashboard::{
 };
 use crate::endpoints::EndpointInventoryView;
 use crate::{LocalUserMetadata, UserSummary, SUDO_ADMIN_GROUPS};
+use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 use serde::{Deserialize, Serialize};
 
 pub const OPERATIONS_WORKSPACES_SCHEMA_VERSION: &str = "dasobjectstore.operations_workspaces.v1";
@@ -72,7 +73,7 @@ impl OperationsWorkspaceKindView {
             Self::Objects => "Objects",
             Self::Endpoints => "Endpoints",
             Self::Activity => "Activity",
-            Self::UsersGroups => "Capabilities",
+            Self::UsersGroups => "Local Access",
         }
     }
 
@@ -989,6 +990,8 @@ pub enum ActivityTaskStateView {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UsersGroupsWorkspaceView {
     pub host_mode: UsersGroupsHostModeView,
+    pub authentication_framework: ProsopikonAuthenticationFramework,
+    pub device_token_requirement: ProsopikonDeviceTokenRequirement,
     pub current_user: Option<LocalUserAuthorityView>,
     pub users: Vec<StandaloneUserAccountView>,
     pub groups: Vec<LocalGroupMembershipView>,
@@ -1027,6 +1030,8 @@ impl UsersGroupsWorkspaceView {
 
         Self {
             host_mode: UsersGroupsHostModeView::Standalone,
+            authentication_framework: ProsopikonAuthenticationFramework::Hybrid,
+            device_token_requirement: ProsopikonDeviceTokenRequirement::NotRequired,
             current_user: current_user.map(LocalUserAuthorityView::from),
             users: users
                 .into_iter()
@@ -1051,6 +1056,8 @@ impl UsersGroupsWorkspaceView {
     pub fn synoptikon_integrated() -> Self {
         Self {
             host_mode: UsersGroupsHostModeView::SynoptikonIntegrated,
+            authentication_framework: ProsopikonAuthenticationFramework::Prosopikon,
+            device_token_requirement: ProsopikonDeviceTokenRequirement::NotRequired,
             current_user: None,
             users: Vec::new(),
             groups: Vec::new(),
@@ -1435,6 +1442,14 @@ mod tests {
         );
 
         assert_eq!(view.host_mode, UsersGroupsHostModeView::Standalone);
+        assert_eq!(
+            view.authentication_framework,
+            prosopikon_core::ProsopikonAuthenticationFramework::Hybrid
+        );
+        assert_eq!(
+            view.device_token_requirement,
+            prosopikon_core::ProsopikonDeviceTokenRequirement::NotRequired
+        );
         assert_eq!(
             view.current_user,
             Some(LocalUserAuthorityView {

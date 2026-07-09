@@ -18,6 +18,7 @@ dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true
 flate2.workspace = true
 libc.workspace = true
+prosopikon-core.workspace = true
 rand_core.workspace = true
 rcgen.workspace = true
 serde.workspace = true
