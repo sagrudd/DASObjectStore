@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.62.5 - 2026-07-09
+
+- Skip strict direct-import duplicates before HDD copy even when a previous
+  interrupted run left the content-addressed payload on disk without a live
+  metadata row, while preserving inline hashing for genuinely new files.
+
 ## 0.62.4 - 2026-07-09
 
 - Prefer daemon appliance telemetry for the Web Home dashboard Capacity,

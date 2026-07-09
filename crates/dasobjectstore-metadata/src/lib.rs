@@ -77,6 +77,7 @@ pub use initialize::{
 };
 pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
 pub use local_object_store::{
+    existing_object_payload_candidate_paths, object_payload_path,
     put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,
     put_object_ssd_first_with_controlled_progress, put_object_ssd_first_with_progress,
     settle_staged_object_to_hdd_with_controlled_progress,

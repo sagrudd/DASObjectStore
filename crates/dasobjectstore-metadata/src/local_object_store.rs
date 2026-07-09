@@ -356,6 +356,37 @@ fn write_direct_requested_copies(
         .collect()
 }
 
+pub fn object_payload_path(
+    disk_root: &DiskCopyRoot,
+    object_id: &ObjectId,
+    content_hash: &str,
+) -> PathBuf {
+    object_copy_path(disk_root, object_id, content_hash)
+}
+
+pub fn existing_object_payload_candidate_paths(
+    disk_root: &DiskCopyRoot,
+    object_id: &ObjectId,
+) -> Result<Vec<PathBuf>, io::Error> {
+    let objects_root = disk_root.root_path.join("objects");
+    if !objects_root.exists() {
+        return Ok(Vec::new());
+    }
+    let encoded_object_id = encode_path_component(object_id.as_str());
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(objects_root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let payload_path = entry.path().join(&encoded_object_id).join("payload");
+        if payload_path.exists() {
+            candidates.push(payload_path);
+        }
+    }
+    Ok(candidates)
+}
+
 fn validate_request(request: &ObjectPutRequest) -> Result<(), ObjectPutError> {
     if request.copy_count == 0 {
         return Err(ObjectPutError::InvalidCopyCount);

@@ -9,8 +9,8 @@ use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    hash_file_sha256_with_progress, measure_ssd_capacity,
-    put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
+    existing_object_payload_candidate_paths, hash_file_sha256_with_progress, measure_ssd_capacity,
+    object_payload_path, put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
     settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
     IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectInspectError, ObjectPutError,
     ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure,
@@ -249,6 +249,7 @@ impl LocalFileIngestExecutor {
                 &self.live_sqlite_path,
                 &request,
                 entry,
+                &managed_disk_roots,
                 copies,
                 &mut state,
                 job_id,
@@ -432,6 +433,7 @@ impl LocalFileIngestExecutor {
                 &self.live_sqlite_path,
                 &request,
                 entry,
+                &managed_disk_roots,
                 copies,
                 &mut state,
                 job_id,
@@ -1297,31 +1299,115 @@ fn maybe_skip_existing_object(
     live_sqlite_path: &Path,
     request: &SubmitIngestFilesRequest,
     entry: &FileIngestEntry,
+    managed_disk_roots: &[DiskCopyRoot],
     copies: u8,
     state: &mut PipelineProgressState,
     job_id: &IngestJobId,
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
 ) -> Result<bool, DaemonIngestFilesRuntimeError> {
-    let Some(existing) = read_existing_object_snapshot(live_sqlite_path, &entry.object_id)? else {
+    let mut incoming_hash = None::<String>;
+    if let Some(existing) = read_existing_object_snapshot(live_sqlite_path, &entry.object_id)? {
+        incoming_hash = incoming_hash_for_conflict_decision(
+            request.conflict_policy,
+            &existing,
+            entry,
+            state,
+            job_id,
+            &request.endpoint,
+            progress,
+        )?;
+        let incoming = DaemonIngestObjectSnapshot::new(entry.size_bytes, incoming_hash.clone());
+        let decision = request
+            .conflict_policy
+            .decide_existing_object(&existing, &incoming);
+        if decision.action == DaemonIngestConflictAction::SkipExistingVersion {
+            emit_existing_object_skip(
+                request,
+                entry,
+                copies,
+                state,
+                job_id,
+                progress,
+                format!("metadata {:?}", decision.reason),
+            )?;
+            return Ok(true);
+        }
+    }
+
+    if request.conflict_policy == DaemonIngestConflictPolicy::Force {
         return Ok(false);
-    };
-    let incoming_hash = incoming_hash_for_conflict_decision(
-        request.conflict_policy,
-        &existing,
-        entry,
-        state,
-        job_id,
-        &request.endpoint,
-        progress,
-    )?;
-    let incoming = DaemonIngestObjectSnapshot::new(entry.size_bytes, incoming_hash);
-    let decision = request
-        .conflict_policy
-        .decide_existing_object(&existing, &incoming);
-    if decision.action != DaemonIngestConflictAction::SkipExistingVersion {
+    }
+    let payload_candidates =
+        existing_payload_candidates_for_object(managed_disk_roots, &entry.object_id)?;
+    if payload_candidates.is_empty() {
         return Ok(false);
     }
 
+    match request.conflict_policy {
+        DaemonIngestConflictPolicy::Lazy => {
+            if payload_candidates.iter().any(|path| {
+                path.metadata()
+                    .map(|metadata| metadata.len() == entry.size_bytes)
+                    .unwrap_or(false)
+            }) {
+                emit_existing_object_skip(
+                    request,
+                    entry,
+                    copies,
+                    state,
+                    job_id,
+                    progress,
+                    "payload size match".to_string(),
+                )?;
+                return Ok(true);
+            }
+        }
+        DaemonIngestConflictPolicy::Strict => {
+            let hash = match incoming_hash {
+                Some(hash) => hash,
+                None => hash_source_file_for_conflict(
+                    entry,
+                    state,
+                    job_id,
+                    &request.endpoint,
+                    progress,
+                )?,
+            };
+            if managed_disk_roots.iter().any(|root| {
+                let expected_path = object_payload_path(root, &entry.object_id, &hash);
+                expected_path.exists()
+                    && expected_path
+                        .metadata()
+                        .map(|metadata| metadata.len() == entry.size_bytes)
+                        .unwrap_or(false)
+            }) {
+                emit_existing_object_skip(
+                    request,
+                    entry,
+                    copies,
+                    state,
+                    job_id,
+                    progress,
+                    "payload checksum match".to_string(),
+                )?;
+                return Ok(true);
+            }
+        }
+        DaemonIngestConflictPolicy::Force => {}
+    }
+
+    Ok(false)
+}
+
+fn emit_existing_object_skip(
+    request: &SubmitIngestFilesRequest,
+    entry: &FileIngestEntry,
+    copies: u8,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    reason: String,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
     state.mark_existing_object_skipped(entry, copies);
     progress(DaemonIngestProgressEvent {
         job_id: job_id.clone(),
@@ -1342,13 +1428,12 @@ fn maybe_skip_existing_object(
         active_hdd_transfers: state.active_hdd_transfer_records(),
         resource_policy: None,
         message: Some(format!(
-            "skipped existing object by {} policy ({:?}): {}",
+            "skipped existing object by {} policy ({}): {}",
             request.conflict_policy,
-            decision.reason,
+            reason,
             entry.relative_path.to_string_lossy()
         )),
-    })?;
-    Ok(true)
+    })
 }
 
 fn incoming_hash_for_conflict_decision(
@@ -1364,6 +1449,16 @@ fn incoming_hash_for_conflict_decision(
         return Ok(None);
     }
 
+    hash_source_file_for_conflict(entry, state, job_id, endpoint, progress).map(Some)
+}
+
+fn hash_source_file_for_conflict(
+    entry: &FileIngestEntry,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+) -> Result<String, DaemonIngestFilesRuntimeError> {
     progress(DaemonIngestProgressEvent {
         job_id: job_id.clone(),
         endpoint: endpoint.clone(),
@@ -1414,7 +1509,7 @@ fn incoming_hash_for_conflict_decision(
         })
         .map_err(|err| io::Error::other(err.to_string()))
     })?;
-    Ok(Some(content_hash))
+    Ok(content_hash)
 }
 
 fn read_existing_object_snapshot(
@@ -1439,6 +1534,18 @@ fn read_existing_object_snapshot(
             "failed to inspect existing object metadata for conflict handling: {err}"
         ))),
     }
+}
+
+fn existing_payload_candidates_for_object(
+    managed_disk_roots: &[DiskCopyRoot],
+    object_id: &ObjectId,
+) -> Result<Vec<PathBuf>, DaemonIngestFilesRuntimeError> {
+    let mut candidates = Vec::new();
+    for root in managed_disk_roots {
+        let mut root_candidates = existing_object_payload_candidate_paths(root, object_id)?;
+        candidates.append(&mut root_candidates);
+    }
+    Ok(candidates)
 }
 
 fn drain_hdd_settlement_events(
@@ -2017,8 +2124,8 @@ mod tests {
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
-        hash_file_sha256, DiskCopyRoot, IngestStagingLayout, ObjectPutProgress,
-        ObjectPutProgressStage, ObjectPutRequest,
+        hash_file_sha256, object_payload_path, DiskCopyRoot, IngestStagingLayout,
+        ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
     use rusqlite::Connection;
@@ -2220,6 +2327,80 @@ mod tests {
                 && !event.active_hdd_transfers.is_empty()
         }));
         assert!(!hdd_root.join("disk-a").join("objects").exists());
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn direct_ingest_strict_skips_existing_payload_without_metadata_before_hdd_copy() {
+        let root = temp_root("daemon-ingest-direct-strict-payload-skip");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd");
+        let source_root = root.join("source");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        write_device_marker(&ssd_root, "role=ssd");
+        write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+        fs::create_dir_all(&source_root).expect("source dir");
+        let source_path = source_root.join("reference.fa.zst");
+        fs::write(&source_path, b"reproducible reference").expect("source file");
+        let object_id = ObjectId::new("zymo_fecal_2025.05/reference.fa.zst").expect("object id");
+        let content_hash = hash_file_sha256(&source_path).expect("source hash");
+        let disk_root = DiskCopyRoot::new(
+            dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id"),
+            hdd_root.join("disk-a"),
+        );
+        let payload_path = object_payload_path(&disk_root, &object_id, &content_hash);
+        fs::create_dir_all(payload_path.parent().expect("payload parent"))
+            .expect("payload parent dir");
+        fs::write(&payload_path, b"reproducible reference").expect("existing payload");
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        write_store_registry_with_policy(&registry_path, policy);
+        fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+        let executor = LocalFileIngestExecutor {
+            ssd_root: ssd_root.clone(),
+            hdd_root: hdd_root.clone(),
+            live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
+            store_registry_path: registry_path,
+            subobject_registry_path,
+        };
+
+        let mut progress_events = Vec::new();
+        executor
+            .submit(
+                SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: source_root,
+                    object_type: ObjectType::Fasta,
+                    copies: Some(1),
+                    hdd_workers: None,
+                    ingress_origin: DaemonIngressOrigin::LocalServer,
+                    conflict_policy: DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                },
+                "2026-07-09T18:55:22Z",
+                |event| {
+                    progress_events.push(event);
+                    Ok(())
+                },
+            )
+            .expect("existing payload skip succeeds");
+
+        assert!(progress_events.iter().any(|event| event
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("payload checksum match"))));
+        assert!(!progress_events.iter().any(|event| {
+            event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)
+                && !event.active_hdd_transfers.is_empty()
+        }));
+        assert_eq!(
+            find_payloads(&hdd_root.join("disk-a").join("objects")),
+            vec![b"reproducible reference".to_vec()]
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
