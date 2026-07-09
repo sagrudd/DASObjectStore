@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.18 - 2026-07-09
+
+- Compact the visible DASObjectStore performance report metadata and early
+  recommendation tables so long identifiers, hashes, paths, and quantitative
+  values do not overflow formal PDF table bounds.
+
 ## 0.54.17 - 2026-07-09
 
 - Reduce and constrain the Mnemosyne Biosciences login wordmark so the brand

@@ -5433,27 +5433,29 @@ fn write_formal_performance_pdf_report_from_artifact(
 }
 
 fn performance_report_metadata_json(report: &PerformanceReport) -> String {
-    let document_id = format!("DOS-{}", report.run_id);
+    let run_id = compact_run_id(&report.run_id);
+    let signature = compact_hash(&report.reproduction_payload_sha256);
     serde_json::json!({
         "header": "DASObjectStore performance report",
         "rows": [
             [
-                {"label": "Run ID", "value": report.run_id},
-                {"label": "Document ID", "value": document_id},
-                {"label": "Performance test identifier", "value": "DASObjectStore-Disk-Speed"},
+                {"label": "Run ID", "value": run_id},
+                {"label": "Test", "value": "Disk speed"},
                 {"label": "Report state", "value": "FINAL"},
             ],
             [
                 {"label": "DeviceID", "value": hostname_for_report()},
                 {"label": "Operator", "value": std::env::var("USER").unwrap_or_else(|_| "not recorded".to_string())},
                 {"label": "Generated at (UTC)", "value": report.generated_at_utc},
-                {"label": "Version", "value": dasobjectstore_core::VERSION},
             ],
             [
-                {"label": "Repository revision", "value": report.repository_revision},
+                {"label": "Repository revision", "value": compact_identifier(&report.repository_revision, 18)},
+                {"label": "Version", "value": dasobjectstore_core::VERSION},
                 {"label": "Test status", "value": "VALID"},
+            ],
+            [
                 {"label": "Signature of operator", "value": "Pending operator signature"},
-                {"label": "Cryptographic signature", "value": report.reproduction_payload_sha256},
+                {"label": "Cryptographic signature", "value": signature},
             ],
         ],
     })
@@ -5492,6 +5494,7 @@ fn artifact_pdf_path(artifact: &Value) -> Option<PathBuf> {
 fn performance_report_metadata_json_from_artifact(artifact: &Value) -> String {
     let run_id =
         json_string(artifact, &["run", "run_id"]).unwrap_or_else(|| "not recorded".to_string());
+    let compact_run_id = compact_run_id(&run_id);
     let generated_at = json_string(artifact, &["run", "generated_at_utc"])
         .unwrap_or_else(|| "not recorded".to_string());
     let revision = json_string(artifact, &["run", "repository_revision"])
@@ -5499,26 +5502,28 @@ fn performance_report_metadata_json_from_artifact(artifact: &Value) -> String {
     let version = json_string(artifact, &["run", "cli_version"])
         .unwrap_or_else(|| dasobjectstore_core::VERSION.to_string());
     let signature = performance_artifact_signature(artifact);
+    let compact_signature = compact_hash(&signature);
     serde_json::json!({
         "header": "DASObjectStore performance report",
         "rows": [
             [
-                {"label": "Run ID", "value": run_id},
-                {"label": "Document ID", "value": format!("DOS-{run_id}")},
-                {"label": "Performance test identifier", "value": "DASObjectStore-Disk-Speed"},
+                {"label": "Run ID", "value": compact_run_id},
+                {"label": "Test", "value": "Disk speed"},
                 {"label": "Report state", "value": "FINAL"},
             ],
             [
                 {"label": "DeviceID", "value": hostname_for_report()},
                 {"label": "Operator", "value": std::env::var("USER").unwrap_or_else(|_| "not recorded".to_string())},
                 {"label": "Generated at (UTC)", "value": generated_at},
-                {"label": "Version", "value": version},
             ],
             [
-                {"label": "Repository revision", "value": revision},
+                {"label": "Repository revision", "value": compact_identifier(&revision, 18)},
+                {"label": "Version", "value": version},
                 {"label": "Test status", "value": "VALID"},
+            ],
+            [
                 {"label": "Signature of operator", "value": "Pending operator signature"},
-                {"label": "Cryptographic signature", "value": signature},
+                {"label": "Cryptographic signature", "value": compact_signature},
             ],
         ],
     })
@@ -5536,6 +5541,67 @@ fn performance_report_qr_payload_from_artifact(artifact: &Value) -> String {
     format!("mnemosyne-report:DASObjectStore:{run_id}:{signature}")
 }
 
+fn compact_run_id(value: &str) -> String {
+    let value = value
+        .strip_prefix("dasobjectstore-performance-")
+        .unwrap_or(value);
+    compact_identifier(value, 28)
+}
+
+fn compact_hash(value: &str) -> String {
+    compact_identifier(value, 24)
+}
+
+fn compact_identifier(value: &str, max_chars: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= max_chars || max_chars < 8 {
+        return value.to_string();
+    }
+    let keep = max_chars.saturating_sub(3);
+    let head = keep / 2;
+    let tail = keep.saturating_sub(head);
+    let prefix = value.chars().take(head).collect::<String>();
+    let suffix = value
+        .chars()
+        .rev()
+        .take(tail)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
+fn compact_path(path: &str) -> String {
+    let path = path.trim();
+    if path.len() <= 42 {
+        return path.to_string();
+    }
+    let Some(file_name) = Path::new(path).file_name().and_then(|name| name.to_str()) else {
+        return compact_identifier(path, 42);
+    };
+    if file_name.is_empty() {
+        compact_identifier(path, 42)
+    } else {
+        format!(".../{file_name}")
+    }
+}
+
+fn humanize_report_token(value: &str) -> String {
+    value
+        .split(['_', '-'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &Path) -> String {
     let run_id =
         json_string(artifact, &["run", "run_id"]).unwrap_or_else(|| "not recorded".to_string());
@@ -5545,16 +5611,20 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
     let mut output = String::new();
     output.push_str("# DASObjectStore Performance Test Report\n\n");
     output.push_str("## Executive Summary\n\n");
-    output.push_str(&format!("- Run ID: `{run_id}`\n"));
+    output.push_str(&format!("- Run ID: `{}`\n", compact_run_id(&run_id)));
     output.push_str(&format!("- Generated at: `{generated_at}`\n"));
-    output.push_str(&format!("- Report artifact: `{}`\n", report_path.display()));
+    output.push_str(&format!(
+        "- Report artifact: `{}`\n",
+        compact_path(&report_path.display().to_string())
+    ));
     output.push_str(&format!(
         "- JSON artifact: `{}`\n",
         json_string(artifact, &["run", "artifacts", "json_path"])
+            .map(|path| compact_path(&path))
             .unwrap_or_else(|| "not recorded".to_string())
     ));
     if !command.is_empty() {
-        output.push_str(&format!("- Reproduction command: `{command}`\n"));
+        output.push_str("- Reproduction command: recorded in the JSON artifact.\n");
     }
     output.push('\n');
 
@@ -5563,11 +5633,13 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
     output.push_str(&format!(
         "| Strategy | `{}` |\n",
         json_string(artifact, &["recommendation", "strategy"])
-            .unwrap_or_else(|| "not recorded".to_string())
+            .map(|value| humanize_report_token(&value))
+            .unwrap_or_else(|| "Not recorded".to_string())
     ));
     output.push_str(&format!(
         "| File order | `{}` |\n",
         json_string(artifact, &["recommendation", "file_order"])
+            .map(|value| value.replace('_', " "))
             .unwrap_or_else(|| "not recorded".to_string())
     ));
     output.push_str(&format!(
@@ -5588,7 +5660,7 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
             artifact,
             &["recommendation", "estimated_aggregate_bytes_per_second"]
         )
-        .map(|value| format_bytes(value as f64))
+        .map(|value| format_bytes_compact(value as f64))
         .unwrap_or_else(|| "not recorded".to_string())
     ));
     if let Some(rows) = json_array(artifact, &["recommendation", "rationale"]) {
@@ -5612,7 +5684,15 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
     ] {
         output.push_str(&format!(
             "| {label} | `{}` |\n",
-            json_string(artifact, path).unwrap_or_else(|| "not recorded".to_string())
+            json_string(artifact, path)
+                .map(|value| {
+                    if label.ends_with("root") || label == "Source path" {
+                        compact_path(&value)
+                    } else {
+                        humanize_report_token(&value)
+                    }
+                })
+                .unwrap_or_else(|| "not recorded".to_string())
         ));
     }
     output.push_str(&format!(
@@ -5642,10 +5722,10 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
             row.file_order,
             row.hdd_concurrency,
             row.redundancy,
-            format_bytes(row.logical_source_bytes as f64),
-            format_bytes(row.physical_hdd_write_bytes as f64),
+            format_bytes_compact(row.logical_source_bytes as f64),
+            format_bytes_compact(row.physical_hdd_write_bytes as f64),
             row.operations,
-            format_bytes(row.aggregate_bytes_per_second as f64),
+            format_bytes_compact(row.aggregate_bytes_per_second as f64),
             yes_no(row.overlapped)
         ));
     }
@@ -5660,7 +5740,7 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
         .flatten()
     {
         output.push_str(&format!(
-            "| {} | `{}` | {} | {} | {} GiB | {} MiB/s | {} |\n",
+            "| {} | `{}` | {} | {} | {:.1} GiB | {:.1} MiB/s | {} |\n",
             json_string(row, &["scenario_label"]).unwrap_or_else(|| json_string(
                 row,
                 &["scenario"]
@@ -6614,25 +6694,26 @@ fn render_performance_report(report: PerformanceReport) -> String {
 | Generated at (UTC) | `{}` |\n\
 | Repository revision | `{}` |\n\
 | CLI version | `{}` |\n\
-| Command | `{}` |\n\
+| Command | Recorded in reproduction payload |\n\
 | JSON artifact | `{}` |\n\
 | PDF artifact | `{}` |\n\
 | QR artifact | `{}` |\n\
 | QR status | `{}` |\n\
 | Redundancy | `{}` HDD copy/copies per logical file |\n\
+| Command digest | `{}` |\n\
 | Reproduction payload SHA-256 | `{}` |\n\
-| Reproduction QR payload | See `Reproduction Payload` |\n\n",
-        report.run_id,
+| Reproduction QR payload | See reproduction payload |\n\n",
+        compact_run_id(&report.run_id),
         report.generated_at_utc,
-        report.repository_revision,
+        compact_identifier(&report.repository_revision, 18),
         dasobjectstore_core::VERSION,
-        report.reproduce_command,
-        report.json_path.display(),
-        report.pdf_path.display(),
-        report.qr_path.display(),
+        compact_path(&report.json_path.display().to_string()),
+        compact_path(&report.pdf_path.display().to_string()),
+        compact_path(&report.qr_path.display().to_string()),
         report.qr_status,
         report.redundancy,
-        report.reproduction_payload_sha256
+        compact_hash(&sha256_hex_bytes(report.reproduce_command.as_bytes())),
+        compact_hash(&report.reproduction_payload_sha256)
     ));
     output.push_str(&format!(
         "QR code image: ![Reproduce]({})\n\n",
@@ -6680,11 +6761,8 @@ fn render_performance_report(report: PerformanceReport) -> String {
         format_concurrency_list(&report.selected_hdd_concurrency())
     ));
     output.push_str("## Summary\n\n");
-    output.push_str(&format!("- Run id: `{}`\n", report.run_id));
-    output.push_str(&format!(
-        "- Reproduce with: `{}`\n",
-        report.reproduce_command
-    ));
+    output.push_str(&format!("- Run id: `{}`\n", compact_run_id(&report.run_id)));
+    output.push_str("- Reproduce with: command recorded in the JSON artifact.\n");
     output.push_str("\n## Reproduction Payload\n\n```json\n");
     output.push_str(&report.reproduction_payload);
     output.push_str("\n```\n\n");
@@ -6717,10 +6795,10 @@ fn render_performance_report(report: PerformanceReport) -> String {
     }
     output.push_str(&format!(
         "- Recommended strategy: {} with `{}` order at {} HDD worker(s), observed aggregate {}/s\n",
-        report.recommendation.strategy.as_str(),
-        report.recommendation.file_order.as_str(),
+        humanize_report_token(report.recommendation.strategy.as_str()),
+        report.recommendation.file_order.as_str().replace('_', " "),
         report.recommendation.hdd_concurrency,
-        format_bytes(report.recommendation.aggregate_bytes_per_second)
+        format_bytes_compact(report.recommendation.aggregate_bytes_per_second)
     ));
 
     output.push_str("\n## Scenario Summary\n\n");
@@ -6728,15 +6806,15 @@ fn render_performance_report(report: PerformanceReport) -> String {
     output.push_str("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n");
     for scenario in report.all_scenarios() {
         output.push_str(&format!(
-            "| {} | `{}` | {} | {} | {} | {} | {} | {}/s | {:.1} s | {} |\n",
+            "| {} | `{}` | {} | {} | {} | {} | {} | {}/s | {:.0} s | {} |\n",
             scenario.kind.label(),
             scenario.file_order.as_str(),
             scenario.concurrency,
             scenario.redundancy,
-            format_bytes(scenario.logical_source_bytes as f64),
-            format_bytes(scenario.physical_hdd_write_bytes as f64),
+            format_bytes_compact(scenario.logical_source_bytes as f64),
+            format_bytes_compact(scenario.physical_hdd_write_bytes as f64),
             scenario.hdd_write_operations,
-            format_bytes(scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001)),
+            format_bytes_compact(scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001)),
             scenario.elapsed_seconds,
             yes_no(scenario.hdd_drain_started_before_all_ssd_staged)
         ));
@@ -6793,12 +6871,12 @@ fn render_performance_report(report: PerformanceReport) -> String {
             .collect::<Vec<_>>()
             .join(", ");
         output.push_str(&format!(
-            "| {} | `{}` | {} | {} | {}/s | {:.1} s | {} |\n",
+            "| {} | `{}` | {} | {} | {}/s | {:.0} s | {} |\n",
             row.scenario.as_str(),
             scenario.file_order.as_str(),
             row.concurrency,
             members,
-            format_bytes(row.aggregate_bytes as f64 / row.seconds.max(0.001)),
+            format_bytes_compact(row.aggregate_bytes as f64 / row.seconds.max(0.001)),
             row.slowest_seconds,
             yes_no(scenario.hdd_drain_started_before_all_ssd_staged)
         ));
@@ -10341,6 +10419,14 @@ fn read_ssd_stress(
 }
 
 fn format_bytes(bytes: f64) -> String {
+    format_bytes_with_precision(bytes, 1)
+}
+
+fn format_bytes_compact(bytes: f64) -> String {
+    format_bytes_with_precision(bytes, 0)
+}
+
+fn format_bytes_with_precision(bytes: f64, precision: usize) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes;
     let mut unit = UNITS[0];
@@ -10352,7 +10438,11 @@ fn format_bytes(bytes: f64) -> String {
         unit = next_unit;
     }
 
-    format!("{value:.1} {unit}")
+    if precision == 0 {
+        format!("{value:.0} {unit}")
+    } else {
+        format!("{value:.1} {unit}")
+    }
 }
 
 fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -12413,8 +12503,7 @@ mod tests {
         assert_eq!(labels[0], "Run ID");
         for required in [
             "Run ID",
-            "Document ID",
-            "Performance test identifier",
+            "Test",
             "Version",
             "Report state",
             "DeviceID",
@@ -12427,10 +12516,7 @@ mod tests {
         ] {
             assert!(labels.contains(&required), "{required}");
         }
-        assert_eq!(
-            metadata["rows"][2][3]["value"],
-            "623f8d191890968ec394ff02950710ecb9e5eed5a0b68c064e28e8ffa0876f58"
-        );
+        assert_eq!(metadata["rows"][3][1]["value"], "623f8d1918...8ffa0876f58");
     }
 
     #[test]
@@ -12450,9 +12536,9 @@ mod tests {
 
         assert_eq!(metadata["header"], "DASObjectStore performance report");
         assert_eq!(metadata["rows"][0][0]["label"], "Run ID");
-        assert_eq!(metadata["rows"][0][2]["value"], "DASObjectStore-Disk-Speed");
-        assert_eq!(metadata["rows"][2][2]["label"], "Signature of operator");
-        assert_eq!(metadata["rows"][2][3]["label"], "Cryptographic signature");
+        assert_eq!(metadata["rows"][0][1]["value"], "Disk speed");
+        assert_eq!(metadata["rows"][3][0]["label"], "Signature of operator");
+        assert_eq!(metadata["rows"][3][1]["label"], "Cryptographic signature");
         assert!(qr_payload.starts_with("mnemosyne-report:DASObjectStore:perf-test-run:"));
         assert!(markdown.contains("## Scenario Summary"));
         assert!(markdown.contains("## Per-Disk HDD Write Rates"));
