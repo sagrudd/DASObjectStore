@@ -9666,6 +9666,7 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
         source_path: args.source().to_path_buf(),
         object_type: args.object_type(),
         copies: args.copies(),
+        hdd_workers: args.hdd_workers(),
         conflict_policy: args.conflict_policy(),
         dry_run: args.dry_run(),
         client_request_id: None,
@@ -10558,6 +10559,11 @@ fn run_ingest_direct_import(
     args: &IngestDirectImportArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
+    if args.hdd_workers() == Some(0) {
+        return Err(CliError::CommandFailed(
+            "HDD worker count must be greater than zero".to_string(),
+        ));
+    }
     let file = File::open(args.policy_file())?;
     let policy: StorePolicy = serde_json::from_reader(file)?;
     let mut request = DirectHddImportRequest::new(
@@ -10584,6 +10590,12 @@ fn run_ingest_direct_import(
         writer.write_all(b"\n")?;
     } else {
         write_ingest_direct_import_report(&report, writer)?;
+        if let Some(workers) = args.hdd_workers() {
+            writeln!(
+                writer,
+                "HDD workers requested: {workers} (single-object direct import uses one active HDD writer)"
+            )?;
+        }
     }
 
     Ok(())
@@ -14484,6 +14496,8 @@ mod tests {
             "fastq",
             "--copies",
             "1",
+            "--hdd-workers",
+            "5",
             "--force",
             "--tui",
         ])
@@ -14504,6 +14518,7 @@ mod tests {
                         dasobjectstore_core::object_type::ObjectType::Fastq
                     );
                     assert_eq!(request.copies, Some(1));
+                    assert_eq!(request.hdd_workers, Some(5));
                     assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
                     assert!(!request.dry_run);
                 }

@@ -42,6 +42,8 @@ pub struct SubmitIngestFilesRequest {
     pub object_type: ObjectType,
     pub copies: Option<u8>,
     #[serde(default)]
+    pub hdd_workers: Option<usize>,
+    #[serde(default)]
     pub conflict_policy: DaemonIngestConflictPolicy,
     pub dry_run: bool,
     pub client_request_id: Option<String>,
@@ -56,6 +58,9 @@ impl SubmitIngestFilesRequest {
         }
         if self.copies == Some(0) {
             return Err(DaemonRequestValidationError::InvalidCopyCount { copies: 0 });
+        }
+        if self.hdd_workers == Some(0) {
+            return Err(DaemonRequestValidationError::InvalidHddWorkerCount { workers: 0 });
         }
         if self
             .client_request_id
@@ -301,6 +306,7 @@ pub enum DaemonRequestValidationError {
     RelativeSourcePath { path: PathBuf },
     RelativePath { field: &'static str, path: PathBuf },
     InvalidCopyCount { copies: u8 },
+    InvalidHddWorkerCount { workers: usize },
     BlankClientRequestId,
     BlankCancellationReason,
     BlankField { field: &'static str },
@@ -334,6 +340,12 @@ impl Display for DaemonRequestValidationError {
             }
             Self::InvalidCopyCount { copies } => {
                 write!(formatter, "copy count must be greater than zero: {copies}")
+            }
+            Self::InvalidHddWorkerCount { workers } => {
+                write!(
+                    formatter,
+                    "HDD worker count must be greater than zero: {workers}"
+                )
             }
             Self::BlankClientRequestId => {
                 formatter.write_str("client_request_id must not be blank")
@@ -406,6 +418,7 @@ mod tests {
             source_path: "/mnt/external/zymo".into(),
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
+            hdd_workers: None,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: Some("request-a".to_string()),
@@ -421,6 +434,7 @@ mod tests {
             source_path: "relative/source".into(),
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
+            hdd_workers: None,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
@@ -443,6 +457,7 @@ mod tests {
             source_path: "/mnt/external/zymo".into(),
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(0),
+            hdd_workers: None,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
@@ -453,6 +468,27 @@ mod tests {
         assert_eq!(
             err,
             DaemonRequestValidationError::InvalidCopyCount { copies: 0 }
+        );
+    }
+
+    #[test]
+    fn rejects_zero_hdd_worker_override() {
+        let request = SubmitIngestFilesRequest {
+            endpoint: StoreId::new("zymo").expect("store id"),
+            source_path: "/mnt/external/zymo".into(),
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive,
+            copies: Some(1),
+            hdd_workers: Some(0),
+            conflict_policy: DaemonIngestConflictPolicy::Strict,
+            dry_run: false,
+            client_request_id: None,
+        };
+
+        let err = request.validate().expect_err("zero workers rejected");
+
+        assert_eq!(
+            err,
+            DaemonRequestValidationError::InvalidHddWorkerCount { workers: 0 }
         );
     }
 
@@ -470,6 +506,7 @@ mod tests {
             serde_json::from_value(encoded).expect("legacy request deserializes");
 
         assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Strict);
+        assert_eq!(request.hdd_workers, None);
         assert_eq!(
             request.object_type,
             dasobjectstore_core::object_type::ObjectType::Naive
@@ -483,6 +520,7 @@ mod tests {
             source_path: "/mnt/external/zymo".into(),
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: None,
+            hdd_workers: None,
             conflict_policy: DaemonIngestConflictPolicy::Lazy,
             dry_run: true,
             client_request_id: None,

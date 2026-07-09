@@ -79,6 +79,7 @@ argument parsing and submits an ingest job request containing:
 * the mounted source directory;
 * the logical object type assigned to the imported files;
 * an optional copy-count override;
+* an optional HDD settlement worker override;
 * the existing-object conflict policy;
 * whether the request is a dry run.
 
@@ -96,6 +97,22 @@ for HDD settlement. In the TUI, ``ssd-stage`` means source bytes are landing on
 SSD, ``ssd-flush`` means the staged payload is being synced, and
 ``checksum-manifest-capture`` means the staged payload is being hashed before
 HDD placement.
+
+By default, the daemon derives HDD settlement fan-out from the managed HDDs in
+the target DAS: ``managed_hdd_count - 2``, bounded to at least one worker and
+never more workers than available HDDs. This keeps source-to-SSD staging moving
+while leaving headroom for the appliance and avoiding multiple concurrent
+writes to the same disk. Operators may override this for a run:
+
+.. code-block:: console
+
+   dasobjectstore ingest files zymo_fecal_2025.05 \
+     --source /home/stephen/zymo_fecal_2025.05/ \
+     --hdd-workers 5 \
+     --tui
+
+The daemon validates ``--hdd-workers`` against the detected managed HDD count
+for the ObjectStore enclosure.
 
 Object Types
 ------------

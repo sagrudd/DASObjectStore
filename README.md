@@ -158,7 +158,9 @@ lower-priority ingest. At the critical watermark, destage is urgent and normal
 ingest should pause or reject non-critical work.
 
 CLI-managed public imports may bypass SSD ingest for reproducible objects with
-an expected digest and source URL:
+an expected digest and source URL. The command accepts `--hdd-workers` for
+alignment with ingest-worker planning, but the current reproducible-object
+direct import writes a single verified object copy to the requested HDD:
 
 ```bash
 dasobjectstore ingest direct-import <object-id> \
@@ -168,6 +170,7 @@ dasobjectstore ingest direct-import <object-id> \
   --expected-sha256 <sha256> \
   --source-uri <url-or-accession> \
   --policy-file <reproducible-cache-direct-policy.json> \
+  --hdd-workers <n> \
   --allow-direct-to-hdd-import \
   --confirm "confirm direct-to-hdd import"
 ```

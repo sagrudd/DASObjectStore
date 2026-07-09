@@ -4,10 +4,6 @@ use crate::api::{
     DaemonIngestWorkerTelemetry, DaemonSsdPressure, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse,
 };
-use crate::runtime::{
-    authoritative_performance_recommendation_path, read_authoritative_ingest_policy,
-    AuthoritativeIngestPolicy, DEFAULT_DAEMON_STATE_DIR,
-};
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_metadata::{
@@ -84,7 +80,6 @@ struct ResolvedIngestEndpoint {
 struct LocalFileIngestExecutor {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
-    authoritative_policy_path: PathBuf,
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
 }
@@ -94,7 +89,6 @@ impl LocalFileIngestExecutor {
         Self {
             ssd_root: default_ssd_root(),
             hdd_root: default_hdd_root(),
-            authoritative_policy_path: default_authoritative_policy_path(),
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
         }
@@ -135,6 +129,8 @@ impl LocalFileIngestExecutor {
                 managed_disk_roots.len()
             )));
         }
+        let hdd_worker_count =
+            resolve_hdd_worker_count(request.hdd_workers, managed_disk_roots.len())?;
         let files = collect_ingest_files(&request.source_path, &endpoint.object_prefix)?;
         let source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
         let total_work_bytes = source_bytes.saturating_mul(u64::from(copies) + 1);
@@ -168,10 +164,11 @@ impl LocalFileIngestExecutor {
             telemetry: None,
             resource_policy: None,
             message: Some(format!(
-                "planned {} file(s), {} source byte(s), {} copy/copies",
+                "planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s)",
                 files.len(),
                 source_bytes,
-                copies
+                copies,
+                hdd_worker_count
             )),
         })?;
 
@@ -198,11 +195,6 @@ impl LocalFileIngestExecutor {
             return Ok(summary);
         }
 
-        let ingest_policy = read_ingest_policy(&self.authoritative_policy_path)?;
-        let hdd_worker_count = ingest_policy
-            .hdd_settlement_concurrency
-            .min(managed_disk_roots.len())
-            .clamp(1, MAX_HDD_SETTLEMENT_WORKERS);
         let mut state = PipelineProgressState::new(
             files.len() as u64,
             source_bytes,
@@ -546,6 +538,34 @@ fn compare_hdd_settlement_disks(
         .cmp(&(u128::from(right_free) * u128::from(left.total_bytes.max(1))))
         .then_with(|| left_free.cmp(&right_free))
         .then_with(|| right.disk_id.cmp(&left.disk_id))
+}
+
+fn resolve_hdd_worker_count(
+    requested: Option<usize>,
+    managed_hdd_count: usize,
+) -> Result<usize, DaemonIngestFilesRuntimeError> {
+    if managed_hdd_count == 0 {
+        return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+            "ingest files requires at least one managed HDD root".to_string(),
+        ));
+    }
+    let maximum = managed_hdd_count.min(MAX_HDD_SETTLEMENT_WORKERS);
+    let workers = requested.unwrap_or_else(|| default_hdd_worker_count(managed_hdd_count));
+    if workers == 0 {
+        return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+            "HDD worker count must be greater than zero".to_string(),
+        ));
+    }
+    if workers > maximum {
+        return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+            "HDD worker count {workers} exceeds available managed HDD writers {maximum}"
+        )));
+    }
+    Ok(workers)
+}
+
+fn default_hdd_worker_count(managed_hdd_count: usize) -> usize {
+    managed_hdd_count.saturating_sub(2).max(1)
 }
 
 #[derive(Debug)]
@@ -1179,18 +1199,6 @@ pub(crate) fn default_hdd_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_HDD_ROOT))
 }
 
-fn default_authoritative_policy_path() -> PathBuf {
-    authoritative_performance_recommendation_path(DEFAULT_DAEMON_STATE_DIR)
-}
-
-fn read_ingest_policy(
-    path: &Path,
-) -> Result<AuthoritativeIngestPolicy, DaemonIngestFilesRuntimeError> {
-    read_authoritative_ingest_policy(path)
-        .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))
-        .map(|policy| policy.unwrap_or_default())
-}
-
 fn validate_known_ssd_root(path: &Path) -> Result<(), DaemonIngestFilesRuntimeError> {
     let marker = read_device_marker(path).map_err(|err| {
         DaemonIngestFilesRuntimeError::CommandFailed(format!(
@@ -1467,9 +1475,9 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_ingest_files, sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState,
-        HddSettlementScheduler, LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState,
-        SSD_ROOT_ENV,
+        collect_ingest_files, default_hdd_worker_count, resolve_hdd_worker_count,
+        sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState, HddSettlementScheduler,
+        LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState, SSD_ROOT_ENV,
     };
     use crate::api::{DaemonIngestConflictPolicy, DaemonSsdPressure, SubmitIngestFilesRequest};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
@@ -1502,7 +1510,6 @@ mod tests {
         let executor = LocalFileIngestExecutor {
             ssd_root: ssd_root.clone(),
             hdd_root: hdd_root.clone(),
-            authoritative_policy_path: root.join("missing-authoritative-policy.json"),
             store_registry_path: registry_path,
             subobject_registry_path,
         };
@@ -1515,6 +1522,7 @@ mod tests {
                     source_path: source_root,
                     object_type: ObjectType::Fastq,
                     copies: Some(1),
+                    hdd_workers: None,
                     conflict_policy: DaemonIngestConflictPolicy::Strict,
                     dry_run: true,
                     client_request_id: None,
@@ -1722,6 +1730,37 @@ mod tests {
             blocked.is_none(),
             "active reservations must block instead of assigning a second writer to an HDD"
         );
+    }
+
+    #[test]
+    fn hdd_workers_default_to_managed_hdd_count_minus_two() {
+        assert_eq!(default_hdd_worker_count(7), 5);
+        assert_eq!(resolve_hdd_worker_count(None, 7).expect("workers"), 5);
+        assert_eq!(resolve_hdd_worker_count(None, 3).expect("workers"), 1);
+        assert_eq!(resolve_hdd_worker_count(None, 1).expect("workers"), 1);
+    }
+
+    #[test]
+    fn hdd_workers_allow_explicit_override_within_detected_hdd_count() {
+        assert_eq!(resolve_hdd_worker_count(Some(3), 7).expect("workers"), 3);
+
+        let err = resolve_hdd_worker_count(Some(8), 7).expect_err("too many workers");
+
+        assert!(err
+            .to_string()
+            .contains("exceeds available managed HDD writers 7"));
+    }
+
+    #[test]
+    fn hdd_workers_reject_zero_and_missing_hdd_roots() {
+        assert!(resolve_hdd_worker_count(Some(0), 7)
+            .expect_err("zero workers")
+            .to_string()
+            .contains("greater than zero"));
+        assert!(resolve_hdd_worker_count(None, 0)
+            .expect_err("missing HDD roots")
+            .to_string()
+            .contains("at least one managed HDD root"));
     }
 
     #[test]

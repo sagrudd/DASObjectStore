@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.1 - 2026-07-09
+
+- Add ``dasobjectstore ingest files --hdd-workers`` and daemon-side validation
+  so operators can explicitly set HDD settlement fan-out while preventing more
+  concurrent workers than managed HDDs.
+- Default normal daemon file ingest to detected managed HDD count minus two,
+  bounded to at least one worker, so SSD staging can continue while bounded HDD
+  settlement drains concurrently instead of falling back to a stale single
+  worker policy.
+
 ## 0.60.0 - 2026-07-09
 
 - Add daemon-owned remote easyconnect ObjectStore grant filtering so remote

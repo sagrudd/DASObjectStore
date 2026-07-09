@@ -427,6 +427,7 @@ mod tests {
             source_path: "relative".into(),
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: None,
+            hdd_workers: None,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,

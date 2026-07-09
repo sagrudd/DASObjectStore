@@ -1279,6 +1279,9 @@ pub(crate) struct IngestFilesArgs {
     /// Override the store policy copy count for this import.
     #[arg(long)]
     copies: Option<u8>,
+    /// HDD settlement worker count; defaults to managed HDD count minus two.
+    #[arg(long)]
+    hdd_workers: Option<usize>,
     /// Reuse an existing object only when its recorded checksum matches the incoming file.
     #[arg(long, conflicts_with_all = ["lazy", "force"])]
     strict: bool,
@@ -1328,6 +1331,10 @@ impl IngestFilesArgs {
 
     pub(crate) fn copies(&self) -> Option<u8> {
         self.copies
+    }
+
+    pub(crate) fn hdd_workers(&self) -> Option<usize> {
+        self.hdd_workers
     }
 
     pub(crate) fn conflict_policy(&self) -> DaemonIngestConflictPolicy {
@@ -1604,6 +1611,9 @@ pub(crate) struct IngestDirectImportArgs {
     /// Allow bypassing SSD ingest for this import.
     #[arg(long)]
     allow_direct_to_hdd_import: bool,
+    /// HDD writer worker count for direct-import planning.
+    #[arg(long)]
+    hdd_workers: Option<usize>,
     /// Required confirmation phrase: confirm direct-to-hdd import.
     #[arg(long)]
     confirm: String,
@@ -1647,6 +1657,10 @@ impl IngestDirectImportArgs {
 
     pub(crate) fn allow_direct_to_hdd_import(&self) -> bool {
         self.allow_direct_to_hdd_import
+    }
+
+    pub(crate) fn hdd_workers(&self) -> Option<usize> {
+        self.hdd_workers
     }
 
     pub(crate) fn confirm(&self) -> &str {
@@ -2819,6 +2833,8 @@ mod tests {
             "/srv/dasobjectstore/ssd",
             "--copies",
             "1",
+            "--hdd-workers",
+            "5",
             "--lazy",
             "--tui",
             "--dry-run",
@@ -2835,6 +2851,7 @@ mod tests {
                 assert_eq!(files.object_type(), ObjectType::Pod5);
                 assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
                 assert_eq!(files.copies(), Some(1));
+                assert_eq!(files.hdd_workers(), Some(5));
                 assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
                 assert!(files.tui());
                 assert!(files.dry_run());
@@ -2986,6 +3003,8 @@ mod tests {
             "--policy-file",
             "/tmp/reproducible-cache.json",
             "--allow-direct-to-hdd-import",
+            "--hdd-workers",
+            "5",
             "--confirm",
             "confirm direct-to-hdd import",
             "--json",
@@ -3018,6 +3037,7 @@ mod tests {
                     Path::new("/tmp/reproducible-cache.json")
                 );
                 assert!(import.allow_direct_to_hdd_import());
+                assert_eq!(import.hdd_workers(), Some(5));
                 assert_eq!(import.confirm(), "confirm direct-to-hdd import");
                 assert!(import.json());
             }
