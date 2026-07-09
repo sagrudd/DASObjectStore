@@ -1086,9 +1086,15 @@ pub(crate) struct StoreCreateArgs {
     /// Explicit S3 bucket name; defaults to a stable name derived from the store ID.
     #[arg(long)]
     bucket: Option<String>,
+    /// Unix group allowed to browse and download objects from this store.
+    #[arg(long)]
+    reader_group: Option<String>,
     /// Unix group allowed to write objects to this store.
     #[arg(long)]
     writer_group: Option<String>,
+    /// Allow all authenticated DASObjectStore users to browse and download this store.
+    #[arg(long)]
+    public: bool,
     /// DAS SSD root used for portable store metadata.
     #[arg(long)]
     ssd_root: Option<PathBuf>,
@@ -1117,8 +1123,16 @@ impl StoreCreateArgs {
         self.bucket.as_deref()
     }
 
+    pub(crate) fn reader_group(&self) -> Option<&str> {
+        self.reader_group.as_deref()
+    }
+
     pub(crate) fn writer_group(&self) -> Option<&str> {
         self.writer_group.as_deref()
+    }
+
+    pub(crate) fn public(&self) -> bool {
+        self.public
     }
 
     pub(crate) fn ssd_root(&self) -> Option<&Path> {
@@ -3049,8 +3063,11 @@ mod tests {
             "2",
             "--bucket",
             "generated-data",
+            "--reader-group",
+            "mnemosyne-readers",
             "--writer-group",
             "mnemosyne",
+            "--public",
             "--ssd-root",
             "/srv/dasobjectstore/ssd",
             "--json",
@@ -3066,7 +3083,9 @@ mod tests {
                 assert_eq!(create.class(), StoreClass::GeneratedData);
                 assert_eq!(create.copies(), Some(2));
                 assert_eq!(create.bucket(), Some("generated-data"));
+                assert_eq!(create.reader_group(), Some("mnemosyne-readers"));
                 assert_eq!(create.writer_group(), Some("mnemosyne"));
+                assert!(create.public());
                 assert_eq!(
                     create.ssd_root(),
                     Some(Path::new("/srv/dasobjectstore/ssd"))

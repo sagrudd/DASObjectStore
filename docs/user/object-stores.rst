@@ -27,6 +27,25 @@ normal users. On Linux, ``store create`` grants that group ACL access to the
 known DAS SSD and managed HDD roots when they are present, so users can ingest
 through DASObjectStore without direct ad hoc disk access.
 
+Read access is separate from write access. Use ``--reader-group`` when a store
+should be browsable or downloadable by users who should not ingest into it. Use
+``--public`` only for stores that every authenticated DASObjectStore user may
+browse and download through the daemon-backed API. Public read does not grant
+direct filesystem access to DAS media and does not make anonymous HTTP access
+available.
+
+.. code-block:: console
+
+   sudo dasobjectstore store create generated-data \
+     --class generated_data \
+     --writer-group mnemosyne \
+     --reader-group mnemosyne-readers
+
+   sudo dasobjectstore store create public-reference \
+     --class reproducible_cache \
+     --writer-group mnemosyne \
+     --public
+
 Override the copy count only when the policy is intentional:
 
 .. code-block:: console

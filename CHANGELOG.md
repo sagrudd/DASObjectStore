@@ -8,6 +8,8 @@ agreement before landing.
 
 ## 0.54.16 - 2026-07-09
 
+- Add first-class ObjectStore reader-group and authenticated public-read policy
+  fields, and enforce them for daemon-backed ObjectBrowser metadata access.
 - Align DASObjectStore performance report metadata with the shared Grammateus
   ``dasobjectstore-performance`` template so rebuilt PDFs from existing JSON
   artifacts render with the required Run ID, QR provenance, and signature table.

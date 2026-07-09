@@ -17,7 +17,9 @@ pub struct StoreInventoryItem {
     pub store_id: StoreId,
     pub policy: StorePolicy,
     pub bucket_name: Option<String>,
+    pub reader_group: Option<String>,
     pub writer_group: Option<String>,
+    pub public: bool,
     pub writable: bool,
 }
 
@@ -34,7 +36,9 @@ mod tests {
                 store_id: StoreId::new("zymo").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-zymo".to_string()),
+                reader_group: Some("mnemosyne-readers".to_string()),
                 writer_group: Some("mnemosyne".to_string()),
+                public: false,
                 writable: true,
             }],
         };
@@ -42,7 +46,9 @@ mod tests {
         let encoded = serde_json::to_value(response).expect("inventory serializes");
 
         assert_eq!(encoded["stores"][0]["store_id"], "zymo");
+        assert_eq!(encoded["stores"][0]["reader_group"], "mnemosyne-readers");
         assert_eq!(encoded["stores"][0]["writer_group"], "mnemosyne");
+        assert_eq!(encoded["stores"][0]["public"], false);
         assert_eq!(encoded["stores"][0]["policy"]["class"], "ReproducibleCache");
     }
 }

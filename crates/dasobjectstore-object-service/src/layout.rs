@@ -16,7 +16,11 @@ pub struct StoreServiceDefinition {
     pub policy: StorePolicy,
     pub bucket_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reader_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub writer_group: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub public: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -130,6 +134,10 @@ fn sanitize_bucket_component(value: &str) -> String {
     } else {
         sanitized.to_string()
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub(crate) fn validate_bucket_name(bucket_name: &str) -> Result<(), ObjectServiceError> {
@@ -279,7 +287,9 @@ mod tests {
             store_id: StoreId::new(store_id).expect("store id"),
             policy,
             bucket_name: None,
+            reader_group: None,
             writer_group: None,
+            public: false,
         }
     }
 }

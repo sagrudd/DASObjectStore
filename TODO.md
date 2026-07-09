@@ -682,9 +682,10 @@ planning are tracked under Milestones 21 and 22.
 - [x] Enforce daemon-authenticated writer-group permissions and object
   lifecycle readiness in the daemon-backed ObjectBrowser API before exposing
   metadata through the daemon request handler.
-- [ ] Add first-class public/read group fields to store policy/registry data
-  and apply them to ObjectBrowser metadata and download authorization before
-  exposing download actions.
+- [x] Add first-class public/read group fields to store policy/registry data
+  and apply them to ObjectBrowser metadata authorization.
+- [ ] Reuse ObjectBrowser public/read/write policy for file and folder download
+  authorization when download routes are implemented.
 - [ ] Implement individual file download routes that stream from the selected
   settled copy, report content length where known, use safe content-disposition
   headers, and fail clearly for missing, unsettled, degraded, or unauthorized

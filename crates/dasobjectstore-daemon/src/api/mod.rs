@@ -456,6 +456,7 @@ mod tests {
             store_class: "generated_data".to_string(),
             required_copies: 2,
             bucket: Some("generated-data".to_string()),
+            reader_group: None,
             writer_group: "bioinformatics".to_string(),
             ssd_root: "/srv/dasobjectstore/ssd".into(),
             object_type: "pod5".to_string(),

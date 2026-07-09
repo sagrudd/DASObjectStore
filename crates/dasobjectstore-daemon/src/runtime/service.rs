@@ -750,7 +750,9 @@ mod tests {
             store_id: StoreId::new("generated").expect("store id"),
             policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
             bucket_name: Some("dos-generated".to_string()),
+            reader_group: None,
             writer_group: Some("mnemosyne".to_string()),
+            public: false,
         }];
         let parent = path.parent().expect("registry parent");
         fs::create_dir_all(parent).expect("registry dir");

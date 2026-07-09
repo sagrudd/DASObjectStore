@@ -741,6 +741,12 @@ pub(super) fn write_store_create_report(
         Some(writer_group) => writeln!(writer, "Writer group: {writer_group}")?,
         None => writeln!(writer, "Writer group: not configured")?,
     }
+    match &report.definition.reader_group {
+        Some(reader_group) => writeln!(writer, "Reader group: {reader_group}")?,
+        None if report.definition.public => writeln!(writer, "Reader group: public")?,
+        None => writeln!(writer, "Reader group: not configured")?,
+    }
+    writeln!(writer, "Public read: {}", report.definition.public)?;
     if let Some(credential_reference) = &report.credential_reference {
         writeln!(writer, "Credential reference: {credential_reference}")?;
     }
@@ -763,14 +769,24 @@ pub(super) fn write_store_list_report(
             .writer_group
             .as_deref()
             .unwrap_or("(not configured)");
+        let reader_group = definition
+            .reader_group
+            .as_deref()
+            .unwrap_or(if definition.public {
+                "(public)"
+            } else {
+                "(not configured)"
+            });
         writeln!(
             writer,
-            "- {} class={} copies={} bucket={} writer_group={} ingest={:?} export={:?}",
+            "- {} class={} copies={} bucket={} reader_group={} writer_group={} public={} ingest={:?} export={:?}",
             definition.store_id,
             definition.policy.class.name(),
             definition.policy.copies,
             bucket,
+            reader_group,
             writer_group,
+            definition.public,
             definition.policy.ingest_mode,
             definition.policy.export_policy
         )?;

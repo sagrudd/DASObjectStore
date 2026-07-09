@@ -17,6 +17,8 @@ pub struct CreateObjectStoreRequest {
     pub store_class: String,
     pub required_copies: u8,
     pub bucket: Option<String>,
+    #[serde(default)]
+    pub reader_group: Option<String>,
     pub writer_group: String,
     pub ssd_root: PathBuf,
     pub object_type: String,
@@ -36,6 +38,7 @@ impl CreateObjectStoreRequest {
     pub fn validate(&self) -> Result<(), CreateObjectStoreValidationError> {
         validate_safe_name("store_id", &self.store_id)?;
         validate_safe_name("store_class", &self.store_class)?;
+        validate_optional_safe_name("reader_group", self.reader_group.as_deref())?;
         validate_safe_name("writer_group", &self.writer_group)?;
         validate_safe_name("object_type", &self.object_type)?;
         validate_safe_name("capacity_behavior", &self.capacity_behavior)?;
@@ -75,6 +78,7 @@ impl CreateObjectStoreRequest {
     ) -> Result<StoreServiceDefinition, CreateObjectStoreValidationError> {
         validate_safe_name("store_id", &self.store_id)?;
         validate_safe_name("store_class", &self.store_class)?;
+        validate_optional_safe_name("reader_group", self.reader_group.as_deref())?;
         validate_safe_name("writer_group", &self.writer_group)?;
         validate_safe_name("object_type", &self.object_type)?;
         validate_safe_name("capacity_behavior", &self.capacity_behavior)?;
@@ -103,7 +107,9 @@ impl CreateObjectStoreRequest {
             store_id: StoreId::new(self.store_id.clone()).expect("validated store id"),
             policy,
             bucket_name: self.bucket.clone(),
+            reader_group: self.reader_group.clone(),
             writer_group: Some(self.writer_group.clone()),
+            public: self.public,
         })
     }
 }
@@ -115,6 +121,7 @@ pub struct CreateObjectStoreResponse {
     pub store_class: String,
     pub required_copies: u8,
     pub bucket: Option<String>,
+    pub reader_group: Option<String>,
     pub writer_group: String,
     pub ssd_root: PathBuf,
     pub object_type: String,
@@ -144,6 +151,7 @@ impl CreateObjectStoreResponse {
             store_class: request.store_class,
             required_copies: request.required_copies,
             bucket: request.bucket,
+            reader_group: request.reader_group,
             writer_group: request.writer_group,
             ssd_root: request.ssd_root,
             object_type: request.object_type,
@@ -312,6 +320,7 @@ mod tests {
             store_class: "generated_data".to_string(),
             required_copies: 2,
             bucket: Some("generated-data".to_string()),
+            reader_group: Some("bioinformatics-readers".to_string()),
             writer_group: "bioinformatics".to_string(),
             ssd_root: PathBuf::from("/srv/dasobjectstore/ssd"),
             object_type: "pod5".to_string(),
@@ -352,7 +361,12 @@ mod tests {
         );
         assert_eq!(definition.policy.export_policy, ExportPolicy::S3);
         assert_eq!(definition.bucket_name.as_deref(), Some("generated-data"));
+        assert_eq!(
+            definition.reader_group.as_deref(),
+            Some("bioinformatics-readers")
+        );
         assert_eq!(definition.writer_group.as_deref(), Some("bioinformatics"));
+        assert!(!definition.public);
     }
 
     #[test]

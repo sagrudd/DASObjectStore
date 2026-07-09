@@ -66,6 +66,13 @@ ObjectStore writer-group policy in the system-managed store registry. The
 managed SSD and HDD roots remain daemon-owned; ordinary users submit jobs but
 do not receive direct filesystem write permission to DAS media.
 
+Browsing and download authorization use the same daemon identity boundary but a
+separate read policy. A store may define a reader group for users who can browse
+or download objects without ingest privileges. A store marked public is readable
+by any authenticated DASObjectStore user, not by anonymous HTTP clients. Writer
+group members can also read the store so existing private stores remain usable
+without a separate reader group.
+
 The Web UI follows the same boundary. Admin-only actions such as enclosure or
 disk lifecycle changes, object store creation, writer-group assignment, and
 store policy changes may be initiated from Web forms, but the frontend only

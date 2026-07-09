@@ -53,7 +53,9 @@ fn render_sample_compose(root: &Path) -> String {
         store_id: StoreId::new("generated").expect("store id"),
         policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
         bucket_name: None,
+        reader_group: None,
         writer_group: None,
+        public: false,
     }])
     .expect("layout planned");
     let request = ComposeRenderRequest {

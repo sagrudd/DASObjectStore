@@ -534,7 +534,9 @@ mod tests {
             store_id: StoreId::new("zymo").expect("store id"),
             policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
             bucket_name: Some("dos-zymo".to_string()),
+            reader_group: None,
             writer_group: Some("bioinformatics".to_string()),
+            public: false,
         };
         fs::write(
             &registry_path,

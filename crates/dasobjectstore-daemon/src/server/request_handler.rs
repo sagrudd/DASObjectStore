@@ -12,7 +12,8 @@ use crate::api::{
     SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
-    authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,
+    authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
+    DaemonStoreAccessPolicy,
 };
 use crate::runtime::{
     default_endpoint_registry_path, default_ssd_root, provision_garage_store_registry,
@@ -277,9 +278,13 @@ where
             })?;
 
         let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
+        if let Some(reader_group) = store.reader_group {
+            policy = policy.with_reader_group(reader_group);
+        }
         if let Some(writer_group) = store.writer_group {
             policy = policy.with_writer_group(writer_group);
         }
+        policy = policy.with_public_read(store.public);
         authorize_store_write(actor, &policy)?;
         Ok(())
     }
@@ -306,10 +311,14 @@ where
             })?;
 
         let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
+        if let Some(reader_group) = store.reader_group {
+            policy = policy.with_reader_group(reader_group);
+        }
         if let Some(writer_group) = store.writer_group {
             policy = policy.with_writer_group(writer_group);
         }
-        authorize_store_write(actor, &policy)?;
+        policy = policy.with_public_read(store.public);
+        authorize_store_read(actor, &policy)?;
         Ok(store_id)
     }
 
@@ -1861,8 +1870,69 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error) if error.code == "permission_denied"
-                && error.message.contains("membership in group mnemosyne is required")
+                && error.message.contains("membership in writer group mnemosyne is required")
         ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_browser_allows_reader_group_without_writer_membership() {
+        let root = temp_root("browser-reader-allowed");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "ena",
+            Some("readers"),
+            Some("mnemosyne"),
+            false,
+        );
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("reader")
+            .with_groups(["readers"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(object_browser_request("ena")),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(response, DaemonApiResponse::ObjectBrowser(_)));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_browser_allows_public_store_for_authenticated_actor() {
+        let root = temp_root("browser-public-allowed");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry_with_read_policy(&root, "ena", None, None, true);
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("guest")
+            .with_groups(["users"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(object_browser_request("ena")),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(response, DaemonApiResponse::ObjectBrowser(_)));
 
         cleanup(&root);
     }
@@ -2004,6 +2074,7 @@ mod tests {
             store_class: "generated_data".to_string(),
             required_copies: 2,
             bucket: Some("generated-data".to_string()),
+            reader_group: None,
             writer_group: "bioinformatics".to_string(),
             ssd_root: "/srv/dasobjectstore/ssd".into(),
             object_type: "pod5".to_string(),
@@ -2056,6 +2127,16 @@ mod tests {
         store_id: &str,
         writer_group: Option<&str>,
     ) -> (PathBuf, PathBuf) {
+        write_test_store_registry_with_read_policy(root, store_id, None, writer_group, false)
+    }
+
+    fn write_test_store_registry_with_read_policy(
+        root: &PathBuf,
+        store_id: &str,
+        reader_group: Option<&str>,
+        writer_group: Option<&str>,
+        public: bool,
+    ) -> (PathBuf, PathBuf) {
         fs::create_dir_all(root).expect("temp registry dir");
         let store_registry = root.join("stores.json");
         let subobject_registry = root.join("subobjects.json");
@@ -2063,7 +2144,9 @@ mod tests {
             store_id: StoreId::new(store_id).expect("store id"),
             policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
             bucket_name: None,
+            reader_group: reader_group.map(ToString::to_string),
             writer_group: writer_group.map(ToString::to_string),
+            public,
         }];
         fs::write(
             &store_registry,

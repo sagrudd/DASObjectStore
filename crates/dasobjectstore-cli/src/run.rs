@@ -8277,7 +8277,9 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         store_id: args.store_id().clone(),
         policy,
         bucket_name: args.bucket().map(ToOwned::to_owned),
+        reader_group: args.reader_group().map(ToOwned::to_owned),
         writer_group: args.writer_group().map(ToOwned::to_owned),
+        public: args.public(),
     };
     let registry_path = args
         .registry_path()
@@ -8291,6 +8293,10 @@ fn run_store_create(args: &StoreCreateArgs, writer: &mut impl Write) -> Result<(
         grant_store_writer_group_access(args.ssd_root(), allow_default_ssd, writer_group)?;
         grant_writer_group_registry_access(&registry_path, writer_group)?;
         grant_writer_group_registry_access(&default_subobject_registry_path(), writer_group)?;
+    }
+    if let Some(reader_group) = &report.definition.reader_group {
+        grant_writer_group_registry_access(&registry_path, reader_group)?;
+        grant_writer_group_registry_access(&default_subobject_registry_path(), reader_group)?;
     }
 
     if args.json() {
@@ -13842,7 +13848,9 @@ mod tests {
                 store_id: StoreId::new("public-reference").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("public-reference".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -13885,7 +13893,9 @@ mod tests {
                 store_id: StoreId::new("portable-generated").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: Some("portable-generated".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -13919,7 +13929,9 @@ mod tests {
                 store_id: StoreId::new("generated-data").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: Some("generated-data".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -13955,7 +13967,9 @@ mod tests {
                 store_id: StoreId::new("public-reference").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: None,
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -14086,7 +14100,9 @@ mod tests {
                 store_id: StoreId::new("generated-data").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: Some("dos-generated-data".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -14127,7 +14143,9 @@ mod tests {
                 store_id: StoreId::new("generated-data").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: Some("dos-generated-data".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -14322,7 +14340,9 @@ mod tests {
                 store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-zymo-fecal-2025-05".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -14610,7 +14630,9 @@ mod tests {
                 store_id: StoreId::new("ENA").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-ena".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
 
@@ -14733,7 +14755,9 @@ mod tests {
                 store_id: StoreId::new("ENA").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
                 bucket_name: Some("dos-ena".to_string()),
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         run(
@@ -15161,7 +15185,9 @@ mod tests {
                 store_id: StoreId::new("generated").expect("store id"),
                 policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
                 bucket_name: None,
+                reader_group: None,
                 writer_group: Some(test_writer_group()),
+                public: false,
             }],
         );
         let cli = Cli::try_parse_from([

@@ -116,7 +116,9 @@ fn write_test_store_registry(
         store_id: StoreId::new(store_id).expect("store id"),
         policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
         bucket_name: None,
+        reader_group: None,
         writer_group: writer_group.map(ToString::to_string),
+        public: false,
     }];
     fs::write(
         &store_registry,

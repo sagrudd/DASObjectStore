@@ -1742,7 +1742,9 @@ mod tests {
             store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
             bucket_name: Some("dos-zymo-fecal-2025-05".to_string()),
+            reader_group: None,
             writer_group: None,
+            public: false,
         };
         let json = serde_json::to_string_pretty(&vec![definition]).expect("store registry json");
         fs::write(path, json).expect("store registry");

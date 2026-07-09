@@ -414,6 +414,8 @@ pub struct CreateObjectStoreRequest {
     pub store_class: Option<String>,
     pub required_copies: u8,
     pub bucket: Option<String>,
+    #[serde(default)]
+    pub reader_group: Option<String>,
     pub writer_group: String,
     #[serde(default)]
     pub ssd_root: Option<String>,
@@ -523,6 +525,7 @@ pub struct StandaloneCreateObjectStoreResponse {
     pub store_class: String,
     pub required_copies: u8,
     pub bucket: Option<String>,
+    pub reader_group: Option<String>,
     pub writer_group: String,
     pub ssd_root: String,
     pub object_type: String,
@@ -1196,6 +1199,10 @@ fn validate_create_object_store_request(
         .transpose()?
         .unwrap_or_else(|| "generated_data".to_string());
     let writer_group = required_field("writer_group", request.writer_group)?;
+    let reader_group = request
+        .reader_group
+        .map(|value| required_field("reader_group", value))
+        .transpose()?;
     let enclosure_id = request
         .enclosure_id
         .map(|value| required_field("enclosure_id", value))
@@ -1248,6 +1255,7 @@ fn validate_create_object_store_request(
         store_class,
         required_copies: request.required_copies,
         bucket: Some(bucket),
+        reader_group,
         writer_group,
         ssd_root: PathBuf::from(ssd_root),
         object_type,
@@ -1807,6 +1815,7 @@ fn create_object_store_response_from_daemon(
         store_class: response.store_class,
         required_copies: response.required_copies,
         bucket: response.bucket,
+        reader_group: response.reader_group,
         writer_group: response.writer_group,
         ssd_root: response.ssd_root.display().to_string(),
         object_type: response.object_type,
@@ -3067,6 +3076,7 @@ mod tests {
                 store_class: "generated_data".to_string(),
                 required_copies: 2,
                 bucket: Some("zymo-fecal-2025-05".to_string()),
+                reader_group: None,
                 writer_group: "bioinformatics".to_string(),
                 ssd_root: PathBuf::from("/srv/dasobjectstore/ssd"),
                 object_type: "pod5".to_string(),
@@ -3097,7 +3107,9 @@ mod tests {
                     ..StorePolicy::defaults_for(StoreClass::GeneratedData)
                 },
                 bucket_name: Some("zymo-fecal-2025-05".to_string()),
+                reader_group: None,
                 writer_group: Some("bioinformatics".to_string()),
+                public: false,
             }
         );
 
@@ -3126,6 +3138,7 @@ mod tests {
                 store_class: None,
                 required_copies: 2,
                 bucket: None,
+                reader_group: None,
                 writer_group: "mnemosyne".to_string(),
                 ssd_root: None,
                 object_type: None,
@@ -3980,6 +3993,7 @@ mod tests {
                 store_class: request.store_class,
                 required_copies: request.required_copies,
                 bucket: request.bucket,
+                reader_group: request.reader_group,
                 writer_group: request.writer_group,
                 ssd_root: request.ssd_root.display().to_string(),
                 object_type: request.object_type,
@@ -4110,6 +4124,7 @@ mod tests {
             store_class: Some("generated_data".to_string()),
             required_copies: 2,
             bucket: Some("zymo-fecal-2025-05".to_string()),
+            reader_group: None,
             writer_group: "bioinformatics".to_string(),
             ssd_root: Some("/srv/dasobjectstore/ssd".to_string()),
             object_type: Some("pod5".to_string()),

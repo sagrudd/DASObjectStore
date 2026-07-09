@@ -120,6 +120,7 @@ pub(crate) fn registry_object_store_cards(
         .map(|definition| {
             let policy = definition.policy;
             let writer_group = definition.writer_group;
+            let public = definition.public;
             let usage = live_sqlite_path
                 .map(|path| store_usage_summary(path, definition.store_id.clone()))
                 .unwrap_or_else(StoreUsageSummary::pending);
@@ -142,7 +143,7 @@ pub(crate) fn registry_object_store_cards(
                 placement_policy: placement_strategy_label(policy.placement_strategy).to_string(),
                 endpoint_export_mode: export_policy_label(policy.export_policy).to_string(),
                 writer_group: writer_group.clone(),
-                public: false,
+                public,
                 writeable: policy.mutability_policy == MutabilityPolicy::Mutable
                     || policy.export_policy != ExportPolicy::Disabled,
                 created_at_utc: "registry-managed".to_string(),
@@ -327,7 +328,9 @@ mod tests {
             store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             policy,
             bucket_name: Some("dos-zymo-fecal".to_string()),
+            reader_group: None,
             writer_group: Some("bioinformatics".to_string()),
+            public: false,
         };
         fs::write(
             &registry_path,
