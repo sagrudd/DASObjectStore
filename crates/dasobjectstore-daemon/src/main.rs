@@ -68,7 +68,7 @@ fn garage_runtime_config(
         compose_project: "dasobjectstore".to_string(),
         service_name: "garage".to_string(),
         config_path: PathBuf::from(DEFAULT_GARAGE_CONFIG_PATH),
-        metadata_path: config.state_dir.join("garage/meta"),
+        metadata_path: PathBuf::from("/srv/dasobjectstore/ssd/garage"),
         data_path: PathBuf::from("/srv/dasobjectstore/hdd/garage"),
         endpoint: format!("http://0.0.0.0:{DEFAULT_GARAGE_API_PORT}"),
     })
@@ -163,6 +163,10 @@ mod tests {
         assert_eq!(
             garage.project_directory,
             Some(PathBuf::from("/var/lib/dasobjectstore/garage"))
+        );
+        assert_eq!(
+            garage.metadata_path,
+            PathBuf::from("/srv/dasobjectstore/ssd/garage")
         );
         assert_eq!(garage.endpoint, "http://0.0.0.0:3900");
     }
