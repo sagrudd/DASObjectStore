@@ -327,7 +327,11 @@ permit is held; those updates are persisted as normal daemon job progress
 events. The daemon exposes a typed byte-transfer adapter for concrete
 S3/object-service upload engines; those engines should implement the adapter
 instead of invoking raw upload code directly, so admission, progress recording,
-and permit release stay centralized.
+and permit release stay centralized. The daemon also includes a concrete AWS
+CLI transfer adapter for S3-compatible object-service intake. That adapter
+runs the configured ``aws s3`` command through the daemon command-runner
+boundary, keeps redacted display arguments separate from execution arguments,
+and records completion bytes through the common remote-upload progress model.
 
 Credential Helper Contract
 --------------------------

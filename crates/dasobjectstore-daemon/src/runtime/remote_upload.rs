@@ -1,4 +1,7 @@
-use super::{admin_jobs::AdminJobRegistry, service::DaemonServiceRuntimeError};
+use super::{
+    admin_jobs::AdminJobRegistry,
+    service::{DaemonServiceRuntimeError, ServiceCommandRunner},
+};
 use crate::api::{
     decide_remote_easyconnect_upload_admission, DaemonIngestQueueDepths, DaemonIngestTelemetry,
     DaemonJobEvent, DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobProgress,
@@ -279,6 +282,93 @@ impl fmt::Display for RemoteUploadS3ByteTransferError {
 }
 
 impl std::error::Error for RemoteUploadS3ByteTransferError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadAwsCliTransferPlan {
+    pub program: String,
+    pub args: Vec<String>,
+    pub display_args: Vec<String>,
+    pub source_bytes: u64,
+    pub progress_updated_at_utc: String,
+    pub progress_message: Option<String>,
+}
+
+impl RemoteUploadAwsCliTransferPlan {
+    pub fn new(
+        program: impl Into<String>,
+        args: Vec<String>,
+        source_bytes: u64,
+        progress_updated_at_utc: impl Into<String>,
+    ) -> Self {
+        Self {
+            program: program.into(),
+            display_args: args.clone(),
+            args,
+            source_bytes,
+            progress_updated_at_utc: progress_updated_at_utc.into(),
+            progress_message: None,
+        }
+    }
+
+    pub fn with_display_args(mut self, display_args: Vec<String>) -> Self {
+        self.display_args = display_args;
+        self
+    }
+
+    pub fn with_progress_message(mut self, message: impl Into<String>) -> Self {
+        self.progress_message = Some(message.into());
+        self
+    }
+
+    fn validate(&self) -> Result<(), RemoteUploadS3ByteTransferError> {
+        if self.program.trim().is_empty() {
+            return Err(RemoteUploadS3ByteTransferError::new(
+                "remote upload AWS CLI program must not be blank",
+            ));
+        }
+        if self.progress_updated_at_utc.trim().is_empty() {
+            return Err(RemoteUploadS3ByteTransferError::new(
+                "remote upload AWS CLI progress timestamp must not be blank",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub struct RemoteUploadAwsCliByteTransfer<'a> {
+    plan: RemoteUploadAwsCliTransferPlan,
+    runner: &'a dyn ServiceCommandRunner,
+}
+
+impl<'a> RemoteUploadAwsCliByteTransfer<'a> {
+    pub fn new(plan: RemoteUploadAwsCliTransferPlan, runner: &'a dyn ServiceCommandRunner) -> Self {
+        Self { plan, runner }
+    }
+}
+
+impl RemoteUploadS3ByteTransfer for RemoteUploadAwsCliByteTransfer<'_> {
+    fn transfer(
+        &self,
+        progress: &mut RemoteUploadS3TransferProgressReporter<'_>,
+    ) -> Result<(), RemoteUploadS3ByteTransferError> {
+        self.plan.validate()?;
+        self.runner
+            .run_with_display_args(&self.plan.program, &self.plan.args, &self.plan.display_args)
+            .map_err(|error| RemoteUploadS3ByteTransferError::new(error.to_string()))?;
+        progress
+            .record_progress(RemoteUploadS3TransferProgressUpdate {
+                bytes_done: self.plan.source_bytes,
+                updated_at_utc: self.plan.progress_updated_at_utc.clone(),
+                message: self
+                    .plan
+                    .progress_message
+                    .clone()
+                    .or_else(|| Some("remote upload AWS CLI transfer completed".to_string())),
+            })
+            .map_err(|error| RemoteUploadS3ByteTransferError::new(error.to_string()))?;
+        Ok(())
+    }
+}
 
 pub struct RemoteUploadS3TransferWorker<'a> {
     gate: Arc<RemoteUploadAdmissionGate>,
@@ -643,7 +733,8 @@ fn admission_decision_for_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
+        record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate,
+        RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan, RemoteUploadQueueDepths,
         RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
         RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
         RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
@@ -655,6 +746,7 @@ mod tests {
         RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadBackpressureReason,
     };
     use crate::runtime::{admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry};
+    use crate::runtime::{DaemonServiceRuntimeError, ServiceCommandOutput, ServiceCommandRunner};
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
@@ -1260,6 +1352,101 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn aws_cli_byte_transfer_runs_redacted_command_and_records_completion_progress() {
+        let root = temp_root("remote-upload-aws-cli-transfer");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let runner = FakeRemoteUploadCommandRunner::default();
+        let plan = RemoteUploadAwsCliTransferPlan::new(
+            "aws",
+            vec![
+                "--endpoint-url".to_string(),
+                "http://127.0.0.1:3900".to_string(),
+                "s3".to_string(),
+                "cp".to_string(),
+                "/data/reads.fastq.gz".to_string(),
+                "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
+            ],
+            42,
+            "2026-07-09T14:31:00Z",
+        )
+        .with_display_args(vec![
+            "--endpoint-url".to_string(),
+            "<redacted>".to_string(),
+            "s3".to_string(),
+            "cp".to_string(),
+            "/data/reads.fastq.gz".to_string(),
+            "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
+        ])
+        .with_progress_message("aws CLI transfer copied 42 bytes");
+        let transfer = RemoteUploadAwsCliByteTransfer::new(plan, &runner);
+
+        let report = worker
+            .run_byte_transfer(worker_request("remote-upload-job-010"), &transfer)
+            .expect("aws transfer completed");
+
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "aws");
+        assert_eq!(calls[0].args[1], "http://127.0.0.1:3900");
+        assert_eq!(calls[0].display_args[1], "<redacted>");
+        assert_eq!(report.progress_events.len(), 1);
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected completion progress event");
+        };
+        assert_eq!(progress_job.progress.work_bytes_done, 42);
+        assert_eq!(
+            progress_job.progress.message.as_deref(),
+            Some("aws CLI transfer copied 42 bytes")
+        );
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected complete final event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Complete);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn aws_cli_byte_transfer_failure_records_failed_job_and_releases_capacity() {
+        let root = temp_root("remote-upload-aws-cli-transfer-failed");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let runner = FakeRemoteUploadCommandRunner {
+            fail: true,
+            ..FakeRemoteUploadCommandRunner::default()
+        };
+        let plan = RemoteUploadAwsCliTransferPlan::new(
+            "aws",
+            vec!["s3".to_string(), "cp".to_string()],
+            42,
+            "2026-07-09T14:31:00Z",
+        );
+        let transfer = RemoteUploadAwsCliByteTransfer::new(plan, &runner);
+
+        let report = worker
+            .run_byte_transfer(worker_request("remote-upload-job-011"), &transfer)
+            .expect("aws failure recorded");
+
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Failed);
+        assert!(final_job
+            .failure_message
+            .as_deref()
+            .expect("failure message")
+            .contains("aws s3 cp exited with status exit status: 1"));
+        assert!(report.progress_events.is_empty());
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
     struct RecordingByteTransfer {
         bytes_done: u64,
     }
@@ -1293,6 +1480,53 @@ mod tests {
             Err(RemoteUploadS3ByteTransferError::new(
                 "object service rejected part",
             ))
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeRemoteUploadCommandRunner {
+        calls: std::cell::RefCell<Vec<FakeRemoteUploadCommandCall>>,
+        fail: bool,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct FakeRemoteUploadCommandCall {
+        program: String,
+        args: Vec<String>,
+        display_args: Vec<String>,
+    }
+
+    impl ServiceCommandRunner for FakeRemoteUploadCommandRunner {
+        fn run(
+            &self,
+            program: &str,
+            args: &[String],
+        ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+            self.run_with_display_args(program, args, args)
+        }
+
+        fn run_with_display_args(
+            &self,
+            program: &str,
+            args: &[String],
+            display_args: &[String],
+        ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+            self.calls.borrow_mut().push(FakeRemoteUploadCommandCall {
+                program: program.to_string(),
+                args: args.to_vec(),
+                display_args: display_args.to_vec(),
+            });
+            if self.fail {
+                return Err(DaemonServiceRuntimeError::CommandFailed {
+                    program: program.to_string(),
+                    args: display_args.to_vec(),
+                    status: "exit status: 1".to_string(),
+                    stderr: "multipart upload failed".to_string(),
+                });
+            }
+            Ok(ServiceCommandOutput {
+                stdout: "ok\n".to_string(),
+            })
         }
     }
 

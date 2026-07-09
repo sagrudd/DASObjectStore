@@ -52,7 +52,8 @@ pub use performance_policy::{
     PERFORMANCE_RECOMMENDATION_SCHEMA,
 };
 pub use remote_upload::{
-    record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate, RemoteUploadQueueDepths,
+    record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate,
+    RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan, RemoteUploadQueueDepths,
     RemoteUploadRuntimeSnapshot, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
     RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
     RemoteUploadS3TransferPermit, RemoteUploadS3TransferProgressReporter,
