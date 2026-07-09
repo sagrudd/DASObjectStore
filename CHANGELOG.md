@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.68.0 - 2026-07-09
+
+- Add a product-neutral floundeR telemetry chart contract for shared Web
+  dashboard, API export, and Grammateus report consumers without
+  DASObjectStore-specific chart hard-coding.
+
 ## 0.67.0 - 2026-07-09
 
 - Add floundeR telemetry render-plan support that splits observed series into

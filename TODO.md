@@ -995,9 +995,12 @@ planning are tracked under Milestones 21 and 22.
   Completed by adding floundeR render-plan DTOs that split observed series into
   non-interpolated segments and emit labelled gap intervals for missing
   samples, service restarts, unknown devices, and unavailable counters.
-- [ ] Ensure the floundeR telemetry chart contract can be used both by the Web
+- [x] Ensure the floundeR telemetry chart contract can be used both by the Web
   dashboard and by Grammateus formal reports without DASObjectStore-specific
   hard-coding.
+  Completed by adding a product-neutral floundeR chart contract wrapper with
+  explicit Web dashboard, Grammateus report, and API export audiences plus a
+  conversion path from DASObjectStore appliance telemetry payloads.
 - [ ] Add Yew DTO/component tests for CPU, memory, IO, capacity, throughput,
   and active-user charts with full data, sparse data, missing intervals,
   changing time windows, and per-disk series.

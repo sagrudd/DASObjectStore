@@ -28,13 +28,14 @@ pub use boundary::{
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
 };
 pub use flounder_telemetry::{
-    FlounderApplianceTelemetryContract, FlounderTelemetryAxis, FlounderTelemetryBand,
-    FlounderTelemetryChart, FlounderTelemetryChartLayout, FlounderTelemetryDevice,
-    FlounderTelemetryGapLabel, FlounderTelemetryMissingInterval, FlounderTelemetryMissingReason,
-    FlounderTelemetryPoint, FlounderTelemetryPointQuality, FlounderTelemetryRenderPlan,
+    FlounderApplianceTelemetryContract, FlounderTelemetryAudience, FlounderTelemetryAxis,
+    FlounderTelemetryBand, FlounderTelemetryChart, FlounderTelemetryChartContract,
+    FlounderTelemetryChartLayout, FlounderTelemetryDevice, FlounderTelemetryGapLabel,
+    FlounderTelemetryMissingInterval, FlounderTelemetryMissingReason, FlounderTelemetryPoint,
+    FlounderTelemetryPointQuality, FlounderTelemetryProducer, FlounderTelemetryRenderPlan,
     FlounderTelemetryRenderSegment, FlounderTelemetrySeries, FlounderTelemetrySeriesRole,
     FlounderTelemetrySmallMultiple, FlounderTelemetryUnit, FlounderTelemetryWindow,
-    FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION,
+    FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION, FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,

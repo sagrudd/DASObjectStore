@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub const FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION: &str =
     "mnemosyne.flounder.appliance_telemetry.v1";
+pub const FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION: &str =
+    "mnemosyne.flounder.telemetry_chart_contract.v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FlounderApplianceTelemetryContract {
@@ -27,6 +29,86 @@ impl FlounderApplianceTelemetryContract {
             charts,
         }
     }
+
+    pub fn into_chart_contract(
+        self,
+        audiences: Vec<FlounderTelemetryAudience>,
+    ) -> FlounderTelemetryChartContract {
+        FlounderTelemetryChartContract::new(
+            self.generated_at_utc,
+            FlounderTelemetryProducer::new(self.producer_product),
+            audiences,
+            self.window,
+            self.charts,
+        )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FlounderTelemetryChartContract {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub producer: FlounderTelemetryProducer,
+    #[serde(default)]
+    pub audiences: Vec<FlounderTelemetryAudience>,
+    pub window: FlounderTelemetryWindow,
+    pub charts: Vec<FlounderTelemetryChart>,
+}
+
+impl FlounderTelemetryChartContract {
+    pub fn new(
+        generated_at_utc: impl Into<String>,
+        producer: FlounderTelemetryProducer,
+        audiences: Vec<FlounderTelemetryAudience>,
+        window: FlounderTelemetryWindow,
+        charts: Vec<FlounderTelemetryChart>,
+    ) -> Self {
+        Self {
+            schema_version: FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION.to_string(),
+            generated_at_utc: generated_at_utc.into(),
+            producer,
+            audiences,
+            window,
+            charts,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FlounderTelemetryProducer {
+    pub product_id: String,
+    #[serde(default)]
+    pub product_name: Option<String>,
+    #[serde(default)]
+    pub component_id: Option<String>,
+}
+
+impl FlounderTelemetryProducer {
+    pub fn new(product_id: impl Into<String>) -> Self {
+        Self {
+            product_id: product_id.into(),
+            product_name: None,
+            component_id: None,
+        }
+    }
+
+    pub fn named(mut self, product_name: impl Into<String>) -> Self {
+        self.product_name = Some(product_name.into());
+        self
+    }
+
+    pub fn with_component(mut self, component_id: impl Into<String>) -> Self {
+        self.component_id = Some(component_id.into());
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FlounderTelemetryAudience {
+    WebDashboard,
+    GrammateusReport,
+    ApiExport,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -489,6 +571,122 @@ mod tests {
                 "per_disk_io_trace",
                 "small_multiple"
             ])
+        );
+    }
+
+    #[test]
+    fn serializes_product_neutral_chart_contract_for_web_and_grammateus() {
+        let contract = FlounderTelemetryChartContract::new(
+            "2026-07-09T20:03:00Z",
+            FlounderTelemetryProducer::new("lab-appliance")
+                .named("Lab Appliance")
+                .with_component("telemetry-service"),
+            vec![
+                FlounderTelemetryAudience::WebDashboard,
+                FlounderTelemetryAudience::GrammateusReport,
+            ],
+            FlounderTelemetryWindow {
+                value: "ten_days".to_string(),
+                label: "10 days".to_string(),
+                start_utc: Some("2026-06-29T20:03:00Z".to_string()),
+                end_utc: Some("2026-07-09T20:03:00Z".to_string()),
+                cadence_seconds: Some(30),
+                downsample_seconds: Some(600),
+            },
+            vec![FlounderTelemetryChart {
+                chart_id: "throughput".to_string(),
+                title: "Throughput".to_string(),
+                layout: FlounderTelemetryChartLayout::LineWithGaps,
+                x_axis: time_axis(),
+                y_axis: FlounderTelemetryAxis {
+                    label: "Rate".to_string(),
+                    unit: FlounderTelemetryUnit::BytesPerSecond,
+                },
+                series: vec![FlounderTelemetrySeries {
+                    series_id: "write_rate".to_string(),
+                    label: "Write rate".to_string(),
+                    role: FlounderTelemetrySeriesRole::Line,
+                    unit: FlounderTelemetryUnit::BytesPerSecond,
+                    device: None,
+                    points: vec![FlounderTelemetryPoint::observed(
+                        "2026-07-09T20:03:00Z",
+                        1_048_576,
+                    )],
+                }],
+                bands: Vec::new(),
+                missing_intervals: Vec::new(),
+                small_multiples: Vec::new(),
+            }],
+        );
+
+        let encoded = serde_json::to_value(&contract).expect("contract serializes");
+
+        assert_eq!(
+            encoded["schema_version"],
+            FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION
+        );
+        assert_eq!(encoded["producer"]["product_id"], "lab-appliance");
+        assert_eq!(encoded["producer"]["component_id"], "telemetry-service");
+        assert_eq!(encoded["audiences"][0], "web_dashboard");
+        assert_eq!(encoded["audiences"][1], "grammateus_report");
+        assert_eq!(encoded["charts"][0]["chart_id"], "throughput");
+        assert_eq!(
+            encoded["charts"][0]["series"][0]["points"][0]["value"],
+            1_048_576
+        );
+    }
+
+    #[test]
+    fn converts_appliance_contract_to_product_neutral_chart_contract() {
+        let appliance = FlounderApplianceTelemetryContract::new(
+            "2026-07-09T20:04:00Z",
+            "dasobjectstore",
+            FlounderTelemetryWindow {
+                value: "one_hour".to_string(),
+                label: "1 hour".to_string(),
+                start_utc: None,
+                end_utc: Some("2026-07-09T20:04:00Z".to_string()),
+                cadence_seconds: Some(30),
+                downsample_seconds: None,
+            },
+            vec![FlounderTelemetryChart {
+                chart_id: "users".to_string(),
+                title: "Users".to_string(),
+                layout: FlounderTelemetryChartLayout::StepSummary,
+                x_axis: time_axis(),
+                y_axis: FlounderTelemetryAxis {
+                    label: "Users".to_string(),
+                    unit: FlounderTelemetryUnit::Count,
+                },
+                series: vec![FlounderTelemetrySeries {
+                    series_id: "active_users".to_string(),
+                    label: "Active users".to_string(),
+                    role: FlounderTelemetrySeriesRole::Step,
+                    unit: FlounderTelemetryUnit::Count,
+                    device: None,
+                    points: vec![FlounderTelemetryPoint::observed("2026-07-09T20:04:00Z", 4)],
+                }],
+                bands: Vec::new(),
+                missing_intervals: Vec::new(),
+                small_multiples: Vec::new(),
+            }],
+        );
+
+        let chart_contract =
+            appliance.into_chart_contract(vec![FlounderTelemetryAudience::ApiExport]);
+
+        assert_eq!(
+            chart_contract.schema_version,
+            FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION
+        );
+        assert_eq!(chart_contract.producer.product_id, "dasobjectstore");
+        assert_eq!(
+            chart_contract.audiences,
+            vec![FlounderTelemetryAudience::ApiExport]
+        );
+        assert_eq!(
+            chart_contract.charts[0].layout,
+            FlounderTelemetryChartLayout::StepSummary
         );
     }
 
