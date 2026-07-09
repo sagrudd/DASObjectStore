@@ -407,6 +407,12 @@ formal PDF reporting is a supported operator surface. If the container runtime
 or Grammateus provider image is unavailable, the installation should not be
 treated as a complete Web-reporting installation.
 
+Package configuration adds the ``dasobjectstore`` service user to the
+``docker`` group and restarts the Web service so the rebuild API can access the
+Docker socket. If Docker is reinstalled or repaired manually after package
+installation, run ``sudo usermod -aG docker dasobjectstore`` and restart
+``dasobjectstore-server.service`` before rebuilding reports through the Web UI.
+
 If the formal renderer is unavailable or fails, DASObjectStore does not emit a
 degraded fallback PDF. The JSON artifact remains the machine-readable benchmark
 record and can be used to rebuild the PDF after the Grammateus provider has

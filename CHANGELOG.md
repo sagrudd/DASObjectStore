@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.11 - 2026-07-09
+
+- Add the packaged ``dasobjectstore`` service user to the ``docker`` group
+  during DEB/RPM configuration so Web performance-report rebuilds can launch the
+  Grammateus renderer container.
+- Improve the packaged report-renderer wrapper diagnostics when the Web service
+  cannot access the Docker API socket.
+
 ## 0.54.10 - 2026-07-09
 
 - Package a DASObjectStore-owned ``gnostikon-workflow-control`` compatibility

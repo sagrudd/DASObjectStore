@@ -23,6 +23,18 @@ ensure_user() {
   fi
 }
 
+ensure_container_runtime_access() {
+  if getent group docker >/dev/null; then
+    usermod -aG docker "$service_user"
+  else
+    cat >&2 <<WARNING
+DASObjectStore formal PDF reporting requires access to the Docker API, but the
+docker group does not exist. Install or repair Docker, then add $service_user to
+the docker group and restart dasobjectstore-server.service.
+WARNING
+  fi
+}
+
 ensure_owned_dir() {
   local path="$1"
   local mode="$2"
@@ -71,6 +83,7 @@ ERROR
 
 ensure_group
 ensure_user
+ensure_container_runtime_access
 
 ensure_owned_dir /run/dasobjectstore 0750
 ensure_owned_dir /var/lib/dasobjectstore 0750

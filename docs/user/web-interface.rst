@@ -497,6 +497,16 @@ path. These are critical runtime dependencies, not optional developer tools:
 package installation should fail dependency resolution if the configured system
 cannot provide the container runtime.
 
+Package configuration adds the ``dasobjectstore`` service user to the
+``docker`` group and restarts ``dasobjectstore-server.service`` so the Web API
+can access ``/var/run/docker.sock``. If a manual Docker repair recreates the
+group or socket after package installation, restore access with:
+
+.. code-block:: console
+
+   sudo usermod -aG docker dasobjectstore
+   sudo systemctl restart dasobjectstore-server.service
+
 Endpoints Workspace
 -------------------
 

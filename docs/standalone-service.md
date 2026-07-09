@@ -138,6 +138,11 @@ DEB/RPM manifests install the DAS-owned wrapper and declare the container
 runtime as a runtime dependency so appliance installs do not silently expose a
 broken reporting surface.
 
+Package configuration adds the `dasobjectstore` service user to the `docker`
+group and restarts `dasobjectstore-server.service`. If Docker is repaired or
+reinstalled later, run `sudo usermod -aG docker dasobjectstore` and restart the
+Web service so the process receives the updated supplementary group.
+
 ## TLS Assets
 
 Default standalone TLS assets live under the product root:

@@ -132,6 +132,8 @@ fn package_installs_named_pam_service_for_local_web_login() {
 fn package_installs_das_owned_report_renderer_wrapper() {
     assert_contains(REPORTING_WRAPPER, "render-report-pdf");
     assert_contains(REPORTING_WRAPPER, "prewarm-report-provider");
+    assert_contains(REPORTING_WRAPPER, "verify_container_runtime_access");
+    assert_contains(REPORTING_WRAPPER, "sudo usermod -aG docker dasobjectstore");
     assert_contains(REPORTING_WRAPPER, "grammateus_markdown_pdf");
     assert_contains(REPORTING_WRAPPER, "docker_args=(run --rm");
     assert_contains(
@@ -214,6 +216,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "Requires:       ca-certificates");
     assert_contains(BUILD_RPM, "Requires:       acl");
     assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_contains(BUILD_RPM, "usermod -aG docker \"\\$service_user\"");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
 }
@@ -252,6 +255,9 @@ fn deb_postinst_rejects_user_owned_managed_root() {
     assert_contains(POSTINST, "service_group=\"dasobjectstore\"");
     assert_contains(POSTINST, "managed_root=\"/srv/dasobjectstore\"");
     assert_contains(POSTINST, "product_root=\"/opt/dasobjectstore\"");
+    assert_contains(POSTINST, "ensure_container_runtime_access");
+    assert_contains(POSTINST, "usermod -aG docker \"$service_user\"");
+    assert_contains(POSTINST, "restart dasobjectstore-server.service");
     assert_contains(
         POSTINST,
         "chown root:\"$service_group\" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",

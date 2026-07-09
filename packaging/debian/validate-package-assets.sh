@@ -75,6 +75,9 @@ require_text "$pam_service" "account required pam_unix.so"
 require_text "$postinst" "service_user=\"dasobjectstore\""
 require_text "$postinst" "managed_root=\"/srv/dasobjectstore\""
 require_text "$postinst" "product_root=\"/opt/dasobjectstore\""
+require_text "$postinst" 'ensure_container_runtime_access'
+require_text "$postinst" 'usermod -aG docker "$service_user"'
+require_text "$postinst" 'restart dasobjectstore-server.service'
 require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
 require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
 require_text "$postinst" "-exec chmod 0640 {} +"
@@ -109,6 +112,8 @@ require_text "$build_deb" 'sudo apt-get install clang libclang-dev libpam0g-dev'
 require_text "$repo_root/Makefile" 'gnostikon'
 require_text "$reporting_wrapper" 'render-report-pdf'
 require_text "$reporting_wrapper" 'prewarm-report-provider'
+require_text "$reporting_wrapper" 'verify_container_runtime_access'
+require_text "$reporting_wrapper" 'sudo usermod -aG docker dasobjectstore'
 require_text "$reporting_wrapper" 'grammateus_markdown_pdf'
 require_text "$reporting_wrapper" 'docker_args=(run --rm'
 
@@ -131,6 +136,7 @@ require_text "$build_rpm" 'BuildRequires:  clang'
 require_text "$build_rpm" 'BuildRequires:  libclang-devel'
 require_text "$build_rpm" 'BuildRequires:  pam-devel'
 require_text "$build_rpm" 'Requires:       pam'
+require_text "$build_rpm" 'usermod -aG docker "\$service_user"'
 require_text "$build_rpm" 'Requires:       /usr/bin/docker'
 require_text "$build_rpm" 'sudo dnf install clang libclang-devel pam-devel'
 

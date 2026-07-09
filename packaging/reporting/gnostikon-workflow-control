@@ -42,6 +42,43 @@ bind_mount() {
   printf 'type=bind,source=%s,target=%s' "$path" "$path"
 }
 
+verify_container_runtime_access() {
+  local container_runtime="$1"
+  if ! command -v "$container_runtime" >/dev/null 2>&1; then
+    printf 'container runtime %s is required for Grammateus PDF rendering\n' "$container_runtime" >&2
+    exit 127
+  fi
+
+  local diagnostics
+  diagnostics="$(mktemp)"
+  if "$container_runtime" info >/dev/null 2>"$diagnostics"; then
+    rm -f "$diagnostics"
+    return 0
+  fi
+
+  local detail
+  detail="$(tr '\n' ' ' <"$diagnostics" | sed 's/[[:space:]][[:space:]]*/ /g')"
+  rm -f "$diagnostics"
+  if printf '%s' "$detail" | grep -qi 'permission denied'; then
+    cat >&2 <<ERROR
+DASObjectStore report rendering cannot access the Docker API as user $(id -un).
+The packaged appliance expects the dasobjectstore service user to be a member of
+the docker group. Re-run package configuration or run:
+  sudo usermod -aG docker dasobjectstore
+  sudo systemctl restart dasobjectstore-server.service
+Docker diagnostic: $detail
+ERROR
+    exit 126
+  fi
+
+  cat >&2 <<ERROR
+DASObjectStore report rendering cannot use the Docker API through $container_runtime.
+Check that the container runtime is installed and the daemon is running.
+Docker diagnostic: $detail
+ERROR
+  exit 1
+}
+
 run_render_report_pdf() {
   local input=""
   local output=""
@@ -114,10 +151,7 @@ run_render_report_pdf() {
     printf 'unsupported report provider: %s\n' "$provider" >&2
     exit 2
   fi
-  if ! command -v "$container_runtime" >/dev/null 2>&1; then
-    printf 'container runtime %s is required for Grammateus PDF rendering\n' "$container_runtime" >&2
-    exit 127
-  fi
+  verify_container_runtime_access "$container_runtime"
 
   local input_dir output_dir
   input_dir="$(cd "$(dirname "$input")" && pwd -P)"
@@ -157,10 +191,7 @@ run_prewarm_report_provider() {
         ;;
     esac
   done
-  if ! command -v "$container_runtime" >/dev/null 2>&1; then
-    printf 'container runtime %s is required for Grammateus provider prewarm\n' "$container_runtime" >&2
-    exit 127
-  fi
+  verify_container_runtime_access "$container_runtime"
   exec "$container_runtime" run --rm --entrypoint /bin/sh "$container_image" -lc \
     "set -eu; grammateus_markdown_pdf --help >/dev/null; Rscript -e 'pkgs <- c(\"ggplot2\", \"jsonlite\", \"scales\", \"svglite\", \"viridisLite\", \"floundeR\"); missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing)) stop(paste(\"missing R packages:\", paste(missing, collapse = \", \"))); library(floundeR); caps <- floundeR::flounder_rust_capabilities(required = TRUE); if (!isTRUE(caps\$compiled_support)) stop(\"floundeR compiled support is unavailable\"); cat(\"grammateus report provider prewarmed\\n\")'"
 }
