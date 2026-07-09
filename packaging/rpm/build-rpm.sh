@@ -103,6 +103,8 @@ BuildRequires:  rust
 # target; those are usually installed through rustup/cargo rather than RPM.
 Requires:       acl
 Requires:       ca-certificates
+Requires:       gnostikon-workflow-control
+Requires:       /usr/bin/docker
 Requires:       pam
 Requires:       systemd
 Requires(post): coreutils

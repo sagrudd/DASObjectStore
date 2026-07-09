@@ -4,7 +4,7 @@ SHELL := /usr/bin/env bash
 
 GITHUB_OWNER ?= sagrudd
 MNEMOSYNE_WORKSPACE ?= $(abspath ..)
-MNEMOSYNE_REPO_MATCH ?= mnemosyne|mneion|monas|synoptikon|mnematikon|grammateus|flounder
+MNEMOSYNE_REPO_MATCH ?= mnemosyne|mneion|monas|synoptikon|mnematikon|gnostikon|grammateus|flounder
 
 .PHONY: help pull build web web-screenshots test fmt check deb rpm remote-deb remote-rpm package clean distclean
 

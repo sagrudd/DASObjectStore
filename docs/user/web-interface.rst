@@ -490,6 +490,12 @@ automatically. If the JSON schema is unsupported, the renderer is unavailable, o
 the Grammateus provider fails, the card reports the failure inline and no
 partial PDF is offered for download.
 
+The packaged appliance depends on ``gnostikon-workflow-control`` and a
+Docker-compatible container runtime for this Web report rebuild path. These are
+critical runtime dependencies, not optional developer tools: package
+installation should fail dependency resolution if the configured package feed
+cannot provide them.
+
 Endpoints Workspace
 -------------------
 

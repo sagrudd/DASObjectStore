@@ -5364,11 +5364,11 @@ fn write_formal_performance_pdf_report(
     match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering failed with status {status}; install/repair gnostikon-workflow-control and the Grammateus report provider, then rebuild with `dasobjectstore performance-report --json-artifact {}`",
+            "formal performance PDF rendering failed with status {status}; install/repair the gnostikon-workflow-control package, Docker/container runtime, and the Grammateus report provider, then rebuild with `dasobjectstore performance-report --json-artifact {}`",
             report.json_path.display()
         ))),
         Err(error) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering requires gnostikon-workflow-control with Grammateus support: {error}; rebuild later with `dasobjectstore performance-report --json-artifact {}`",
+            "formal performance PDF rendering requires the gnostikon-workflow-control package with Grammateus support plus a Docker/container runtime: {error}; rebuild later with `dasobjectstore performance-report --json-artifact {}`",
             report.json_path.display()
         ))),
     }
@@ -5409,10 +5409,10 @@ fn write_formal_performance_pdf_report_from_artifact(
     match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering failed with status {status}; install/repair gnostikon-workflow-control and the Grammateus report provider"
+            "formal performance PDF rendering failed with status {status}; install/repair the gnostikon-workflow-control package, Docker/container runtime, and the Grammateus report provider"
         ))),
         Err(error) => Err(CliError::CommandFailed(format!(
-            "formal performance PDF rendering requires gnostikon-workflow-control with Grammateus support: {error}"
+            "formal performance PDF rendering requires the gnostikon-workflow-control package with Grammateus support plus a Docker/container runtime: {error}"
         ))),
     }
 }

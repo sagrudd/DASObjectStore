@@ -129,6 +129,14 @@ The developer fallback page is available only through the explicit
 `packaging/web/prepare-web-dist.sh --allow-fallback` escape hatch and must not
 be used for `make deb` or `make rpm` artifacts.
 
+Formal performance-report rendering in the Web Activity page depends on the
+Mnemosyne Grammateus handoff command `gnostikon-workflow-control` and a
+Docker-compatible container runtime. `make pull` fetches the
+`gnostikon-workflow-control` sibling checkout for local development, and the
+DEB/RPM manifests declare the renderer and container runtime as runtime
+dependencies so appliance installs do not silently expose a broken reporting
+surface.
+
 ## TLS Assets
 
 Default standalone TLS assets live under the product root:

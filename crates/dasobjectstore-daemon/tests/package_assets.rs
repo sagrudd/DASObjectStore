@@ -107,7 +107,10 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(PAM_SERVICE, "account required pam_unix.so");
     assert_contains(BUILD_DEB, "etc/pam.d");
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
-    assert_contains(BUILD_DEB, "Depends: ca-certificates, acl, libpam0g");
+    assert_contains(
+        BUILD_DEB,
+        "Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io",
+    );
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
     assert_contains(
         BUILD_DEB,
@@ -119,6 +122,8 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_RPM, "BuildRequires:  libclang-devel");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
     assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_contains(BUILD_RPM, "Requires:       gnostikon-workflow-control");
+    assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "sudo dnf install clang libclang-devel pam-devel");
 }
 
@@ -150,7 +155,10 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
-    assert_contains(BUILD_DEB, "Depends: ca-certificates, acl, libpam0g");
+    assert_contains(
+        BUILD_DEB,
+        "Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io",
+    );
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
 }
 
@@ -189,6 +197,8 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "Requires:       ca-certificates");
     assert_contains(BUILD_RPM, "Requires:       acl");
     assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_contains(BUILD_RPM, "Requires:       gnostikon-workflow-control");
+    assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
 }
 
@@ -213,6 +223,7 @@ fn makefile_exposes_distribution_targets() {
     assert_contains(MAKEFILE, "bash packaging/web/prepare-web-dist.sh");
     assert_contains(MAKEFILE, "deb: web");
     assert_contains(MAKEFILE, "bash packaging/debian/build-deb.sh");
+    assert_contains(MAKEFILE, "gnostikon");
     assert_contains(MAKEFILE, "rpm: web");
     assert_contains(MAKEFILE, "bash packaging/rpm/build-rpm.sh");
     assert_contains(MAKEFILE, "package: deb rpm");

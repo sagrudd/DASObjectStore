@@ -84,7 +84,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g
+Depends: ca-certificates, acl, libpam0g, gnostikon-workflow-control, docker.io
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore

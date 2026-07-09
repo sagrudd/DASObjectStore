@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.9 - 2026-07-09
+
+- Add ``gnostikon-workflow-control`` to Mnemosyne sibling discovery for
+  ``make pull`` so the Grammateus report handoff source is kept current with
+  DASObjectStore development checkouts.
+- Declare ``gnostikon-workflow-control`` and the Docker command/container
+  runtime as required DEB/RPM runtime dependencies for the supported Web
+  performance-report rebuild workflow.
+- Clarify CLI and user documentation for formal performance PDF rendering so
+  missing Grammateus handoff dependencies are treated as packaging/install
+  faults rather than optional developer tooling.
+
 ## 0.54.8 - 2026-07-09
 
 - Add a per-process GUI API health instance identifier so the Web console can

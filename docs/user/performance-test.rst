@@ -400,6 +400,13 @@ template, title-panel metadata table, document identifier, provenance QR
 payload, footer branding, operator signature field, and cryptographic signature
 field.
 
+Packaged appliance installations declare ``gnostikon-workflow-control`` and a
+Docker-compatible container runtime as runtime dependencies because formal PDF
+reporting is a supported operator surface. If ``apt install`` or ``dnf install``
+cannot resolve those dependencies from the configured Mnemosyne package feed,
+the DASObjectStore package should not be treated as a complete Web-reporting
+installation.
+
 If the formal renderer is unavailable or fails, DASObjectStore does not emit a
 degraded fallback PDF. The JSON artifact remains the machine-readable benchmark
 record and can be used to rebuild the PDF after the Grammateus provider has
@@ -570,6 +577,12 @@ report template. The provider may run natively or through the configured
 container runtime, but the resulting PDF must contain the Mnemosyne title
 metadata panel, provenance QR payload, branded footer, rendered Markdown
 tables, embedded figures, and signature rows.
+
+The source checkout discovery used by ``make pull`` includes the
+``gnostikon-workflow-control`` sibling repository. Package builds also declare
+``gnostikon-workflow-control`` and the container runtime as runtime dependencies
+so a freshly installed appliance cannot silently expose a broken report rebuild
+button.
 
 Use ``dasobjectstore performance-report`` to rebuild the formal PDF from an
 existing JSON artifact. The rebuild path recreates the report Markdown, chart
