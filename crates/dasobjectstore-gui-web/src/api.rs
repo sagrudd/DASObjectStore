@@ -16,6 +16,18 @@ impl ApiError {
     pub fn is_permission_denied(&self) -> bool {
         matches!(self.status, Some(401 | 403))
     }
+
+    pub fn is_transport_failure(&self) -> bool {
+        self.status.is_none()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ApiHealthResponse {
+    pub service: String,
+    pub status: String,
+    pub version: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -916,6 +928,11 @@ pub async fn verify_session(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn get_api_health(api_base_path: &str) -> Result<ApiHealthResponse, ApiError> {
+    get_json_without_session(&format!("{}/health", api_base_path.trim_end_matches('/'))).await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn get_home_dashboard(path: &str) -> Result<HomeDashboardResponse, ApiError> {
     get_json(path).await
 }
@@ -1169,6 +1186,15 @@ where
             .header("authorization", &format!("Bearer {session_token}"));
     }
     let response = request.send().await?;
+    decode_response(response).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn get_json_without_session<R>(path: &str) -> Result<R, ApiError>
+where
+    R: for<'de> Deserialize<'de>,
+{
+    let response = Request::get(path).send().await?;
     decode_response(response).await
 }
 

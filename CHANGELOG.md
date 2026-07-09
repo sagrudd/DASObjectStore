@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.2 - 2026-07-09
+
+- Invalidate standalone Web browser session tokens on server startup so a
+  service restart forces users to sign in again.
+- Add Web session heartbeat handling that automatically logs out invalidated
+  sessions and shows a disconnected message when the server is unreachable,
+  clearing the message when the Web API responds again.
+
 ## 0.54.1 - 2026-07-09
 
 - Refine the Web login page Mnemosyne Biosciences wordmark sizing and

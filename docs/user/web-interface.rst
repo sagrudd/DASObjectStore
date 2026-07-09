@@ -72,6 +72,15 @@ DASObjectStore browser session tokens; users do not need to be pre-created in
 that file before logging in. OS-local sudo status and daemon policy remain the
 authority for administrative storage mutation.
 
+Standalone browser sessions are intentionally process-scoped. When
+``dasobjectstore-server`` starts, it revokes existing browser session tokens so
+a restarted Web service requires a fresh sign-in. The browser also checks the
+active session periodically: invalid or expired sessions are cleared from local
+browser storage and the user is returned to the login page. If the Web server is
+temporarily unreachable, the browser clears the active session, shows a
+disconnection message, and polls the public health route until the interface can
+reach the server again.
+
 Packaged appliances keep the Web service unprivileged and perform the PAM check
 through ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``. The
 helper must be owned by ``root:dasobjectstore`` with mode ``4750`` so

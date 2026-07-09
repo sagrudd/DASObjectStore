@@ -9,7 +9,7 @@ pub mod entrypoint;
 pub mod mount;
 pub mod objects;
 pub mod overview;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 mod session;
 #[cfg(target_arch = "wasm32")]
 mod storage;

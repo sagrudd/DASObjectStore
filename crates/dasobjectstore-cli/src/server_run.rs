@@ -7,8 +7,8 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
     ensure_standalone_tls_assets, gui_api_router_for_host_mode, LocalAuthStore,
-    StandaloneAuthenticationConfig, StandaloneServerConfig, StandaloneServerConfigError,
-    StandaloneTlsAssetError, StandaloneTlsAssetReport,
+    LocalAuthStoreError, StandaloneAuthenticationConfig, StandaloneServerConfig,
+    StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::fs;
@@ -43,6 +43,8 @@ async fn start_server(
 ) -> Result<(), ServerRunError> {
     let socket_addr = config.socket_addr()?;
     ensure_standalone_tls_assets(&config)?;
+    let auth_store = LocalAuthStore::new(config.product_root.clone());
+    let revoked_sessions = auth_store.revoke_all_sessions()?;
     let tls =
         RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
             .await?;
@@ -51,6 +53,12 @@ async fn start_server(
         "dasobjectstore-server listening on https://{}",
         socket_addr
     )?;
+    if revoked_sessions > 0 {
+        writeln!(
+            writer,
+            "dasobjectstore-server invalidated {revoked_sessions} existing session(s)"
+        )?;
+    }
     let web_root = config.product_root.join("web");
     let auth_root = config.product_root.clone();
     axum_server::bind_rustls(socket_addr, tls)
@@ -158,6 +166,7 @@ fn bytes_response(content_type: &'static str, bytes: Vec<u8>) -> Response {
 pub(crate) enum ServerRunError {
     Config(StandaloneServerConfigError),
     Tls(StandaloneTlsAssetError),
+    Auth(LocalAuthStoreError),
     Io(io::Error),
     Json(serde_json::Error),
 }
@@ -167,6 +176,7 @@ impl Display for ServerRunError {
         match self {
             Self::Config(err) => write!(formatter, "{err}"),
             Self::Tls(err) => write!(formatter, "{err}"),
+            Self::Auth(err) => write!(formatter, "{err}"),
             Self::Io(err) => write!(formatter, "server output failed: {err}"),
             Self::Json(err) => write!(formatter, "server JSON output failed: {err}"),
         }
@@ -184,6 +194,12 @@ impl From<StandaloneServerConfigError> for ServerRunError {
 impl From<StandaloneTlsAssetError> for ServerRunError {
     fn from(err: StandaloneTlsAssetError) -> Self {
         Self::Tls(err)
+    }
+}
+
+impl From<LocalAuthStoreError> for ServerRunError {
+    fn from(err: LocalAuthStoreError) -> Self {
+        Self::Auth(err)
     }
 }
 

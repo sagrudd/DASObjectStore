@@ -7,12 +7,19 @@ use crate::workspace::{
     ObjectStoresPage, UsersGroupsPage, WorkspacePage,
 };
 use crate::{api, storage};
+use gloo_timers::callback::Interval;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
 const DASOBJECTSTORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MNEMOSYNE_LOGO_ICON_SRC: &str = "mnemosyne-biosciences-logo-icon-black.png";
 const MNEMOSYNE_LOGO_WORDMARK_SRC: &str = "mnemosyne-biosciences-logo-master-mono.png";
+const SESSION_HEARTBEAT_MS: u32 = 15_000;
+const RECONNECT_POLL_MS: u32 = 3_000;
+const SESSION_INVALIDATED_MESSAGE: &str =
+    "Your session has expired or was invalidated by a server restart. Please sign in again.";
+const SERVER_UNREACHABLE_MESSAGE: &str =
+    "The DASObjectStore server is unreachable. You have been logged out; this page will keep checking for reconnection.";
 
 #[function_component(App)]
 pub fn app() -> Html {
@@ -54,18 +61,93 @@ pub fn app() -> Html {
                         Ok(_) => {
                             storage::clear_session();
                             stable_state.set(StableState::Disconnected);
-                            app_state.set(AppState::Disconnected);
+                            app_state.set(AppState::SessionInvalid(
+                                SESSION_INVALIDATED_MESSAGE.to_string(),
+                            ));
                         }
                         Err(error) => {
                             storage::clear_session();
                             stable_state.set(StableState::Disconnected);
-                            app_state.set(AppState::Error(error.message));
+                            app_state.set(session_check_error_state(error));
                         }
                     }
                 });
             }
             || ()
         });
+    }
+
+    {
+        let auth_base_path = auth_base_path.clone();
+        let stable_state = stable_state.clone();
+        let app_state = app_state.clone();
+        let username = username.clone();
+        use_effect_with(*stable_state, move |current_stable_state| {
+            let interval = (*current_stable_state == StableState::Connected).then(|| {
+                Interval::new(SESSION_HEARTBEAT_MS, move || {
+                    let auth_base_path = auth_base_path.clone();
+                    let stable_state = stable_state.clone();
+                    let app_state = app_state.clone();
+                    let username = username.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let Some((stored_username, session_token)) = storage::stored_session()
+                        else {
+                            username.set(String::new());
+                            stable_state.set(StableState::Disconnected);
+                            app_state.set(AppState::SessionInvalid(
+                                SESSION_INVALIDATED_MESSAGE.to_string(),
+                            ));
+                            return;
+                        };
+
+                        match api::verify_session(&auth_base_path, stored_username, session_token)
+                            .await
+                        {
+                            Ok(response) if response.valid => {
+                                username.set(response.username);
+                            }
+                            Ok(_) => {
+                                storage::clear_session();
+                                username.set(String::new());
+                                stable_state.set(StableState::Disconnected);
+                                app_state.set(AppState::SessionInvalid(
+                                    SESSION_INVALIDATED_MESSAGE.to_string(),
+                                ));
+                            }
+                            Err(error) => {
+                                storage::clear_session();
+                                username.set(String::new());
+                                stable_state.set(StableState::Disconnected);
+                                app_state.set(session_check_error_state(error));
+                            }
+                        }
+                    });
+                });
+            });
+            move || drop(interval)
+        });
+    }
+
+    {
+        let api_base_path = api_base_path.clone();
+        let app_state = app_state.clone();
+        use_effect_with(
+            (*app_state).is_server_unreachable(),
+            move |server_unreachable| {
+                let interval = (*server_unreachable).then(|| {
+                    Interval::new(RECONNECT_POLL_MS, move || {
+                        let api_base_path = api_base_path.clone();
+                        let app_state = app_state.clone();
+                        wasm_bindgen_futures::spawn_local(async move {
+                            if api::get_api_health(&api_base_path).await.is_ok() {
+                                app_state.set(AppState::Disconnected);
+                            }
+                        });
+                    })
+                });
+                move || drop(interval)
+            },
+        );
     }
 
     let on_username = input_callback(username.clone());
@@ -97,7 +179,13 @@ pub fn app() -> Html {
                     Err(error) => {
                         storage::clear_session();
                         stable_state.set(StableState::Disconnected);
-                        app_state.set(AppState::Error(error.message));
+                        if error.is_transport_failure() {
+                            app_state.set(AppState::ServerUnreachable(
+                                SERVER_UNREACHABLE_MESSAGE.to_string(),
+                            ));
+                        } else {
+                            app_state.set(AppState::Error(error.message));
+                        }
                     }
                 }
             });
@@ -322,4 +410,14 @@ fn input_callback(state: UseStateHandle<String>) -> Callback<InputEvent> {
         let input: HtmlInputElement = event.target_unchecked_into();
         state.set(input.value());
     })
+}
+
+fn session_check_error_state(error: api::ApiError) -> AppState {
+    if error.is_permission_denied() {
+        AppState::SessionInvalid(SESSION_INVALIDATED_MESSAGE.to_string())
+    } else if error.is_transport_failure() {
+        AppState::ServerUnreachable(SERVER_UNREACHABLE_MESSAGE.to_string())
+    } else {
+        AppState::Error(error.message)
+    }
 }

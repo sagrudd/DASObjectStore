@@ -73,6 +73,29 @@ fn login_issues_verifiable_session_and_logout_revokes_it() {
 }
 
 #[test]
+fn revoke_all_sessions_invalidates_sessions_across_store_instances() {
+    let root = temp_root("restart-revoke");
+    let store = registered_store(&root);
+    let login = store.login("admin", "secret").expect("login succeeds");
+    store
+        .verify_session("admin", &login.session_token)
+        .expect("session verifies before restart revocation");
+
+    let restarted_store = LocalAuthStore::new(&root);
+    let revoked = restarted_store
+        .revoke_all_sessions()
+        .expect("startup revocation succeeds");
+    let err = restarted_store
+        .verify_session("admin", &login.session_token)
+        .expect_err("session is invalid after startup revocation");
+
+    assert_eq!(revoked, 2);
+    assert!(matches!(err, LocalAuthStoreError::InvalidSessionToken));
+
+    cleanup(&root);
+}
+
+#[test]
 fn rejects_invalid_password() {
     let root = temp_root("invalid-password");
     let store = registered_store(&root);
