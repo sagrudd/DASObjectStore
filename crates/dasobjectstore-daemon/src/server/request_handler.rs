@@ -1,17 +1,20 @@
 use crate::api::{
-    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobKind,
-    DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
+    remote_easyconnect_renew_after_offset_seconds,
+    resolve_remote_easyconnect_session_lifetime_seconds, AssignLocalUserToLocalGroupRequest,
+    AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
+    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectDownloadRequest,
     ObjectFolderDownloadRequest, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+    RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -20,13 +23,16 @@ use crate::auth::{
 use crate::runtime::{
     default_endpoint_registry_path, default_hdd_root, default_ssd_root,
     provision_garage_store_registry, query_object_browser_metadata, read_object_browser_metadata,
-    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
-    AdminJobRegistry, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
+    resolve_object_folder_download_with_hdd_root, submit_ingest_files_to_local_store_with_progress,
+    upsert_endpoint_inventory_record, AdminJobRegistry, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
-    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry, ServiceCommandRunner,
+    SystemLocalAdminCommandRunner, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
@@ -47,6 +53,7 @@ pub struct DaemonRequestHandler<S, C> {
     subobject_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
     hdd_root_path: PathBuf,
+    remote_easyconnect_session_store_path: PathBuf,
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
 }
 
@@ -64,6 +71,9 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            remote_easyconnect_session_store_path: remote_easyconnect_session_store_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
         }
     }
@@ -81,6 +91,9 @@ where
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
+            remote_easyconnect_session_store_path: remote_easyconnect_session_store_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
         }
     }
@@ -102,6 +115,11 @@ where
 
     pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
         self.hdd_root_path = hdd_root_path.into();
+        self
+    }
+
+    pub fn with_remote_easyconnect_session_store_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.remote_easyconnect_session_store_path = path.into();
         self
     }
 
@@ -317,6 +335,32 @@ where
                     ))),
                 }
             }
+            DaemonApiRequest::RemoteEasyconnectRevokeSession(request) => {
+                let revoked_at_utc = self.clock.now_utc();
+                match self.revoke_remote_easyconnect_session(&request.session_id, &revoked_at_utc) {
+                    Ok(revoked) => Ok(DaemonApiResponse::RemoteEasyconnectRevokeSession(
+                        RemoteEasyconnectRevokeSessionResponse {
+                            session_id: request.session_id,
+                            revoked,
+                            revoked_at_utc,
+                        },
+                    )),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_session_revoke_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
+            DaemonApiRequest::RemoteEasyconnectRenewSession(request) => {
+                let renewed_at_utc = self.clock.now_utc();
+                match self.renew_remote_easyconnect_session(request, &renewed_at_utc) {
+                    Ok(response) => Ok(DaemonApiResponse::RemoteEasyconnectRenewSession(response)),
+                    Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_session_renew_failed",
+                        error.to_string(),
+                    ))),
+                }
+            }
             DaemonApiRequest::RemoteEasyconnectUploadAdmission(request) => {
                 Ok(DaemonApiResponse::RemoteEasyconnectUploadAdmission(
                     self.remote_upload_admission_gate
@@ -445,6 +489,77 @@ where
         self.authorize_endpoint_read(actor, &request.endpoint)
     }
 
+    fn revoke_remote_easyconnect_session(
+        &self,
+        session_id: &str,
+        revoked_at_utc: &str,
+    ) -> Result<bool, RemoteEasyconnectPairedSessionStoreError> {
+        FileBackedRemoteEasyconnectPairedSessionStore::new(
+            &self.remote_easyconnect_session_store_path,
+        )
+        .revoke(session_id, revoked_at_utc)
+    }
+
+    fn renew_remote_easyconnect_session(
+        &self,
+        request: RemoteEasyconnectRenewSessionRequest,
+        renewed_at_utc: &str,
+    ) -> Result<RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRenewalDispatchError> {
+        let lifetime_seconds =
+            resolve_remote_easyconnect_session_lifetime_seconds(request.requested_lifetime_seconds)
+                .map_err(
+                    |error| RemoteEasyconnectRenewalDispatchError::InvalidRequest {
+                        message: error.to_string(),
+                    },
+                )?;
+        let renew_after_offset = remote_easyconnect_renew_after_offset_seconds(lifetime_seconds)
+            .map_err(
+                |error| RemoteEasyconnectRenewalDispatchError::InvalidRequest {
+                    message: error.to_string(),
+                },
+            )?;
+        let expires_at_utc = add_seconds_to_utc_timestamp(renewed_at_utc, lifetime_seconds)
+            .ok_or_else(|| RemoteEasyconnectRenewalDispatchError::InvalidClock {
+                value: renewed_at_utc.to_string(),
+            })?;
+        let renew_after_utc = add_seconds_to_utc_timestamp(renewed_at_utc, renew_after_offset)
+            .ok_or_else(|| RemoteEasyconnectRenewalDispatchError::InvalidClock {
+                value: renewed_at_utc.to_string(),
+            })?;
+        let rotated_renewal_token =
+            rotated_easyconnect_renewal_token(&request.session_id, renewed_at_utc);
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            &self.remote_easyconnect_session_store_path,
+        );
+        let renewed = store
+            .renew(RemoteEasyconnectPairedSessionRenewalRequest {
+                session_id: request.session_id,
+                renewal_token: request.renewal_token,
+                renewed_at_utc: renewed_at_utc.to_string(),
+                expires_at_utc,
+                renew_after_utc,
+                rotated_renewal_token,
+            })
+            .map_err(RemoteEasyconnectRenewalDispatchError::SessionStore)?;
+
+        Ok(RemoteEasyconnectRenewSessionResponse {
+            session: RemoteEasyconnectSession {
+                session_id: renewed.session_id.clone(),
+                issued_at_utc: renewed.issued_at_utc,
+                expires_at_utc: renewed.expires_at_utc,
+                credentials: renewed.credentials,
+                renewal: RemoteEasyconnectSessionRenewal {
+                    renew_url: format!(
+                        "/api/v1/remote/easyconnect/sessions/{}/renew",
+                        renewed.session_id
+                    ),
+                    renew_after_utc: renewed.renew_after_utc,
+                    renewal_token: renewed.renewal_token,
+                },
+            },
+        })
+    }
+
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
         if let Some(registry) = &self.admin_job_registry {
             registry
@@ -514,6 +629,106 @@ fn resolve_authorization_store_id(
             subobject_registry_path: subobject_registry_path.to_path_buf(),
         }),
     }
+}
+
+#[derive(Debug)]
+enum RemoteEasyconnectRenewalDispatchError {
+    InvalidRequest { message: String },
+    InvalidClock { value: String },
+    SessionStore(RemoteEasyconnectPairedSessionStoreError),
+}
+
+impl Display for RemoteEasyconnectRenewalDispatchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest { message } => formatter.write_str(message),
+            Self::InvalidClock { value } => write!(
+                formatter,
+                "daemon clock value {value} is not a supported UTC timestamp"
+            ),
+            Self::SessionStore(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for RemoteEasyconnectRenewalDispatchError {}
+
+fn rotated_easyconnect_renewal_token(session_id: &str, renewed_at_utc: &str) -> String {
+    let suffix = renewed_at_utc
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    format!("renewal-{session_id}-{suffix}")
+}
+
+fn add_seconds_to_utc_timestamp(timestamp: &str, seconds: u64) -> Option<String> {
+    let instant = parse_utc_timestamp(timestamp)?;
+    let total = instant.checked_add(seconds as i64)?;
+    Some(format_utc_timestamp(total))
+}
+
+fn parse_utc_timestamp(timestamp: &str) -> Option<i64> {
+    let timestamp = timestamp.strip_suffix('Z')?;
+    let (date, time) = timestamp.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year = date_parts.next()?.parse::<i64>().ok()?;
+    let month = date_parts.next()?.parse::<u32>().ok()?;
+    let day = date_parts.next()?.parse::<u32>().ok()?;
+    if date_parts.next().is_some() {
+        return None;
+    }
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next()?.parse::<u32>().ok()?;
+    let minute = time_parts.next()?.parse::<u32>().ok()?;
+    let second = time_parts.next()?.parse::<u32>().ok()?;
+    if time_parts.next().is_some()
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    Some(days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second))
+}
+
+fn format_utc_timestamp(seconds_since_epoch: i64) -> String {
+    let days = seconds_since_epoch.div_euclid(86_400);
+    let seconds_of_day = seconds_since_epoch.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month = i64::from(month);
+    let day = i64::from(day);
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    let year = year + i64::from(month <= 2);
+    (year, month as u32, day as u32)
 }
 
 #[derive(Debug)]
@@ -1271,8 +1486,10 @@ mod tests {
         ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
         ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
@@ -1281,9 +1498,12 @@ mod tests {
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
-        admin_job_registry_path, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-        FileBackedAdminJobRegistry, LocalAdminRuntimeError, LocalGroupAdministrationOperation,
-        RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
+        admin_job_registry_path, remote_easyconnect_session_store_path,
+        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
+        FileBackedRemoteEasyconnectPairedSessionStore, LocalAdminRuntimeError,
+        LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
+        RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
+        RemoteUploadAdmissionGate,
     };
     use crate::AdminJobRegistry;
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
@@ -2498,6 +2718,93 @@ mod tests {
     }
 
     #[test]
+    fn daemon_revoke_easyconnect_session_updates_persisted_store() {
+        let root = temp_root("remote-easyconnect-revoke-session");
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path);
+        session_store
+            .upsert(paired_session("session-1"))
+            .expect("session stored");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectRevokeSession(
+                RemoteEasyconnectRevokeSessionRequest {
+                    session_id: "session-1".to_string(),
+                    reason: Some("operator requested revocation".to_string()),
+                },
+            ))
+            .expect("request handled");
+
+        let DaemonApiResponse::RemoteEasyconnectRevokeSession(response) = response else {
+            panic!("expected remote easyconnect revoke response");
+        };
+        assert!(response.revoked);
+        assert_eq!(response.revoked_at_utc, "2026-07-09T16:20:00Z");
+        let stored = session_store
+            .get("session-1")
+            .expect("session loaded")
+            .expect("session exists");
+        assert_eq!(
+            stored.revoked_at_utc.as_deref(),
+            Some("2026-07-09T16:20:00Z")
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_renew_easyconnect_session_rotates_token_and_persists_expiry() {
+        let root = temp_root("remote-easyconnect-renew-session");
+        let session_store_path = remote_easyconnect_session_store_path(&root);
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path);
+        session_store
+            .upsert(paired_session("session-1"))
+            .expect("session stored");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+        )
+        .with_remote_easyconnect_session_store_path(&session_store_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectRenewSession(
+                RemoteEasyconnectRenewSessionRequest {
+                    session_id: "session-1".to_string(),
+                    renewal_token: "renewal-token-1".to_string(),
+                    requested_lifetime_seconds: Some(28_800),
+                },
+            ))
+            .expect("request handled");
+
+        let DaemonApiResponse::RemoteEasyconnectRenewSession(response) = response else {
+            panic!("expected remote easyconnect renew response");
+        };
+        assert_eq!(response.session.session_id, "session-1");
+        assert_eq!(response.session.issued_at_utc, "2026-07-09T16:20:00Z");
+        assert_eq!(response.session.expires_at_utc, "2026-07-10T00:20:00Z");
+        assert_eq!(
+            response.session.renewal.renew_after_utc,
+            "2026-07-09T23:20:00Z"
+        );
+        assert_eq!(response.session.credentials.access_key_id, "AKIAEXAMPLE");
+        assert_ne!(response.session.renewal.renewal_token, "renewal-token-1");
+
+        let stored = session_store
+            .get("session-1")
+            .expect("session loaded")
+            .expect("session exists");
+        assert_eq!(stored.expires_at_utc, "2026-07-10T00:20:00Z");
+        assert_eq!(stored.renewal_token, response.session.renewal.renewal_token);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn reports_unwired_commands_as_api_errors() {
         let service = FakeService::default();
         let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
@@ -2579,6 +2886,32 @@ mod tests {
             client_request_id: Some("endpoint-upsert-1".to_string()),
             administrator_actor: Some("operator".to_string()),
             confirmation_marker: Some(ENDPOINT_RECORD_CONFIRMATION.to_string()),
+        }
+    }
+
+    fn paired_session(session_id: &str) -> RemoteEasyconnectPairedSessionRecord {
+        RemoteEasyconnectPairedSessionRecord {
+            session_id: session_id.to_string(),
+            approved_actor: "stephen".to_string(),
+            auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            issued_at_utc: "2026-07-09T16:10:00Z".to_string(),
+            expires_at_utc: "2026-07-10T00:10:00Z".to_string(),
+            renew_after_utc: "2026-07-09T23:10:00Z".to_string(),
+            renewal_token: "renewal-token-1".to_string(),
+            credentials: RemoteEasyconnectSessionCredentials {
+                access_key_id: "AKIAEXAMPLE".to_string(),
+                secret_access_key: "secret".to_string(),
+                session_token: Some("session-token".to_string()),
+            },
+            object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                object_store: "zymo_fecal_2025.05".to_string(),
+                bucket: "dos-zymo-fecal-2025-05".to_string(),
+                can_read: true,
+                can_write: true,
+                writer_group: Some("mnemosyne".to_string()),
+                object_type: "fastq".to_string(),
+            }],
+            revoked_at_utc: None,
         }
     }
 

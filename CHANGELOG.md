@@ -19,6 +19,9 @@ agreement before landing.
 - Add a file-backed remote easyconnect paired-session store for daemon runtime
   persistence with revocation, renewal token rotation, expiry, actor matching,
   and per-ObjectStore write authorization coverage.
+- Wire daemon remote easyconnect session revocation and renewal commands to the
+  persisted paired-session store, including expiry extension and rotated
+  renewal-token responses.
 - Add remote-client easyconnect regression coverage for successful, denied, and
   expired pairing callbacks, paired upload sessions, renewal metadata states,
   and local rejection of expired sessions before stored credentials are used.

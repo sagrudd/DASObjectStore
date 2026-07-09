@@ -883,9 +883,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add a first-class persisted easyconnect paired-session store with tests
   for revocation, renewal token rotation, expiry, actor matching, and
   per-ObjectStore write permission checks.
+- [x] Wire the persisted easyconnect paired-session store into daemon revoke
+  and renew routes with persisted revocation, expiry extension, and renewal
+  token rotation tests.
 - [ ] Wire the persisted easyconnect paired-session store into daemon
-  easyconnect session create/exchange/revoke/renew routes and remote-upload
-  ObjectStore listing authorization.
+  easyconnect create/exchange routes and remote-upload ObjectStore listing
+  authorization.
 - [ ] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.

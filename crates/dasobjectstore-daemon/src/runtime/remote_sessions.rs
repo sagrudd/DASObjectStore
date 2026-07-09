@@ -1,4 +1,7 @@
-use crate::api::{RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant};
+use crate::api::{
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant,
+    RemoteEasyconnectSessionCredentials,
+};
 use crate::auth::DaemonLocalActor;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -59,6 +62,7 @@ pub struct RemoteEasyconnectPairedSessionRecord {
     pub expires_at_utc: String,
     pub renew_after_utc: String,
     pub renewal_token: String,
+    pub credentials: RemoteEasyconnectSessionCredentials,
     pub object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
     pub revoked_at_utc: Option<String>,
 }
@@ -71,6 +75,21 @@ impl RemoteEasyconnectPairedSessionRecord {
         require_non_blank("expires_at_utc", &self.expires_at_utc)?;
         require_non_blank("renew_after_utc", &self.renew_after_utc)?;
         require_non_blank("renewal_token", &self.renewal_token)?;
+        require_non_blank("credentials.access_key_id", &self.credentials.access_key_id)?;
+        require_non_blank(
+            "credentials.secret_access_key",
+            &self.credentials.secret_access_key,
+        )?;
+        if self
+            .credentials
+            .session_token
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(RemoteEasyconnectPairedSessionStoreError::BlankField {
+                field: "credentials.session_token",
+            });
+        }
         if self.object_stores.is_empty() {
             return Err(RemoteEasyconnectPairedSessionStoreError::BlankField {
                 field: "object_stores",
@@ -496,7 +515,10 @@ mod tests {
         RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
         REMOTE_EASYCONNECT_SESSION_SCHEMA,
     };
-    use crate::api::{RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant};
+    use crate::api::{
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectSessionCredentials,
+    };
     use crate::auth::DaemonLocalActor;
     use std::path::PathBuf;
 
@@ -658,6 +680,11 @@ mod tests {
             expires_at_utc: "2026-07-10T00:10:00Z".to_string(),
             renew_after_utc: "2026-07-09T23:10:00Z".to_string(),
             renewal_token: "renewal-token-1".to_string(),
+            credentials: RemoteEasyconnectSessionCredentials {
+                access_key_id: "AKIAEXAMPLE".to_string(),
+                secret_access_key: "secret".to_string(),
+                session_token: Some("session-token".to_string()),
+            },
             object_stores: vec![
                 RemoteEasyconnectObjectStoreGrant {
                     object_store: "zymo_fecal_2025.05".to_string(),
