@@ -2092,6 +2092,68 @@ mod tests {
     }
 
     #[test]
+    fn hdd_settlement_scheduler_enforces_redundancy_on_distinct_eligible_disks() {
+        let disk_a = dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id");
+        let disk_b = dasobjectstore_core::ids::DiskId::new("disk-b").expect("disk id");
+        let disk_c = dasobjectstore_core::ids::DiskId::new("disk-c").expect("disk id");
+        let mut scheduler = HddSettlementScheduler {
+            disks: vec![
+                HddSettlementDiskState {
+                    disk_id: disk_a.clone(),
+                    root_path: PathBuf::from("/hdd/a"),
+                    active: false,
+                    total_bytes: 100,
+                    available_bytes: 90,
+                    assigned_bytes: 0,
+                },
+                HddSettlementDiskState {
+                    disk_id: disk_b.clone(),
+                    root_path: PathBuf::from("/hdd/b"),
+                    active: false,
+                    total_bytes: 100,
+                    available_bytes: 80,
+                    assigned_bytes: 0,
+                },
+                HddSettlementDiskState {
+                    disk_id: disk_c.clone(),
+                    root_path: PathBuf::from("/hdd/c"),
+                    active: false,
+                    total_bytes: 100,
+                    available_bytes: 70,
+                    assigned_bytes: 0,
+                },
+            ],
+        };
+
+        let roots = scheduler
+            .reserve_roots(3, 16)
+            .expect("reservation evaluates")
+            .expect("three copies reserve");
+
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.disk_id.clone())
+                .collect::<Vec<_>>(),
+            vec![disk_a, disk_b, disk_c]
+        );
+        assert!(
+            scheduler
+                .reserve_roots(1, 16)
+                .expect("overlapping reservation evaluates")
+                .is_none(),
+            "active redundant reservation must preserve one writer per HDD"
+        );
+
+        scheduler.release_roots(&roots, 16);
+        let err = scheduler
+            .reserve_roots(4, 16)
+            .expect_err("more copies than physical disks rejected");
+
+        assert!(err.to_string().contains("HDD settlement needs 4 disk(s)"));
+    }
+
+    #[test]
     fn hdd_settlement_scheduler_rejects_duplicate_physical_disk_ids() {
         let disk_a = dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id");
         let roots = vec![
