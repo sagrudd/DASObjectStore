@@ -1,10 +1,8 @@
-//! Route helpers for the standalone Users/Groups console surface.
+//! Route helpers for the standalone capability-mapping console surface.
 //!
-//! Users and group readiness are now represented inside the coherent product
-//! console, with ObjectStore writer-policy readiness surfaced on the canonical
-//! ObjectStores page. These helpers expose the authenticated API boundary used
-//! by the first-class primary navigation page without reintroducing a parallel
-//! legacy holder surface.
+//! The route retains the original `users-groups` segment for API stability, but
+//! the browser surface treats local users and groups as Prosopikon-aware
+//! appliance capability mappings rather than as an identity authority.
 
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = "workspaces/users-groups";
 pub const CREATE_LOCAL_GROUP_ACTION_ROUTE: &str = "workspaces/users-groups/local-groups";

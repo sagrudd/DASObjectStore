@@ -72,7 +72,7 @@ impl OperationsWorkspaceKindView {
             Self::Objects => "Objects",
             Self::Endpoints => "Endpoints",
             Self::Activity => "Activity",
-            Self::UsersGroups => "Users/Groups",
+            Self::UsersGroups => "Capabilities",
         }
     }
 

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.55.1 - 2026-07-09
+
+- Reframe the standalone Web Users/Groups console as a Prosopikon-aware local
+  appliance capability mapping view while preserving the existing
+  ``workspaces/users-groups`` API route.
+
 ## 0.55.0 - 2026-07-09
 
 - Add the public ``dasobjectstore-remote easyconnect <host-or-ip>`` contract

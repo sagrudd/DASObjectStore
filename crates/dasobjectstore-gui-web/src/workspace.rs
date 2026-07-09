@@ -66,7 +66,7 @@ impl WorkspacePage {
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
             Self::Endpoints => "Endpoints",
-            Self::UsersGroups => "Users/Groups",
+            Self::UsersGroups => "Capabilities",
             Self::Bioinformatics => "Bioinformatics",
         }
     }
@@ -78,7 +78,7 @@ impl WorkspacePage {
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
             Self::Endpoints => "Endpoints",
-            Self::UsersGroups => "Users/Groups",
+            Self::UsersGroups => "Local Capability Mapping",
             Self::Bioinformatics => "Bioinformatics",
         }
     }
@@ -4574,41 +4574,41 @@ pub fn users_groups_summary_cards(view: &UsersGroupsWorkspaceResponse) -> Vec<Da
 
     vec![
         DashboardMetric::new(
-            "Host mode",
+            "Authority adapter",
             &view.host_mode,
-            "Authority source for this console",
+            "Prosopikon-aware host boundary for this appliance",
             "identity",
         ),
-        DashboardMetric::new("Current user", username, authority, "authority"),
+        DashboardMetric::new("Local actor", username, authority, "authority"),
         DashboardMetric::new(
-            "Product users",
+            "Session principals",
             view.users.len().to_string(),
-            "Browser-session users known to DASObjectStore",
+            "Local principals surfaced to the appliance capability map",
             "local",
         ),
         DashboardMetric::new(
-            "Local groups",
+            "OS groups",
             view.groups.len().to_string(),
-            "OS groups visible for the current user",
+            "Local groups visible for capability evaluation",
             "membership",
         ),
         DashboardMetric::new(
-            "Writer groups",
+            "Capability groups",
             view.writer_groups.len().to_string(),
-            format!("Managed registry: {}", view.groups_file_path),
+            format!("Local mapping registry: {}", view.groups_file_path),
             "policy",
         ),
         DashboardMetric::new(
-            "Admin operations",
+            "Mapping actions",
             view.operations
                 .iter()
                 .filter(|operation| operation.enabled)
                 .count()
                 .to_string(),
             if view.capabilities.administrator_actions_enabled {
-                "Local group administration is available."
+                "Local capability mapping is available."
             } else {
-                "Local group administration requires sudo-derived authority."
+                "Capability mapping requires sudo-derived authority."
             },
             "readiness",
         ),
@@ -4923,9 +4923,9 @@ pub fn users_groups_page(props: &UsersGroupsPageProps) -> Html {
     html! {
         <section class="dos-page" data-page="users-groups" data-api-route={api_path}>
             <PageHeader
-                eyebrow="Identity and writer policy"
-                title="Users/Groups"
-                summary="Local OS authority, product-local sessions, writer groups, and administrator readiness."
+                eyebrow="Prosopikon-aware appliance mapping"
+                title="Local Capability Mapping"
+                summary="Map Prosopikon-recognized local principals onto appliance OS groups and DASObjectStore writer/admin capabilities."
             />
             { render_users_groups_state(
                 &*users_groups_state,
@@ -4949,8 +4949,8 @@ fn render_users_groups_state(
     match state {
         ApiLoadState::Loading => render_users_groups_state_message(
             "Loading",
-            "Loading local authority",
-            "The Web console is requesting OS-local user, group, and writer-policy readiness.",
+            "Loading capability mapping",
+            "The Web console is requesting local principal, OS group, and writer-policy readiness.",
         ),
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
             render_users_groups_workspace(
@@ -4962,15 +4962,15 @@ fn render_users_groups_state(
             )
         }
         ApiLoadState::Empty(message) => {
-            render_users_groups_state_message("Inventory", "No local authority data", message)
+            render_users_groups_state_message("Inventory", "No capability mapping data", message)
         }
         ApiLoadState::PermissionDenied(message) => render_users_groups_state_message(
             "Permission denied",
-            "Users/Groups requires a standalone authenticated session",
+            "Capability mapping requires a standalone authenticated session",
             message,
         ),
         ApiLoadState::TransportError(message) => {
-            render_users_groups_state_message("Error", "Unable to load Users/Groups", message)
+            render_users_groups_state_message("Error", "Unable to load capability mapping", message)
         }
     }
 }
@@ -5003,10 +5003,10 @@ fn render_users_groups_workspace(
                     api_base_path,
                 ) }
                 <section class="dos-card dos-wide-card">
-                    <span class="dos-card-label">{ "Current OS authority" }</span>
+                    <span class="dos-card-label">{ "Local appliance actor" }</span>
                     if let Some(user) = &view.current_user {
                         <h2>{ &user.username }</h2>
-                        <p>{ if user.sudo_administrator { "Sudo-derived administrator." } else { "Inspection-only local user." } }</p>
+                        <p>{ if user.sudo_administrator { "Sudo-derived capability administrator." } else { "Inspection-only local actor; Prosopikon remains the identity authority." } }</p>
                         <div class="dos-chip-row">
                             { for user.groups.iter().map(|group| html! {
                                 <span class="dos-status-pill">{ group }</span>
@@ -5018,9 +5018,9 @@ fn render_users_groups_workspace(
                     }
                 </section>
                 <section class="dos-card">
-                    <span class="dos-card-label">{ "Writer policy" }</span>
-                    <h2>{ format!("{} managed group(s)", view.writer_groups.len()) }</h2>
-                    <p>{ format!("Registry: {}", view.groups_file_path) }</p>
+                    <span class="dos-card-label">{ "Capability groups" }</span>
+                    <h2>{ format!("{} mapped group(s)", view.writer_groups.len()) }</h2>
+                    <p>{ format!("Local registry: {}", view.groups_file_path) }</p>
                     <div class="dos-chip-row">
                         { for view.writer_groups.iter().map(|group| html! {
                             <span class="dos-status-pill">{ format!("{} · {}", group.display_name, if group.current_user_member { "member" } else { "not member" }) }</span>
@@ -5028,9 +5028,9 @@ fn render_users_groups_workspace(
                     </div>
                 </section>
                 <section class="dos-card">
-                    <span class="dos-card-label">{ "Administrator readiness" }</span>
+                    <span class="dos-card-label">{ "Mapping readiness" }</span>
                     <h2>{ if view.capabilities.administrator_actions_enabled { "Ready" } else { "Not ready" } }</h2>
-                    <p>{ if view.capabilities.os_local_group_management { "Local group management is available for this session." } else { "Local group management is gated until sudo-derived authority is present." } }</p>
+                    <p>{ if view.capabilities.os_local_group_management { "Local capability mapping is available for this session." } else { "Capability mapping is gated until sudo-derived authority is present." } }</p>
                     { for view.operations.iter().map(|operation| html! {
                         <p>{ format!("{}: {}", operation.label, if operation.enabled { "available" } else { operation.blocked_reason.as_deref().unwrap_or("blocked") }) }</p>
                     }) }
@@ -5169,11 +5169,11 @@ fn render_create_local_group_card(
     html! {
         <section class="dos-card dos-create-card" data-action="create_local_group">
             <span class="dos-create-mark">{ "+" }</span>
-            <h2>{ "Create local group" }</h2>
-            <p>{ if enabled { "Preview and submit a daemon-owned local writer/admin group creation." } else { "Requires sudo-derived administrator authority." } }</p>
+            <h2>{ "Create capability group" }</h2>
+            <p>{ if enabled { "Preview a local OS group that maps Prosopikon-recognized principals to DASObjectStore writer/admin capabilities." } else { "Requires sudo-derived administrator authority." } }</p>
             <span class="dos-status-pill">{ if enabled { "Available" } else { "Admin only" } }</span>
             <label class="dos-form-field">
-                <span>{ "Group name" }</span>
+                <span>{ "Capability group" }</span>
                 <input
                     type="text"
                     value={state.group_name.clone()}
@@ -5206,7 +5206,7 @@ fn render_create_local_group_card(
                 />
             </label>
             <button class="dos-auth-submit" type="button" disabled={!can_apply} onclick={apply}>
-                { if state.applying { "Submitting..." } else { "Submit group creation" } }
+                { if state.applying { "Submitting..." } else { "Submit capability group" } }
             </button>
             { render_local_group_admin_result("Submitted", state.submitted.as_ref()) }
             if let Some(error) = &state.error {
@@ -5330,11 +5330,11 @@ fn render_assign_local_user_card(
     html! {
         <section class="dos-card dos-create-card" data-action="assign_local_user_to_group">
             <span class="dos-create-mark">{ "@" }</span>
-            <h2>{ "Assign user to group" }</h2>
-            <p>{ if enabled { "Preview and submit a daemon-owned local user-to-group assignment." } else { "Requires sudo-derived administrator authority." } }</p>
+            <h2>{ "Map principal to group" }</h2>
+            <p>{ if enabled { "Preview a local principal-to-group mapping for appliance capability enforcement." } else { "Requires sudo-derived administrator authority." } }</p>
             <span class="dos-status-pill">{ if enabled { "Available" } else { "Admin only" } }</span>
             <label class="dos-form-field">
-                <span>{ "Username" }</span>
+                <span>{ "Local principal" }</span>
                 <input
                     type="text"
                     list="dos-local-users"
@@ -5359,7 +5359,7 @@ fn render_assign_local_user_card(
                 </datalist>
             </label>
             <label class="dos-form-field">
-                <span>{ "Group" }</span>
+                <span>{ "Capability group" }</span>
                 <select onchange={{
                     let assign_user_state = assign_user_state.clone();
                     Callback::from(move |event: Event| {
@@ -5403,7 +5403,7 @@ fn render_assign_local_user_card(
                 />
             </label>
             <button class="dos-auth-submit" type="button" disabled={!can_apply} onclick={apply}>
-                { if state.applying { "Submitting..." } else { "Submit group assignment" } }
+                { if state.applying { "Submitting..." } else { "Submit capability mapping" } }
             </button>
             { render_local_group_admin_result("Submitted", state.submitted.as_ref()) }
             if let Some(error) = &state.error {
@@ -6339,7 +6339,7 @@ mod tests {
                 "ObjectStores",
                 "Endpoints",
                 "Activity",
-                "Users/Groups",
+                "Capabilities",
                 "Bioinformatics"
             ]
         );
@@ -6360,8 +6360,8 @@ mod tests {
         assert!(synoptikon_labels.contains(&"Activity"));
         assert!(standalone_labels.contains(&"Endpoints"));
         assert!(!synoptikon_labels.contains(&"Endpoints"));
-        assert!(standalone_labels.contains(&"Users/Groups"));
-        assert!(!synoptikon_labels.contains(&"Users/Groups"));
+        assert!(standalone_labels.contains(&"Capabilities"));
+        assert!(!synoptikon_labels.contains(&"Capabilities"));
     }
 
     #[test]
@@ -6545,11 +6545,11 @@ mod tests {
             .map(|card| (card.label.as_str(), card.value.as_str()))
             .collect();
 
-        assert!(values.contains(&("Host mode", "standalone")));
-        assert!(values.contains(&("Current user", "operator")));
-        assert!(values.contains(&("Product users", "1")));
-        assert!(values.contains(&("Writer groups", "1")));
-        assert!(values.contains(&("Admin operations", "2")));
+        assert!(values.contains(&("Authority adapter", "standalone")));
+        assert!(values.contains(&("Local actor", "operator")));
+        assert!(values.contains(&("Session principals", "1")));
+        assert!(values.contains(&("Capability groups", "1")));
+        assert!(values.contains(&("Mapping actions", "2")));
     }
 
     #[test]
