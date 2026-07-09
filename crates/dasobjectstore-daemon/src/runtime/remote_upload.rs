@@ -78,6 +78,20 @@ impl RemoteUploadAdmissionGate {
         }
     }
 
+    pub fn run_s3_transfer<T, E>(
+        self: &Arc<Self>,
+        policy: RemoteUploadBackpressurePolicy,
+        ssd_pressure: DaemonSsdPressure,
+        transfer: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, RemoteUploadS3TransferRunError<E>> {
+        let permit = self
+            .try_acquire_s3_transfer(policy, ssd_pressure)
+            .map_err(RemoteUploadS3TransferRunError::Admission)?;
+        let result = transfer().map_err(RemoteUploadS3TransferRunError::Transfer);
+        drop(permit);
+        result
+    }
+
     fn try_begin_s3_transfer_inner(
         &self,
         policy: RemoteUploadBackpressurePolicy,
@@ -119,6 +133,12 @@ impl Drop for RemoteUploadS3TransferPermit {
             self.released = true;
         }
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum RemoteUploadS3TransferRunError<E> {
+    Admission(RemoteEasyconnectUploadAdmissionDecision),
+    Transfer(E),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -225,6 +245,65 @@ mod tests {
             .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
             .expect_err("third transfer blocked");
 
+        assert_eq!(
+            decision.action,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 2);
+    }
+
+    #[test]
+    fn run_s3_transfer_releases_capacity_after_success() {
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let policy = RemoteUploadBackpressurePolicy::default();
+
+        let result = gate.run_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites, || {
+            assert_eq!(gate.snapshot().active_s3_transfers, 1);
+            Ok::<_, &'static str>("uploaded")
+        });
+
+        assert_eq!(result, Ok("uploaded"));
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+    }
+
+    #[test]
+    fn run_s3_transfer_releases_capacity_after_transfer_error() {
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let policy = RemoteUploadBackpressurePolicy::default();
+
+        let result = gate.run_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites, || {
+            assert_eq!(gate.snapshot().active_s3_transfers, 1);
+            Err::<(), _>("network failed")
+        });
+
+        assert_eq!(
+            result,
+            Err(super::RemoteUploadS3TransferRunError::Transfer(
+                "network failed"
+            ))
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+    }
+
+    #[test]
+    fn run_s3_transfer_does_not_execute_when_admission_blocks() {
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let policy = RemoteUploadBackpressurePolicy::default();
+        let _first = gate
+            .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
+            .expect("first transfer admitted");
+        let _second = gate
+            .try_acquire_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites)
+            .expect("second transfer admitted");
+
+        let result: Result<(), super::RemoteUploadS3TransferRunError<&'static str>> = gate
+            .run_s3_transfer(policy, DaemonSsdPressure::AcceptingWrites, || {
+                panic!("blocked transfer must not execute")
+            });
+
+        let Err(super::RemoteUploadS3TransferRunError::Admission(decision)) = result else {
+            panic!("expected admission failure");
+        };
         assert_eq!(
             decision.action,
             RemoteUploadBackpressureAction::PauseNewTransfers

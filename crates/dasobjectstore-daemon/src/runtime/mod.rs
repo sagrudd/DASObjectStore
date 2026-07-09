@@ -53,7 +53,7 @@ pub use performance_policy::{
 };
 pub use remote_upload::{
     RemoteUploadAdmissionGate, RemoteUploadQueueDepths, RemoteUploadRuntimeSnapshot,
-    RemoteUploadS3TransferPermit,
+    RemoteUploadS3TransferPermit, RemoteUploadS3TransferRunError,
 };
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,

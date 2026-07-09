@@ -800,6 +800,9 @@ planning are tracked under Milestones 21 and 22.
   accepting more remote intake.
 - [x] Add a daemon remote-upload S3 transfer permit guard so upload workers can
   reserve bounded S3 intake capacity and release it safely.
+- [x] Add a daemon remote-upload S3 transfer execution wrapper that refuses
+  blocked admission before invoking transfer code and releases capacity after
+  success or failure.
 - [ ] Wire the daemon runtime remote-upload admission gate into concrete upload
   workers/jobs so SSD staging, S3/object-service intake, HDD landing workers,
   and verification cannot grow without bounds.
