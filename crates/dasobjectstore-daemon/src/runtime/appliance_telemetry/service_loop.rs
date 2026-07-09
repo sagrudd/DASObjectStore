@@ -395,7 +395,8 @@ fn merge_bounded_appliance_telemetry_state(
                 existing.samples.extend(sample_set.samples.clone());
                 merged = existing;
             }
-            Ok(_) | Err(_) => {}
+            Ok(_) => {}
+            Err(_) => preserve_corrupt_appliance_telemetry_state(path, sample_set)?,
         },
         Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(error) => {
@@ -407,6 +408,61 @@ fn merge_bounded_appliance_telemetry_state(
     }
     retain_bounded_appliance_telemetry_samples(&mut merged);
     Ok(merged)
+}
+
+fn preserve_corrupt_appliance_telemetry_state(
+    path: &Path,
+    sample_set: &ApplianceTelemetrySampleSet,
+) -> Result<(), ApplianceTelemetryLoopError> {
+    let corrupt_path = corrupt_appliance_telemetry_state_path(path, sample_set);
+    fs::rename(path, &corrupt_path).map_err(|error| {
+        ApplianceTelemetryLoopError::Sink(format!(
+            "preserve corrupt telemetry state file {} as {}: {error}",
+            path.display(),
+            corrupt_path.display()
+        ))
+    })?;
+    if let Some(parent) = path.parent() {
+        sync_parent_directory(parent)?;
+    }
+    Ok(())
+}
+
+fn corrupt_appliance_telemetry_state_path(
+    path: &Path,
+    sample_set: &ApplianceTelemetrySampleSet,
+) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("appliance-telemetry");
+    let timestamp = sanitize_filename_component(&sample_set.generated_at_utc);
+    let candidate = parent.join(format!("corrupt-{stem}-{timestamp}.json"));
+    if !candidate.exists() {
+        return candidate;
+    }
+    parent.join(format!(
+        "corrupt-{stem}-{timestamp}-{}.json",
+        std::process::id()
+    ))
+}
+
+fn sanitize_filename_component(value: &str) -> String {
+    let mut sanitized = String::new();
+    for character in value.chars() {
+        if character.is_ascii_alphanumeric() {
+            sanitized.push(character);
+        } else if !sanitized.ends_with('-') {
+            sanitized.push('-');
+        }
+    }
+    let sanitized = sanitized.trim_matches('-');
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized.to_string()
+    }
 }
 
 fn can_merge_appliance_telemetry_state(

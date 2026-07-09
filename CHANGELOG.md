@@ -27,6 +27,9 @@ agreement before landing.
 - Bound the appliance telemetry JSON history with raw samples for the last hour,
   one-minute buckets through one day, ten-minute buckets through ten days, and
   hourly buckets through three months.
+- Preserve corrupt telemetry JSON for operator inspection before starting a
+  fresh schema-valid history, with regression coverage for recovery, atomic
+  rewrite cleanup, missing-data markers, and disk/enclosure identity retention.
 
 ## 0.61.2 - 2026-07-09
 

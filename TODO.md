@@ -956,7 +956,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Implement bounded JSON retention so telemetry cannot grow without limit,
   with retention/downsampling policy sufficient for 1 hour, 1 day, 10 day, and
   3 month chart windows.
-- [ ] Add daemon tests for telemetry cadence, bounded retention, atomic rewrite,
+- [x] Add daemon tests for telemetry cadence, bounded retention, atomic rewrite,
   corrupt JSON recovery, missing metric markers, and preservation of
   enclosure/disk identity across samples.
 - [ ] Expose authenticated telemetry API routes for current summaries,

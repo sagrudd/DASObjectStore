@@ -1,13 +1,14 @@
 use dasobjectstore_daemon::{
-    appliance_telemetry_state_path, collect_appliance_session_telemetry,
+    appliance_sample_set, appliance_telemetry_state_path, collect_appliance_session_telemetry,
     collect_linux_cpu_telemetry, collect_linux_disk_capacity_telemetry,
     collect_linux_disk_io_telemetry, collect_linux_memory_telemetry, parse_linux_cpu_snapshot,
-    parse_linux_diskstats, validate_appliance_telemetry_cadence, ApplianceHostTelemetryCollector,
-    ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError, ApplianceTelemetryLoop,
-    ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError, ApplianceTelemetryMissingReason,
-    ApplianceTelemetrySink, ApplianceTelemetrySleeper, ApplianceTelemetrySource,
-    FileBackedApplianceTelemetrySink, LinuxCpuSnapshot, LinuxHostTelemetrySample,
-    LinuxProcTelemetryCollector, APPLIANCE_TELEMETRY_FILE_NAME,
+    parse_linux_diskstats, validate_appliance_telemetry_cadence, ApplianceDiskCapacityTelemetry,
+    ApplianceEnclosureTelemetry, ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry,
+    ApplianceTelemetryCollectorError, ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig,
+    ApplianceTelemetryLoopError, ApplianceTelemetryMissingReason, ApplianceTelemetrySink,
+    ApplianceTelemetrySleeper, ApplianceTelemetrySource, FileBackedApplianceTelemetrySink,
+    LinuxCpuSnapshot, LinuxHostTelemetrySample, LinuxProcTelemetryCollector,
+    APPLIANCE_TELEMETRY_FILE_NAME,
 };
 use serde_json::json;
 use std::fs;
@@ -266,7 +267,6 @@ fn file_backed_sink_writes_current_schema_shaped_sample_set() {
     let written: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&state_path).expect("state reads"))
             .expect("state is json");
-    fs::remove_dir_all(&root).expect("fixture root removed");
 
     assert!(state_path.ends_with(APPLIANCE_TELEMETRY_FILE_NAME));
     assert_eq!(
@@ -283,6 +283,19 @@ fn file_backed_sink_writes_current_schema_shaped_sample_set() {
         written["samples"][0]["sessions"]["missing_reason"],
         "not_configured"
     );
+    let missing_paths = written["samples"][0]["missing_data"]
+        .as_array()
+        .expect("missing data array")
+        .iter()
+        .map(|marker| marker["path"].as_str().expect("missing data path"))
+        .collect::<Vec<_>>();
+    assert!(missing_paths.contains(&"cpu.usage_percent"));
+    assert!(missing_paths.contains(&"disks.capacity"));
+    assert!(missing_paths.contains(&"disks.io"));
+    assert!(missing_paths.contains(&"sessions"));
+
+    assert_no_telemetry_temp_files(&state_path);
+    fs::remove_dir_all(&root).expect("fixture root removed");
 }
 
 #[test]
@@ -334,6 +347,74 @@ fn file_backed_sink_bounds_telemetry_retention_by_chart_windows() {
         ]
     );
     assert_eq!(written["generated_at_utc"], "2026-07-09T18:00:00Z");
+}
+
+#[test]
+fn file_backed_sink_preserves_corrupt_json_and_starts_fresh_history() {
+    let root = temp_root("appliance-telemetry-corrupt-recovery");
+    let state_path = appliance_telemetry_state_path(&root);
+    fs::create_dir_all(state_path.parent().expect("telemetry parent")).expect("telemetry dir");
+    fs::write(&state_path, "{ this is not json").expect("corrupt state written");
+    let mut sink = FileBackedApplianceTelemetrySink::new(&state_path);
+
+    let sample_set = sample_set_at("2026-07-09T18:01:00Z");
+    sink.record(&sample_set).expect("state recovered");
+
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("state reads"))
+            .expect("state is json");
+    let corrupt_files = telemetry_dir_entries(&state_path)
+        .into_iter()
+        .filter(|name| name.starts_with("corrupt-appliance-telemetry.v1-"))
+        .collect::<Vec<_>>();
+    assert_eq!(corrupt_files.len(), 1);
+    let corrupt_path = state_path
+        .parent()
+        .expect("telemetry parent")
+        .join(&corrupt_files[0]);
+    assert_eq!(
+        fs::read_to_string(&corrupt_path).expect("corrupt state reads"),
+        "{ this is not json"
+    );
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(written["generated_at_utc"], "2026-07-09T18:01:00Z");
+    assert_eq!(
+        written["samples"].as_array().expect("samples array").len(),
+        1
+    );
+}
+
+#[test]
+fn file_backed_sink_preserves_enclosure_and_disk_identity_across_samples() {
+    let root = temp_root("appliance-telemetry-identity-retained");
+    let state_path = appliance_telemetry_state_path(&root);
+    let mut sink = FileBackedApplianceTelemetrySink::new(&state_path);
+
+    for timestamp in ["2026-07-09T18:02:00Z", "2026-07-09T18:02:30Z"] {
+        let sample_set = sample_set_with_disk_identity(timestamp);
+        sink.record(&sample_set).expect("state written");
+    }
+
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("state reads"))
+            .expect("state is json");
+    assert_no_telemetry_temp_files(&state_path);
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    let samples = written["samples"].as_array().expect("samples array");
+    assert_eq!(samples.len(), 2);
+    for sample in samples {
+        assert_eq!(sample["enclosures"][0]["enclosure_id"], "qnap-tl-d800c-01");
+        assert_eq!(sample["enclosures"][0]["disk_ids"][0], "qnap-a");
+        assert_eq!(sample["disks"][0]["disk_id"], "qnap-a");
+        assert_eq!(sample["disks"][0]["label"], "QNAP bay 1");
+        assert_eq!(sample["disks"][0]["enclosure_id"], "qnap-tl-d800c-01");
+        assert_eq!(
+            sample["disks"][0]["device_path"],
+            "/dev/disk/by-id/fixture-a"
+        );
+    }
 }
 
 #[test]
@@ -517,6 +598,89 @@ fn sample_set_at(timestamp: &str) -> dasobjectstore_daemon::ApplianceTelemetrySa
     ApplianceTelemetryLoop::new(config, FakeCollector::new())
         .collect_once(timestamp)
         .expect("sample collected")
+}
+
+fn sample_set_with_disk_identity(
+    timestamp: &str,
+) -> dasobjectstore_daemon::ApplianceTelemetrySampleSet {
+    let snapshot = LinuxCpuSnapshot {
+        total_jiffies: 100,
+        idle_jiffies: 90,
+        logical_core_count: 2,
+    };
+    appliance_sample_set(
+        30,
+        source(),
+        timestamp.to_string(),
+        LinuxHostTelemetrySample {
+            cpu: collect_linux_cpu_telemetry(None, &snapshot, "0.10 0.20 0.30 1/10 42"),
+            memory: ApplianceMemoryTelemetry {
+                total_bytes: Some(100),
+                available_bytes: Some(75),
+                used_percent: Some(25.0),
+                swap_total_bytes: Some(0),
+                swap_used_bytes: Some(0),
+                missing_reason: None,
+            },
+            enclosures: vec![ApplianceEnclosureTelemetry {
+                enclosure_id: "qnap-tl-d800c-01".to_string(),
+                label: Some("QNAP TL-D800C".to_string()),
+                disk_ids: vec!["qnap-a".to_string()],
+                total_bytes: Some(1_000),
+                available_bytes: Some(700),
+                used_percent: Some(30.0),
+                missing_reason: None,
+            }],
+            disks: vec![ApplianceDiskCapacityTelemetry {
+                disk_id: "qnap-a".to_string(),
+                label: Some("QNAP bay 1".to_string()),
+                mount_path: "/srv/dasobjectstore/hdd/qnap-a".to_string(),
+                role: "hdd".to_string(),
+                enclosure_id: Some("qnap-tl-d800c-01".to_string()),
+                device_path: Some("/dev/disk/by-id/fixture-a".to_string()),
+                filesystem: Some("ext4".to_string()),
+                total_bytes: Some(1_000),
+                available_bytes: Some(700),
+                used_percent: Some(30.0),
+                missing_reason: None,
+            }],
+            disk_io: Vec::new(),
+            sessions: dasobjectstore_daemon::ApplianceSessionTelemetry {
+                web_active_sessions: Some(1),
+                remote_agent_active_sessions: Some(0),
+                distinct_logged_in_users: Some(1),
+                administrator_sessions: Some(1),
+                operator_sessions: Some(0),
+                missing_reason: None,
+            },
+            cpu_snapshot: snapshot,
+        },
+    )
+}
+
+fn assert_no_telemetry_temp_files(state_path: &std::path::Path) {
+    let temp_prefix = format!(".{APPLIANCE_TELEMETRY_FILE_NAME}.tmp-");
+    let temp_files = telemetry_dir_entries(state_path)
+        .into_iter()
+        .filter(|name| name.starts_with(&temp_prefix))
+        .collect::<Vec<_>>();
+    assert!(
+        temp_files.is_empty(),
+        "unexpected telemetry temp files: {temp_files:?}"
+    );
+}
+
+fn telemetry_dir_entries(state_path: &std::path::Path) -> Vec<String> {
+    fs::read_dir(state_path.parent().expect("telemetry parent"))
+        .expect("telemetry directory reads")
+        .map(|entry| {
+            entry
+                .expect("telemetry entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>()
 }
 
 #[derive(Default)]
