@@ -132,6 +132,7 @@ pub enum DaemonApiRequest {
     RemoteEasyconnectExchangePairing(RemoteEasyconnectExchangePairingRequest),
     RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionRequest),
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionRequest),
+    RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionRequest),
 }
 
 impl DaemonApiRequest {
@@ -181,7 +182,8 @@ impl DaemonApiRequest {
             | Self::JobList(_)
             | Self::JobStatus(_)
             | Self::ServiceStatus(_)
-            | Self::RemoteEasyconnectDiscovery(_) => Ok(()),
+            | Self::RemoteEasyconnectDiscovery(_)
+            | Self::RemoteEasyconnectUploadAdmission(_) => Ok(()),
         }
     }
 }
@@ -214,6 +216,7 @@ pub enum DaemonApiResponse {
     RemoteEasyconnectExchangePairing(RemoteEasyconnectExchangePairingResponse),
     RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionResponse),
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionResponse),
+    RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionDecision),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
 }
@@ -425,17 +428,19 @@ mod tests {
         DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonIngressOrigin,
         DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest,
         DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceStatusRequest, ObjectBrowserPageRequest, ObjectBrowserRequest,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        DaemonServiceStatusRequest, DaemonSsdPressure, ObjectBrowserPageRequest,
+        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
+        ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+        PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectUploadAdmissionRequest,
         StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
+    use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
     use dasobjectstore_object_service::ObjectServiceProviderId;
 
     #[test]
@@ -697,12 +702,23 @@ mod tests {
                 renewal_token: "renewal-token".to_string(),
                 requested_lifetime_seconds: Some(28_800),
             });
+        let admission = DaemonApiRequest::RemoteEasyconnectUploadAdmission(
+            RemoteEasyconnectUploadAdmissionRequest {
+                policy: RemoteUploadBackpressurePolicy::default(),
+                ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                active_s3_transfers: 0,
+                ssd_stage_queue_depth: 0,
+                hdd_landing_queue_depth: 0,
+                verification_queue_depth: 0,
+            },
+        );
 
         let discovery = serde_json::to_value(discovery).expect("discovery serializes");
         let create = serde_json::to_value(create).expect("create serializes");
         let exchange = serde_json::to_value(exchange).expect("exchange serializes");
         let revoke = serde_json::to_value(revoke).expect("revoke serializes");
         let renew = serde_json::to_value(renew).expect("renew serializes");
+        let admission = serde_json::to_value(admission).expect("admission serializes");
 
         assert_eq!(discovery["command"], "remote_easyconnect_discovery");
         assert_eq!(create["command"], "remote_easyconnect_create_pairing");
@@ -713,6 +729,8 @@ mod tests {
         assert_eq!(exchange["command"], "remote_easyconnect_exchange_pairing");
         assert_eq!(revoke["command"], "remote_easyconnect_revoke_session");
         assert_eq!(renew["command"], "remote_easyconnect_renew_session");
+        assert_eq!(admission["command"], "remote_easyconnect_upload_admission");
+        assert_eq!(admission["payload"]["ssd_pressure"], "accepting_writes");
         assert_eq!(
             REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
             "/api/v1/remote/easyconnect/pairings/exchange"

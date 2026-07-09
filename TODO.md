@@ -793,9 +793,11 @@ planning are tracked under Milestones 21 and 22.
   handoff, Web remote-upload workspace payloads, and remote S3 upload plans.
 - [x] Add daemon remote-upload admission decisions for SSD pressure, S3 transfer
   concurrency, SSD staging, HDD landing, and verification queue limits.
+- [x] Expose remote-upload admission decisions through daemon request/response,
+  request handler, and typed client boundaries.
 - [ ] Wire remote-upload admission decisions into concrete daemon-managed upload
-  job execution so SSD staging, S3/object-service intake, HDD landing workers,
-  and verification cannot grow without bounds.
+  job runtime so SSD staging, S3/object-service intake, HDD landing workers, and
+  verification cannot grow without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
   expired pairings, and interrupted browser tabs.

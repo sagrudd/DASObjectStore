@@ -299,7 +299,9 @@ until daemon health reports capacity for more intake.
 The daemon exposes the same policy as an admission decision for remote upload
 intake. The decision can accept intake, pause new transfers with a retry hint
 when S3 concurrency or SSD/HDD/verification queues are full, or reject new
-transfers while SSD pressure is critical.
+transfers while SSD pressure is critical. Remote upload executors should call
+the daemon admission API before starting additional intake rather than applying
+local-only queue guesses.
 
 Credential Helper Contract
 --------------------------

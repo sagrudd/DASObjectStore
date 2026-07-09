@@ -26,6 +26,7 @@ use crate::api::{
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
     StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
@@ -348,6 +349,16 @@ where
             response => Err(unexpected("remote_easyconnect_renew_session", response)),
         }
     }
+
+    pub fn remote_easyconnect_upload_admission(
+        &self,
+        request: RemoteEasyconnectUploadAdmissionRequest,
+    ) -> Result<RemoteEasyconnectUploadAdmissionDecision, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectUploadAdmission(request))? {
+            DaemonApiResponse::RemoteEasyconnectUploadAdmission(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_upload_admission", response)),
+        }
+    }
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -392,6 +403,9 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         }
         DaemonApiResponse::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
         DaemonApiResponse::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
+        DaemonApiResponse::RemoteEasyconnectUploadAdmission(_) => {
+            "remote_easyconnect_upload_admission"
+        }
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }
@@ -410,17 +424,22 @@ mod tests {
         DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserRequest,
-        ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
-        ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectCreatePairingResponse, StoreInventoryRequest, StoreInventoryResponse,
-        SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserPageRequest,
+        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
+        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
+        ObjectFolderDownloadResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectUploadAdmissionDecision,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::remote_upload::{
+        RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
+    };
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::cell::RefCell;
     use std::path::PathBuf;
@@ -773,6 +792,43 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::RemoteEasyconnectCreatePairing(_)]
+        ));
+    }
+
+    #[test]
+    fn remote_easyconnect_upload_admission_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::RemoteEasyconnectUploadAdmission(
+                RemoteEasyconnectUploadAdmissionDecision {
+                    action: RemoteUploadBackpressureAction::PauseNewTransfers,
+                    reason: RemoteEasyconnectUploadBackpressureReason::S3TransferConcurrencyFull,
+                    retry_after_seconds: Some(30),
+                    message: "Remote S3 transfer concurrency is full".to_string(),
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .remote_easyconnect_upload_admission(RemoteEasyconnectUploadAdmissionRequest {
+                policy: RemoteUploadBackpressurePolicy::default(),
+                ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                active_s3_transfers: 2,
+                ssd_stage_queue_depth: 0,
+                hdd_landing_queue_depth: 0,
+                verification_queue_depth: 0,
+            })
+            .expect("upload admission response");
+
+        assert_eq!(
+            response.action,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+        );
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::RemoteEasyconnectUploadAdmission(_)]
         ));
     }
 

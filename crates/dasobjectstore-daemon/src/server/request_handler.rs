@@ -1,9 +1,9 @@
 use crate::api::{
-    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobKind,
-    DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
+    decide_remote_easyconnect_upload_admission, AssignLocalUserToLocalGroupRequest,
+    AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
+    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
@@ -303,6 +303,11 @@ where
                         error.to_string(),
                     ))),
                 }
+            }
+            DaemonApiRequest::RemoteEasyconnectUploadAdmission(request) => {
+                Ok(DaemonApiResponse::RemoteEasyconnectUploadAdmission(
+                    decide_remote_easyconnect_upload_admission(request),
+                ))
             }
             request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "not_implemented",
@@ -1122,6 +1127,7 @@ impl DaemonApiRequest {
             Self::RemoteEasyconnectExchangePairing(_) => "remote_easyconnect_exchange_pairing",
             Self::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
             Self::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
+            Self::RemoteEasyconnectUploadAdmission(_) => "remote_easyconnect_upload_admission",
         }
     }
 }
@@ -1142,11 +1148,12 @@ mod tests {
         DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
-        ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, StoreInventoryRequest, SubmitIngestFilesRequest,
+        DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserPageRequest,
+        ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
+        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
+        ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
+        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, SubmitIngestFilesRequest,
         SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
@@ -1158,6 +1165,9 @@ mod tests {
     };
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
+    use dasobjectstore_core::remote_upload::{
+        RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
+    };
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
@@ -2222,6 +2232,38 @@ mod tests {
             .lifecycle_calls
             .borrow()
             .is_empty());
+    }
+
+    #[test]
+    fn daemon_handles_remote_upload_admission_decisions() {
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"));
+
+        let response = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectUploadAdmission(
+                RemoteEasyconnectUploadAdmissionRequest {
+                    policy: RemoteUploadBackpressurePolicy::default(),
+                    ssd_pressure: DaemonSsdPressure::Critical,
+                    active_s3_transfers: 0,
+                    ssd_stage_queue_depth: 0,
+                    hdd_landing_queue_depth: 0,
+                    verification_queue_depth: 0,
+                },
+            ))
+            .expect("request handled");
+
+        let DaemonApiResponse::RemoteEasyconnectUploadAdmission(decision) = response else {
+            panic!("expected remote upload admission decision");
+        };
+
+        assert_eq!(
+            decision.action,
+            RemoteUploadBackpressureAction::RejectNewTransfers
+        );
+        assert_eq!(
+            decision.reason,
+            RemoteEasyconnectUploadBackpressureReason::SsdCriticalPressure
+        );
     }
 
     #[test]

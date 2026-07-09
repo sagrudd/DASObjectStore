@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Wire remote-upload admission decisions into the daemon request/response,
+  request handler, and typed client boundary so upload executors can ask the
+  daemon before admitting more intake.
 - Add daemon remote-upload admission decisions for SSD pressure, S3 transfer
   concurrency, SSD staging, HDD landing, and verification queue limits.
 - Promote ingress-origin classification into the core domain crate and include
