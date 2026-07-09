@@ -303,7 +303,9 @@ transfers while SSD pressure is critical. Remote upload executors should call
 the daemon admission API before starting additional intake rather than applying
 local-only queue guesses. The daemon runtime maintains the active S3 transfer
 count and queue depths used by this decision, so clients should treat
-``pause_new_transfers`` and ``reject_new_transfers`` as authoritative.
+``pause_new_transfers`` and ``reject_new_transfers`` as authoritative. Daemon
+upload workers reserve S3 intake capacity with a transfer permit and release it
+when the transfer completes or fails.
 
 Credential Helper Contract
 --------------------------

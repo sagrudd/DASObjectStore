@@ -798,6 +798,8 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add a daemon runtime remote-upload admission gate that tracks active S3
   transfers plus SSD staging, HDD landing, and verification queue depths before
   accepting more remote intake.
+- [x] Add a daemon remote-upload S3 transfer permit guard so upload workers can
+  reserve bounded S3 intake capacity and release it safely.
 - [ ] Wire the daemon runtime remote-upload admission gate into concrete upload
   workers/jobs so SSD staging, S3/object-service intake, HDD landing workers,
   and verification cannot grow without bounds.

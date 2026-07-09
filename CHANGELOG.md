@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Add an RAII-style daemon remote-upload S3 transfer permit so concrete upload
+  workers can reserve bounded transfer capacity and release it safely on
+  completion or failure.
 - Add a daemon runtime remote-upload admission gate that tracks active S3
   transfers plus SSD staging, HDD landing, and verification queue depths before
   accepting more remote intake.
