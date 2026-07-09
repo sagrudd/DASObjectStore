@@ -1,3 +1,4 @@
+use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
 use dasobjectstore_mnemosyne::{
     validate_synoptikon_integrated_host_boundary, ProductHostMode, StorageAuthority,
     SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedHostBoundaryError,
@@ -22,6 +23,8 @@ fn accepts_complete_synoptikon_integrated_context() {
         StorageAuthority::SynoptikonStorageBinding
     );
     assert_eq!(boundary.context.storage_binding_id, "binding-1");
+    assert_eq!(boundary.ingress_origin, IngressOrigin::Synoptikon);
+    assert_eq!(boundary.landing_mode, IngressLandingMode::SsdFirst);
 }
 
 #[test]

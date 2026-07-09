@@ -719,6 +719,9 @@ agent transfer as ``remote_s3``. Both origins advertise ``ssd_first`` landing
 mode. This means selected bytes stage through the chosen ObjectStore's managed
 SSD first, then settle to daemon-selected HDD targets according to store policy;
 the browser and remote agent never choose or write individual disks directly.
+The remote-upload workspace API also returns these origin and landing-mode
+values so Web, CLI-agent, and future product-integration clients can make the
+same placement assumptions before transfer begins.
 
 Bioinformatics Workspace
 ------------------------

@@ -2,6 +2,7 @@ use crate::dashboard::{
     CapacitySummaryView, DashboardWarning, ObjectStoreCardView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 use crate::home_aggregator::now_utc_string;
+use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
 use dasobjectstore_daemon::{
     remote_easyconnect_object_store_grants_for_actor, DaemonLocalActor,
     RemoteEasyconnectObjectStoreAccessPolicy,
@@ -17,6 +18,7 @@ pub struct RemoteUploadWorkspaceView {
     pub schema_version: String,
     pub generated_at_utc: String,
     pub actor: RemoteUploadActorView,
+    pub ingress_policy: RemoteUploadIngressPolicyView,
     pub stores: Vec<RemoteUploadObjectStoreView>,
     pub warnings: Vec<DashboardWarning>,
 }
@@ -26,6 +28,25 @@ pub struct RemoteUploadActorView {
     pub username: String,
     pub groups: Vec<String>,
     pub sudo_administrator: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteUploadIngressPolicyView {
+    pub browser_ingress_origin: IngressOrigin,
+    pub browser_landing_mode: IngressLandingMode,
+    pub paired_agent_ingress_origin: IngressOrigin,
+    pub paired_agent_landing_mode: IngressLandingMode,
+}
+
+impl RemoteUploadIngressPolicyView {
+    fn standard() -> Self {
+        Self {
+            browser_ingress_origin: IngressOrigin::WebUpload,
+            browser_landing_mode: IngressOrigin::WebUpload.landing_mode(),
+            paired_agent_ingress_origin: IngressOrigin::RemoteS3,
+            paired_agent_landing_mode: IngressOrigin::RemoteS3.landing_mode(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -141,6 +162,7 @@ pub(crate) fn live_remote_upload_workspace_for_user(
             groups,
             sudo_administrator,
         },
+        ingress_policy: RemoteUploadIngressPolicyView::standard(),
         stores,
         warnings: unique_warnings(warnings),
     }
@@ -201,11 +223,12 @@ fn unique_warnings(warnings: Vec<DashboardWarning>) -> Vec<DashboardWarning> {
 
 #[cfg(test)]
 mod tests {
-    use super::remote_upload_store_view;
+    use super::{remote_upload_store_view, RemoteUploadIngressPolicyView};
     use crate::dashboard::{
         CapacitySummaryView, DashboardHealthStateView, ObjectStoreCardView,
         WriterPolicyReadinessView,
     };
+    use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
     use dasobjectstore_daemon::RemoteEasyconnectObjectStoreGrant;
 
     #[test]
@@ -231,6 +254,23 @@ mod tests {
 
         assert!(!view.upload_allowed);
         assert_eq!(view.upload_state, "export_unavailable");
+    }
+
+    #[test]
+    fn remote_upload_workspace_uses_shared_ingress_policy() {
+        let policy = RemoteUploadIngressPolicyView::standard();
+
+        assert_eq!(policy.browser_ingress_origin, IngressOrigin::WebUpload);
+        assert_eq!(policy.browser_landing_mode, IngressLandingMode::SsdFirst);
+        assert_eq!(policy.paired_agent_ingress_origin, IngressOrigin::RemoteS3);
+        assert_eq!(
+            policy.paired_agent_landing_mode,
+            IngressLandingMode::SsdFirst
+        );
+
+        let encoded = serde_json::to_value(policy).expect("policy serializes");
+        assert_eq!(encoded["browser_ingress_origin"], "web_upload");
+        assert_eq!(encoded["paired_agent_ingress_origin"], "remote_s3");
     }
 
     fn card(

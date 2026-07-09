@@ -2,6 +2,7 @@ use crate::{
     validation::is_uuid_like, MneionDasObjectStoreEndpoint, MneionDasObjectStoreEndpointKind,
     MneionEndpointObjectContract, DASOBJECTSTORE_PRODUCT_ID,
 };
+use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
@@ -113,6 +114,8 @@ pub struct MneionManagedStorageBindingExport {
 pub struct MneionManagedStorageBindingContract {
     pub storage_definition_id: String,
     pub governance_domain_id: String,
+    pub ingress_origin: IngressOrigin,
+    pub landing_mode: IngressLandingMode,
     pub endpoint_kind: String,
     pub manager_product_id: String,
     pub object_contract: String,
@@ -186,6 +189,8 @@ pub fn export_mneion_managed_storage_binding(
         managed_binding_contract: MneionManagedStorageBindingContract {
             storage_definition_id: object_store_identifier,
             governance_domain_id,
+            ingress_origin: IngressOrigin::Mneion,
+            landing_mode: IngressOrigin::Mneion.landing_mode(),
             endpoint_kind: endpoint_kind_contract_name(&request.managed_endpoint),
             manager_product_id: request.managed_endpoint.manager_product_id.trim().to_string(),
             object_contract: object_contract_name(request.managed_endpoint.object_contract),
@@ -447,6 +452,14 @@ mod tests {
             "dasobjectstore_nfs"
         );
         assert_eq!(
+            export.managed_binding_contract.ingress_origin,
+            dasobjectstore_core::ingress::IngressOrigin::Mneion
+        );
+        assert_eq!(
+            export.managed_binding_contract.landing_mode,
+            dasobjectstore_core::ingress::IngressLandingMode::SsdFirst
+        );
+        assert_eq!(
             export.managed_binding_contract.manager_product_id,
             "dasobjectstore"
         );
@@ -482,6 +495,8 @@ mod tests {
             json!({
                 "storage_definition_id": STORE_UUID,
                 "governance_domain_id": TENANT_DOMAIN_UUID,
+                "ingress_origin": "mneion",
+                "landing_mode": "ssd_first",
                 "endpoint_kind": "dasobjectstore_das",
                 "manager_product_id": "dasobjectstore",
                 "object_contract": "object_style",

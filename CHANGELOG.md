@@ -10,6 +10,9 @@ agreement before landing.
 
 - Promote ingress-origin classification into the core domain crate and include
   ``remote_s3``/``ssd_first`` in remote S3 upload plans and CLI output.
+- Advertise shared ``web_upload``, ``remote_s3``, ``synoptikon``, and
+  ``mneion`` ingress placement contracts through Web remote-upload and
+  Mnemosyne/Synoptikon binding payloads.
 - Carry typed ingress origin through daemon file-ingest requests, default
   legacy requests to ``local_server``, and have the daemon runtime use the
   request origin when deciding SSD-first versus direct-to-HDD landing.

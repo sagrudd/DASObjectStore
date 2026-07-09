@@ -4,6 +4,7 @@ use crate::{
     HostModeProfile, HostModeProfileError, ProductHostMode, StorageAuthority,
     DASOBJECTSTORE_PRODUCT_ID,
 };
+use dasobjectstore_core::ingress::{IngressLandingMode, IngressOrigin};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
@@ -56,6 +57,8 @@ impl SynoptikonIntegratedHostBoundaryContext {
 pub struct SynoptikonIntegratedHostBoundary {
     pub profile: HostModeProfile,
     pub context: SynoptikonIntegratedHostBoundaryContext,
+    pub ingress_origin: IngressOrigin,
+    pub landing_mode: IngressLandingMode,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -116,6 +119,8 @@ pub fn validate_synoptikon_integrated_host_boundary(
     Ok(SynoptikonIntegratedHostBoundary {
         profile,
         context: context.clone(),
+        ingress_origin: IngressOrigin::Synoptikon,
+        landing_mode: IngressOrigin::Synoptikon.landing_mode(),
     })
 }
 

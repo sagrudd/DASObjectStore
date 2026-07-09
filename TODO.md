@@ -778,9 +778,11 @@ planning are tracked under Milestones 21 and 22.
   decisions.
 - [x] Wire centralized ingress-origin classification through remote/S3
   object-service upload planning and CLI plan output.
-- [ ] Wire centralized ingress-origin classification through remaining Web
-  direct-upload execution and future Synoptikon/Mneion submission paths so
-  placement behavior is deterministic everywhere.
+- [x] Wire centralized ingress-origin classification through Web remote-upload
+  workspace payloads and Mnemosyne/Synoptikon binding contracts.
+- [ ] Wire centralized ingress-origin classification through future Web
+  direct-upload execution and concrete Synoptikon/Mneion submission clients
+  once those byte-transfer/client paths are implemented.
 - [ ] Implement the default HDD landing worker rule as
   `max(number_of_hdds_in_enclosure - 2, 2)` for SSD destage and local
   direct-to-HDD ingest, with one active writer per physical HDD and bounded
