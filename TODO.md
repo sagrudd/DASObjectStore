@@ -791,9 +791,11 @@ planning are tracked under Milestones 21 and 22.
   the same HDD and never places redundant copies of one object on the same disk.
 - [x] Add shared remote-upload backpressure policy contracts to easyconnect
   handoff, Web remote-upload workspace payloads, and remote S3 upload plans.
-- [ ] Add daemon-enforced queue/backpressure execution for remote uploads so SSD staging,
-  S3/object-service intake, HDD landing workers, and verification cannot grow
-  without bounds.
+- [x] Add daemon remote-upload admission decisions for SSD pressure, S3 transfer
+  concurrency, SSD staging, HDD landing, and verification queue limits.
+- [ ] Wire remote-upload admission decisions into concrete daemon-managed upload
+  job execution so SSD staging, S3/object-service intake, HDD landing workers,
+  and verification cannot grow without bounds.
 - [ ] Add resumable and cancellable remote upload jobs, including cleanup of
   partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
   expired pairings, and interrupted browser tabs.

@@ -1,9 +1,12 @@
+use super::health::DaemonSsdPressure;
 use super::ingest::{DaemonIngressLandingMode, DaemonIngressOrigin};
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
 use dasobjectstore_core::ids::StoreId;
-use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
+use dasobjectstore_core::remote_upload::{
+    RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
+};
 use serde::{Deserialize, Serialize};
 
 pub const REMOTE_EASYCONNECT_DISCOVERY_ROUTE: &str = "/api/v1/remote/easyconnect/discovery";
@@ -389,6 +392,111 @@ pub struct RemoteEasyconnectUploadHandoffFailure {
     pub retryable: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadAdmissionRequest {
+    #[serde(default)]
+    pub policy: RemoteUploadBackpressurePolicy,
+    pub ssd_pressure: DaemonSsdPressure,
+    pub active_s3_transfers: u16,
+    pub ssd_stage_queue_depth: u32,
+    pub hdd_landing_queue_depth: u32,
+    pub verification_queue_depth: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectUploadAdmissionDecision {
+    pub action: RemoteUploadBackpressureAction,
+    pub reason: RemoteEasyconnectUploadBackpressureReason,
+    pub retry_after_seconds: Option<u64>,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEasyconnectUploadBackpressureReason {
+    AllClear,
+    SsdHighPressure,
+    SsdCriticalPressure,
+    S3TransferConcurrencyFull,
+    SsdStageQueueFull,
+    HddLandingQueueFull,
+    VerificationQueueFull,
+}
+
+pub fn decide_remote_easyconnect_upload_admission(
+    request: RemoteEasyconnectUploadAdmissionRequest,
+) -> RemoteEasyconnectUploadAdmissionDecision {
+    match request.ssd_pressure {
+        DaemonSsdPressure::Critical => {
+            return admission_decision(
+                request.policy.ssd_critical_pressure_action,
+                RemoteEasyconnectUploadBackpressureReason::SsdCriticalPressure,
+                "SSD pressure is critical; remote upload intake must wait for daemon drain.",
+            );
+        }
+        DaemonSsdPressure::High => {
+            return admission_decision(
+                request.policy.ssd_high_pressure_action,
+                RemoteEasyconnectUploadBackpressureReason::SsdHighPressure,
+                "SSD pressure is high; pause new remote uploads while existing work drains.",
+            );
+        }
+        DaemonSsdPressure::AcceptingWrites => {}
+    }
+
+    if request.active_s3_transfers >= request.policy.max_s3_transfer_concurrency {
+        return admission_decision(
+            RemoteUploadBackpressureAction::PauseNewTransfers,
+            RemoteEasyconnectUploadBackpressureReason::S3TransferConcurrencyFull,
+            "Remote S3 transfer concurrency is full; wait before starting another upload.",
+        );
+    }
+    if request.ssd_stage_queue_depth >= request.policy.max_ssd_stage_queue_depth {
+        return admission_decision(
+            RemoteUploadBackpressureAction::PauseNewTransfers,
+            RemoteEasyconnectUploadBackpressureReason::SsdStageQueueFull,
+            "SSD staging queue is full; wait for staged objects to drain.",
+        );
+    }
+    if request.hdd_landing_queue_depth >= request.policy.max_hdd_landing_queue_depth {
+        return admission_decision(
+            RemoteUploadBackpressureAction::PauseNewTransfers,
+            RemoteEasyconnectUploadBackpressureReason::HddLandingQueueFull,
+            "HDD landing queue is full; wait for daemon-selected HDD writers to catch up.",
+        );
+    }
+    if request.verification_queue_depth >= request.policy.max_verification_queue_depth {
+        return admission_decision(
+            RemoteUploadBackpressureAction::PauseNewTransfers,
+            RemoteEasyconnectUploadBackpressureReason::VerificationQueueFull,
+            "Verification queue is full; wait for completed writes to verify.",
+        );
+    }
+
+    admission_decision(
+        RemoteUploadBackpressureAction::Accept,
+        RemoteEasyconnectUploadBackpressureReason::AllClear,
+        "Remote upload intake is available.",
+    )
+}
+
+fn admission_decision(
+    action: RemoteUploadBackpressureAction,
+    reason: RemoteEasyconnectUploadBackpressureReason,
+    message: impl Into<String>,
+) -> RemoteEasyconnectUploadAdmissionDecision {
+    RemoteEasyconnectUploadAdmissionDecision {
+        action,
+        reason,
+        retry_after_seconds: match action {
+            RemoteUploadBackpressureAction::Accept => None,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+            | RemoteUploadBackpressureAction::RejectNewTransfers => Some(30),
+        },
+        message: message.into(),
+    }
+}
+
 pub fn plan_remote_easyconnect_upload_handoff(
     request: RemoteEasyconnectUploadHandoffRequest,
 ) -> Result<RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectValidationError> {
@@ -608,20 +716,26 @@ fn validate_requested_lifetime(
 
 #[cfg(test)]
 mod tests {
+    use super::super::health::DaemonSsdPressure;
     use super::super::ingest::{DaemonIngressLandingMode, DaemonIngressOrigin};
     use super::{
-        plan_remote_easyconnect_upload_handoff, remote_easyconnect_object_store_grants_for_actor,
+        decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
+        remote_easyconnect_object_store_grants_for_actor,
         remote_easyconnect_renew_after_offset_seconds,
         resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
         RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectSessionPolicy, RemoteEasyconnectUploadHandoffMode,
+        RemoteEasyconnectSessionPolicy, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, RemoteEasyconnectUploadHandoffMode,
         RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffState,
         RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
         REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
         REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
     };
     use crate::auth::DaemonLocalActor;
+    use dasobjectstore_core::remote_upload::{
+        RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
+    };
 
     #[test]
     fn validates_create_pairing_contract() {
@@ -906,6 +1020,82 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn remote_upload_admission_accepts_when_queues_have_capacity() {
+        let decision = decide_remote_easyconnect_upload_admission(admission_request());
+
+        assert_eq!(decision.action, RemoteUploadBackpressureAction::Accept);
+        assert_eq!(
+            decision.reason,
+            RemoteEasyconnectUploadBackpressureReason::AllClear
+        );
+        assert_eq!(decision.retry_after_seconds, None);
+    }
+
+    #[test]
+    fn remote_upload_admission_rejects_new_intake_on_critical_ssd_pressure() {
+        let mut request = admission_request();
+        request.ssd_pressure = DaemonSsdPressure::Critical;
+
+        let decision = decide_remote_easyconnect_upload_admission(request);
+
+        assert_eq!(
+            decision.action,
+            RemoteUploadBackpressureAction::RejectNewTransfers
+        );
+        assert_eq!(
+            decision.reason,
+            RemoteEasyconnectUploadBackpressureReason::SsdCriticalPressure
+        );
+        assert_eq!(decision.retry_after_seconds, Some(30));
+    }
+
+    #[test]
+    fn remote_upload_admission_pauses_when_any_bounded_queue_is_full() {
+        let policy = RemoteUploadBackpressurePolicy::default();
+        let mut request = admission_request();
+        request.active_s3_transfers = policy.max_s3_transfer_concurrency;
+        assert_paused_for(
+            request,
+            RemoteEasyconnectUploadBackpressureReason::S3TransferConcurrencyFull,
+        );
+
+        let mut request = admission_request();
+        request.ssd_stage_queue_depth = policy.max_ssd_stage_queue_depth;
+        assert_paused_for(
+            request,
+            RemoteEasyconnectUploadBackpressureReason::SsdStageQueueFull,
+        );
+
+        let mut request = admission_request();
+        request.hdd_landing_queue_depth = policy.max_hdd_landing_queue_depth;
+        assert_paused_for(
+            request,
+            RemoteEasyconnectUploadBackpressureReason::HddLandingQueueFull,
+        );
+
+        let mut request = admission_request();
+        request.verification_queue_depth = policy.max_verification_queue_depth;
+        assert_paused_for(
+            request,
+            RemoteEasyconnectUploadBackpressureReason::VerificationQueueFull,
+        );
+    }
+
+    fn assert_paused_for(
+        request: RemoteEasyconnectUploadAdmissionRequest,
+        reason: RemoteEasyconnectUploadBackpressureReason,
+    ) {
+        let decision = decide_remote_easyconnect_upload_admission(request);
+
+        assert_eq!(
+            decision.action,
+            RemoteUploadBackpressureAction::PauseNewTransfers
+        );
+        assert_eq!(decision.reason, reason);
+        assert_eq!(decision.retry_after_seconds, Some(30));
+    }
+
     fn store(object_store: &str, bucket: &str) -> RemoteEasyconnectObjectStoreAccessPolicy {
         RemoteEasyconnectObjectStoreAccessPolicy {
             object_store: object_store.to_string(),
@@ -938,6 +1128,17 @@ mod tests {
             total_bytes: 3072,
             browser_origin: "https://192.168.1.192:8448".to_string(),
             client_request_id: Some("handoff-1".to_string()),
+        }
+    }
+
+    fn admission_request() -> RemoteEasyconnectUploadAdmissionRequest {
+        RemoteEasyconnectUploadAdmissionRequest {
+            policy: RemoteUploadBackpressurePolicy::default(),
+            ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+            active_s3_transfers: 1,
+            ssd_stage_queue_depth: 1,
+            hdd_landing_queue_depth: 1,
+            verification_queue_depth: 1,
         }
     }
 

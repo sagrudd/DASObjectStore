@@ -296,6 +296,11 @@ queue depth to four. When SSD pressure is high, clients should pause new
 transfers; when SSD pressure is critical, clients should reject new transfers
 until daemon health reports capacity for more intake.
 
+The daemon exposes the same policy as an admission decision for remote upload
+intake. The decision can accept intake, pause new transfers with a retry hint
+when S3 concurrency or SSD/HDD/verification queues are full, or reject new
+transfers while SSD pressure is critical.
+
 Credential Helper Contract
 --------------------------
 
