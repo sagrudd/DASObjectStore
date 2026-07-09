@@ -332,6 +332,9 @@ CLI transfer adapter for S3-compatible object-service intake. That adapter
 runs the configured ``aws s3`` command through the daemon command-runner
 boundary, keeps redacted display arguments separate from execution arguments,
 and records completion bytes through the common remote-upload progress model.
+The runtime job executor constructs the remote-upload job and AWS CLI transfer
+from one easyconnect job request, then runs that job through the same
+admission-gated worker used by lower-level transfer adapters.
 
 Credential Helper Contract
 --------------------------

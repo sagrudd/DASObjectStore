@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.5 - 2026-07-09
 
+- Add a daemon runtime easyconnect AWS CLI upload-job executor that constructs
+  remote-upload jobs and S3 transfer plans before running them through the
+  admission-gated worker.
 - Add a daemon AWS CLI remote-upload byte-transfer adapter that runs concrete
   S3-compatible transfer commands through the admission-gated worker and
   records completion byte progress.

@@ -370,6 +370,57 @@ impl RemoteUploadS3ByteTransfer for RemoteUploadAwsCliByteTransfer<'_> {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteEasyconnectAwsCliUploadJobRequest {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+    pub policy: RemoteUploadBackpressurePolicy,
+    pub ssd_pressure: DaemonSsdPressure,
+    pub program: String,
+    pub args: Vec<String>,
+    pub display_args: Vec<String>,
+    pub submitted_at_utc: String,
+    pub started_at_utc: String,
+    pub finished_at_utc: String,
+    pub progress_updated_at_utc: String,
+    pub actor: Option<String>,
+    pub progress_message: Option<String>,
+}
+
+pub fn run_remote_easyconnect_aws_cli_upload_job(
+    registry: &dyn AdminJobRegistry,
+    gate: Arc<RemoteUploadAdmissionGate>,
+    runner: &dyn ServiceCommandRunner,
+    request: RemoteEasyconnectAwsCliUploadJobRequest,
+) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+    let worker_request = RemoteUploadS3TransferWorkerRequest {
+        job: RemoteUploadS3TransferJob {
+            job_id: request.job_id,
+            object_store: request.object_store,
+            source_bytes: request.source_bytes,
+            policy: request.policy,
+            ssd_pressure: request.ssd_pressure,
+        },
+        submitted_at_utc: request.submitted_at_utc,
+        started_at_utc: request.started_at_utc,
+        finished_at_utc: request.finished_at_utc,
+        actor: request.actor,
+    };
+    let mut transfer_plan = RemoteUploadAwsCliTransferPlan::new(
+        request.program,
+        request.args,
+        request.source_bytes,
+        request.progress_updated_at_utc,
+    )
+    .with_display_args(request.display_args);
+    if let Some(message) = request.progress_message {
+        transfer_plan = transfer_plan.with_progress_message(message);
+    }
+    let transfer = RemoteUploadAwsCliByteTransfer::new(transfer_plan, runner);
+    RemoteUploadS3TransferWorker::new(gate, registry).run_byte_transfer(worker_request, &transfer)
+}
+
 pub struct RemoteUploadS3TransferWorker<'a> {
     gate: Arc<RemoteUploadAdmissionGate>,
     registry: &'a dyn AdminJobRegistry,
@@ -733,7 +784,8 @@ fn admission_decision_for_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        record_remote_upload_s3_transfer_job, RemoteUploadAdmissionGate,
+        record_remote_upload_s3_transfer_job, run_remote_easyconnect_aws_cli_upload_job,
+        RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
         RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan, RemoteUploadQueueDepths,
         RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
         RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
@@ -1447,6 +1499,44 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn easyconnect_aws_cli_upload_job_runs_transfer_and_persists_final_status() {
+        let root = temp_root("remote-upload-easyconnect-aws-cli-job");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let runner = FakeRemoteUploadCommandRunner::default();
+
+        let report = run_remote_easyconnect_aws_cli_upload_job(
+            &registry,
+            std::sync::Arc::clone(&gate),
+            &runner,
+            easyconnect_aws_cli_job_request("remote-upload-job-012"),
+        )
+        .expect("easyconnect aws cli upload job completed");
+
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "aws");
+        assert_eq!(calls[0].args[0], "s3");
+        assert_eq!(calls[0].display_args[2], "<source-redacted>");
+        assert_eq!(report.progress_events.len(), 1);
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected complete final event");
+        };
+        let status = registry
+            .status(DaemonJobStatusRequest {
+                job_id: final_job.job_id,
+            })
+            .expect("final status");
+        assert_eq!(status.job.kind, DaemonJobKind::RemoteUpload);
+        assert_eq!(status.job.state, DaemonJobState::Complete);
+        assert_eq!(status.job.progress.work_bytes_done, 42);
+        assert_eq!(status.job.actor.as_deref(), Some("stephen"));
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
     struct RecordingByteTransfer {
         bytes_done: u64,
     }
@@ -1553,6 +1643,35 @@ mod tests {
             started_at_utc: "2026-07-09T14:10:05Z".to_string(),
             finished_at_utc: "2026-07-09T14:11:00Z".to_string(),
             actor: Some("stephen".to_string()),
+        }
+    }
+
+    fn easyconnect_aws_cli_job_request(job_id: &str) -> RemoteEasyconnectAwsCliUploadJobRequest {
+        RemoteEasyconnectAwsCliUploadJobRequest {
+            job_id: job_id.to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            policy: RemoteUploadBackpressurePolicy::default(),
+            ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+            program: "aws".to_string(),
+            args: vec![
+                "s3".to_string(),
+                "cp".to_string(),
+                "/private/source/reads.fastq.gz".to_string(),
+                "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
+            ],
+            display_args: vec![
+                "s3".to_string(),
+                "cp".to_string(),
+                "<source-redacted>".to_string(),
+                "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
+            ],
+            submitted_at_utc: "2026-07-09T14:10:00Z".to_string(),
+            started_at_utc: "2026-07-09T14:10:05Z".to_string(),
+            finished_at_utc: "2026-07-09T14:11:00Z".to_string(),
+            progress_updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+            actor: Some("stephen".to_string()),
+            progress_message: Some("easyconnect AWS CLI transfer copied 42 bytes".to_string()),
         }
     }
 
