@@ -1021,9 +1021,12 @@ planning are tracked under Milestones 21 and 22.
   days/3 months selector, missing and sparse sample interpretation, the
   30-second browser refresh cadence, and read-only operator versus
   administrator expectations.
-- [ ] Update `docs/standalone-service.md` with telemetry state file location,
+- [x] Update `docs/standalone-service.md` with telemetry state file location,
   retention policy, ownership, cadence configuration, and how to reset or
   inspect telemetry safely.
+  Completed by documenting packaged telemetry ownership, config validation,
+  supported cadences, bounded retention, read-only inspection commands, safe
+  history reset steps, and daemon log checks for collection/write failures.
 - [ ] Add cross-product notes for floundeR documenting the generalized
   telemetry chart grammar so Monas, Synoptikon, Mnematikon, and future
   Mnemosyne products can reuse the same plotting semantics.

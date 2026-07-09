@@ -193,6 +193,28 @@ The initial telemetry state file is:
 enables telemetry with a 30 second cadence by default; the initial supported
 cadences are 6 seconds for fast local diagnostics and 30 seconds for normal
 appliance operation.
+Operators configure telemetry in `/etc/dasobjectstore/daemon.json` under the
+`telemetry` object:
+
+```json
+"telemetry": {
+  "enabled": true,
+  "cadence_seconds": 30
+}
+```
+
+Before restarting the service after a cadence or enablement change, validate
+the edited file:
+
+```console
+sudo dasobjectstored --config /etc/dasobjectstore/daemon.json --check-config
+sudo systemctl restart dasobjectstored.service
+```
+
+Setting `enabled` to `false` stops new samples from being written, but does not
+delete the existing telemetry history. Unsupported cadences, including values
+other than `6` or `30`, are rejected by daemon configuration validation.
+
 The JSON state is retained in bounded tiers so long-running appliances cannot
 grow the file without limit: raw cadence samples are kept for the last hour,
 one sample per minute is kept through one day, one sample per ten-minute bucket
@@ -244,6 +266,44 @@ that sees an unknown future major version SHALL leave it untouched and fall back
 to the newest version it understands. Migrations SHALL write the target version
 atomically and keep the source version until migration succeeds, preserving a
 rollback and audit path.
+
+### Inspecting and Resetting Telemetry Safely
+
+Prefer the authenticated daemon `appliance_telemetry` API or the Web Home page
+for normal inspection. Direct file reads are for service diagnosis only and
+must be read-only. Useful checks are:
+
+```console
+sudo stat -c '%U:%G %a %n' /var/lib/dasobjectstore/telemetry
+sudo stat -c '%U:%G %a %n' /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json
+sudo python3 -m json.tool /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json >/dev/null
+sudo grep -n '"generated_at_utc"' /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json | head -1
+```
+
+Do not edit the JSON state file in place. The daemon rewrites it atomically and
+will replace malformed JSON by preserving the bad file with a timestamped
+`corrupt-*.json` name before starting a fresh schema-valid history.
+
+To intentionally reset telemetry history without touching managed object data,
+stop the daemon, move only the telemetry state file aside, then start the
+daemon so it can create a fresh file on the next sample:
+
+```console
+sudo systemctl stop dasobjectstored.service
+sudo mv /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json \
+  /var/lib/dasobjectstore/telemetry/appliance-telemetry.v1.json.reset-$(date -u +%Y%m%dT%H%M%SZ)
+sudo systemctl start dasobjectstored.service
+sudo systemctl status dasobjectstored.service
+```
+
+Keep the telemetry directory itself in place with `dasobjectstore:dasobjectstore`
+ownership and mode `0750`. Do not remove `/var/lib/dasobjectstore`,
+`/srv/dasobjectstore`, managed HDD roots, object-service metadata, or
+`admin-jobs` state when resetting telemetry. A reset only discards chart
+history; it does not repair daemon collection failures. If the new file is not
+created after the configured cadence, inspect `journalctl -u
+dasobjectstored.service` for `appliance telemetry collection failed` or
+`appliance telemetry write failed` messages.
 
 ## Remote Client Packages
 
