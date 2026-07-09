@@ -8,6 +8,8 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Derive remote-upload S3 transfer-rate telemetry from daemon byte progress
+  timestamps when transfer producers do not provide an explicit rate.
 - Wire easyconnect/AWS CLI remote-upload submissions to populate source scan
   count and staged-byte telemetry from the remote client's source inventory.
 - Add a typed daemon remote-upload progress telemetry payload covering source

@@ -554,7 +554,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         let running_job = running_daemon_job_for_s3_transfer(
             &job,
             submitted_at_utc.clone(),
-            started_at_utc,
+            started_at_utc.clone(),
             actor.clone(),
         )?;
         let running_event = daemon_job_event_for_summary(running_job.clone());
@@ -567,6 +567,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             object_store: job.object_store.clone(),
             source_bytes: job.source_bytes,
             submitted_at_utc: submitted_at_utc.clone(),
+            started_at_utc,
             actor: actor.clone(),
             events: Vec::new(),
         };
@@ -638,6 +639,7 @@ pub struct RemoteUploadS3TransferProgressReporter<'a> {
     object_store: String,
     source_bytes: u64,
     submitted_at_utc: String,
+    started_at_utc: String,
     actor: Option<String>,
     events: Vec<DaemonJobEvent>,
 }
@@ -648,6 +650,13 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
         update: RemoteUploadS3TransferProgressUpdate,
     ) -> Result<DaemonJobEvent, DaemonServiceRuntimeError> {
         let bytes_done = update.bytes_done.min(self.source_bytes);
+        let updated_at_utc = update.updated_at_utc;
+        let telemetry = remote_upload_progress_telemetry_with_s3_rate(
+            update.telemetry,
+            bytes_done,
+            &self.started_at_utc,
+            &updated_at_utc,
+        );
         let message = remote_upload_progress_message(
             update.message.unwrap_or_else(|| {
                 format!(
@@ -655,7 +664,7 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
                     self.object_store
                 )
             }),
-            update.telemetry.as_ref(),
+            telemetry.as_ref(),
         );
         let job = DaemonJobSummary {
             job_id: self.job_id.clone(),
@@ -670,7 +679,7 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
                 message: Some(message),
             },
             submitted_at_utc: self.submitted_at_utc.clone(),
-            updated_at_utc: update.updated_at_utc,
+            updated_at_utc,
             actor: self.actor.clone(),
             failure_message: None,
         };
@@ -862,6 +871,97 @@ fn remote_upload_progress_message(
     } else {
         format!("{base} | {}", fields.join(" "))
     }
+}
+
+fn remote_upload_progress_telemetry_with_s3_rate(
+    mut telemetry: Option<RemoteUploadProgressTelemetry>,
+    bytes_done: u64,
+    started_at_utc: &str,
+    updated_at_utc: &str,
+) -> Option<RemoteUploadProgressTelemetry> {
+    if telemetry
+        .as_ref()
+        .and_then(|telemetry| telemetry.s3_bytes_per_second)
+        .is_some()
+    {
+        return telemetry;
+    }
+    let Some(rate) = remote_upload_s3_bytes_per_second(bytes_done, started_at_utc, updated_at_utc)
+    else {
+        return telemetry;
+    };
+    match &mut telemetry {
+        Some(telemetry) => telemetry.s3_bytes_per_second = Some(rate),
+        None => {
+            telemetry = Some(RemoteUploadProgressTelemetry {
+                s3_bytes_per_second: Some(rate),
+                ..RemoteUploadProgressTelemetry::default()
+            });
+        }
+    }
+    telemetry
+}
+
+fn remote_upload_s3_bytes_per_second(
+    bytes_done: u64,
+    started_at_utc: &str,
+    updated_at_utc: &str,
+) -> Option<u64> {
+    let started = parse_utc_timestamp_seconds(started_at_utc)?;
+    let updated = parse_utc_timestamp_seconds(updated_at_utc)?;
+    let elapsed = u64::try_from(updated.checked_sub(started)?).ok()?;
+    if elapsed == 0 {
+        return None;
+    }
+    let rate = bytes_done / elapsed;
+    (rate > 0).then_some(rate)
+}
+
+fn parse_utc_timestamp_seconds(value: &str) -> Option<i64> {
+    let value = value.trim();
+    if value.len() != 20
+        || !value.ends_with('Z')
+        || value.get(4..5)? != "-"
+        || value.get(7..8)? != "-"
+        || value.get(10..11)? != "T"
+        || value.get(13..14)? != ":"
+        || value.get(16..17)? != ":"
+    {
+        return None;
+    }
+    let year = value.get(0..4)?.parse::<i64>().ok()?;
+    let month = value.get(5..7)?.parse::<u32>().ok()?;
+    let day = value.get(8..10)?.parse::<u32>().ok()?;
+    let hour = value.get(11..13)?.parse::<u32>().ok()?;
+    let minute = value.get(14..16)?.parse::<u32>().ok()?;
+    let second = value.get(17..19)?.parse::<u32>().ok()?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    Some(
+        days.saturating_mul(86_400)
+            .saturating_add(i64::from(hour) * 3_600)
+            .saturating_add(i64::from(minute) * 60)
+            .saturating_add(i64::from(second)),
+    )
+}
+
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let month = i64::from(month);
+    let day = i64::from(day);
+    let year = year - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 fn running_daemon_job_for_s3_transfer(
@@ -1907,6 +2007,38 @@ mod tests {
     }
 
     #[test]
+    fn transfer_worker_derives_s3_rate_telemetry_from_progress_timestamps() {
+        let root = temp_root("remote-upload-worker-rate-progress");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+
+        let report = worker
+            .run_with_progress(worker_request("remote-upload-job-033"), |progress| {
+                progress
+                    .record_progress(RemoteUploadS3TransferProgressUpdate {
+                        bytes_done: 40,
+                        updated_at_utc: "2026-07-09T14:10:15Z".to_string(),
+                        telemetry: None,
+                        message: Some("uploaded 40 bytes".to_string()),
+                    })
+                    .expect("progress recorded");
+                Ok::<(), &'static str>(())
+            })
+            .expect("worker completed");
+
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event");
+        };
+        assert_eq!(
+            progress_job.progress.message.as_deref(),
+            Some("uploaded 40 bytes | s3_bytes_per_second=4")
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn transfer_worker_runs_typed_byte_transfer_under_admission_gate() {
         let root = temp_root("remote-upload-worker-byte-transfer");
         let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
@@ -1925,7 +2057,7 @@ mod tests {
         assert_eq!(progress_job.progress.work_bytes_done, 32);
         assert_eq!(
             progress_job.progress.message.as_deref(),
-            Some("typed byte transfer copied 32 bytes")
+            Some("typed byte transfer copied 32 bytes | s3_bytes_per_second=1")
         );
         let DaemonJobEvent::Complete(final_job) = report.final_event else {
             panic!("expected complete final event");
