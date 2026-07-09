@@ -836,9 +836,13 @@ planning are tracked under Milestones 21 and 22.
 - [x] Wire the remote client/local-agent easyconnect upload command to call the
   daemon submit route so SSD staging, S3/object-service intake, HDD landing
   workers, and verification cannot grow without bounds end-to-end.
-- [ ] Add resumable and cancellable remote upload jobs, including cleanup of
-  partial SSD-staged objects, failed S3 multipart uploads, abandoned sessions,
-  expired pairings, and interrupted browser tabs.
+- [x] Add a daemon runtime cancellation cleanup plan for remote upload jobs,
+  covering partial SSD-staged objects, failed S3 multipart uploads, abandoned
+  sessions, expired pairings, and interrupted browser handoffs.
+- [ ] Wire resumable and cancellable remote upload job execution to the cleanup
+  plan, including cleanup workers for partial SSD-staged objects, failed S3
+  multipart uploads, abandoned sessions, expired pairings, and interrupted
+  browser tabs.
 - [ ] Extend daemon progress/events so remote uploads show source scan count,
   staged bytes, S3 transfer rate, SSD queue depth, HDD landing queue depth,
   active per-HDD writers, verification state, and session-renewal status.

@@ -363,6 +363,13 @@ admission-gated worker used by lower-level transfer adapters. The daemon API
 and typed daemon client now expose that executor as an easyconnect AWS CLI
 upload submission route, so paired clients can hand upload jobs to
 ``dasobjectstored`` instead of invoking storage mutation paths directly.
+Cancelled or interrupted remote uploads use a typed daemon cleanup plan. The
+plan identifies partial SSD-staged objects, incomplete S3 multipart uploads,
+abandoned remote sessions, expired pairings, and interrupted browser handoffs
+before cleanup workers mutate any state. Required destructive cleanup, such as
+partial SSD-stage removal or multipart abort, is distinguished from resumable
+session and browser-handoff cleanup so later progress views can report what is
+safe to retry.
 
 Credential Helper Contract
 --------------------------

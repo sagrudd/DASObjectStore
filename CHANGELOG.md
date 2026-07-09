@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.7 - 2026-07-09
+
+- Add a typed daemon runtime cleanup plan for cancelled or interrupted remote
+  uploads, covering partial SSD staging, failed multipart uploads, abandoned
+  sessions, expired pairings, and interrupted browser handoffs.
+
 ## 0.60.6 - 2026-07-09
 
 - Wire ``dasobjectstore-remote upload --submit-to-daemon`` through the typed

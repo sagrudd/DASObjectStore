@@ -780,6 +780,125 @@ pub enum RemoteUploadS3TransferJobOutcome {
     NotAdmitted(RemoteEasyconnectUploadAdmissionDecision),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupRequest {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+    pub staged_object_prefix: Option<String>,
+    pub multipart_upload_id: Option<String>,
+    pub session_id: Option<String>,
+    pub pairing_id: Option<String>,
+    pub browser_handoff_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupPlan {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+    pub resumable: bool,
+    pub actions: Vec<RemoteUploadCancellationCleanupAction>,
+}
+
+impl RemoteUploadCancellationCleanupPlan {
+    pub fn requires_work(&self) -> bool {
+        !self.actions.is_empty()
+    }
+
+    pub fn requires_multipart_abort(&self) -> bool {
+        self.actions.iter().any(|action| {
+            action.scope == RemoteUploadCancellationCleanupScope::FailedMultipartUpload
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCancellationCleanupAction {
+    pub scope: RemoteUploadCancellationCleanupScope,
+    pub identifier: String,
+    pub required: bool,
+    pub reason: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoteUploadCancellationCleanupScope {
+    PartialSsdStage,
+    FailedMultipartUpload,
+    AbandonedSession,
+    ExpiredPairing,
+    InterruptedBrowserHandoff,
+}
+
+pub fn plan_remote_upload_cancellation_cleanup(
+    request: RemoteUploadCancellationCleanupRequest,
+) -> RemoteUploadCancellationCleanupPlan {
+    let reason = request
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("remote upload was cancelled or interrupted")
+        .to_string();
+    let mut actions = Vec::new();
+
+    if let Some(prefix) = non_blank(request.staged_object_prefix.as_deref()) {
+        actions.push(RemoteUploadCancellationCleanupAction {
+            scope: RemoteUploadCancellationCleanupScope::PartialSsdStage,
+            identifier: prefix.to_string(),
+            required: true,
+            reason: format!("remove partial SSD-staged objects because {reason}"),
+        });
+    }
+    if let Some(upload_id) = non_blank(request.multipart_upload_id.as_deref()) {
+        actions.push(RemoteUploadCancellationCleanupAction {
+            scope: RemoteUploadCancellationCleanupScope::FailedMultipartUpload,
+            identifier: upload_id.to_string(),
+            required: true,
+            reason: format!("abort incomplete S3 multipart upload because {reason}"),
+        });
+    }
+    if let Some(session_id) = non_blank(request.session_id.as_deref()) {
+        actions.push(RemoteUploadCancellationCleanupAction {
+            scope: RemoteUploadCancellationCleanupScope::AbandonedSession,
+            identifier: session_id.to_string(),
+            required: false,
+            reason: format!(
+                "revoke remote upload session if no active job owns it because {reason}"
+            ),
+        });
+    }
+    if let Some(pairing_id) = non_blank(request.pairing_id.as_deref()) {
+        actions.push(RemoteUploadCancellationCleanupAction {
+            scope: RemoteUploadCancellationCleanupScope::ExpiredPairing,
+            identifier: pairing_id.to_string(),
+            required: false,
+            reason: format!("expire unused easyconnect pairing because {reason}"),
+        });
+    }
+    if let Some(handoff_id) = non_blank(request.browser_handoff_id.as_deref()) {
+        actions.push(RemoteUploadCancellationCleanupAction {
+            scope: RemoteUploadCancellationCleanupScope::InterruptedBrowserHandoff,
+            identifier: handoff_id.to_string(),
+            required: false,
+            reason: format!("close browser handoff state because {reason}"),
+        });
+    }
+
+    RemoteUploadCancellationCleanupPlan {
+        job_id: request.job_id,
+        object_store: request.object_store,
+        source_bytes: request.source_bytes,
+        resumable: actions.iter().all(|action| !action.required),
+        actions,
+    }
+}
+
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
 fn admission_decision_for_state(
     policy: RemoteUploadBackpressurePolicy,
     ssd_pressure: DaemonSsdPressure,
@@ -798,13 +917,15 @@ fn admission_decision_for_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        record_remote_upload_s3_transfer_job, run_remote_easyconnect_aws_cli_upload_job,
-        RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
-        RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan, RemoteUploadQueueDepths,
-        RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
-        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
-        RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
-        RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
+        plan_remote_upload_cancellation_cleanup, record_remote_upload_s3_transfer_job,
+        run_remote_easyconnect_aws_cli_upload_job, RemoteEasyconnectAwsCliUploadJobRequest,
+        RemoteUploadAdmissionGate, RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
+        RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupScope,
+        RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
+        RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
+        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressReporter,
+        RemoteUploadS3TransferProgressUpdate, RemoteUploadS3TransferWorker,
+        RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
         DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonJobEvent, DaemonJobKind,
@@ -1557,6 +1678,68 @@ mod tests {
         assert_eq!(gate.snapshot().active_s3_transfers, 0);
 
         cleanup(&root);
+    }
+
+    #[test]
+    fn cancellation_cleanup_plan_requires_partial_stage_and_multipart_cleanup() {
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-020".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: Some("ssd/remote-upload-job-020".to_string()),
+                multipart_upload_id: Some("multipart-123".to_string()),
+                session_id: Some("session-1".to_string()),
+                pairing_id: Some("pairing-1".to_string()),
+                browser_handoff_id: Some("handoff-1".to_string()),
+                reason: Some("user cancelled upload".to_string()),
+            });
+
+        assert!(plan.requires_work());
+        assert!(plan.requires_multipart_abort());
+        assert!(!plan.resumable);
+        assert_eq!(plan.actions.len(), 5);
+        assert_eq!(
+            plan.actions[0].scope,
+            RemoteUploadCancellationCleanupScope::PartialSsdStage
+        );
+        assert!(plan.actions[0].required);
+        assert_eq!(
+            plan.actions[1].scope,
+            RemoteUploadCancellationCleanupScope::FailedMultipartUpload
+        );
+        assert!(plan.actions[1].required);
+        assert!(plan.actions[1].reason.contains("user cancelled upload"));
+    }
+
+    #[test]
+    fn cancellation_cleanup_plan_can_be_resumable_when_only_session_state_remains() {
+        let plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-021".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 0,
+                staged_object_prefix: None,
+                multipart_upload_id: None,
+                session_id: Some("session-1".to_string()),
+                pairing_id: Some(" ".to_string()),
+                browser_handoff_id: Some("handoff-1".to_string()),
+                reason: None,
+            });
+
+        assert!(plan.requires_work());
+        assert!(!plan.requires_multipart_abort());
+        assert!(plan.resumable);
+        assert_eq!(plan.actions.len(), 2);
+        assert_eq!(
+            plan.actions[0].scope,
+            RemoteUploadCancellationCleanupScope::AbandonedSession
+        );
+        assert_eq!(
+            plan.actions[1].scope,
+            RemoteUploadCancellationCleanupScope::InterruptedBrowserHandoff
+        );
+        assert!(plan.actions.iter().all(|action| !action.required));
     }
 
     struct RecordingByteTransfer {

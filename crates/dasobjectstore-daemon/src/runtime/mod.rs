@@ -52,15 +52,17 @@ pub use performance_policy::{
     PERFORMANCE_RECOMMENDATION_SCHEMA,
 };
 pub use remote_upload::{
-    record_remote_upload_s3_transfer_job, run_remote_easyconnect_aws_cli_upload_job,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
-    RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan, RemoteUploadQueueDepths,
-    RemoteUploadRuntimeSnapshot, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
-    RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
-    RemoteUploadS3TransferPermit, RemoteUploadS3TransferProgressReporter,
-    RemoteUploadS3TransferProgressUpdate, RemoteUploadS3TransferRunError,
-    RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerReport,
-    RemoteUploadS3TransferWorkerRequest,
+    plan_remote_upload_cancellation_cleanup, record_remote_upload_s3_transfer_job,
+    run_remote_easyconnect_aws_cli_upload_job, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteUploadAdmissionGate, RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
+    RemoteUploadCancellationCleanupAction, RemoteUploadCancellationCleanupPlan,
+    RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupScope,
+    RemoteUploadQueueDepths, RemoteUploadRuntimeSnapshot, RemoteUploadS3ByteTransfer,
+    RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
+    RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferPermit,
+    RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
+    RemoteUploadS3TransferRunError, RemoteUploadS3TransferWorker,
+    RemoteUploadS3TransferWorkerReport, RemoteUploadS3TransferWorkerRequest,
 };
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,
