@@ -875,9 +875,11 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add server-side easyconnect API contract tests for revocation request
   validation, eight-hour renewal policy, active-upload renewal responses, and
   standalone local-user grant filtering.
-- [ ] Add persisted-session route/runtime tests for easyconnect revoked session
-  handling, renewal during active upload, and standalone local-user permission
-  checks.
+- [x] Add standalone easyconnect auth-context route tests for invalid, expired,
+  and revoked persisted local sessions.
+- [ ] Add persisted easyconnect session-store/runtime tests for revoked paired
+  upload sessions, renewal during active upload, and standalone local-user
+  permission checks beyond auth-context admission.
 - [ ] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.

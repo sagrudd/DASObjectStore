@@ -11,6 +11,8 @@ agreement before landing.
 - Add server-side easyconnect API contract coverage for session revocation,
   eight-hour renewal semantics, rotated renewal-token responses, and standalone
   local-user ObjectStore grant filtering.
+- Add standalone easyconnect auth-context route regressions for invalid,
+  expired, and revoked persisted local sessions.
 - Add remote-client easyconnect regression coverage for successful, denied, and
   expired pairing callbacks, paired upload sessions, renewal metadata states,
   and local rejection of expired sessions before stored credentials are used.

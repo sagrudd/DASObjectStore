@@ -2502,6 +2502,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn standalone_easyconnect_auth_context_rejects_invalid_session() {
+        let root = temp_root("easyconnect-auth-invalid");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store,
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = get_response_with_session(
+            app,
+            "/api/v1/remote/easyconnect/auth-context",
+            "stephen",
+            "invalid-session-token",
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_easyconnect_auth_context_rejects_expired_session() {
+        let root = temp_root("easyconnect-auth-expired");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let login = auth_store
+            .login("stephen", "secret")
+            .expect("login succeeds");
+        expire_user_sessions(&auth_store, "stephen");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store,
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = get_response_with_session(
+            app,
+            "/api/v1/remote/easyconnect/auth-context",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_easyconnect_auth_context_rejects_revoked_session() {
+        let root = temp_root("easyconnect-auth-revoked");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let login = auth_store
+            .login("stephen", "secret")
+            .expect("login succeeds");
+        auth_store
+            .logout("stephen", &login.session_token)
+            .expect("logout succeeds");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store,
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = get_response_with_session(
+            app,
+            "/api/v1/remote/easyconnect/auth-context",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn standalone_easyconnect_auth_context_uses_authenticated_local_user() {
         let root = temp_root("easyconnect-auth-context");
         let auth_store = registered_auth_store_for_user(&root, "stephen");
