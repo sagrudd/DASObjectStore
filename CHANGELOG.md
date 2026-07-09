@@ -8,6 +8,8 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Populate remote-upload progress with non-zero SSD stage and HDD landing
+  queue-depth telemetry from the daemon admission gate snapshot.
 - Derive remote-upload S3 transfer-rate telemetry from daemon byte progress
   timestamps when transfer producers do not provide an explicit rate.
 - Wire easyconnect/AWS CLI remote-upload submissions to populate source scan

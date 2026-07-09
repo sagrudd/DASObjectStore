@@ -562,6 +562,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
 
         let mut progress_reporter = RemoteUploadS3TransferProgressReporter {
             registry: self.registry,
+            gate: Arc::clone(&self.gate),
             job_id: DaemonJobId::new(job.job_id.clone())
                 .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job.job_id.clone()))?,
             object_store: job.object_store.clone(),
@@ -635,6 +636,7 @@ pub struct RemoteUploadS3TransferWorkerReport {
 
 pub struct RemoteUploadS3TransferProgressReporter<'a> {
     registry: &'a dyn AdminJobRegistry,
+    gate: Arc<RemoteUploadAdmissionGate>,
     job_id: DaemonJobId,
     object_store: String,
     source_bytes: u64,
@@ -657,6 +659,8 @@ impl RemoteUploadS3TransferProgressReporter<'_> {
             &self.started_at_utc,
             &updated_at_utc,
         );
+        let telemetry =
+            remote_upload_progress_telemetry_with_queue_depths(telemetry, self.gate.snapshot());
         let message = remote_upload_progress_message(
             update.message.unwrap_or_else(|| {
                 format!(
@@ -898,6 +902,23 @@ fn remote_upload_progress_telemetry_with_s3_rate(
                 ..RemoteUploadProgressTelemetry::default()
             });
         }
+    }
+    telemetry
+}
+
+fn remote_upload_progress_telemetry_with_queue_depths(
+    mut telemetry: Option<RemoteUploadProgressTelemetry>,
+    snapshot: RemoteUploadRuntimeSnapshot,
+) -> Option<RemoteUploadProgressTelemetry> {
+    if snapshot.ssd_stage_queue_depth == 0 && snapshot.hdd_landing_queue_depth == 0 {
+        return telemetry;
+    }
+    let fields = telemetry.get_or_insert_with(RemoteUploadProgressTelemetry::default);
+    if fields.ssd_queue_depth.is_none() && snapshot.ssd_stage_queue_depth > 0 {
+        fields.ssd_queue_depth = Some(snapshot.ssd_stage_queue_depth);
+    }
+    if fields.hdd_landing_queue_depth.is_none() && snapshot.hdd_landing_queue_depth > 0 {
+        fields.hdd_landing_queue_depth = Some(snapshot.hdd_landing_queue_depth);
     }
     telemetry
 }
@@ -2033,6 +2054,45 @@ mod tests {
         assert_eq!(
             progress_job.progress.message.as_deref(),
             Some("uploaded 40 bytes | s3_bytes_per_second=4")
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_records_queue_depth_telemetry_from_gate_snapshot() {
+        let root = temp_root("remote-upload-worker-queue-progress");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        gate.observe_queue_depths(RemoteUploadQueueDepths {
+            ssd_stage_queue_depth: 1,
+            hdd_landing_queue_depth: 2,
+            verification_queue_depth: 3,
+        });
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+
+        let report = worker
+            .run_with_progress(worker_request("remote-upload-job-034"), |progress| {
+                progress
+                    .record_progress(RemoteUploadS3TransferProgressUpdate {
+                        bytes_done: 20,
+                        updated_at_utc: "2026-07-09T14:10:15Z".to_string(),
+                        telemetry: None,
+                        message: Some("uploaded 20 bytes".to_string()),
+                    })
+                    .expect("progress recorded");
+                Ok::<(), &'static str>(())
+            })
+            .expect("worker completed");
+
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event");
+        };
+        assert_eq!(
+            progress_job.progress.message.as_deref(),
+            Some(
+                "uploaded 20 bytes | s3_bytes_per_second=2 ssd_queue_depth=1 hdd_landing_queue_depth=2"
+            )
         );
 
         cleanup(&root);

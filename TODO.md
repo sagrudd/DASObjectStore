@@ -857,9 +857,11 @@ planning are tracked under Milestones 21 and 22.
   source inventory.
 - [x] Wire the daemon remote-upload S3 transfer worker to derive
   S3 transfer-rate telemetry from byte progress and progress timestamps.
-- [ ] Wire remaining remote upload SSD/HDD queue, active per-HDD writer,
-  verification, and session-renewal producers to populate the daemon progress
-  telemetry payload.
+- [x] Wire the daemon remote-upload S3 transfer worker to populate non-zero
+  SSD stage and HDD landing queue-depth telemetry from the admission gate
+  snapshot.
+- [ ] Wire remaining remote upload active per-HDD writer, verification, and
+  session-renewal producers to populate the daemon progress telemetry payload.
 - [ ] Add Web progress rendering for remote uploads that remains accurate when
   the browser refreshes, disconnects, or reconnects while the paired CLI agent
   continues transfer.
