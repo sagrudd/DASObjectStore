@@ -1,12 +1,13 @@
 use dasobjectstore_daemon::{
     appliance_telemetry_state_path, collect_linux_cpu_telemetry,
-    collect_linux_disk_capacity_telemetry, collect_linux_memory_telemetry,
-    parse_linux_cpu_snapshot, validate_appliance_telemetry_cadence,
-    ApplianceHostTelemetryCollector, ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError,
-    ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError,
-    ApplianceTelemetryMissingReason, ApplianceTelemetrySink, ApplianceTelemetrySleeper,
-    ApplianceTelemetrySource, FileBackedApplianceTelemetrySink, LinuxCpuSnapshot,
-    LinuxHostTelemetrySample, LinuxProcTelemetryCollector, APPLIANCE_TELEMETRY_FILE_NAME,
+    collect_linux_disk_capacity_telemetry, collect_linux_disk_io_telemetry,
+    collect_linux_memory_telemetry, parse_linux_cpu_snapshot, parse_linux_diskstats,
+    validate_appliance_telemetry_cadence, ApplianceHostTelemetryCollector,
+    ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError, ApplianceTelemetryLoop,
+    ApplianceTelemetryLoopConfig, ApplianceTelemetryLoopError, ApplianceTelemetryMissingReason,
+    ApplianceTelemetrySink, ApplianceTelemetrySleeper, ApplianceTelemetrySource,
+    FileBackedApplianceTelemetrySink, LinuxCpuSnapshot, LinuxHostTelemetrySample,
+    LinuxProcTelemetryCollector, APPLIANCE_TELEMETRY_FILE_NAME,
 };
 use serde_json::json;
 use std::fs;
@@ -30,6 +31,16 @@ MemAvailable:    750000 kB
 Cached:          250000 kB
 SwapTotal:       200000 kB
 SwapFree:        150000 kB
+";
+
+const PROC_DISKSTATS_1: &str = "\
+   8       0 sda 100 0 2000 300 40 0 1000 200 0 500 600
+   8      16 sdb 10 0 20 3 4 0 8 2 0 6 7
+";
+
+const PROC_DISKSTATS_2: &str = "\
+   8       0 sda 130 0 2600 360 70 0 1600 290 0 620 760
+   8      16 sdb 11 0 22 4 5 0 10 3 0 7 8
 ";
 
 #[test]
@@ -147,6 +158,50 @@ fn disk_capacity_telemetry_reads_managed_hdd_root_markers() {
     assert_eq!(enclosures[0].disk_ids, vec!["qnap-a".to_string()]);
     assert_eq!(enclosures[0].total_bytes, disks[0].total_bytes);
     assert_eq!(enclosures[0].available_bytes, disks[0].available_bytes);
+}
+
+#[test]
+fn parses_linux_diskstats_fixture() {
+    let counters = parse_linux_diskstats(PROC_DISKSTATS_1).expect("diskstats parse");
+    let sda = counters.get("sda").expect("sda counters");
+
+    assert_eq!(sda.device_name, "sda");
+    assert_eq!(sda.read_operations, 100);
+    assert_eq!(sda.write_operations, 40);
+    assert_eq!(sda.sectors_read, 2000);
+    assert_eq!(sda.sectors_written, 1000);
+    assert_eq!(sda.io_time_millis, 500);
+}
+
+#[test]
+fn disk_io_telemetry_uses_managed_hdd_markers_and_diskstats_deltas() {
+    let root = temp_root("appliance-telemetry-hdd-io");
+    let hdd_root = root.join("hdd");
+    let disk_root = hdd_root.join("disk-a");
+    fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
+    fs::write(
+        disk_root.join(".dasobjectstore/device.env"),
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\ndevice=/dev/disk/by-id/fixture-a\ndiskstats_device=sda\nfilesystem=ext4\n",
+    )
+    .expect("device marker written");
+    let previous = parse_linux_diskstats(PROC_DISKSTATS_1).expect("previous diskstats");
+    let current = parse_linux_diskstats(PROC_DISKSTATS_2).expect("current diskstats");
+
+    let telemetry = collect_linux_disk_io_telemetry(&hdd_root, &current, Some(&previous), 6)
+        .expect("disk io telemetry");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(telemetry.len(), 1);
+    assert_eq!(telemetry[0].disk_id, "qnap-a");
+    assert_eq!(telemetry[0].label.as_deref(), Some("QNAP bay 1"));
+    assert_eq!(telemetry[0].device_name.as_deref(), Some("sda"));
+    assert_eq!(telemetry[0].read_bytes_per_second, Some(51_200.0));
+    assert_eq!(telemetry[0].write_bytes_per_second, Some(51_200.0));
+    assert_eq!(telemetry[0].read_operations_per_second, Some(5.0));
+    assert_eq!(telemetry[0].write_operations_per_second, Some(5.0));
+    assert_eq!(telemetry[0].average_await_millis, Some(2.5));
+    assert_eq!(telemetry[0].io_time_percent, Some(2.0));
+    assert_eq!(telemetry[0].missing_reason, None);
 }
 
 #[test]
@@ -332,6 +387,7 @@ impl ApplianceHostTelemetryCollector for FakeCollector {
             },
             enclosures: Vec::new(),
             disks: Vec::new(),
+            disk_io: Vec::new(),
             cpu_snapshot: snapshot,
         })
     }

@@ -248,6 +248,15 @@ pub fn appliance_sample_set(
             &disk.missing_reason,
         );
     }
+    if host.disk_io.is_empty() {
+        missing_data.push(ApplianceTelemetryMissingDataMarker {
+            path: "disks.io".to_string(),
+            reason: ApplianceTelemetryMissingReason::NotConfigured,
+            detail: Some(
+                "disk IO rate collection is not wired into the service loop yet".to_string(),
+            ),
+        });
+    }
     missing_data.push(ApplianceTelemetryMissingDataMarker {
         path: "sessions".to_string(),
         reason: ApplianceTelemetryMissingReason::NotConfigured,
@@ -267,6 +276,7 @@ pub fn appliance_sample_set(
         memory: host.memory,
         enclosures: host.enclosures,
         disks: host.disks,
+        disk_io: host.disk_io,
         sessions: ApplianceSessionTelemetry {
             web_active_sessions: None,
             remote_agent_active_sessions: None,

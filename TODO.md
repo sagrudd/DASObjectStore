@@ -943,7 +943,11 @@ planning are tracked under Milestones 21 and 22.
     authoritative enclosure association in each sample.
 - [ ] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
   read operations/s, write operations/s, queue or await signals where available,
-  and explicit missing-counter reasons when the host cannot provide a metric.
+  and explicit missing-counter reasons when the host cannot provide a metric:
+  - [x] Add Linux `/proc/diskstats` parsing and managed-HDD marker matching for
+    per-disk IO rate calculation using fixture data.
+  - [ ] Wire disk IO counters into the daemon telemetry service loop with
+    retained previous samples and cadence-aware rate calculation.
 - [ ] Add active-user/session telemetry for local Web sessions and remote-agent
   sessions, including total active sessions, distinct logged-in users, and
   administrator/non-administrator counts where policy permits exposure.

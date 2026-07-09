@@ -41,7 +41,21 @@ pub struct LinuxHostTelemetrySample {
     pub memory: ApplianceMemoryTelemetry,
     pub enclosures: Vec<ApplianceEnclosureTelemetry>,
     pub disks: Vec<ApplianceDiskCapacityTelemetry>,
+    pub disk_io: Vec<ApplianceDiskIoTelemetry>,
     pub cpu_snapshot: LinuxCpuSnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LinuxDiskIoCounters {
+    pub device_name: String,
+    pub read_operations: u64,
+    pub write_operations: u64,
+    pub sectors_read: u64,
+    pub sectors_written: u64,
+    pub read_time_millis: u64,
+    pub write_time_millis: u64,
+    pub io_time_millis: u64,
+    pub weighted_io_time_millis: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -70,6 +84,7 @@ pub struct ApplianceTelemetrySample {
     pub memory: ApplianceMemoryTelemetry,
     pub enclosures: Vec<ApplianceEnclosureTelemetry>,
     pub disks: Vec<ApplianceDiskCapacityTelemetry>,
+    pub disk_io: Vec<ApplianceDiskIoTelemetry>,
     pub sessions: ApplianceSessionTelemetry,
 }
 
@@ -101,6 +116,28 @@ pub struct ApplianceDiskCapacityTelemetry {
     pub total_bytes: Option<u64>,
     pub available_bytes: Option<u64>,
     pub used_percent: Option<f64>,
+    pub missing_reason: Option<ApplianceTelemetryMissingReason>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplianceDiskIoTelemetry {
+    pub disk_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub mount_path: String,
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enclosure_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    pub read_bytes_per_second: Option<f64>,
+    pub write_bytes_per_second: Option<f64>,
+    pub read_operations_per_second: Option<f64>,
+    pub write_operations_per_second: Option<f64>,
+    pub average_await_millis: Option<f64>,
+    pub io_time_percent: Option<f64>,
     pub missing_reason: Option<ApplianceTelemetryMissingReason>,
 }
 
@@ -148,6 +185,7 @@ pub struct ApplianceSessionTelemetry {
 pub enum ApplianceTelemetryCollectorError {
     Io { path: PathBuf, message: String },
     InvalidDeviceMarker { path: PathBuf, message: String },
+    InvalidProcDiskstats(String),
     InvalidProcStat(String),
 }
 
@@ -164,6 +202,9 @@ impl fmt::Display for ApplianceTelemetryCollectorError {
                 "invalid DASObjectStore device marker {}: {message}",
                 path.display()
             ),
+            Self::InvalidProcDiskstats(message) => {
+                write!(formatter, "invalid /proc/diskstats: {message}")
+            }
             Self::InvalidProcStat(message) => write!(formatter, "invalid /proc/stat: {message}"),
         }
     }

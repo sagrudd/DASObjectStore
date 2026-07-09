@@ -1,7 +1,8 @@
 use super::model::{
-    ApplianceCpuTelemetry, ApplianceDiskCapacityTelemetry, ApplianceEnclosureTelemetry,
-    ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError, ApplianceTelemetryMissingReason,
-    LinuxCpuSnapshot, LinuxHostTelemetrySample,
+    ApplianceCpuTelemetry, ApplianceDiskCapacityTelemetry, ApplianceDiskIoTelemetry,
+    ApplianceEnclosureTelemetry, ApplianceMemoryTelemetry, ApplianceTelemetryCollectorError,
+    ApplianceTelemetryMissingReason, LinuxCpuSnapshot, LinuxDiskIoCounters,
+    LinuxHostTelemetrySample,
 };
 use super::service_loop::ApplianceHostTelemetryCollector;
 use dasobjectstore_metadata::{measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError};
@@ -57,6 +58,7 @@ impl LinuxProcTelemetryCollector {
             memory: collect_linux_memory_telemetry(&proc_meminfo),
             enclosures,
             disks,
+            disk_io: Vec::new(),
             cpu_snapshot,
         })
     }
@@ -249,7 +251,7 @@ pub fn collect_linux_disk_capacity_telemetry(
                 });
             }
         };
-        let Some(marker) = parse_managed_hdd_marker(&marker_path, &marker)? else {
+        let Some(marker) = parse_managed_hdd_marker(&mount_path, &marker_path, &marker)? else {
             continue;
         };
         let (total_bytes, available_bytes, used_percent, missing_reason) =
@@ -287,6 +289,89 @@ pub fn collect_linux_disk_capacity_telemetry(
     Ok((enclosures, disks))
 }
 
+pub fn parse_linux_diskstats(
+    proc_diskstats: &str,
+) -> Result<BTreeMap<String, LinuxDiskIoCounters>, ApplianceTelemetryCollectorError> {
+    let mut counters = BTreeMap::new();
+    for line in proc_diskstats
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+    {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() < 14 {
+            return Err(ApplianceTelemetryCollectorError::InvalidProcDiskstats(
+                "diskstats line has fewer than 14 fields".to_string(),
+            ));
+        }
+        let device_name = fields[2].to_string();
+        counters.insert(
+            device_name.clone(),
+            LinuxDiskIoCounters {
+                device_name,
+                read_operations: parse_diskstats_u64(fields[3], "reads completed")?,
+                write_operations: parse_diskstats_u64(fields[7], "writes completed")?,
+                sectors_read: parse_diskstats_u64(fields[5], "sectors read")?,
+                sectors_written: parse_diskstats_u64(fields[9], "sectors written")?,
+                read_time_millis: parse_diskstats_u64(fields[6], "read time ms")?,
+                write_time_millis: parse_diskstats_u64(fields[10], "write time ms")?,
+                io_time_millis: parse_diskstats_u64(fields[12], "io time ms")?,
+                weighted_io_time_millis: parse_diskstats_u64(fields[13], "weighted io time ms")?,
+            },
+        );
+    }
+    Ok(counters)
+}
+
+pub fn collect_linux_disk_io_telemetry(
+    hdd_root: impl AsRef<Path>,
+    current_diskstats: &BTreeMap<String, LinuxDiskIoCounters>,
+    previous_diskstats: Option<&BTreeMap<String, LinuxDiskIoCounters>>,
+    elapsed_seconds: u64,
+) -> Result<Vec<ApplianceDiskIoTelemetry>, ApplianceTelemetryCollectorError> {
+    let markers = managed_hdd_markers(hdd_root.as_ref())?;
+    let mut telemetry = Vec::new();
+
+    for marker in markers {
+        let device_name = marker.diskstats_device_name.clone();
+        let current = device_name
+            .as_ref()
+            .and_then(|name| current_diskstats.get(name));
+        let previous = match (device_name.as_ref(), previous_diskstats) {
+            (Some(name), Some(previous_diskstats)) => previous_diskstats.get(name),
+            _ => None,
+        };
+        let (
+            read_bytes_per_second,
+            write_bytes_per_second,
+            read_operations_per_second,
+            write_operations_per_second,
+            average_await_millis,
+            io_time_percent,
+            missing_reason,
+        ) = disk_io_rates(current, previous, elapsed_seconds);
+
+        telemetry.push(ApplianceDiskIoTelemetry {
+            disk_id: marker.disk_id,
+            label: marker.label,
+            mount_path: marker.mount_path.to_string_lossy().to_string(),
+            role: "hdd".to_string(),
+            enclosure_id: marker.enclosure_id,
+            device_path: marker.device_path,
+            device_name,
+            read_bytes_per_second,
+            write_bytes_per_second,
+            read_operations_per_second,
+            write_operations_per_second,
+            average_await_millis,
+            io_time_percent,
+            missing_reason,
+        });
+    }
+
+    telemetry.sort_by(|left, right| left.disk_id.cmp(&right.disk_id));
+    Ok(telemetry)
+}
+
 #[derive(Debug)]
 struct ManagedHddMarker {
     disk_id: String,
@@ -294,9 +379,12 @@ struct ManagedHddMarker {
     enclosure_id: Option<String>,
     device_path: Option<String>,
     filesystem: Option<String>,
+    diskstats_device_name: Option<String>,
+    mount_path: PathBuf,
 }
 
 fn parse_managed_hdd_marker(
+    mount_path: &Path,
     marker_path: &Path,
     marker: &str,
 ) -> Result<Option<ManagedHddMarker>, ApplianceTelemetryCollectorError> {
@@ -318,9 +406,61 @@ fn parse_managed_hdd_marker(
         disk_id: disk_id.to_string(),
         label: optional_marker_value(&values, "label").or_else(|| Some(disk_id.to_string())),
         enclosure_id: optional_marker_value(&values, "enclosure_id"),
+        diskstats_device_name: optional_marker_value(&values, "diskstats_device")
+            .or_else(|| marker_device_name(&values)),
         device_path: optional_marker_value(&values, "device"),
         filesystem: optional_marker_value(&values, "filesystem"),
+        mount_path: mount_path.to_path_buf(),
     }))
+}
+
+fn managed_hdd_markers(
+    hdd_root: &Path,
+) -> Result<Vec<ManagedHddMarker>, ApplianceTelemetryCollectorError> {
+    let entries = match fs::read_dir(hdd_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(ApplianceTelemetryCollectorError::Io {
+                path: hdd_root.to_path_buf(),
+                message: error.to_string(),
+            });
+        }
+    };
+    let mut markers = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| ApplianceTelemetryCollectorError::Io {
+            path: hdd_root.to_path_buf(),
+            message: error.to_string(),
+        })?;
+        let file_type =
+            entry
+                .file_type()
+                .map_err(|error| ApplianceTelemetryCollectorError::Io {
+                    path: entry.path(),
+                    message: error.to_string(),
+                })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let mount_path = entry.path();
+        let marker_path = mount_path.join(".dasobjectstore").join("device.env");
+        let marker = match fs::read_to_string(&marker_path) {
+            Ok(marker) => marker,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(ApplianceTelemetryCollectorError::Io {
+                    path: marker_path,
+                    message: error.to_string(),
+                });
+            }
+        };
+        if let Some(marker) = parse_managed_hdd_marker(&mount_path, &marker_path, &marker)? {
+            markers.push(marker);
+        }
+    }
+    markers.sort_by(|left, right| left.disk_id.cmp(&right.disk_id));
+    Ok(markers)
 }
 
 fn parse_device_marker_values(marker: &str) -> BTreeMap<&str, &str> {
@@ -339,6 +479,12 @@ fn optional_marker_value(values: &BTreeMap<&str, &str>, key: &str) -> Option<Str
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn marker_device_name(values: &BTreeMap<&str, &str>) -> Option<String> {
+    optional_marker_value(values, "device")
+        .and_then(|device| Path::new(&device).file_name().map(|name| name.to_owned()))
+        .map(|name| name.to_string_lossy().to_string())
 }
 
 fn missing_reason_for_capacity_error(
@@ -408,6 +554,112 @@ fn add_optional_capacity(left: Option<u64>, right: Option<u64>) -> Option<u64> {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),
         _ => None,
     }
+}
+
+fn parse_diskstats_u64(value: &str, label: &str) -> Result<u64, ApplianceTelemetryCollectorError> {
+    value.parse::<u64>().map_err(|error| {
+        ApplianceTelemetryCollectorError::InvalidProcDiskstats(format!(
+            "{label} field {value:?} is not an integer: {error}"
+        ))
+    })
+}
+
+fn disk_io_rates(
+    current: Option<&LinuxDiskIoCounters>,
+    previous: Option<&LinuxDiskIoCounters>,
+    elapsed_seconds: u64,
+) -> (
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<ApplianceTelemetryMissingReason>,
+) {
+    let Some(current) = current else {
+        return missing_disk_io_rates(ApplianceTelemetryMissingReason::DeviceMissing);
+    };
+    let Some(previous) = previous else {
+        return missing_disk_io_rates(ApplianceTelemetryMissingReason::DaemonStartup);
+    };
+    if elapsed_seconds == 0 || diskstats_counter_reset(current, previous) {
+        return missing_disk_io_rates(ApplianceTelemetryMissingReason::CounterReset);
+    }
+
+    let elapsed = elapsed_seconds as f64;
+    let read_ops_delta = current
+        .read_operations
+        .saturating_sub(previous.read_operations);
+    let write_ops_delta = current
+        .write_operations
+        .saturating_sub(previous.write_operations);
+    let sectors_read_delta = current.sectors_read.saturating_sub(previous.sectors_read);
+    let sectors_written_delta = current
+        .sectors_written
+        .saturating_sub(previous.sectors_written);
+    let service_time_delta = current
+        .read_time_millis
+        .saturating_sub(previous.read_time_millis)
+        .saturating_add(
+            current
+                .write_time_millis
+                .saturating_sub(previous.write_time_millis),
+        );
+    let io_time_delta = current
+        .io_time_millis
+        .saturating_sub(previous.io_time_millis);
+    let ops_delta = read_ops_delta.saturating_add(write_ops_delta);
+
+    (
+        Some(rate(sectors_read_delta.saturating_mul(512), elapsed)),
+        Some(rate(sectors_written_delta.saturating_mul(512), elapsed)),
+        Some(rate(read_ops_delta, elapsed)),
+        Some(rate(write_ops_delta, elapsed)),
+        if ops_delta == 0 {
+            None
+        } else {
+            Some(round_two_decimals(
+                service_time_delta as f64 / ops_delta as f64,
+            ))
+        },
+        Some(round_two_decimals(
+            (io_time_delta as f64 * 100.0) / (elapsed * 1000.0),
+        )),
+        None,
+    )
+}
+
+fn missing_disk_io_rates(
+    reason: ApplianceTelemetryMissingReason,
+) -> (
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<f64>,
+    Option<ApplianceTelemetryMissingReason>,
+) {
+    (None, None, None, None, None, None, Some(reason))
+}
+
+fn diskstats_counter_reset(current: &LinuxDiskIoCounters, previous: &LinuxDiskIoCounters) -> bool {
+    current.read_operations < previous.read_operations
+        || current.write_operations < previous.write_operations
+        || current.sectors_read < previous.sectors_read
+        || current.sectors_written < previous.sectors_written
+        || current.read_time_millis < previous.read_time_millis
+        || current.write_time_millis < previous.write_time_millis
+        || current.io_time_millis < previous.io_time_millis
+}
+
+fn rate(delta: u64, elapsed_seconds: f64) -> f64 {
+    round_two_decimals(delta as f64 / elapsed_seconds)
+}
+
+fn round_two_decimals(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 fn parse_load_averages(proc_loadavg: &str) -> (Option<f64>, Option<f64>, Option<f64>) {

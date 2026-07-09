@@ -199,6 +199,10 @@ Each sample includes CPU, memory, and managed HDD capacity data when
 role, filesystem, device marker data, and marker-provided `enclosure_id` values
 so Web/API readers can group capacity by enclosure when that association is
 available.
+The schema also includes a `disk_io` array for per-disk read/write throughput,
+operation rate, await, and IO-time metrics. Until the daemon service loop wires
+retained `/proc/diskstats` samples into that field, writers SHALL mark
+`disks.io` as missing rather than interpolating or inventing IO data.
 
 Writers SHALL update the file atomically by writing a schema-valid document to
 a temporary file in the same directory, fsyncing the file, applying final
