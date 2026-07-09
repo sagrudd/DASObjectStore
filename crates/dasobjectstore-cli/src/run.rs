@@ -5683,7 +5683,7 @@ fn render_performance_report_from_json_artifact(artifact: &Value, report_path: &
         .unwrap_or_else(|| "not recorded".to_string())
     ));
     if let Some(rows) = json_array(artifact, &["recommendation", "rationale"]) {
-        output.push_str("### Rationale\n\n");
+        output.push_str("<br />\n\n### Rationale\n\n");
         for row in rows.iter().filter_map(Value::as_str) {
             output.push_str(&format!("- {row}\n"));
         }
