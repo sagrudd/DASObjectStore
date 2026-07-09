@@ -563,8 +563,9 @@ fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        standalone_object_browser_router_with_state, StandaloneObjectBrowserClient,
-        StandaloneObjectBrowserClientError, StandaloneObjectBrowserRouteState,
+        standalone_object_browser_router_with_state, write_folder_archive,
+        StandaloneObjectBrowserClient, StandaloneObjectBrowserClientError,
+        StandaloneObjectBrowserRouteState,
     };
     use crate::{LocalAuthStore, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER};
     use axum::body::{to_bytes, Body};
@@ -803,6 +804,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn object_download_route_surfaces_unavailable_degraded_source() {
+        let root = temp_root("object-download-unavailable");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = Arc::new(RecordingObjectBrowserClient::with_error(
+            StandaloneObjectBrowserClientError {
+                status: StatusCode::CONFLICT,
+                code: "object_download_unavailable".to_string(),
+                message: "object `ENA/Xeno/degraded.fastq.gz` has no verified placement on a managed HDD root"
+                    .to_string(),
+            },
+        ));
+        let app = test_router(auth_store, client);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/degraded.fastq.gz")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "object_download_unavailable");
+        assert!(encoded["message"]
+            .as_str()
+            .expect("message")
+            .contains("no verified placement"));
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn object_folder_download_route_streams_tar_gz_archive() {
         let root = temp_root("object-folder-download");
         let auth_store = registered_auth_store(&root);
@@ -874,6 +914,78 @@ mod tests {
                 ("reads.fastq.gz".to_string(), b"reads".to_vec()),
             ]
         );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn object_folder_download_route_surfaces_unavailable_archive_source() {
+        let root = temp_root("object-folder-download-unavailable");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = Arc::new(RecordingObjectBrowserClient::with_error(
+            StandaloneObjectBrowserClientError {
+                status: StatusCode::CONFLICT,
+                code: "object_folder_download_unavailable".to_string(),
+                message: "object `ENA/Xeno/degraded.fastq.gz` has no verified placement on a managed HDD root"
+                    .to_string(),
+            },
+        ));
+        let app = test_router(auth_store, client);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/folders/download/ENA/Xeno")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "object_folder_download_unavailable");
+        assert!(encoded["message"]
+            .as_str()
+            .expect("message")
+            .contains("no verified placement"));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn folder_archive_stream_stops_when_receiver_is_interrupted() {
+        let root = temp_root("object-folder-download-interrupted");
+        let metadata_path = write_test_file(&root, "objects/metadata.tsv", b"metadata");
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        drop(receiver);
+
+        let err = write_folder_archive(
+            ObjectFolderDownloadResponse {
+                endpoint: StoreId::new("ena").expect("store id"),
+                store_id: StoreId::new("ena").expect("store id"),
+                prefix: "ENA/Xeno".to_string(),
+                archive_name: "Xeno.tar.gz".to_string(),
+                total_files: 1,
+                total_source_bytes: b"metadata".len() as u64,
+                entries: vec![ObjectFolderArchiveEntry {
+                    object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
+                    archive_path: "metadata.tsv".to_string(),
+                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a")
+                        .expect("disk id"),
+                    source_path: metadata_path,
+                    size_bytes: b"metadata".len() as u64,
+                }],
+            },
+            sender,
+        )
+        .expect_err("closed receiver stops archive generation");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
 
         cleanup(&root);
     }

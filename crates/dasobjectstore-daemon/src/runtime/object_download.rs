@@ -458,6 +458,64 @@ mod tests {
     }
 
     #[test]
+    fn selects_verified_copy_from_managed_hdd_root() {
+        let root = temp_root("download-selects-managed-copy");
+        let live_sqlite_path = root.join("live.sqlite");
+        let hdd_root = root.join("hdd");
+        let disk_root = hdd_root.join("disk-b");
+        write_hdd_marker(&disk_root, "disk-b");
+        let selected_source = write_source(
+            &disk_root,
+            "objects/bb/object-b/payload",
+            b"selected payload",
+        );
+        let connection = fixture_connection(&live_sqlite_path);
+        insert_disk_fixture(&connection, "disk-b");
+        insert_object_row_fixture(&connection, "ena/raw/metadata.tsv", "sha256:payload");
+        insert_placement_fixture(
+            &connection,
+            "placement-unmanaged",
+            "ena/raw/metadata.tsv",
+            "disk-a",
+            "objects/aa/object-a/payload",
+            Some("2026-07-09T10:18:22Z"),
+        );
+        insert_placement_fixture(
+            &connection,
+            "placement-unverified",
+            "ena/raw/metadata.tsv",
+            "disk-b",
+            "objects/bb/object-b/unverified",
+            None,
+        );
+        insert_placement_fixture(
+            &connection,
+            "placement-selected",
+            "ena/raw/metadata.tsv",
+            "disk-b",
+            "objects/bb/object-b/payload",
+            Some("2026-07-09T10:18:23Z"),
+        );
+
+        let response = resolve_object_download_with_hdd_root(
+            &live_sqlite_path,
+            &hdd_root,
+            &store_id(),
+            &ObjectDownloadRequest {
+                endpoint: store_id(),
+                object_id: object_id("ena/raw/metadata.tsv"),
+            },
+        )
+        .expect("download resolves from managed verified copy");
+
+        assert_eq!(response.source_disk_id.as_str(), "disk-b");
+        assert_eq!(response.source_path, selected_source);
+        assert_eq!(response.size_bytes, b"selected payload".len() as u64);
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn rejects_object_without_verified_managed_hdd_placement() {
         let root = temp_root("download-unverified");
         let live_sqlite_path = root.join("live.sqlite");
@@ -634,12 +692,44 @@ mod tests {
         connection
     }
 
+    fn insert_disk_fixture(connection: &Connection, disk_id: &str) {
+        connection
+            .execute(
+                "INSERT INTO disks
+                    (disk_id, pool_id, role, state, size_bytes, serial_hint, model_hint,
+                     enclosure_topology_path, created_at_utc, updated_at_utc)
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, ?6, ?7)",
+                params![
+                    disk_id,
+                    "pool-a",
+                    "hdd",
+                    "Healthy",
+                    4_000_000_000_i64,
+                    "2026-07-09T10:18:21Z",
+                    "2026-07-09T10:18:21Z",
+                ],
+            )
+            .expect("insert disk");
+    }
+
     fn insert_object_fixture(
         connection: &Connection,
         object_id: &str,
         relative_path: &str,
         content_hash: &str,
     ) {
+        insert_object_row_fixture(connection, object_id, content_hash);
+        insert_placement_fixture(
+            connection,
+            &format!("placement-{object_id}"),
+            object_id,
+            "disk-a",
+            relative_path,
+            Some("2026-07-09T10:18:22Z"),
+        );
+    }
+
+    fn insert_object_row_fixture(connection: &Connection, object_id: &str, content_hash: &str) {
         connection
             .execute(
                 "INSERT INTO objects
@@ -657,18 +747,28 @@ mod tests {
                 ],
             )
             .expect("insert object");
+    }
+
+    fn insert_placement_fixture(
+        connection: &Connection,
+        placement_id: &str,
+        object_id: &str,
+        disk_id: &str,
+        relative_path: &str,
+        verified_at_utc: Option<&str>,
+    ) {
         connection
             .execute(
                 "INSERT INTO placements
                     (placement_id, object_id, disk_id, relative_path, content_hash, verified_at_utc, created_at_utc)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
-                    format!("placement-{object_id}"),
+                    placement_id,
                     object_id,
-                    "disk-a",
+                    disk_id,
                     relative_path,
-                    content_hash,
-                    "2026-07-09T10:18:22Z",
+                    "sha256:payload",
+                    verified_at_utc,
                     "2026-07-09T10:18:21Z",
                 ],
             )

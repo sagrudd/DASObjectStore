@@ -710,7 +710,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Surface physical placement faithfully in the browser: SSD-only, HDD
   settled, multi-copy disk IDs/labels, degraded/missing-copy warnings,
   redownload-required state, and unavailable objects.
-- [ ] Add tests for file browser API paging/search/sort, permission denial,
+- [x] Add tests for file browser API paging/search/sort, permission denial,
   settled-copy selection, degraded object handling, file download streaming,
   folder `tar.gz` archive contents, interrupted archive cleanup, and large-tree
   response bounds.
