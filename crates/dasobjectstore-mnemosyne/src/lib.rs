@@ -30,8 +30,9 @@ pub use boundary::{
 pub use flounder_telemetry::{
     FlounderApplianceTelemetryContract, FlounderTelemetryAxis, FlounderTelemetryBand,
     FlounderTelemetryChart, FlounderTelemetryChartLayout, FlounderTelemetryDevice,
-    FlounderTelemetryMissingInterval, FlounderTelemetryMissingReason, FlounderTelemetryPoint,
-    FlounderTelemetryPointQuality, FlounderTelemetrySeries, FlounderTelemetrySeriesRole,
+    FlounderTelemetryGapLabel, FlounderTelemetryMissingInterval, FlounderTelemetryMissingReason,
+    FlounderTelemetryPoint, FlounderTelemetryPointQuality, FlounderTelemetryRenderPlan,
+    FlounderTelemetryRenderSegment, FlounderTelemetrySeries, FlounderTelemetrySeriesRole,
     FlounderTelemetrySmallMultiple, FlounderTelemetryUnit, FlounderTelemetryWindow,
     FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION,
 };

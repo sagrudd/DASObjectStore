@@ -55,6 +55,105 @@ pub struct FlounderTelemetryChart {
     pub small_multiples: Vec<FlounderTelemetrySmallMultiple>,
 }
 
+impl FlounderTelemetryChart {
+    pub fn render_plan(&self) -> FlounderTelemetryRenderPlan {
+        let mut line_segments = Vec::new();
+        let mut gap_labels = self
+            .missing_intervals
+            .iter()
+            .map(FlounderTelemetryGapLabel::from)
+            .collect::<Vec<_>>();
+
+        for series in &self.series {
+            let mut current_points = Vec::new();
+            for point in &series.points {
+                if point.is_observed() {
+                    current_points.push(point.clone());
+                    continue;
+                }
+                if !current_points.is_empty() {
+                    line_segments.push(FlounderTelemetryRenderSegment {
+                        series_id: series.series_id.clone(),
+                        points: std::mem::take(&mut current_points),
+                    });
+                }
+                gap_labels.push(FlounderTelemetryGapLabel::from_point(
+                    &series.series_id,
+                    point,
+                ));
+            }
+            if !current_points.is_empty() {
+                line_segments.push(FlounderTelemetryRenderSegment {
+                    series_id: series.series_id.clone(),
+                    points: current_points,
+                });
+            }
+        }
+        gap_labels.sort_by(|left, right| {
+            left.start_utc
+                .cmp(&right.start_utc)
+                .then(left.end_utc.cmp(&right.end_utc))
+                .then(left.label.cmp(&right.label))
+        });
+
+        FlounderTelemetryRenderPlan {
+            chart_id: self.chart_id.clone(),
+            line_segments,
+            gap_labels,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FlounderTelemetryRenderPlan {
+    pub chart_id: String,
+    pub line_segments: Vec<FlounderTelemetryRenderSegment>,
+    pub gap_labels: Vec<FlounderTelemetryGapLabel>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FlounderTelemetryRenderSegment {
+    pub series_id: String,
+    pub points: Vec<FlounderTelemetryPoint>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FlounderTelemetryGapLabel {
+    pub start_utc: String,
+    pub end_utc: String,
+    pub reason: FlounderTelemetryMissingReason,
+    pub label: String,
+    #[serde(default)]
+    pub affected_series_ids: Vec<String>,
+}
+
+impl FlounderTelemetryGapLabel {
+    fn from_point(series_id: &str, point: &FlounderTelemetryPoint) -> Self {
+        Self {
+            start_utc: point.timestamp_utc.clone(),
+            end_utc: point.timestamp_utc.clone(),
+            reason: point.quality.missing_reason(),
+            label: point
+                .label
+                .clone()
+                .unwrap_or_else(|| point.quality.default_gap_label().to_string()),
+            affected_series_ids: vec![series_id.to_string()],
+        }
+    }
+}
+
+impl From<&FlounderTelemetryMissingInterval> for FlounderTelemetryGapLabel {
+    fn from(interval: &FlounderTelemetryMissingInterval) -> Self {
+        Self {
+            start_utc: interval.start_utc.clone(),
+            end_utc: interval.end_utc.clone(),
+            reason: interval.reason,
+            label: interval.label.clone(),
+            affected_series_ids: interval.affected_series_ids.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlounderTelemetryChartLayout {
@@ -136,6 +235,10 @@ impl FlounderTelemetryPoint {
             label: Some(label.into()),
         }
     }
+
+    pub fn is_observed(&self) -> bool {
+        self.value.is_some() && self.quality == FlounderTelemetryPointQuality::Observed
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -146,6 +249,26 @@ pub enum FlounderTelemetryPointQuality {
     UnavailableCounter,
     ServiceRestart,
     UnknownDevice,
+}
+
+impl FlounderTelemetryPointQuality {
+    fn missing_reason(self) -> FlounderTelemetryMissingReason {
+        match self {
+            Self::Observed | Self::MissingSample => FlounderTelemetryMissingReason::NoSamples,
+            Self::UnavailableCounter => FlounderTelemetryMissingReason::CounterUnavailable,
+            Self::ServiceRestart => FlounderTelemetryMissingReason::ServiceStopped,
+            Self::UnknownDevice => FlounderTelemetryMissingReason::DeviceUnknown,
+        }
+    }
+
+    fn default_gap_label(self) -> &'static str {
+        match self {
+            Self::Observed | Self::MissingSample => "sample missing",
+            Self::UnavailableCounter => "counter unavailable",
+            Self::ServiceRestart => "service restarted",
+            Self::UnknownDevice => "device unknown",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -366,6 +489,82 @@ mod tests {
                 "per_disk_io_trace",
                 "small_multiple"
             ])
+        );
+    }
+
+    #[test]
+    fn render_plan_breaks_lines_at_missing_points_and_labels_gaps() {
+        let chart = FlounderTelemetryChart {
+            chart_id: "memory".to_string(),
+            title: "Memory".to_string(),
+            layout: FlounderTelemetryChartLayout::LineWithGaps,
+            x_axis: time_axis(),
+            y_axis: percent_axis("Memory"),
+            series: vec![FlounderTelemetrySeries {
+                series_id: "memory_used".to_string(),
+                label: "Memory used".to_string(),
+                role: FlounderTelemetrySeriesRole::Line,
+                unit: FlounderTelemetryUnit::PercentBasisPoints,
+                device: None,
+                points: vec![
+                    FlounderTelemetryPoint::observed("2026-07-09T19:50:00Z", 6000),
+                    FlounderTelemetryPoint::observed("2026-07-09T19:50:30Z", 6100),
+                    FlounderTelemetryPoint::missing(
+                        "2026-07-09T19:51:00Z",
+                        FlounderTelemetryPointQuality::ServiceRestart,
+                        "telemetry service restarted",
+                    ),
+                    FlounderTelemetryPoint::observed("2026-07-09T19:51:30Z", 6200),
+                    FlounderTelemetryPoint::observed("2026-07-09T19:52:00Z", 6300),
+                    FlounderTelemetryPoint::missing(
+                        "2026-07-09T19:52:30Z",
+                        FlounderTelemetryPointQuality::UnavailableCounter,
+                        "memory counter unavailable",
+                    ),
+                ],
+            }],
+            bands: Vec::new(),
+            missing_intervals: vec![FlounderTelemetryMissingInterval {
+                start_utc: "2026-07-09T19:53:00Z".to_string(),
+                end_utc: "2026-07-09T19:54:00Z".to_string(),
+                reason: FlounderTelemetryMissingReason::CollectionError,
+                label: "collector error".to_string(),
+                affected_series_ids: vec!["memory_used".to_string()],
+            }],
+            small_multiples: Vec::new(),
+        };
+
+        let render_plan = chart.render_plan();
+        let encoded = serde_json::to_value(&render_plan).expect("render plan serializes");
+
+        assert_eq!(render_plan.line_segments.len(), 2);
+        assert_eq!(render_plan.line_segments[0].points.len(), 2);
+        assert_eq!(
+            render_plan.line_segments[0].points[1].timestamp_utc,
+            "2026-07-09T19:50:30Z"
+        );
+        assert_eq!(render_plan.line_segments[1].points.len(), 2);
+        assert_eq!(render_plan.gap_labels.len(), 3);
+        assert_eq!(
+            render_plan.gap_labels[0].reason,
+            FlounderTelemetryMissingReason::ServiceStopped
+        );
+        assert_eq!(
+            render_plan.gap_labels[1].reason,
+            FlounderTelemetryMissingReason::CounterUnavailable
+        );
+        assert_eq!(
+            render_plan.gap_labels[2].reason,
+            FlounderTelemetryMissingReason::CollectionError
+        );
+        assert_eq!(encoded["line_segments"][0]["points"][0]["value"], 6000);
+        assert_eq!(
+            encoded["gap_labels"][0]["label"],
+            "telemetry service restarted"
+        );
+        assert_eq!(
+            encoded["gap_labels"][1]["affected_series_ids"][0],
+            "memory_used"
         );
     }
 

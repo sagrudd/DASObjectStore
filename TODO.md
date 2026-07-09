@@ -988,10 +988,13 @@ planning are tracked under Milestones 21 and 22.
   Completed by adding the versioned Mnemosyne floundeR appliance telemetry
   contract module with chart layout, axis, series, point-quality, missing
   interval, capacity-band, per-device, and small-multiple DTOs.
-- [ ] Implement floundeR rendering support for scientifically correct missing
+- [x] Implement floundeR rendering support for scientifically correct missing
   intervals so absent samples, service restarts, unknown devices, and
   unavailable counters are shown as gaps or labelled missing intervals rather
   than interpolated lines.
+  Completed by adding floundeR render-plan DTOs that split observed series into
+  non-interpolated segments and emit labelled gap intervals for missing
+  samples, service restarts, unknown devices, and unavailable counters.
 - [ ] Ensure the floundeR telemetry chart contract can be used both by the Web
   dashboard and by Grammateus formal reports without DASObjectStore-specific
   hard-coding.

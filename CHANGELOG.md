@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.67.0 - 2026-07-09
+
+- Add floundeR telemetry render-plan support that splits observed series into
+  non-interpolated segments and emits labelled gaps for missing samples,
+  service restarts, unavailable counters, unknown devices, and collection
+  intervals.
+
 ## 0.66.0 - 2026-07-09
 
 - Add versioned Mnemosyne floundeR appliance telemetry data contracts covering
