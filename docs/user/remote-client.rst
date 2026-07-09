@@ -367,8 +367,9 @@ staged-byte totals from the client-side source inventory. The daemon
 remote-upload worker derives S3 transfer-rate telemetry from byte progress and
 progress timestamps when a transfer producer does not supply its own rate;
 non-zero SSD stage and HDD landing queue depths are populated from the daemon
-admission gate snapshot. HDD writer, verification, and session-renewal
-producers are still being wired.
+admission gate snapshot; active HDD writer counts and pending verification
+state are derived from daemon ingest telemetry. Session-renewal producers are
+still being wired.
 The runtime job executor constructs the remote-upload job and AWS CLI transfer
 from one easyconnect job request, then runs that job through the same
 admission-gated worker used by lower-level transfer adapters. The daemon API
