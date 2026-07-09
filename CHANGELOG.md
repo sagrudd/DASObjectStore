@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.62.1 - 2026-07-09
+
+- Fix server-local ``ingest direct-import`` so checksum calculation happens
+  inline during HDD copy rather than as a producer-side source prehash that
+  starves the HDD worker pool.
+- Add direct-to-HDD object copy support that streams to a temporary HDD payload,
+  calculates SHA-256 during the write, and renames into the content-addressed
+  object path once the hash is known.
+- Update direct-import progress accounting so live TUI displays HDD write
+  activity and active disk transfers instead of a misleading source-read
+  hashing phase.
+
 ## 0.62.0 - 2026-07-09
 
 - Persist Garage store-scoped credentials in a daemon-owned managed registry
