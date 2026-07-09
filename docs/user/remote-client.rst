@@ -110,6 +110,24 @@ The default config path is:
 Use ``--config <PATH>`` or ``DASOBJECTSTORE_REMOTE_CONFIG`` for a different
 configuration file.
 
+The remote configuration file is also the planned storage location for
+easyconnect pairings. It can contain paired appliance records, issued remote
+upload session credentials, session expiry time, renewal metadata, and the
+selected default ObjectStore for each appliance. The file is written with
+owner-only permissions on Unix systems because active upload sessions may carry
+temporary S3 credentials.
+
+Display commands redact secret-bearing fields. ``config show`` prints whether a
+credential helper, upload session, and renewal path are configured. ``config
+show --json`` emits a redacted JSON view suitable for support logs: session and
+access-key identifiers are shortened, secret keys and session tokens are
+replaced with ``<redacted>``, and raw helper output is never printed.
+
+Updating the base endpoint with ``config set`` preserves paired appliance and
+session records. Pairings are removed only by future explicit pairing/session
+management commands; they are not silently discarded by normal endpoint
+configuration changes.
+
 For a standalone appliance local-password flow, configure the username and the
 credential helper supplied by the site:
 

@@ -22,6 +22,10 @@ pub struct RemoteConfig {
     pub username: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_helper: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_appliance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paired_appliances: Vec<RemotePairedAppliance>,
 }
 
 impl RemoteConfig {
@@ -48,6 +52,8 @@ impl RemoteConfig {
                 .credential_helper
                 .map(ToOwned::to_owned)
                 .or_else(|| self.credential_helper.clone()),
+            default_appliance_id: self.default_appliance_id.clone(),
+            paired_appliances: self.paired_appliances.clone(),
         }
     }
 
@@ -82,7 +88,160 @@ impl RemoteConfig {
         }
         Ok(())
     }
+
+    pub fn redacted(&self) -> RedactedRemoteConfig {
+        RedactedRemoteConfig {
+            endpoint_url: self.endpoint_url.clone(),
+            region: self.region.clone(),
+            profile: self.profile.clone(),
+            auth_authority: self.auth_authority,
+            username: self.username.clone(),
+            credential_helper_configured: self.credential_helper.is_some(),
+            default_appliance_id: self.default_appliance_id.clone(),
+            paired_appliances: self
+                .paired_appliances
+                .iter()
+                .map(RemotePairedAppliance::redacted)
+                .collect(),
+        }
+    }
 }
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemotePairedAppliance {
+    pub appliance_id: String,
+    pub display_name: String,
+    pub appliance_base_url: String,
+    pub discovery_url: String,
+    #[serde(default)]
+    pub auth_authority: RemoteAuthAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_object_store: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<RemoteUploadSession>,
+}
+
+impl RemotePairedAppliance {
+    pub fn redacted(&self) -> RedactedRemotePairedAppliance {
+        RedactedRemotePairedAppliance {
+            appliance_id: self.appliance_id.clone(),
+            display_name: self.display_name.clone(),
+            appliance_base_url: self.appliance_base_url.clone(),
+            discovery_url: self.discovery_url.clone(),
+            auth_authority: self.auth_authority,
+            paired_actor: self.paired_actor.clone(),
+            default_object_store: self.default_object_store.clone(),
+            session: self.session.as_ref().map(RemoteUploadSession::redacted),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteUploadSession {
+    pub session_id: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub credentials: RemoteSessionCredentials,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal: Option<RemoteSessionRenewalMetadata>,
+}
+
+impl RemoteUploadSession {
+    pub fn redacted(&self) -> RedactedRemoteUploadSession {
+        RedactedRemoteUploadSession {
+            session_id: self.redacted_session_id(),
+            issued_at: self.issued_at.clone(),
+            expires_at: self.expires_at.clone(),
+            credentials: self.credentials.redacted(),
+            renewal: self.renewal.clone(),
+        }
+    }
+
+    pub fn redacted_session_id(&self) -> String {
+        redact_identifier(&self.session_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteSessionCredentials {
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+}
+
+impl RemoteSessionCredentials {
+    pub fn redacted(&self) -> RedactedRemoteSessionCredentials {
+        RedactedRemoteSessionCredentials {
+            access_key_id: redact_identifier(&self.access_key_id),
+            secret_access_key: REDACTED_SECRET.to_string(),
+            session_token: self
+                .session_token
+                .as_ref()
+                .map(|_| REDACTED_SECRET.to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteSessionRenewalMetadata {
+    pub renew_url: String,
+    pub renew_after: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_renewed_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RedactedRemoteConfig {
+    pub endpoint_url: String,
+    pub region: String,
+    pub profile: String,
+    pub auth_authority: RemoteAuthAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    pub credential_helper_configured: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_appliance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paired_appliances: Vec<RedactedRemotePairedAppliance>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RedactedRemotePairedAppliance {
+    pub appliance_id: String,
+    pub display_name: String,
+    pub appliance_base_url: String,
+    pub discovery_url: String,
+    pub auth_authority: RemoteAuthAuthority,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_object_store: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<RedactedRemoteUploadSession>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RedactedRemoteUploadSession {
+    pub session_id: String,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub credentials: RedactedRemoteSessionCredentials,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal: Option<RemoteSessionRenewalMetadata>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RedactedRemoteSessionCredentials {
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
+}
+
+pub const REDACTED_SECRET: &str = "<redacted>";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RemoteConfigOverrides<'a> {
@@ -151,6 +310,20 @@ fn default_profile() -> String {
     DEFAULT_PROFILE.to_string()
 }
 
+fn redact_identifier(value: &str) -> String {
+    let trimmed = value.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= 8 {
+        return REDACTED_SECRET.to_string();
+    }
+    let prefix = chars.iter().take(4).collect::<String>();
+    let suffix = chars
+        .iter()
+        .skip(chars.len().saturating_sub(4))
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
 #[derive(Debug)]
 pub enum RemoteConfigError {
     Io(io::Error),
@@ -189,7 +362,10 @@ impl From<serde_json::Error> for RemoteConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::{RemoteConfig, RemoteConfigOverrides};
+    use super::{
+        RemoteConfig, RemoteConfigOverrides, RemotePairedAppliance, RemoteSessionCredentials,
+        RemoteSessionRenewalMetadata, RemoteUploadSession, REDACTED_SECRET,
+    };
     use crate::auth::RemoteAuthAuthority;
 
     #[test]
@@ -201,6 +377,19 @@ mod tests {
             auth_authority: RemoteAuthAuthority::Mneion,
             username: Some("alice".to_string()),
             credential_helper: Some("helper".to_string()),
+            default_appliance_id: Some("appliance-1".to_string()),
+            paired_appliances: vec![RemotePairedAppliance {
+                appliance_id: "appliance-1".to_string(),
+                display_name: "Lab DAS".to_string(),
+                appliance_base_url: "https://192.168.1.192:8448".to_string(),
+                discovery_url:
+                    "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
+                        .to_string(),
+                auth_authority: RemoteAuthAuthority::LocalPassword,
+                paired_actor: Some("alice".to_string()),
+                default_object_store: Some("generated-data".to_string()),
+                session: None,
+            }],
         };
 
         let merged = config.merged_with(RemoteConfigOverrides {
@@ -214,5 +403,71 @@ mod tests {
         assert_eq!(merged.profile, "new");
         assert_eq!(merged.username.as_deref(), Some("alice"));
         assert_eq!(merged.credential_helper.as_deref(), Some("helper"));
+        assert_eq!(merged.default_appliance_id.as_deref(), Some("appliance-1"));
+        assert_eq!(merged.paired_appliances.len(), 1);
+    }
+
+    #[test]
+    fn reads_legacy_config_without_pairing_fields() {
+        let raw = r#"{
+          "endpoint_url": "http://192.168.1.192:3900",
+          "region": "garage",
+          "profile": "dasobjectstore"
+        }"#;
+
+        let config: RemoteConfig = serde_json::from_str(raw).expect("legacy config parses");
+
+        assert_eq!(config.endpoint_url, "http://192.168.1.192:3900");
+        assert!(config.default_appliance_id.is_none());
+        assert!(config.paired_appliances.is_empty());
+    }
+
+    #[test]
+    fn redacts_session_credentials_for_display() {
+        let config = RemoteConfig {
+            endpoint_url: "https://192.168.1.192:3900".to_string(),
+            region: "garage".to_string(),
+            profile: "dasobjectstore".to_string(),
+            auth_authority: RemoteAuthAuthority::LocalPassword,
+            username: Some("stephen".to_string()),
+            credential_helper: Some("helper".to_string()),
+            default_appliance_id: Some("appliance-1".to_string()),
+            paired_appliances: vec![RemotePairedAppliance {
+                appliance_id: "appliance-1".to_string(),
+                display_name: "QNAP TL-D800C".to_string(),
+                appliance_base_url: "https://192.168.1.192:8448".to_string(),
+                discovery_url:
+                    "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
+                        .to_string(),
+                auth_authority: RemoteAuthAuthority::LocalPassword,
+                paired_actor: Some("stephen".to_string()),
+                default_object_store: Some("zymo_fecal_2025.05".to_string()),
+                session: Some(RemoteUploadSession {
+                    session_id: "SESSIONREFERENCE7890".to_string(),
+                    issued_at: "2026-07-09T11:30:00Z".to_string(),
+                    expires_at: "2026-07-09T19:30:00Z".to_string(),
+                    credentials: RemoteSessionCredentials {
+                        access_key_id: "DOSREMOTEACCESSKEY1234".to_string(),
+                        secret_access_key: "super-secret".to_string(),
+                        session_token: Some("temporary-token".to_string()),
+                    },
+                    renewal: Some(RemoteSessionRenewalMetadata {
+                        renew_url: "https://192.168.1.192:8448/api/renew".to_string(),
+                        renew_after: "2026-07-09T18:30:00Z".to_string(),
+                        last_renewed_at: None,
+                    }),
+                }),
+            }],
+        };
+
+        let redacted = config.redacted();
+        let rendered = serde_json::to_string(&redacted).expect("redacted config serializes");
+
+        assert!(rendered.contains("DOSR...1234"));
+        assert!(rendered.contains("SESS...7890"));
+        assert!(rendered.contains(REDACTED_SECRET));
+        assert!(!rendered.contains("SESSIONREFERENCE7890"));
+        assert!(!rendered.contains("super-secret"));
+        assert!(!rendered.contains("temporary-token"));
     }
 }

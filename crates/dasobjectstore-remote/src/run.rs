@@ -96,14 +96,13 @@ fn run_config_set(
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
     let path = config_path(cli)?;
-    let config = RemoteConfig {
-        endpoint_url: args.endpoint_url().to_string(),
-        region: args.region().to_string(),
-        profile: args.profile().to_string(),
-        auth_authority: args.auth(),
-        username: args.username().map(ToOwned::to_owned),
-        credential_helper: args.credential_helper().map(ToOwned::to_owned),
-    };
+    let mut config = read_optional_config(&path)?.unwrap_or_else(empty_config);
+    config.endpoint_url = args.endpoint_url().to_string();
+    config.region = args.region().to_string();
+    config.profile = args.profile().to_string();
+    config.auth_authority = args.auth();
+    config.username = args.username().map(ToOwned::to_owned);
+    config.credential_helper = args.credential_helper().map(ToOwned::to_owned);
     config.validate_for_command()?;
     write_config(&path, &config)?;
     writeln!(writer, "Wrote {}", path.display())?;
@@ -118,7 +117,7 @@ fn run_config_show(
     let config = resolved_config(cli)?;
     config.validate_for_command()?;
     if json {
-        serde_json::to_writer_pretty(&mut *writer, &config)?;
+        serde_json::to_writer_pretty(&mut *writer, &config.redacted())?;
         writer.write_all(b"\n")?;
     } else {
         writeln!(writer, "Endpoint: {}", config.endpoint_url)?;
@@ -130,6 +129,35 @@ fn run_config_show(
         }
         if config.credential_helper.is_some() {
             writeln!(writer, "Credential helper: configured")?;
+        }
+        if let Some(default_appliance_id) = &config.default_appliance_id {
+            writeln!(writer, "Default appliance: {default_appliance_id}")?;
+        }
+        if !config.paired_appliances.is_empty() {
+            writeln!(writer, "Paired appliances:")?;
+            for appliance in &config.paired_appliances {
+                writeln!(
+                    writer,
+                    "- {} ({})",
+                    appliance.display_name, appliance.appliance_id
+                )?;
+                writeln!(writer, "  Base URL: {}", appliance.appliance_base_url)?;
+                writeln!(writer, "  Auth authority: {}", appliance.auth_authority)?;
+                if let Some(actor) = &appliance.paired_actor {
+                    writeln!(writer, "  Paired actor: {actor}")?;
+                }
+                if let Some(store) = &appliance.default_object_store {
+                    writeln!(writer, "  Default ObjectStore: {store}")?;
+                }
+                if let Some(session) = &appliance.session {
+                    writeln!(writer, "  Session: {}", session.redacted_session_id())?;
+                    writeln!(writer, "  Session expires: {}", session.expires_at)?;
+                    if session.renewal.is_some() {
+                        writeln!(writer, "  Renewal: configured")?;
+                    }
+                    writeln!(writer, "  Credentials: configured, redacted")?;
+                }
+            }
         }
     }
     Ok(())
@@ -205,14 +233,7 @@ fn resolved_valid_config(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError
 
 fn resolved_config(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError> {
     let path = config_path(cli)?;
-    let base = read_optional_config(&path)?.unwrap_or_else(|| RemoteConfig {
-        endpoint_url: String::new(),
-        region: DEFAULT_REGION.to_string(),
-        profile: DEFAULT_PROFILE.to_string(),
-        auth_authority: RemoteAuthAuthority::AwsProfile,
-        username: None,
-        credential_helper: None,
-    });
+    let base = read_optional_config(&path)?.unwrap_or_else(empty_config);
     Ok(base.merged_with(RemoteConfigOverrides {
         endpoint_url: cli.endpoint_url(),
         region: cli.region(),
@@ -221,6 +242,19 @@ fn resolved_config(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError> {
         username: cli.username(),
         credential_helper: cli.credential_helper(),
     }))
+}
+
+fn empty_config() -> RemoteConfig {
+    RemoteConfig {
+        endpoint_url: String::new(),
+        region: DEFAULT_REGION.to_string(),
+        profile: DEFAULT_PROFILE.to_string(),
+        auth_authority: RemoteAuthAuthority::AwsProfile,
+        username: None,
+        credential_helper: None,
+        default_appliance_id: None,
+        paired_appliances: Vec::new(),
+    }
 }
 
 fn config_path(cli: &RemoteCli) -> Result<PathBuf, RemoteRunError> {
@@ -311,5 +345,123 @@ impl From<RemoteAuthError> for RemoteRunError {
 impl From<RemoteS3Error> for RemoteRunError {
     fn from(error: RemoteS3Error) -> Self {
         Self::S3(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run;
+    use crate::auth::RemoteAuthAuthority;
+    use crate::cli::RemoteCli;
+    use crate::config::{
+        read_optional_config, write_config, RemoteConfig, RemotePairedAppliance,
+        RemoteSessionCredentials, RemoteUploadSession,
+    };
+    use clap::Parser;
+
+    #[test]
+    fn config_show_json_redacts_paired_session_credentials() {
+        let path = temp_config_path("show-redacts");
+        write_config(&path, &paired_config()).expect("write config");
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "--config",
+            path.to_str().expect("utf8 path"),
+            "config",
+            "show",
+            "--json",
+        ])
+        .expect("cli parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("config show succeeds");
+
+        let rendered = String::from_utf8(output).expect("utf8 output");
+        assert!(rendered.contains("DOSR...1234"));
+        assert!(rendered.contains("SESS...7890"));
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("SESSIONREFERENCE7890"));
+        assert!(!rendered.contains("super-secret"));
+        assert!(!rendered.contains("temporary-token"));
+    }
+
+    #[test]
+    fn config_set_preserves_paired_appliance_storage() {
+        let path = temp_config_path("set-preserves");
+        write_config(&path, &paired_config()).expect("write config");
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "--config",
+            path.to_str().expect("utf8 path"),
+            "config",
+            "set",
+            "--endpoint-url",
+            "https://new.example:3900",
+            "--region",
+            "garage",
+            "--profile",
+            "new-profile",
+        ])
+        .expect("cli parses");
+        let mut output = Vec::new();
+
+        run(&cli, &mut output).expect("config set succeeds");
+
+        let config = read_optional_config(&path)
+            .expect("read config")
+            .expect("config exists");
+        assert_eq!(config.endpoint_url, "https://new.example:3900");
+        assert_eq!(config.profile, "new-profile");
+        assert_eq!(config.default_appliance_id.as_deref(), Some("appliance-1"));
+        assert_eq!(config.paired_appliances.len(), 1);
+        assert_eq!(
+            config.paired_appliances[0].default_object_store.as_deref(),
+            Some("zymo_fecal_2025.05")
+        );
+    }
+
+    fn paired_config() -> RemoteConfig {
+        RemoteConfig {
+            endpoint_url: "https://192.168.1.192:3900".to_string(),
+            region: "garage".to_string(),
+            profile: "dasobjectstore".to_string(),
+            auth_authority: RemoteAuthAuthority::LocalPassword,
+            username: Some("stephen".to_string()),
+            credential_helper: Some("helper".to_string()),
+            default_appliance_id: Some("appliance-1".to_string()),
+            paired_appliances: vec![RemotePairedAppliance {
+                appliance_id: "appliance-1".to_string(),
+                display_name: "QNAP TL-D800C".to_string(),
+                appliance_base_url: "https://192.168.1.192:8448".to_string(),
+                discovery_url:
+                    "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
+                        .to_string(),
+                auth_authority: RemoteAuthAuthority::LocalPassword,
+                paired_actor: Some("stephen".to_string()),
+                default_object_store: Some("zymo_fecal_2025.05".to_string()),
+                session: Some(RemoteUploadSession {
+                    session_id: "SESSIONREFERENCE7890".to_string(),
+                    issued_at: "2026-07-09T11:30:00Z".to_string(),
+                    expires_at: "2026-07-09T19:30:00Z".to_string(),
+                    credentials: RemoteSessionCredentials {
+                        access_key_id: "DOSREMOTEACCESSKEY1234".to_string(),
+                        secret_access_key: "super-secret".to_string(),
+                        session_token: Some("temporary-token".to_string()),
+                    },
+                    renewal: None,
+                }),
+            }],
+        }
+    }
+
+    fn temp_config_path(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-remote-{name}-{}-{nanos}.json",
+            std::process::id()
+        ))
     }
 }

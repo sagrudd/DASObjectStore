@@ -381,6 +381,8 @@ mod tests {
             auth_authority: RemoteAuthAuthority::AwsProfile,
             username: None,
             credential_helper: None,
+            default_appliance_id: None,
+            paired_appliances: Vec::new(),
         }
     }
 

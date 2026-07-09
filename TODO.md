@@ -727,7 +727,7 @@ planning are tracked under Milestones 21 and 22.
   `dasobjectstore-remote easyconnect <host-or-ip>`, including discovery URL,
   browser launch, pairing lifecycle, local callback/polling fallback, failure
   states, and CLI output.
-- [ ] Add remote CLI configuration storage for paired DAS appliances, issued
+- [x] Add remote CLI configuration storage for paired DAS appliances, issued
   session credentials, expiry time, renewal metadata, selected default
   ObjectStore, and secure redaction in logs/help output.
 - [ ] Implement the remote CLI browser-launch flow that opens the appliance Web

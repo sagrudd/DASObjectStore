@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.56.0 - 2026-07-09
+
+- Add paired-appliance remote client configuration storage for easyconnect
+  sessions, including temporary upload credentials, expiry and renewal metadata,
+  default ObjectStore selection, preservation across ``config set``, and
+  redacted ``config show`` output.
+
 ## 0.55.1 - 2026-07-09
 
 - Reframe the standalone Web Users/Groups console as a Prosopikon-aware local
