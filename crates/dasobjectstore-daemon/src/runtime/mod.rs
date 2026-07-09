@@ -5,6 +5,7 @@ mod config;
 mod endpoint_registry;
 mod ingest_files;
 mod local_admin;
+mod object_browser;
 mod performance_policy;
 mod service;
 
@@ -33,6 +34,9 @@ pub use local_admin::{
     LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
     LocalGroupAdministrationRequest, LocalGroupAdministrationResponse, LocalGroupCommandPlanner,
     SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
+};
+pub use object_browser::{
+    query_object_browser_metadata, ObjectBrowserMetadataEntry, ObjectBrowserQueryError,
 };
 pub use performance_policy::{
     authoritative_performance_recommendation_path, read_authoritative_ingest_policy,

@@ -674,7 +674,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Define daemon/API DTOs for ObjectStore file browsing: folder nodes, file
   nodes, object type, size, timestamps, checksum/readiness state, lifecycle
   state, copy count, and disk placement for each settled copy.
-- [ ] Implement metadata-backed ObjectStore tree query logic with prefix
+- [x] Implement metadata-backed ObjectStore tree query logic with prefix
   browsing, breadcrumb paths, server-side filtering/search, sort options,
   pagination, bounded response sizes, and large-tree regression fixtures.
 - [ ] Add authenticated API routes for listing ObjectStore folders and files,
