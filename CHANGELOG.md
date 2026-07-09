@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.8 - 2026-07-09
+
+- Add a per-process GUI API health instance identifier so the Web console can
+  detect server restarts even when the product version is unchanged.
+- Tighten the connected Web session heartbeat to poll server health every five
+  seconds, require the server version and instance identity to match the
+  authenticated session, and immediately clear tokens/unmount authenticated
+  pages when the server is unreachable, restarted, changed version, or rejects
+  the session.
+
 ## 0.54.7 - 2026-07-09
 
 - Refresh the Web Users/Groups workspace after successful live local group

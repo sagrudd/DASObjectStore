@@ -28,6 +28,8 @@ pub struct ApiHealthResponse {
     pub service: String,
     pub status: String,
     pub version: String,
+    #[serde(default)]
+    pub instance_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
