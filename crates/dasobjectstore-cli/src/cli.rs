@@ -1933,7 +1933,10 @@ pub(crate) struct ServiceRenderComposeArgs {
     /// Container image for the selected object service.
     #[arg(long)]
     image: String,
-    /// API port to expose on 127.0.0.1.
+    /// Host address to bind the object-service port on.
+    #[arg(long, default_value = "0.0.0.0")]
+    bind_address: String,
+    /// API port to expose.
     #[arg(long)]
     api_port: u16,
 }
@@ -1965,6 +1968,10 @@ impl ServiceRenderComposeArgs {
 
     pub(crate) fn image(&self) -> &str {
         &self.image
+    }
+
+    pub(crate) fn bind_address(&self) -> &str {
+        &self.bind_address
     }
 
     pub(crate) fn api_port(&self) -> u16 {
@@ -2595,6 +2602,7 @@ mod tests {
                 assert_eq!(render.provider().name(), "garage");
                 assert_eq!(render.service_name(), "garage");
                 assert_eq!(render.image(), "garage:latest");
+                assert_eq!(render.bind_address(), "0.0.0.0");
                 assert_eq!(render.api_port(), 3900);
             }
             _ => panic!("expected render-compose command"),

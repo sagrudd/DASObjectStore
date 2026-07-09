@@ -11,6 +11,7 @@ pub struct ComposeServiceConfig {
     pub provider_id: ObjectServiceProviderId,
     pub service_name: String,
     pub image: String,
+    pub bind_address: String,
     pub api_port: u16,
 }
 
@@ -25,8 +26,14 @@ impl ComposeServiceConfig {
             provider_id,
             service_name: service_name.into(),
             image: image.into(),
+            bind_address: "127.0.0.1".to_string(),
             api_port,
         }
+    }
+
+    pub fn with_bind_address(mut self, bind_address: impl Into<String>) -> Self {
+        self.bind_address = bind_address.into();
+        self
     }
 }
 
@@ -52,7 +59,8 @@ pub fn render_compose(
     yaml.push_str("    restart: \"no\"\n");
     yaml.push_str("    ports:\n");
     yaml.push_str(&format!(
-        "      - \"127.0.0.1:{port}:{port}\"\n",
+        "      - \"{bind_address}:{port}:{port}\"\n",
+        bind_address = service.bind_address,
         port = service.api_port
     ));
     yaml.push_str("    environment:\n");
@@ -114,6 +122,7 @@ pub(crate) fn validate_render_request(
 fn validate_service_config(service: &ComposeServiceConfig) -> Result<(), ObjectServiceError> {
     reject_blank("service_name", &service.service_name)?;
     reject_blank("image", &service.image)?;
+    reject_blank("bind_address", &service.bind_address)?;
 
     if service.api_port == 0 {
         return Err(ObjectServiceError::InvalidConfiguration(
@@ -178,8 +187,30 @@ mod tests {
         assert!(rendered
             .compose_yaml
             .contains("DASOBJECTSTORE_BUCKETS: generated-data\n"));
+        assert!(rendered.compose_yaml.contains("\"127.0.0.1:3900:3900\""));
         assert!(rendered.compose_yaml.contains("store_id: generated\n"));
         assert!(rendered.compose_yaml.contains("class: generated_data\n"));
+    }
+
+    #[test]
+    fn renders_explicit_remote_bind_address() {
+        let request = request(vec![binding(
+            "generated",
+            StoreClass::GeneratedData,
+            "generated-data",
+            "secret://generated",
+        )]);
+        let service = ComposeServiceConfig::new(
+            ObjectServiceProviderId::Garage,
+            "object-service",
+            "example/object-service:1",
+            3900,
+        )
+        .with_bind_address("0.0.0.0");
+
+        let rendered = render_compose(&request, &service).expect("compose renders");
+
+        assert!(rendered.compose_yaml.contains("\"0.0.0.0:3900:3900\""));
     }
 
     #[test]

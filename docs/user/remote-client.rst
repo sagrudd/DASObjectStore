@@ -175,6 +175,13 @@ Configure the DASObjectStore S3 endpoint once on the remote computer:
      --region garage \
      --profile dasobjectstore
 
+The configured endpoint must be reachable from the remote computer. A Garage
+or S3-compatible service bound only to ``127.0.0.1:3900`` on the DAS host is
+valid for local testing but will not accept remote uploads. Render the
+production object-service Compose file with the default DASObjectStore
+``0.0.0.0`` binding, or set an equivalent non-loopback bind address, before
+using an appliance IP such as ``192.168.1.192`` in remote upload plans.
+
 The default config path is:
 
 .. code-block:: text

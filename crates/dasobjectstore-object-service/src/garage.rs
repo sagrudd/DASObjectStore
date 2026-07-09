@@ -15,6 +15,7 @@ pub const DEFAULT_GARAGE_CONFIG_PATH: &str = "/etc/dasobjectstore/garage.toml";
 pub struct GarageProviderConfig {
     pub service_name: String,
     pub image: String,
+    pub bind_address: String,
     pub api_port: u16,
     pub rpc_port: u16,
     pub web_port: u16,
@@ -31,6 +32,7 @@ impl Default for GarageProviderConfig {
         Self {
             service_name: DEFAULT_GARAGE_SERVICE_NAME.to_string(),
             image: DEFAULT_GARAGE_IMAGE.to_string(),
+            bind_address: "127.0.0.1".to_string(),
             api_port: DEFAULT_GARAGE_API_PORT,
             rpc_port: DEFAULT_GARAGE_API_PORT + 1,
             web_port: DEFAULT_GARAGE_API_PORT + 2,
@@ -136,10 +138,22 @@ impl ObjectServiceProvider for GarageProvider {
         yaml.push_str(&format!("    image: {}\n", self.config.image));
         yaml.push_str("    restart: \"no\"\n");
         yaml.push_str("    ports:\n");
-        yaml.push_str(&render_port_mapping(self.config.api_port));
-        yaml.push_str(&render_port_mapping(self.config.rpc_port));
-        yaml.push_str(&render_port_mapping(self.config.web_port));
-        yaml.push_str(&render_port_mapping(self.config.admin_port));
+        yaml.push_str(&render_port_mapping(
+            &self.config.bind_address,
+            self.config.api_port,
+        ));
+        yaml.push_str(&render_port_mapping(
+            &self.config.bind_address,
+            self.config.rpc_port,
+        ));
+        yaml.push_str(&render_port_mapping(
+            &self.config.bind_address,
+            self.config.web_port,
+        ));
+        yaml.push_str(&render_port_mapping(
+            &self.config.bind_address,
+            self.config.admin_port,
+        ));
         yaml.push_str("    volumes:\n");
         yaml.push_str(&format!(
             "      - {}:/etc/garage.toml:ro\n",
@@ -177,7 +191,10 @@ impl ObjectServiceProvider for GarageProvider {
         Ok(ServiceStatus {
             provider_id: ObjectServiceProviderId::Garage,
             state: ServiceState::Unknown,
-            endpoint: Some(format!("http://127.0.0.1:{}", self.config.api_port)),
+            endpoint: Some(format!(
+                "http://{}:{}",
+                self.config.bind_address, self.config.api_port
+            )),
             message: Some(
                 "Garage runtime status inspection is not wired to Docker Compose yet".to_string(),
             ),
@@ -185,13 +202,14 @@ impl ObjectServiceProvider for GarageProvider {
     }
 }
 
-fn render_port_mapping(port: u16) -> String {
-    format!("      - \"127.0.0.1:{port}:{port}\"\n")
+fn render_port_mapping(bind_address: &str, port: u16) -> String {
+    format!("      - \"{bind_address}:{port}:{port}\"\n")
 }
 
 fn validate_config(config: &GarageProviderConfig) -> Result<(), ObjectServiceError> {
     reject_blank("service_name", &config.service_name)?;
     reject_blank("image", &config.image)?;
+    reject_blank("bind_address", &config.bind_address)?;
     reject_blank("config_path", &config.config_path)?;
 
     if config.api_port == 0
@@ -284,9 +302,25 @@ mod tests {
         assert!(rendered
             .compose_yaml
             .contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
+        assert!(rendered.compose_yaml.contains("\"127.0.0.1:3900:3900\""));
         assert!(rendered
             .compose_yaml
             .contains("credential_reference: secret://generated"));
+    }
+
+    #[test]
+    fn renders_garage_remote_bind_address_when_requested() {
+        let provider = GarageProvider::new(GarageProviderConfig {
+            bind_address: "0.0.0.0".to_string(),
+            ..GarageProviderConfig::default()
+        });
+
+        let rendered = provider
+            .render_compose(&request())
+            .expect("Garage compose renders");
+
+        assert!(rendered.compose_yaml.contains("\"0.0.0.0:3900:3900\""));
+        assert!(rendered.compose_yaml.contains("\"0.0.0.0:3901:3901\""));
     }
 
     #[test]

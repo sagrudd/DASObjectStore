@@ -11,6 +11,12 @@ agreement before landing.
 - Add a typed daemon API, client helper, and request-handler route for
   easyconnect AWS CLI remote-upload jobs so submissions reach the
   admission-gated runtime executor.
+- Make rendered object-service Compose bind addresses explicit, defaulting the
+  CLI render path to ``0.0.0.0`` for remote-upload endpoints while retaining a
+  configurable ``--bind-address`` override for loopback-only deployments.
+- Improve ``dasobjectstore status`` object-service reporting so Docker
+  loopback-only port bindings are detected and surfaced as unsuitable for
+  remote upload clients.
 
 ## 0.60.5 - 2026-07-09
 

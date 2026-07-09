@@ -27,6 +27,32 @@ the appliance can stage incoming bytes on the selected ObjectStore SSD before
 daemon-owned HDD settlement. Use ``--json`` when another tool needs to consume
 the plan.
 
+Endpoint reachability
+---------------------
+
+The endpoint URL in the upload plan must be reachable from the remote computer.
+``http://127.0.0.1:3900`` only verifies that the object service is listening on
+the DAS host itself; it is not a valid endpoint for a different workstation.
+
+When rendering Docker Compose for the appliance object service, the CLI defaults
+to a remote-capable host binding:
+
+.. code-block:: console
+
+   dasobjectstore service render-compose \
+     --project-name dasobjectstore \
+     --ssd-metadata-path /srv/dasobjectstore/ssd/garage \
+     --hdd-data-path /srv/dasobjectstore/hdd/garage \
+     --provider garage \
+     --service-name garage \
+     --image dxflrs/garage:v2.3.0 \
+     --api-port 3900
+
+This renders host port bindings on ``0.0.0.0``. For local-only testing, pass
+``--bind-address 127.0.0.1`` explicitly. ``dasobjectstore status`` reports when
+the detected Docker listener is loopback-only so operators do not mistake a
+local health check for a remote-upload-ready endpoint.
+
 On a remote computer that does not have the DASObjectStore store registry, pass
 the bucket name explicitly:
 

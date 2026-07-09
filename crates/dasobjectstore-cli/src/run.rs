@@ -7746,8 +7746,10 @@ fn web_runtime_status() -> RuntimeEndpointStatus {
 
 fn object_service_runtime_status() -> RuntimeEndpointStatus {
     let port = 3900;
-    let endpoint = format!("http://127.0.0.1:{port}");
-    let active = "127.0.0.1:3900"
+    let docker_binding = docker_object_service_binding(port);
+    let bind_address = docker_binding.unwrap_or_else(|| "127.0.0.1".to_string());
+    let endpoint = format!("http://{bind_address}:{port}");
+    let active = format!("{bind_address}:{port}")
         .parse::<SocketAddr>()
         .is_ok_and(local_tcp_listener_active);
     RuntimeEndpointStatus {
@@ -7755,17 +7757,109 @@ fn object_service_runtime_status() -> RuntimeEndpointStatus {
         kind: "s3_compatible",
         configured: true,
         active,
-        bind_address: Some("127.0.0.1".to_string()),
+        bind_address: Some(bind_address.clone()),
         port: Some(port),
         url: Some(endpoint),
-        service: None,
-        service_state: None,
+        service: Some("docker".to_string()),
+        service_state: docker_object_service_container_state(port),
         config_path: None,
-        message: if active {
+        message: if bind_address == "127.0.0.1" {
+            Some(
+                "S3-compatible object-service listener is only reachable on loopback; remote upload clients need a non-loopback bind address".to_string(),
+            )
+        } else if active {
             None
         } else {
             Some("S3-compatible object-service listener is not reachable locally".to_string())
         },
+    }
+}
+
+fn docker_object_service_binding(port: u16) -> Option<String> {
+    let output = ProcessCommand::new("docker")
+        .args([
+            "ps",
+            "--format",
+            "{{.Ports}}",
+            "--filter",
+            &format!("publish={port}"),
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_docker_published_bind_address(&stdout, port)
+}
+
+fn docker_object_service_container_state(port: u16) -> Option<String> {
+    let output = ProcessCommand::new("docker")
+        .args([
+            "ps",
+            "--format",
+            "{{.Status}}",
+            "--filter",
+            &format!("publish={port}"),
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let state = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|state| !state.is_empty())?
+        .to_string();
+    Some(state)
+}
+
+fn parse_docker_published_bind_address(ports: &str, port: u16) -> Option<String> {
+    ports
+        .split(',')
+        .map(str::trim)
+        .find_map(|entry| parse_docker_port_entry_bind_address(entry, port))
+}
+
+fn parse_docker_port_entry_bind_address(entry: &str, port: u16) -> Option<String> {
+    let (host_side, container_side) = entry.split_once("->")?;
+    if !published_container_side_contains_port(container_side, port) {
+        return None;
+    }
+    let host_side = host_side
+        .rsplit_once(' ')
+        .map_or(host_side, |(_, value)| value);
+    let (address, host_ports) = host_side.rsplit_once(':')?;
+    if !published_host_side_contains_port(host_ports, port) {
+        return None;
+    }
+    let address = address.trim_matches(['[', ']']).trim();
+    (!address.is_empty()).then(|| address.to_string())
+}
+
+fn published_container_side_contains_port(container_side: &str, port: u16) -> bool {
+    let port_spec = container_side.split('/').next().unwrap_or(container_side);
+    published_port_spec_contains_port(port_spec, port)
+}
+
+fn published_host_side_contains_port(host_ports: &str, port: u16) -> bool {
+    published_port_spec_contains_port(host_ports, port)
+}
+
+fn published_port_spec_contains_port(port_spec: &str, port: u16) -> bool {
+    match port_spec.split_once('-') {
+        Some((start, end)) => {
+            let Ok(start) = start.parse::<u16>() else {
+                return false;
+            };
+            let Ok(end) = end.parse::<u16>() else {
+                return false;
+            };
+            (start..=end).contains(&port)
+        }
+        None => port_spec.parse::<u16>().is_ok_and(|value| value == port),
     }
 }
 
@@ -10702,6 +10796,7 @@ fn run_service_render_compose(
             let provider = GarageProvider::new(GarageProviderConfig {
                 service_name: args.service_name().to_string(),
                 image: args.image().to_string(),
+                bind_address: args.bind_address().to_string(),
                 api_port: args.api_port(),
                 rpc_port: garage_derived_port(args.api_port(), 1)?,
                 web_port: garage_derived_port(args.api_port(), 2)?,
@@ -10716,7 +10811,8 @@ fn run_service_render_compose(
                 args.service_name(),
                 args.image(),
                 args.api_port(),
-            );
+            )
+            .with_bind_address(args.bind_address());
             render_compose(&request, &service)?
         }
     };
@@ -11103,7 +11199,7 @@ mod tests {
         connection_status_from_probe, current_user_group_names,
         materialize_generated_performance_workload, measure_copy_with_progress,
         measure_copy_with_split_progress, measure_ssd_stage_payload_with_progress,
-        parse_binary_size, performance_report_metadata_json,
+        parse_binary_size, parse_docker_published_bind_address, performance_report_metadata_json,
         performance_report_metadata_json_from_artifact,
         performance_report_qr_payload_from_artifact, performance_sync_all_calls,
         plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
@@ -11199,6 +11295,36 @@ mod tests {
         assert!(output.contains("status"));
         assert!(output.contains("queue"));
         assert!(output.contains("direct-import"));
+    }
+
+    #[test]
+    fn docker_port_parser_extracts_loopback_bind_from_single_mapping() {
+        let ports = "127.0.0.1:3900->3900/tcp";
+
+        assert_eq!(
+            parse_docker_published_bind_address(ports, 3900).as_deref(),
+            Some("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn docker_port_parser_extracts_loopback_bind_from_compacted_range() {
+        let ports = "127.0.0.1:3900-3903->3900-3903/tcp";
+
+        assert_eq!(
+            parse_docker_published_bind_address(ports, 3900).as_deref(),
+            Some("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn docker_port_parser_extracts_public_bind_from_single_mapping() {
+        let ports = "0.0.0.0:3900->3900/tcp, [::]:3900->3900/tcp";
+
+        assert_eq!(
+            parse_docker_published_bind_address(ports, 3900).as_deref(),
+            Some("0.0.0.0")
+        );
     }
 
     #[test]
@@ -15322,6 +15448,7 @@ mod tests {
         assert!(output.contains("image: garage:latest"));
         assert!(output.contains("DASOBJECTSTORE_PROVIDER: garage"));
         assert!(output.contains("DASOBJECTSTORE_BUCKETS: dos-generated"));
+        assert!(output.contains("\"0.0.0.0:3900:3900\""));
         assert!(output.contains("/etc/dasobjectstore/garage.toml:/etc/garage.toml:ro"));
         assert!(output.contains("command: [\"/garage\", \"server\", \"--single-node\""));
         assert!(
