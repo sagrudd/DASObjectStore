@@ -115,9 +115,10 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(
         BUILD_DEB,
-        "Depends: ca-certificates, acl, libpam0g, docker.io",
+        "Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin",
     );
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
+    assert_contains(BUILD_DEB, "docker-buildx");
     assert_contains(
         BUILD_DEB,
         "sudo apt-get install clang libclang-dev libpam0g-dev",
@@ -129,6 +130,7 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
     assert_contains(BUILD_RPM, "Requires:       pam");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
+    assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
     assert_contains(BUILD_RPM, "sudo dnf install clang libclang-devel pam-devel");
 }
 
@@ -188,7 +190,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
     assert_contains(
         BUILD_DEB,
-        "Depends: ca-certificates, acl, libpam0g, docker.io",
+        "Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin",
     );
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
 }
@@ -234,6 +236,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
         "install -d -o \"\\$service_user\" -g \"\\$service_group\" -m 0750 /var/lib/dasobjectstore/report-rebuild",
     );
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
+    assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
 }
 

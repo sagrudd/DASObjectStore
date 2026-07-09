@@ -419,10 +419,13 @@ product-specific report inputs. Source builds can initialise the provider with:
    make report-provider
 
 The target uses ``../grammateus`` and ``../floundeR`` by default and builds the
-requested ``grammateus/report:0.8.1`` image. ``make deb`` and ``make rpm`` run
-this target before assembling packages. Package configuration then prewarms the
-provider and reports the exact ``grammateus_report_provider install`` repair
-command when the provider is missing.
+requested ``grammateus/report:0.8.1`` image. The build requires Docker Buildx
+because floundeR is passed as an additional Docker build context. Ubuntu
+packages this as ``docker-buildx``; Docker CE based installs commonly provide
+``docker-buildx-plugin``. ``make deb`` and ``make rpm`` run this target before
+assembling packages. Package configuration then prewarms the provider and
+reports the exact ``grammateus_report_provider install`` repair command when
+the provider is missing.
 
 Package configuration adds the ``dasobjectstore`` service user to the
 ``docker`` group and restarts the Web service so the rebuild API can access the

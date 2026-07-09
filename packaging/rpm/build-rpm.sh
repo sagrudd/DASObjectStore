@@ -107,6 +107,7 @@ BuildRequires:  rust
 Requires:       acl
 Requires:       ca-certificates
 Requires:       /usr/bin/docker
+Requires:       docker-buildx-plugin
 Requires:       pam
 Requires:       systemd
 Requires(post): coreutils

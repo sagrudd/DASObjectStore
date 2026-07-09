@@ -87,8 +87,8 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g, docker.io
-X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg
+Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin
+X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics

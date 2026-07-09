@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.14 - 2026-07-09
+
+- Declare Docker Buildx as a formal report-provider dependency because the
+  Grammateus/floundeR provider build uses Docker named build contexts.
+- Document the Debian and Docker CE package-name differences for Buildx so
+  appliance installs can repair the provider build path reproducibly.
+
 ## 0.54.13 - 2026-07-09
 
 - Add a `make report-provider` build target that initialises the formal

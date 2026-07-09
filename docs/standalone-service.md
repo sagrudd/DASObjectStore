@@ -142,7 +142,10 @@ The formal PDF report container is initialised through the Grammateus-owned
 `grammateus_report_provider` installer. This mirrors the Mnematikon runtime
 asset pattern: the report provider is a semantically versioned Grammateus
 runtime asset, while DASObjectStore supplies the product report content and
-invokes the shared provider. For source checkouts, run:
+invokes the shared provider. The installer uses Docker Buildx because the
+Grammateus report-provider Dockerfile consumes the sibling floundeR build
+context. On Ubuntu this is supplied by `docker-buildx`; Docker CE based
+installations commonly use `docker-buildx-plugin`. For source checkouts, run:
 
 ```text
 make pull
