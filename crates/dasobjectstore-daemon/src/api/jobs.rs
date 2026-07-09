@@ -74,6 +74,7 @@ pub enum DaemonJobKind {
     Repair,
     EndpointValidation,
     ServiceOperation,
+    RemoteUpload,
     SystemAdministration,
 }
 
@@ -264,6 +265,14 @@ mod tests {
 
         assert_eq!(encoded["jobs"][0]["kind"], "enclosure_preparation");
         assert_eq!(encoded["jobs"][0]["state"], "complete");
+    }
+
+    #[test]
+    fn serializes_remote_upload_job_kind_with_stable_case() {
+        let encoded = serde_json::to_value(DaemonJobKind::RemoteUpload)
+            .expect("remote upload kind serializes");
+
+        assert_eq!(encoded, "remote_upload");
     }
 
     #[test]

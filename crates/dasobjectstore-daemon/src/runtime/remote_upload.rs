@@ -1,5 +1,6 @@
 use crate::api::{
-    decide_remote_easyconnect_upload_admission, DaemonSsdPressure,
+    decide_remote_easyconnect_upload_admission, DaemonJobEvent, DaemonJobId, DaemonJobIdError,
+    DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobSummary, DaemonSsdPressure,
     RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
 };
 use dasobjectstore_core::remote_upload::{
@@ -206,6 +207,109 @@ pub struct RemoteUploadS3TransferJobSummary {
     pub runtime_after: RemoteUploadRuntimeSnapshot,
 }
 
+impl RemoteUploadS3TransferJobSummary {
+    pub fn daemon_job_summary(
+        &self,
+        submitted_at_utc: impl Into<String>,
+        updated_at_utc: impl Into<String>,
+        actor: Option<String>,
+    ) -> Result<DaemonJobSummary, DaemonJobIdError> {
+        let job_id = DaemonJobId::new(self.job_id.clone())?;
+        let state = self.daemon_job_state();
+        let failure_message = self.failure_message();
+
+        Ok(DaemonJobSummary {
+            job_id,
+            kind: DaemonJobKind::RemoteUpload,
+            state,
+            progress: self.daemon_job_progress(),
+            submitted_at_utc: submitted_at_utc.into(),
+            updated_at_utc: updated_at_utc.into(),
+            actor,
+            failure_message,
+        })
+    }
+
+    pub fn daemon_job_event(
+        &self,
+        submitted_at_utc: impl Into<String>,
+        updated_at_utc: impl Into<String>,
+        actor: Option<String>,
+    ) -> Result<DaemonJobEvent, DaemonJobIdError> {
+        let job = self.daemon_job_summary(submitted_at_utc, updated_at_utc, actor)?;
+        Ok(match job.state {
+            DaemonJobState::Complete => DaemonJobEvent::Complete(job),
+            DaemonJobState::Failed => DaemonJobEvent::Failed(job),
+            _ => DaemonJobEvent::Progress(job),
+        })
+    }
+
+    fn daemon_job_state(&self) -> DaemonJobState {
+        match &self.outcome {
+            RemoteUploadS3TransferJobOutcome::Completed => DaemonJobState::Complete,
+            RemoteUploadS3TransferJobOutcome::Failed { .. } => DaemonJobState::Failed,
+            RemoteUploadS3TransferJobOutcome::NotAdmitted(decision) => match decision.action {
+                RemoteUploadBackpressureAction::Accept
+                | RemoteUploadBackpressureAction::PauseNewTransfers => DaemonJobState::Waiting,
+                RemoteUploadBackpressureAction::RejectNewTransfers => DaemonJobState::Failed,
+            },
+        }
+    }
+
+    fn daemon_job_progress(&self) -> DaemonJobProgress {
+        match &self.outcome {
+            RemoteUploadS3TransferJobOutcome::Completed => DaemonJobProgress {
+                stage: "remote_s3_transfer_complete".to_string(),
+                work_bytes_done: self.source_bytes,
+                work_bytes_total: self.source_bytes,
+                work_units_done: 1,
+                work_units_total: 1,
+                message: Some(format!(
+                    "remote upload S3 transfer completed for {}",
+                    self.object_store
+                )),
+            },
+            RemoteUploadS3TransferJobOutcome::Failed { error } => DaemonJobProgress {
+                stage: "remote_s3_transfer_failed".to_string(),
+                work_bytes_done: 0,
+                work_bytes_total: self.source_bytes,
+                work_units_done: 0,
+                work_units_total: 1,
+                message: Some(error.clone()),
+            },
+            RemoteUploadS3TransferJobOutcome::NotAdmitted(decision) => DaemonJobProgress {
+                stage: match decision.action {
+                    RemoteUploadBackpressureAction::RejectNewTransfers => {
+                        "remote_s3_admission_rejected"
+                    }
+                    RemoteUploadBackpressureAction::Accept
+                    | RemoteUploadBackpressureAction::PauseNewTransfers => {
+                        "remote_s3_admission_wait"
+                    }
+                }
+                .to_string(),
+                work_bytes_done: 0,
+                work_bytes_total: self.source_bytes,
+                work_units_done: 0,
+                work_units_total: 1,
+                message: Some(decision.message.clone()),
+            },
+        }
+    }
+
+    fn failure_message(&self) -> Option<String> {
+        match &self.outcome {
+            RemoteUploadS3TransferJobOutcome::Failed { error } => Some(error.clone()),
+            RemoteUploadS3TransferJobOutcome::NotAdmitted(decision)
+                if decision.action == RemoteUploadBackpressureAction::RejectNewTransfers =>
+            {
+                Some(decision.message.clone())
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RemoteUploadS3TransferJobOutcome {
     Completed,
@@ -232,9 +336,12 @@ fn admission_decision_for_state(
 mod tests {
     use super::{
         RemoteUploadAdmissionGate, RemoteUploadQueueDepths, RemoteUploadS3TransferJob,
-        RemoteUploadS3TransferJobOutcome,
+        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
     };
-    use crate::api::{DaemonSsdPressure, RemoteEasyconnectUploadBackpressureReason};
+    use crate::api::{
+        DaemonJobEvent, DaemonJobKind, DaemonJobState, DaemonSsdPressure,
+        RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadBackpressureReason,
+    };
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
@@ -474,6 +581,92 @@ mod tests {
         assert_eq!(gate.snapshot().active_s3_transfers, 2);
     }
 
+    #[test]
+    fn completed_s3_transfer_job_maps_to_complete_daemon_job_event() {
+        let summary = RemoteUploadS3TransferJobSummary {
+            job_id: "remote-upload-job-001".to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            outcome: RemoteUploadS3TransferJobOutcome::Completed,
+            runtime_after: Default::default(),
+        };
+
+        let event = summary
+            .daemon_job_event(
+                "2026-07-09T14:00:00Z",
+                "2026-07-09T14:00:30Z",
+                Some("stephen".to_string()),
+            )
+            .expect("event");
+
+        let DaemonJobEvent::Complete(job) = event else {
+            panic!("expected complete job event");
+        };
+        assert_eq!(job.job_id.as_str(), "remote-upload-job-001");
+        assert_eq!(job.kind, DaemonJobKind::RemoteUpload);
+        assert_eq!(job.state, DaemonJobState::Complete);
+        assert_eq!(job.progress.work_bytes_done, 42);
+        assert_eq!(job.progress.work_bytes_total, 42);
+        assert_eq!(job.failure_message, None);
+    }
+
+    #[test]
+    fn paused_s3_transfer_job_maps_to_waiting_daemon_job_progress_event() {
+        let summary = RemoteUploadS3TransferJobSummary {
+            job_id: "remote-upload-job-002".to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            outcome: RemoteUploadS3TransferJobOutcome::NotAdmitted(admission_decision(
+                RemoteUploadBackpressureAction::PauseNewTransfers,
+            )),
+            runtime_after: Default::default(),
+        };
+
+        let event = summary
+            .daemon_job_event("2026-07-09T14:00:00Z", "2026-07-09T14:00:30Z", None)
+            .expect("event");
+
+        let DaemonJobEvent::Progress(job) = event else {
+            panic!("expected progress job event");
+        };
+        assert_eq!(job.kind, DaemonJobKind::RemoteUpload);
+        assert_eq!(job.state, DaemonJobState::Waiting);
+        assert_eq!(job.progress.stage, "remote_s3_admission_wait");
+        assert_eq!(
+            job.progress.message.as_deref(),
+            Some("Remote upload intake is temporarily paused.")
+        );
+        assert_eq!(job.failure_message, None);
+    }
+
+    #[test]
+    fn rejected_s3_transfer_job_maps_to_failed_daemon_job_event() {
+        let summary = RemoteUploadS3TransferJobSummary {
+            job_id: "remote-upload-job-003".to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            outcome: RemoteUploadS3TransferJobOutcome::NotAdmitted(admission_decision(
+                RemoteUploadBackpressureAction::RejectNewTransfers,
+            )),
+            runtime_after: Default::default(),
+        };
+
+        let event = summary
+            .daemon_job_event("2026-07-09T14:00:00Z", "2026-07-09T14:00:30Z", None)
+            .expect("event");
+
+        let DaemonJobEvent::Failed(job) = event else {
+            panic!("expected failed job event");
+        };
+        assert_eq!(job.kind, DaemonJobKind::RemoteUpload);
+        assert_eq!(job.state, DaemonJobState::Failed);
+        assert_eq!(job.progress.stage, "remote_s3_admission_rejected");
+        assert_eq!(
+            job.failure_message.as_deref(),
+            Some("Remote upload intake is temporarily paused.")
+        );
+    }
+
     fn transfer_job(policy: RemoteUploadBackpressurePolicy) -> RemoteUploadS3TransferJob {
         RemoteUploadS3TransferJob {
             job_id: "remote-upload-job-001".to_string(),
@@ -481,6 +674,17 @@ mod tests {
             source_bytes: 42,
             policy,
             ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+        }
+    }
+
+    fn admission_decision(
+        action: RemoteUploadBackpressureAction,
+    ) -> RemoteEasyconnectUploadAdmissionDecision {
+        RemoteEasyconnectUploadAdmissionDecision {
+            action,
+            reason: RemoteEasyconnectUploadBackpressureReason::SsdHighPressure,
+            retry_after_seconds: Some(30),
+            message: "Remote upload intake is temporarily paused.".to_string(),
         }
     }
 }

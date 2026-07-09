@@ -309,7 +309,10 @@ when the transfer completes or fails. The shared worker wrapper checks admission
 before invoking transfer code, so blocked intake does not start partially. The
 daemon job wrapper carries the remote upload job id, target ObjectStore, source
 byte count, final outcome, and runtime queue snapshot back to the future job
-registry/event stream.
+registry/event stream. Those summaries now map onto the common daemon job
+event model using the stable ``remote_upload`` job kind, with completed
+transfers emitted as complete events, temporary backpressure emitted as waiting
+progress events, and rejected/failed transfers emitted as failed events.
 
 Credential Helper Contract
 --------------------------

@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.3 - 2026-07-09
 
+- Add the stable ``remote_upload`` daemon job kind and map remote-upload S3
+  transfer job summaries into the shared daemon job event model for completed,
+  waiting, rejected, and failed transfers.
 - Add a daemon remote-upload S3 transfer job wrapper that records job identity,
   target ObjectStore, source bytes, admission/transfer outcome, and runtime
   queue state while enforcing the central admission gate before transfer code
