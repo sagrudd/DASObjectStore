@@ -222,17 +222,24 @@ async function assertVisualContract(page, { auth }) {
       issues.push("authenticated view is missing the top bar");
     }
 
-    const brandLogos = Array.from(document.querySelectorAll(".dos-brand-logo"));
+    const brandLogoSelector = authenticated ? ".dos-brand-logo" : ".dos-auth-wordmark";
+    const brandLogos = Array.from(document.querySelectorAll(brandLogoSelector));
     if (brandLogos.length === 0) {
-      issues.push("Mnemosyne brand logo is missing");
+      issues.push(
+        authenticated
+          ? "Mnemosyne compact brand logo is missing"
+          : "Mnemosyne login wordmark is missing",
+      );
     }
     for (const logo of brandLogos) {
       const rect = logo.getBoundingClientRect();
       if (!visible(logo)) {
-        issues.push("Mnemosyne brand logo is not visible");
+        issues.push("Mnemosyne brand asset is not visible");
       }
-      if (rect.width < 10 || rect.height < 18) {
-        issues.push(`Mnemosyne brand logo renders too small: ${rect.width}x${rect.height}`);
+      const minWidth = authenticated ? 10 : 160;
+      const minHeight = authenticated ? 18 : 100;
+      if (rect.width < minWidth || rect.height < minHeight) {
+        issues.push(`Mnemosyne brand asset renders too small: ${rect.width}x${rect.height}`);
       }
     }
 

@@ -12,6 +12,7 @@ use yew::prelude::*;
 
 const DASOBJECTSTORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MNEMOSYNE_LOGO_ICON_SRC: &str = "mnemosyne-biosciences-logo-icon-black.png";
+const MNEMOSYNE_LOGO_WORDMARK_SRC: &str = "mnemosyne-biosciences-logo-master-mono.png";
 
 #[function_component(App)]
 pub fn app() -> Html {
@@ -193,12 +194,12 @@ fn landing_page(props: &LandingPageProps) -> Html {
     html! {
         <section class="dos-auth-shell">
             <aside class="dos-auth-brand">
-                <div class="dos-brand-lockup" aria-label="Mnemosyne Biosciences DASObjectStore">
-                    { brand_mark(false) }
-                    <div>
-                        <strong>{ "Mnemosyne Biosciences" }</strong>
-                        <span>{ "DASObjectStore" }</span>
-                    </div>
+                <div class="dos-auth-wordmark-lockup">
+                    <img
+                        class="dos-auth-wordmark"
+                        src={MNEMOSYNE_LOGO_WORDMARK_SRC}
+                        alt="Mnemosyne Biosciences"
+                    />
                 </div>
                 <div class="dos-auth-summary">
                     <p>{ "Local appliance access" }</p>

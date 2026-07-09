@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.53.5 - 2026-07-09
+
+- Add the full Mnemosyne Biosciences wordmark to the Web login page using a
+  trimmed packaged asset and responsive login-page sizing.
+- Keep the compact Mnemosyne icon treatment for authenticated navigation while
+  extending screenshot regression checks to validate the login wordmark.
+
 ## 0.53.4 - 2026-07-09
 
 - Replace the Web UI boxed placeholder brand mark with the Mnemosyne

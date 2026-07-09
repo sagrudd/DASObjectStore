@@ -124,6 +124,19 @@ h2 {
   gap: 12px;
 }
 
+.dos-auth-wordmark-lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.dos-auth-wordmark {
+  display: block;
+  width: clamp(260px, 30vw, 332px);
+  max-width: 100%;
+  height: auto;
+}
+
 .dos-brand-lockup strong,
 .dos-topbar-brand strong {
   display: block;
@@ -901,6 +914,10 @@ h2 {
 
   .dos-auth-brand {
     min-height: 360px;
+  }
+
+  .dos-auth-wordmark {
+    width: clamp(220px, 72vw, 260px);
   }
 
   .dos-auth-summary h1 {
