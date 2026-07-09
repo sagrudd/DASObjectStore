@@ -40,8 +40,8 @@ pub use auth_routes::{
     gui_api_router_for_host_mode, standalone_auth_router, standalone_gui_api_router,
     AssignLocalUserToGroupRequest, AuthRouteError, CreateLocalGroupRequest, GuiApiHostMode,
     LoginRequest, LogoutRequest, RegisterRequest, SessionCheckRequest,
-    StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,
-    StandaloneLocalGroupOperation,
+    StandaloneEasyconnectAuthContextResponse, StandaloneLocalGroupAdminAcceptedResponse,
+    StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,

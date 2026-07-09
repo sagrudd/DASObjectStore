@@ -33,7 +33,8 @@ use dasobjectstore_daemon::{
     DaemonRuntimeConfig, PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
-    PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, UnixSocketDaemonTransport,
+    PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, RemoteEasyconnectAuthProvider,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
@@ -62,6 +63,7 @@ pub fn gui_api_router_for_host_mode(
         GuiApiHostMode::Standalone => crate::routes::gui_api_router_without_redesign_dashboards()
             .merge(standalone_dashboard_router(auth_store.clone()))
             .merge(standalone_auth_router(auth_store.clone()))
+            .merge(standalone_easyconnect_router(auth_store.clone()))
             .merge(standalone_users_groups_router(auth_store.clone()))
             .merge(standalone_enclosure_admin_router(auth_store.clone()))
             .merge(
@@ -82,6 +84,24 @@ fn standalone_auth_router_with_state(state: StandaloneAuthRouteState) -> Router 
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/session", post(session))
+        .with_state(state)
+}
+
+pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {
+    standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState::system(auth_store))
+}
+
+fn standalone_easyconnect_router_with_state(state: StandaloneEasyconnectRouteState) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/remote/easyconnect/discovery",
+            get(easyconnect_discovery),
+        )
+        .route(
+            "/api/v1/remote/easyconnect/auth-context",
+            get(easyconnect_auth_context),
+        )
+        .layer(Extension(state.auth_store.clone()))
         .with_state(state)
 }
 
@@ -253,11 +273,26 @@ struct StandaloneAuthRouteState {
     local_password_authenticator: Arc<dyn LocalPasswordAuthenticator>,
 }
 
+#[derive(Clone)]
+struct StandaloneEasyconnectRouteState {
+    auth_store: LocalAuthStore,
+    public_base_url: String,
+}
+
 impl StandaloneAuthRouteState {
     fn system(auth_store: LocalAuthStore) -> Self {
         Self {
             auth_store,
             local_password_authenticator: Arc::new(SystemLocalPasswordAuthenticator::default()),
+        }
+    }
+}
+
+impl StandaloneEasyconnectRouteState {
+    fn system(auth_store: LocalAuthStore) -> Self {
+        Self {
+            auth_store,
+            public_base_url: crate::DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
         }
     }
 }
@@ -353,6 +388,16 @@ pub struct LogoutRequest {
 pub struct SessionCheckRequest {
     pub username: String,
     pub session_token: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEasyconnectAuthContextResponse {
+    pub schema_version: String,
+    pub auth_provider: RemoteEasyconnectAuthProvider,
+    pub subject_id: String,
+    pub session_expires_at_unix_seconds: Option<i64>,
+    pub supported_auth_providers: Vec<RemoteEasyconnectAuthProvider>,
+    pub future_auth_providers: Vec<RemoteEasyconnectAuthProvider>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -852,6 +897,38 @@ async fn session(
         .map_err(auth_route_error)
 }
 
+async fn easyconnect_discovery(
+    State(state): State<StandaloneEasyconnectRouteState>,
+) -> Json<RemoteEasyconnectDiscoveryResponse> {
+    Json(standalone_easyconnect_discovery_payload(
+        &state.public_base_url,
+    ))
+}
+
+async fn easyconnect_auth_context(
+    actor: AuthenticatedGuiActor,
+) -> Result<Json<StandaloneEasyconnectAuthContextResponse>, (StatusCode, Json<AuthRouteError>)> {
+    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "standalone_local_user_required",
+            "easyconnect standalone authentication requires a local standalone browser session",
+        ));
+    }
+
+    Ok(Json(StandaloneEasyconnectAuthContextResponse {
+        schema_version: "dasobjectstore.remote_easyconnect.auth_context.v1".to_string(),
+        auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+        subject_id: actor.subject_id,
+        session_expires_at_unix_seconds: actor.expires_at_unix_seconds,
+        supported_auth_providers: vec![RemoteEasyconnectAuthProvider::StandaloneLocalUser],
+        future_auth_providers: vec![
+            RemoteEasyconnectAuthProvider::Synoptikon,
+            RemoteEasyconnectAuthProvider::Mneion,
+        ],
+    }))
+}
+
 async fn standalone_home_dashboard(
     State(_state): State<StandaloneDashboardRouteState>,
     _actor: AuthenticatedGuiActor,
@@ -928,6 +1005,33 @@ fn actor_local_user_for_workspace(
     local_user_provider
         .local_user(&actor.subject_id)
         .map_err(|err| err.to_string())
+}
+
+fn standalone_easyconnect_discovery_payload(
+    public_base_url: &str,
+) -> RemoteEasyconnectDiscoveryResponse {
+    let api_base_url = format!(
+        "{}/products/dasobjectstore/api",
+        public_base_url.trim_end_matches('/')
+    );
+
+    RemoteEasyconnectDiscoveryResponse {
+        appliance_id: "standalone-dasobjectstore".to_string(),
+        product_id: "dasobjectstore".to_string(),
+        display_name: "DASObjectStore standalone appliance".to_string(),
+        pairing_create_url: format!("{api_base_url}/v1/remote/easyconnect/pairings"),
+        pairing_exchange_url: format!("{api_base_url}/v1/remote/easyconnect/pairings/exchange"),
+        session_revoke_url_template: format!(
+            "{api_base_url}/v1/remote/easyconnect/sessions/{{session_id}}"
+        ),
+        session_renew_url_template: format!(
+            "{api_base_url}/v1/remote/easyconnect/sessions/{{session_id}}/renew"
+        ),
+        default_session_lifetime_seconds:
+            dasobjectstore_daemon::REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+        session_policy: RemoteEasyconnectSessionPolicy::default(),
+        auth_providers: vec![RemoteEasyconnectAuthProvider::StandaloneLocalUser],
+    }
 }
 
 async fn create_local_group(
@@ -2041,31 +2145,32 @@ fn route_error(
 mod tests {
     use super::{
         gui_api_router_for_host_mode, standalone_auth_router_with_state,
-        standalone_dashboard_router_with_state, standalone_enclosure_admin_router_with_state,
-        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
-        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
-        DaemonEndpointBindingReadiness, DaemonEndpointKind, DaemonEndpointValidation,
-        DaemonEndpointValidationState, DaemonUpsertEndpointInventoryRequest,
-        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
-        EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
-        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, PrepareEnclosureHddDeviceRequest,
-        PrepareEnclosureRequest, RegisterRequest, SessionCheckRequest,
-        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
-        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
-        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
+        standalone_enclosure_admin_router_with_state, standalone_reporting_router_with_state,
+        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
+        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointBindingReadiness,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
+        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
+        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
-        StandaloneDashboardRouteState, StandaloneEnclosureAdminClient,
-        StandaloneEnclosureAdminClientError, StandaloneEnclosureAdminRouteState,
-        StandaloneEnclosurePrepareAcceptedResponse, StandaloneEnclosurePrepareDaemonRequest,
-        StandaloneEnclosurePrepareResponse, StandaloneEndpointInventoryAcceptedResponse,
-        StandaloneEndpointInventoryUpsertResponse, StandaloneLocalGroupAdminAcceptedResponse,
-        StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
-        StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
-        StandaloneLocalGroupOperation, StandaloneReportingRouteState,
-        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
+        StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
+        StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
+        StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
+        StandaloneEndpointInventoryAcceptedResponse, StandaloneEndpointInventoryUpsertResponse,
+        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
+        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
+        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
+        StandaloneReportingRouteState, StandaloneUsersGroupsRouteState,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -2298,6 +2403,109 @@ mod tests {
 
         assert_eq!(login.username, "stephen");
         assert!(session.valid);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_easyconnect_discovery_advertises_local_user_auth() {
+        let root = temp_root("easyconnect-discovery");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store,
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/remote/easyconnect/discovery")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(
+            encoded["auth_providers"],
+            serde_json::json!(["standalone_local_user"])
+        );
+        assert_eq!(encoded["default_session_lifetime_seconds"], 28_800);
+        assert_eq!(
+            encoded["session_policy"]["renewal_requires_password_reauthentication"],
+            false
+        );
+        assert_eq!(
+            encoded["pairing_create_url"],
+            "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_easyconnect_auth_context_requires_session() {
+        let root = temp_root("easyconnect-auth-required");
+        let auth_store = registered_auth_store(&root);
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store,
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/remote/easyconnect/auth-context")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_easyconnect_auth_context_uses_authenticated_local_user() {
+        let root = temp_root("easyconnect-auth-context");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let login = auth_store
+            .login("stephen", "secret")
+            .expect("login succeeds");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store,
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let encoded = get_json_with_session::<serde_json::Value>(
+            app,
+            "/api/v1/remote/easyconnect/auth-context",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(
+            encoded["schema_version"],
+            "dasobjectstore.remote_easyconnect.auth_context.v1"
+        );
+        assert_eq!(encoded["auth_provider"], "standalone_local_user");
+        assert_eq!(encoded["subject_id"], "stephen");
+        assert_eq!(
+            encoded["supported_auth_providers"],
+            serde_json::json!(["standalone_local_user"])
+        );
+        assert_eq!(
+            encoded["future_auth_providers"],
+            serde_json::json!(["synoptikon", "mneion"])
+        );
 
         cleanup(&root);
     }
@@ -3578,6 +3786,28 @@ mod tests {
                 Request::builder()
                     .method("GET")
                     .uri("/api/v1/workspaces/users-groups")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn synoptikon_integrated_host_mode_omits_standalone_easyconnect_routes() {
+        let root = temp_root("integrated-easyconnect");
+        let auth_store = LocalAuthStore::new(&root);
+        let app = gui_api_router_for_host_mode(GuiApiHostMode::SynoptikonIntegrated, auth_store);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/remote/easyconnect/auth-context")
                     .body(Body::empty())
                     .expect("request builds"),
             )

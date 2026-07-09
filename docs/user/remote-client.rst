@@ -75,6 +75,15 @@ the following operations:
 * explicit session revocation; and
 * renewal of an active session during long uploads.
 
+Standalone appliances advertise ``standalone_local_user`` as the active
+easyconnect authentication provider. The browser approval path uses the same
+local-user Web session as the rest of the standalone console: the user logs in
+with their appliance OS/PAM credentials, and protected easyconnect approval
+routes resolve the authenticated local subject from the browser session token.
+The API shape also reserves ``synoptikon`` and ``mneion`` providers for later
+integrated-host deployments, but those providers are not active in standalone
+mode.
+
 Session exchange responses carry temporary S3 credentials, accessible
 ObjectStore grants, expiry time, and renewal metadata. Those credentials are
 intended for the paired ``dasobjectstore-remote`` process only and must not be

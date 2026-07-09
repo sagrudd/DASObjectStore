@@ -741,7 +741,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Set the default remote upload session lifetime to eight hours and add
   renewal semantics that are safe for long-running ingress jobs without keeping
   passwords in memory longer than required.
-- [ ] Support standalone local-user authentication for easyconnect first, while
+- [x] Support standalone local-user authentication for easyconnect first, while
   keeping the API shape ready for Synoptikon/Mneion identity providers.
 - [ ] Add permission checks so remote upload sessions can list only the
   ObjectStores available to the authenticated user and can write only to stores
