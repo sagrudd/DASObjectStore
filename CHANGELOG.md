@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.65.0 - 2026-07-09
+
+- Add a stable Home throughput telemetry chart with fixed axes, bounded labels,
+  and an empty-sample state so telemetry refreshes do not resize dashboard
+  cards or overlap text.
+- Refresh the selected Home telemetry window on a fixed browser cadence while
+  preserving the existing authenticated dashboard load/error states.
+
 ## 0.64.0 - 2026-07-09
 
 - Add a global Home telemetry window control for 1 hour, 1 day, 10 days, and

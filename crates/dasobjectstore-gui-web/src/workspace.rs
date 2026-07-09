@@ -5,7 +5,7 @@ use crate::api::ObjectBrowserResponse;
 use crate::api::{
     ActivityWorkspaceResponse, EnclosureDriveSlotResponse, EnclosuresPageResponse,
     HomeDashboardResponse, ObjectBrowserPlacementResponse, ObjectStoresPageResponse,
-    UsersGroupsWorkspaceResponse,
+    ThroughputDayResponse, UsersGroupsWorkspaceResponse,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
@@ -25,7 +25,7 @@ use crate::api::{
 use crate::api::{ObjectBrowserFileNodeResponse, ObjectBrowserFolderNodeResponse};
 use crate::mount::FrontendHost;
 #[cfg(target_arch = "wasm32")]
-use gloo_timers::callback::Timeout;
+use gloo_timers::callback::{Interval, Timeout};
 #[cfg(target_arch = "wasm32")]
 use prosopikon_core::{
     LocalAccessGroupRecord, LocalAccessMembershipRecord, LocalAccessPrincipalRecord,
@@ -38,6 +38,16 @@ use prosopikon_yew::{
 pub const HOME_WORKSPACE_ROUTE: &str = "dashboard/home";
 pub const ENCLOSURES_WORKSPACE_ROUTE: &str = "dashboard/enclosures";
 pub const OBJECTSTORES_WORKSPACE_ROUTE: &str = "dashboard/object-stores";
+#[cfg(target_arch = "wasm32")]
+const HOME_DASHBOARD_REFRESH_MS: u32 = 30_000;
+#[cfg(target_arch = "wasm32")]
+const HOME_THROUGHPUT_CHART_WIDTH: f64 = 640.0;
+#[cfg(target_arch = "wasm32")]
+const HOME_THROUGHPUT_CHART_HEIGHT: f64 = 180.0;
+const HOME_THROUGHPUT_CHART_LEFT: f64 = 48.0;
+const HOME_THROUGHPUT_CHART_RIGHT: f64 = 616.0;
+const HOME_THROUGHPUT_CHART_TOP: f64 = 24.0;
+const HOME_THROUGHPUT_CHART_BOTTOM: f64 = 144.0;
 pub const ACTIVITY_WORKSPACE_ROUTE: &str = crate::activity::ACTIVITY_WORKSPACE_ROUTE;
 pub const ENDPOINTS_WORKSPACE_ROUTE: &str = crate::endpoints::ENDPOINTS_WORKSPACE_ROUTE;
 pub const BIOINFORMATICS_WORKSPACE_ROUTE: &str = "workspaces/bioinformatics";
@@ -447,6 +457,87 @@ pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetr
             &view.health.label,
         ),
     ]
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HomeThroughputChartPoint {
+    pub date: String,
+    pub ingest_tib: f64,
+    pub x: f64,
+    pub y: f64,
+}
+
+pub fn home_throughput_chart_points(view: &HomeDashboardResponse) -> Vec<HomeThroughputChartPoint> {
+    throughput_chart_points(&view.throughput_7d.daily)
+}
+
+pub fn home_throughput_chart_polyline(points: &[HomeThroughputChartPoint]) -> String {
+    points
+        .iter()
+        .map(|point| format!("{:.1},{:.1}", point.x, point.y))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn home_throughput_chart_max_tib(points: &[HomeThroughputChartPoint]) -> String {
+    let max_tib = points
+        .iter()
+        .map(|point| point.ingest_tib)
+        .fold(0.0_f64, f64::max);
+    if max_tib < 10.0 {
+        format!("{max_tib:.1} TiB")
+    } else {
+        format!("{max_tib:.0} TiB")
+    }
+}
+
+fn throughput_chart_points(days: &[ThroughputDayResponse]) -> Vec<HomeThroughputChartPoint> {
+    let parsed = days
+        .iter()
+        .filter_map(|day| parse_tib_value(&day.ingest_tib).map(|ingest_tib| (day, ingest_tib)))
+        .collect::<Vec<_>>();
+    if parsed.is_empty() {
+        return Vec::new();
+    }
+
+    let max_tib = parsed
+        .iter()
+        .map(|(_, ingest_tib)| *ingest_tib)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let span = parsed.len().saturating_sub(1).max(1) as f64;
+    parsed
+        .into_iter()
+        .enumerate()
+        .map(|(index, (day, ingest_tib))| {
+            let x = HOME_THROUGHPUT_CHART_LEFT
+                + ((HOME_THROUGHPUT_CHART_RIGHT - HOME_THROUGHPUT_CHART_LEFT)
+                    * (index as f64 / span));
+            let y = HOME_THROUGHPUT_CHART_BOTTOM
+                - ((HOME_THROUGHPUT_CHART_BOTTOM - HOME_THROUGHPUT_CHART_TOP)
+                    * (ingest_tib / max_tib));
+            HomeThroughputChartPoint {
+                date: day.date.clone(),
+                ingest_tib,
+                x,
+                y,
+            }
+        })
+        .collect()
+}
+
+fn parse_tib_value(value: &str) -> Option<f64> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let numeric = value
+        .strip_suffix("TiB")
+        .unwrap_or(value)
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    numeric.is_finite().then_some(numeric.max(0.0))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1780,6 +1871,25 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
         });
     }
 
+    {
+        let api_path = api_path.clone();
+        let dashboard_state = dashboard_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            let interval = Interval::new(HOME_DASHBOARD_REFRESH_MS, move || {
+                let path = path.clone();
+                let dashboard_state = dashboard_state.clone();
+                wasm_bindgen_futures::spawn_local(async move {
+                    dashboard_state.set(page_load_state_from_result(
+                        crate::api::get_home_dashboard(&path).await,
+                        |_| None,
+                    ));
+                });
+            });
+            move || drop(interval)
+        });
+    }
+
     html! {
         <section class="dos-page" data-page="home" data-api-route={api_path}>
             <PageHeader
@@ -1816,6 +1926,7 @@ fn render_home_dashboard_state(
                 <div class="dos-metric-grid">
                     { for home_dashboard_metrics(view).into_iter().map(render_metric_card) }
                 </div>
+                { render_home_throughput_chart(view) }
                 <div class="dos-attention-grid">
                     { for home_dashboard_attention(view).into_iter().map(render_attention_card) }
                 </div>
@@ -1832,6 +1943,95 @@ fn render_home_dashboard_state(
         ApiLoadState::TransportError(message) => {
             render_home_state_message("Error", "Unable to load Home dashboard", message)
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html {
+    let points = home_throughput_chart_points(view);
+    let first_label = points
+        .first()
+        .map(|point| point.date.as_str())
+        .unwrap_or("No samples");
+    let last_label = points
+        .last()
+        .map(|point| point.date.as_str())
+        .unwrap_or("Awaiting telemetry");
+    let max_label = home_throughput_chart_max_tib(&points);
+    let polyline = home_throughput_chart_polyline(&points);
+    let has_points = !points.is_empty();
+
+    html! {
+        <section class="dos-card dos-home-chart-card" aria-label="Home throughput telemetry chart">
+            <div class="dos-card-row">
+                <div>
+                    <span class="dos-card-label">{ "Telemetry chart" }</span>
+                    <h2>{ "Throughput" }</h2>
+                </div>
+                <span class="dos-status-pill">{ &view.telemetry_window.selected_label }</span>
+            </div>
+            <div class="dos-home-chart-frame">
+                <svg
+                    class="dos-home-throughput-chart"
+                    viewBox={format!(
+                        "0 0 {:.0} {:.0}",
+                        HOME_THROUGHPUT_CHART_WIDTH,
+                        HOME_THROUGHPUT_CHART_HEIGHT
+                    )}
+                    role="img"
+                    aria-label="Ingest throughput over selected telemetry window"
+                >
+                    <line
+                        class="dos-chart-axis"
+                        x1={HOME_THROUGHPUT_CHART_LEFT.to_string()}
+                        y1={HOME_THROUGHPUT_CHART_BOTTOM.to_string()}
+                        x2={HOME_THROUGHPUT_CHART_RIGHT.to_string()}
+                        y2={HOME_THROUGHPUT_CHART_BOTTOM.to_string()}
+                    />
+                    <line
+                        class="dos-chart-axis"
+                        x1={HOME_THROUGHPUT_CHART_LEFT.to_string()}
+                        y1={HOME_THROUGHPUT_CHART_TOP.to_string()}
+                        x2={HOME_THROUGHPUT_CHART_LEFT.to_string()}
+                        y2={HOME_THROUGHPUT_CHART_BOTTOM.to_string()}
+                    />
+                    <line
+                        class="dos-chart-gridline"
+                        x1={HOME_THROUGHPUT_CHART_LEFT.to_string()}
+                        y1={HOME_THROUGHPUT_CHART_TOP.to_string()}
+                        x2={HOME_THROUGHPUT_CHART_RIGHT.to_string()}
+                        y2={HOME_THROUGHPUT_CHART_TOP.to_string()}
+                    />
+                    {
+                        if has_points {
+                            html! {
+                                <>
+                                    <polyline class="dos-chart-line" points={polyline} />
+                                    { for points.iter().map(|point| html! {
+                                        <circle
+                                            class="dos-chart-point"
+                                            cx={format!("{:.1}", point.x)}
+                                            cy={format!("{:.1}", point.y)}
+                                            r="3"
+                                        />
+                                    }) }
+                                </>
+                            }
+                        } else {
+                            html! {
+                                <text class="dos-chart-empty" x="320" y="88" text-anchor="middle">
+                                    { "Awaiting throughput samples" }
+                                </text>
+                            }
+                        }
+                    }
+                    <text class="dos-chart-label" x="8" y="28">{ max_label }</text>
+                    <text class="dos-chart-label" x="8" y="148">{ "0 TiB" }</text>
+                    <text class="dos-chart-label" x="48" y="170">{ first_label }</text>
+                    <text class="dos-chart-label" x="616" y="170" text-anchor="end">{ last_label }</text>
+                </svg>
+            </div>
+        </section>
     }
 }
 
@@ -6886,21 +7086,22 @@ mod tests {
         enclosure_prepare_confirmed, enclosure_retry_clears_job_state, enclosure_ssd_root,
         enclosures_workspace_api_path, endpoints_workspace_api_path,
         home_dashboard_api_path_with_window, home_dashboard_attention, home_dashboard_metrics,
-        home_workspace_api_path, object_browser_download_disabled_reason,
-        object_browser_file_download_available, object_browser_file_summaries,
-        object_browser_folder_download_available, object_browser_folder_summaries,
-        object_browser_initial_endpoint, object_browser_placement_summary,
-        object_browser_placement_summary_state, object_store_bucket_default,
-        object_store_card_summaries, object_store_configure_review_from_values,
-        object_store_create_confirmation_matches, object_store_create_review_from_values,
-        object_store_creation_fields_ready, objectstores_workspace_api_path,
-        primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
-        subobject_registry_preview_from_values, users_groups_summary_cards,
-        users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState,
-        RemoteUploadSelectedFile, RemoteUploadSelectionSummary, WorkspacePage,
-        ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
-        PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
+        home_throughput_chart_max_tib, home_throughput_chart_points,
+        home_throughput_chart_polyline, home_workspace_api_path,
+        object_browser_download_disabled_reason, object_browser_file_download_available,
+        object_browser_file_summaries, object_browser_folder_download_available,
+        object_browser_folder_summaries, object_browser_initial_endpoint,
+        object_browser_placement_summary, object_browser_placement_summary_state,
+        object_store_bucket_default, object_store_card_summaries,
+        object_store_configure_review_from_values, object_store_create_confirmation_matches,
+        object_store_create_review_from_values, object_store_creation_fields_ready,
+        objectstores_workspace_api_path, primary_navigation_for_host, remote_upload_folder_count,
+        remote_upload_workspace_api_path, subobject_registry_preview_from_values,
+        users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
+        EnclosureWizardState, RemoteUploadSelectedFile, RemoteUploadSelectionSummary,
+        WorkspacePage, ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE,
+        ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
+        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
     };
     use super::{
         local_group_assignment_fields_ready, local_group_create_fields_ready,
@@ -8217,7 +8418,12 @@ mod tests {
                 "written_tib": "2.0",
                 "ingest_tib": "2.5",
                 "avg_read_mib_s": 120,
-                "avg_write_mib_s": 240
+                "avg_write_mib_s": 240,
+                "daily": [
+                    { "date": "2026-07-07", "read_tib": "0.1", "written_tib": "0.2", "ingest_tib": "0.2" },
+                    { "date": "2026-07-08", "read_tib": "0.2", "written_tib": "0.5", "ingest_tib": "0.5" },
+                    { "date": "2026-07-09", "read_tib": "0.4", "written_tib": "1.8", "ingest_tib": "1.8" }
+                ]
             },
             "disk_io": {
                 "available": true,
@@ -8298,6 +8504,21 @@ mod tests {
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "Throughput" && metric.state == "1 day"));
+        let chart_points = home_throughput_chart_points(&view);
+        assert_eq!(chart_points.len(), 3);
+        assert_eq!(chart_points[0].date, "2026-07-07");
+        assert_eq!(chart_points[2].date, "2026-07-09");
+        assert!(chart_points
+            .iter()
+            .all(|point| point.x >= 48.0 && point.x <= 616.0));
+        assert!(chart_points
+            .iter()
+            .all(|point| point.y >= 24.0 && point.y <= 144.0));
+        assert_eq!(home_throughput_chart_max_tib(&chart_points), "1.8 TiB");
+        assert_eq!(
+            home_throughput_chart_polyline(&chart_points),
+            "48.0,130.7 332.0,110.7 616.0,24.0"
+        );
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "Disk IO" && metric.value == "240 MiB/s write"));

@@ -249,6 +249,11 @@ JSON input at ``/var/lib/dasobjectstore/health/smart-warnings.json``; until
 those daemon writers are present, the dashboard reports explicit
 unavailable-source warnings rather than bootstrap fixture text.
 
+The Home page refreshes its selected-window telemetry payload on a fixed
+cadence while the page is open. The throughput telemetry chart uses a stable
+SVG view box, fixed axes, bounded labels, and an explicit empty-sample state so
+updates do not resize cards or interpolate missing data into the visible line.
+
 The redesigned Home, Enclosures, ObjectStores, and Bioinformatics pages share a
 single Yew API loading contract. Each page renders explicit loading, success,
 empty, permission-denied, transport-error, and stale-data states so operators

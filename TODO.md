@@ -976,9 +976,12 @@ planning are tracked under Milestones 21 and 22.
   Completed by adding a Home telemetry-window query contract, filtering
   daemon-backed Home telemetry summaries by the selected window, and rendering a
   browser-side segmented window control above the Home metric grid.
-- [ ] Ensure telemetry charts update on cadence without jitter: stable chart
+- [x] Ensure telemetry charts update on cadence without jitter: stable chart
   containers, stable axes/labels, bounded redraw work, no card resizing, and no
   text overlap on desktop or mobile.
+  Completed by adding fixed-cadence Home telemetry refresh, decoding bounded
+  daily throughput points, and rendering a fixed-viewBox SVG chart with stable
+  axes, bounded labels, and an explicit empty-sample state.
 - [ ] Define reusable floundeR data contracts for Mnemosyne appliance
   telemetry: line charts with missing-data gaps, point/step summaries,
   capacity bands, per-disk IO traces, and small-multiple chart layouts.

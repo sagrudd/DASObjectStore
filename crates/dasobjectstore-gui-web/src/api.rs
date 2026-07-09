@@ -658,6 +658,16 @@ pub struct ThroughputSummaryResponse {
     pub ingest_tib: String,
     pub avg_read_mib_s: u32,
     pub avg_write_mib_s: u32,
+    #[serde(default)]
+    pub daily: Vec<ThroughputDayResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ThroughputDayResponse {
+    pub date: String,
+    pub read_tib: String,
+    pub written_tib: String,
+    pub ingest_tib: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
