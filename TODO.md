@@ -877,9 +877,12 @@ planning are tracked under Milestones 21 and 22.
   standalone local-user grant filtering.
 - [x] Add standalone easyconnect auth-context route tests for invalid, expired,
   and revoked persisted local sessions.
-- [ ] Add persisted easyconnect session-store/runtime tests for revoked paired
-  upload sessions, renewal during active upload, and standalone local-user
-  permission checks beyond auth-context admission.
+- [x] Add remote-upload runtime tests proving a failed paired upload can report
+  active-upload renewal progress, clean abandoned session state, release S3
+  admission capacity, and preserve the failed daemon job record.
+- [ ] Add a first-class persisted easyconnect paired-session store and tests for
+  revoked paired upload sessions, renewal during active upload, and standalone
+  local-user permission checks beyond auth-context admission.
 - [ ] Add tests for ObjectStore listing through a remote upload session,
   including non-writer denial, read-only/locked store denial, and missing writer
   group diagnostics.

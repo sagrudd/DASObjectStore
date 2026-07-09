@@ -13,6 +13,9 @@ agreement before landing.
   local-user ObjectStore grant filtering.
 - Add standalone easyconnect auth-context route regressions for invalid,
   expired, and revoked persisted local sessions.
+- Add remote-upload runtime regression coverage for failed paired uploads that
+  report active-upload renewal progress, clean abandoned session state, release
+  S3 admission capacity, and preserve failed daemon job status.
 - Add remote-client easyconnect regression coverage for successful, denied, and
   expired pairing callbacks, paired upload sessions, renewal metadata states,
   and local rejection of expired sessions before stored credentials are used.

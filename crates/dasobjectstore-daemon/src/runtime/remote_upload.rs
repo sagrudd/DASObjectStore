@@ -2256,6 +2256,94 @@ mod tests {
     }
 
     #[test]
+    fn failed_paired_upload_cleans_session_state_after_renewal_progress() {
+        let root = temp_root("remote-upload-paired-session-cleanup");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let session_root = root.join("sessions");
+        std::fs::create_dir_all(&session_root).expect("session dir created");
+        std::fs::write(session_root.join("session-1"), b"paired session").expect("session written");
+        let runner = FakeRemoteUploadCommandRunner::default();
+        let cleanup_worker = RemoteUploadCancellationCleanupRuntime::new(
+            cleanup_runtime_config(&root, None),
+            &runner,
+        );
+        let cleanup_plan =
+            plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+                job_id: "remote-upload-job-033".to_string(),
+                object_store: "zymo_fecal_2025.05".to_string(),
+                source_bytes: 42,
+                staged_object_prefix: None,
+                multipart_upload_id: None,
+                session_id: Some("session-1".to_string()),
+                pairing_id: None,
+                browser_handoff_id: None,
+                reason: Some("paired CLI agent disconnected during active upload".to_string()),
+            });
+
+        let report = worker
+            .run_with_cleanup_on_failure(
+                worker_request("remote-upload-job-033"),
+                cleanup_plan,
+                &cleanup_worker,
+                |progress| {
+                    progress
+                        .record_progress(RemoteUploadS3TransferProgressUpdate {
+                            bytes_done: 21,
+                            updated_at_utc: "2026-07-09T14:10:30Z".to_string(),
+                            telemetry: Some(RemoteUploadProgressTelemetry {
+                                session_renewal_status: Some("renewed_during_upload".to_string()),
+                                ..RemoteUploadProgressTelemetry::default()
+                            }),
+                            message: Some("uploaded 21 bytes before reconnect".to_string()),
+                        })
+                        .expect("progress recorded");
+                    Err::<(), _>("paired CLI agent disconnected")
+                },
+            )
+            .expect("failure cleanup reported");
+
+        let DaemonJobEvent::Progress(progress_job) = &report.progress_events[0] else {
+            panic!("expected progress event");
+        };
+        assert!(progress_job
+            .progress
+            .message
+            .as_deref()
+            .expect("progress message")
+            .contains("session_renewal_status=renewed_during_upload"));
+
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(final_job.progress.stage, "remote_s3_transfer_failed");
+        assert_eq!(
+            final_job.failure_message.as_deref(),
+            Some("paired CLI agent disconnected")
+        );
+        let cleanup_report = report.cleanup_report.expect("cleanup report");
+        assert!(cleanup_report.completed());
+        assert_eq!(cleanup_report.action_reports.len(), 1);
+        assert_eq!(
+            cleanup_report.action_reports[0].action.scope,
+            RemoteUploadCancellationCleanupScope::AbandonedSession
+        );
+        assert!(!session_root.join("session-1").exists());
+
+        let status = registry
+            .status(DaemonJobStatusRequest {
+                job_id: final_job.job_id,
+            })
+            .expect("final status");
+        assert_eq!(status.job.state, DaemonJobState::Failed);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+        assert!(runner.calls.borrow().is_empty());
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn transfer_worker_skips_cleanup_plan_after_success() {
         let root = temp_root("remote-upload-worker-cleanup-after-success");
         let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
