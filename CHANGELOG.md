@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.3 - 2026-07-09
+
+- Include Prosopikon in ``make pull`` sibling repository discovery and add a
+  Web packaging preflight that verifies the local Prosopikon checkout exposes
+  the required ``auth`` and ``pam`` features before Trunk starts, avoiding the
+  misleading crates.io ``prosopikon-core`` feature-resolution failure during
+  ``make deb`` and ``make rpm``.
+
 ## 0.60.2 - 2026-07-09
 
 - Add a daemon remote-upload S3 transfer execution wrapper that acquires an

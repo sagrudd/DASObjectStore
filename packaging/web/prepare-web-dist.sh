@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/dasobjectstore-gui-web"
+prosopikon_core_root="$repo_root/../prosopikon/crates/prosopikon-core"
+prosopikon_yew_root="$repo_root/../prosopikon/crates/prosopikon-yew"
 dist="$web_root/dist"
 allow_fallback=0
 
@@ -10,7 +12,36 @@ if [[ "${1:-}" == "--allow-fallback" ]]; then
   allow_fallback=1
 fi
 
+validate_prosopikon_checkout() {
+  if [[ ! -f "$prosopikon_core_root/Cargo.toml" || ! -f "$prosopikon_yew_root/Cargo.toml" ]]; then
+    cat >&2 <<ERROR
+Prosopikon is required to package the DASObjectStore web interface.
+Expected sibling checkout: $repo_root/../prosopikon
+
+Run: make pull
+or clone/update sagrudd/prosopikon beside DASObjectStore before running make web, make deb, or make rpm.
+ERROR
+    return 1
+  fi
+
+  if ! grep -Eq '^[[:space:]]*auth[[:space:]]*=' "$prosopikon_core_root/Cargo.toml" \
+    || ! grep -Eq '^[[:space:]]*pam[[:space:]]*=' "$prosopikon_core_root/Cargo.toml"; then
+    cat >&2 <<ERROR
+The Prosopikon checkout at $repo_root/../prosopikon is too old for DASObjectStore.
+prosopikon-core must expose the auth and pam features used by the Web/API package.
+
+Run: make pull
+or update sagrudd/prosopikon beside DASObjectStore before running make web, make deb, or make rpm.
+ERROR
+    return 1
+  fi
+
+  cargo metadata --manifest-path "$repo_root/Cargo.toml" --format-version 1 --no-deps >/dev/null
+}
+
 build_web_dist() {
+  validate_prosopikon_checkout
+
   if ! command -v trunk >/dev/null 2>&1; then
     cat >&2 <<'ERROR'
 trunk is required to package the DASObjectStore web interface.

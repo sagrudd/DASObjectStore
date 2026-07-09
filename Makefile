@@ -4,7 +4,7 @@ SHELL := /usr/bin/env bash
 
 GITHUB_OWNER ?= sagrudd
 MNEMOSYNE_WORKSPACE ?= $(abspath ..)
-MNEMOSYNE_REPO_MATCH ?= mnemosyne|mneion|monas|synoptikon|mnematikon|gnostikon|grammateus|flounder
+MNEMOSYNE_REPO_MATCH ?= mnemosyne|mneion|monas|synoptikon|mnematikon|gnostikon|grammateus|flounder|prosopikon
 GRAMMATEUS_DIR ?= $(MNEMOSYNE_WORKSPACE)/grammateus
 FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
 REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
