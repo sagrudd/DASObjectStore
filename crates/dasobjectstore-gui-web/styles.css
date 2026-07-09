@@ -1139,12 +1139,21 @@ h2 {
 }
 
 .dos-checkbox-list label,
-.dos-risk-review label {
+.dos-risk-review label,
+.dos-checkbox-row {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   color: #41515a;
   font-size: 0.82rem;
+}
+
+.dos-checkbox-row {
+  font-weight: 650;
+}
+
+.dos-checkbox-row input {
+  margin-top: 2px;
 }
 
 .dos-risk-review,

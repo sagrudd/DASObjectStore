@@ -5263,11 +5263,9 @@ fn refresh_users_groups_workspace(
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CreateLocalGroupFormState {
     group_name: String,
-    previewing: bool,
     applying: bool,
-    preview: Option<LocalGroupAdminResponse>,
     submitted: Option<LocalGroupAdminResponse>,
-    confirmation_phrase: String,
+    acknowledged: bool,
     error: Option<String>,
 }
 
@@ -5276,17 +5274,14 @@ impl CreateLocalGroupFormState {
     fn new() -> Self {
         Self {
             group_name: String::new(),
-            previewing: false,
             applying: false,
-            preview: None,
             submitted: None,
-            confirmation_phrase: String::new(),
+            acknowledged: false,
             error: None,
         }
     }
 
     fn reset_result(&mut self) {
-        self.preview = None;
         self.submitted = None;
         self.error = None;
     }
@@ -5297,11 +5292,9 @@ impl CreateLocalGroupFormState {
 struct AssignLocalUserFormState {
     username: String,
     group_name: String,
-    previewing: bool,
     applying: bool,
-    preview: Option<LocalGroupAdminResponse>,
     submitted: Option<LocalGroupAdminResponse>,
-    confirmation_phrase: String,
+    acknowledged: bool,
     error: Option<String>,
 }
 
@@ -5317,17 +5310,14 @@ impl AssignLocalUserFormState {
                 .and_then(|view| view.writer_groups.first())
                 .map(|group| group.group_name.clone())
                 .unwrap_or_default(),
-            previewing: false,
             applying: false,
-            preview: None,
             submitted: None,
-            confirmation_phrase: String::new(),
+            acknowledged: false,
             error: None,
         }
     }
 
     fn reset_result(&mut self) {
-        self.preview = None;
         self.submitted = None;
         self.error = None;
     }
@@ -5602,12 +5592,10 @@ fn render_create_local_group_card(
 ) -> Html {
     let state = (*create_group_state).clone();
     let enabled = view.capabilities.os_local_group_management;
-    let can_preview =
-        enabled && !state.previewing && local_group_create_fields_ready(&state.group_name);
     let can_apply = enabled
-        && state.preview.is_some()
-        && !state.applying
-        && local_group_admin_confirmation_matches(&state.confirmation_phrase);
+        && local_group_create_fields_ready(&state.group_name)
+        && state.acknowledged
+        && !state.applying;
 
     let on_group_name = {
         let create_group_state = create_group_state.clone();
@@ -5619,41 +5607,14 @@ fn render_create_local_group_card(
             create_group_state.set(next);
         })
     };
-    let preview = {
+    let on_acknowledged = {
         let create_group_state = create_group_state.clone();
-        let api_base_path = api_base_path.clone();
-        Callback::from(move |_| {
-            let mut pending = (*create_group_state).clone();
-            pending.previewing = true;
-            pending.error = None;
-            pending.preview = None;
-            create_group_state.set(pending.clone());
-
-            let create_group_state = create_group_state.clone();
-            let api_base_path = api_base_path.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let request = CreateLocalGroupRequest {
-                    group_name: pending.group_name.trim().to_string(),
-                    dry_run: true,
-                    confirmation_marker: None,
-                    client_request_id: None,
-                };
-                let result = crate::api::submit_create_local_group(&api_base_path, &request).await;
-                let mut next = (*create_group_state).clone();
-                next.previewing = false;
-                match result {
-                    Ok(response) => {
-                        next.preview = Some(response);
-                        next.submitted = None;
-                        next.error = None;
-                    }
-                    Err(error) => {
-                        next.preview = None;
-                        next.error = Some(error.message);
-                    }
-                }
-                create_group_state.set(next);
-            });
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let mut next = (*create_group_state).clone();
+            next.acknowledged = input.checked();
+            next.submitted = None;
+            create_group_state.set(next);
         })
     };
     let apply = {
@@ -5692,8 +5653,6 @@ fn render_create_local_group_card(
                         ));
                         let mut assign_next = (*assign_user_state).clone();
                         assign_next.group_name = group_name.clone();
-                        assign_next.confirmation_phrase.clear();
-                        assign_next.previewing = false;
                         assign_next.applying = false;
                         assign_next.reset_result();
                         assign_user_state.set(assign_next);
@@ -5713,11 +5672,11 @@ fn render_create_local_group_card(
     html! {
         <section class="dos-card dos-create-card" data-action="create_local_group">
             <span class="dos-create-mark">{ "+" }</span>
-            <h2>{ "Create access group" }</h2>
-            <p>{ if enabled { "Preview a local OS group that maps Prosopikon-recognized users to DASObjectStore writer/admin access." } else { "Requires sudo-derived administrator authority." } }</p>
+            <h2>{ "Create a data access account or tenant group" }</h2>
+            <p>{ if enabled { "Create a local OS group that maps Prosopikon-recognized users to DASObjectStore writer/admin access." } else { "Requires sudo-derived administrator authority." } }</p>
             <span class="dos-status-pill">{ if enabled { "Available" } else { "Admin only" } }</span>
             <label class="dos-form-field">
-                <span>{ "Access group" }</span>
+                <span>{ "Access account or tenant group" }</span>
                 <input
                     type="text"
                     value={state.group_name.clone()}
@@ -5726,28 +5685,14 @@ fn render_create_local_group_card(
                     disabled={!enabled}
                 />
             </label>
-            <button class="dos-secondary-action" type="button" disabled={!can_preview} onclick={preview}>
-                { if state.previewing { "Previewing..." } else { "Dry-run preview" } }
-            </button>
-            { render_local_group_admin_result("Preview", state.preview.as_ref()) }
-            <label class="dos-form-field">
-                <span>{ "Confirmation phrase" }</span>
+            <label class="dos-checkbox-row">
                 <input
-                    type="text"
-                    value={state.confirmation_phrase.clone()}
-                    placeholder={LOCAL_GROUP_ADMIN_CONFIRMATION}
-                    oninput={{
-                        let create_group_state = create_group_state.clone();
-                        Callback::from(move |event: InputEvent| {
-                            let input: HtmlInputElement = event.target_unchecked_into();
-                            let mut next = (*create_group_state).clone();
-                            next.confirmation_phrase = input.value();
-                            next.submitted = None;
-                            create_group_state.set(next);
-                        })
-                    }}
+                    type="checkbox"
+                    checked={state.acknowledged}
+                    onchange={on_acknowledged}
                     disabled={!enabled}
                 />
+                <span>{ "Clicking this dialog enables the creation of the specified access group" }</span>
             </label>
             <button class="dos-auth-submit" type="button" disabled={!can_apply} onclick={apply}>
                 { if state.applying { "Submitting..." } else { "Submit access group" } }
@@ -5769,53 +5714,21 @@ fn render_assign_local_user_card(
 ) -> Html {
     let state = (*assign_user_state).clone();
     let enabled = view.capabilities.os_local_group_management;
-    let can_preview = enabled
-        && !state.previewing
-        && local_group_assignment_fields_ready(&state.username, &state.group_name);
     let can_apply = enabled
-        && state.preview.is_some()
-        && !state.applying
-        && local_group_admin_confirmation_matches(&state.confirmation_phrase);
+        && local_group_assignment_fields_ready(&state.username, &state.group_name)
+        && state.acknowledged
+        && !state.applying;
     let user_options = view.users.clone();
     let group_options = view.writer_groups.clone();
 
-    let preview = {
+    let on_acknowledged = {
         let assign_user_state = assign_user_state.clone();
-        let api_base_path = api_base_path.clone();
-        Callback::from(move |_| {
-            let mut pending = (*assign_user_state).clone();
-            pending.previewing = true;
-            pending.error = None;
-            pending.preview = None;
-            assign_user_state.set(pending.clone());
-
-            let assign_user_state = assign_user_state.clone();
-            let api_base_path = api_base_path.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                let request = AssignLocalUserToGroupRequest {
-                    username: pending.username.trim().to_string(),
-                    group_name: pending.group_name.trim().to_string(),
-                    dry_run: true,
-                    confirmation_marker: None,
-                    client_request_id: None,
-                };
-                let result =
-                    crate::api::submit_assign_local_user_to_group(&api_base_path, &request).await;
-                let mut next = (*assign_user_state).clone();
-                next.previewing = false;
-                match result {
-                    Ok(response) => {
-                        next.preview = Some(response);
-                        next.submitted = None;
-                        next.error = None;
-                    }
-                    Err(error) => {
-                        next.preview = None;
-                        next.error = Some(error.message);
-                    }
-                }
-                assign_user_state.set(next);
-            });
+        Callback::from(move |event: Event| {
+            let input: HtmlInputElement = event.target_unchecked_into();
+            let mut next = (*assign_user_state).clone();
+            next.acknowledged = input.checked();
+            next.submitted = None;
+            assign_user_state.set(next);
         })
     };
     let apply = {
@@ -5852,7 +5765,7 @@ fn render_assign_local_user_card(
                             .unwrap_or_else(|| pending.username.trim().to_string());
                         let group_name = response.group_name.clone();
                         next.submitted = Some(response);
-                        next.confirmation_phrase.clear();
+                        next.acknowledged = false;
                         next.error = None;
                         users_groups_state.set(users_groups_state_with_group_assignment(
                             &*users_groups_state,
@@ -5874,11 +5787,11 @@ fn render_assign_local_user_card(
     html! {
         <section class="dos-card dos-create-card" data-action="assign_local_user_to_group">
             <span class="dos-create-mark">{ "@" }</span>
-            <h2>{ "Map principal to group" }</h2>
-            <p>{ if enabled { "Preview a local user-to-group mapping for appliance access enforcement." } else { "Requires sudo-derived administrator authority." } }</p>
+            <h2>{ "Map user to tenant group" }</h2>
+            <p>{ if enabled { "Map a local user to a tenant group for appliance access enforcement." } else { "Requires sudo-derived administrator authority." } }</p>
             <span class="dos-status-pill">{ if enabled { "Available" } else { "Admin only" } }</span>
             <label class="dos-form-field">
-                <span>{ "Local principal" }</span>
+                <span>{ "Local user" }</span>
                 <input
                     type="text"
                     list="dos-local-users"
@@ -5903,7 +5816,7 @@ fn render_assign_local_user_card(
                 </datalist>
             </label>
             <label class="dos-form-field">
-                <span>{ "Access group" }</span>
+                <span>{ "Access account or tenant group" }</span>
                 <select onchange={{
                     let assign_user_state = assign_user_state.clone();
                     Callback::from(move |event: Event| {
@@ -5923,28 +5836,14 @@ fn render_assign_local_user_card(
                     }
                 </select>
             </label>
-            <button class="dos-secondary-action" type="button" disabled={!can_preview} onclick={preview}>
-                { if state.previewing { "Previewing..." } else { "Dry-run preview" } }
-            </button>
-            { render_local_group_admin_result("Preview", state.preview.as_ref()) }
-            <label class="dos-form-field">
-                <span>{ "Confirmation phrase" }</span>
+            <label class="dos-checkbox-row">
                 <input
-                    type="text"
-                    value={state.confirmation_phrase.clone()}
-                    placeholder={LOCAL_GROUP_ADMIN_CONFIRMATION}
-                    oninput={{
-                        let assign_user_state = assign_user_state.clone();
-                        Callback::from(move |event: InputEvent| {
-                            let input: HtmlInputElement = event.target_unchecked_into();
-                            let mut next = (*assign_user_state).clone();
-                            next.confirmation_phrase = input.value();
-                            next.submitted = None;
-                            assign_user_state.set(next);
-                        })
-                    }}
+                    type="checkbox"
+                    checked={state.acknowledged}
+                    onchange={on_acknowledged}
                     disabled={!enabled}
                 />
+                <span>{ "Clicking this dialog enables the selected user to be mapped to the specified tenant group" }</span>
             </label>
             <button class="dos-auth-submit" type="button" disabled={!can_apply} onclick={apply}>
                 { if state.applying { "Submitting..." } else { "Submit access mapping" } }
@@ -6880,13 +6779,13 @@ mod tests {
         users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState,
         RemoteUploadSelectedFile, RemoteUploadSelectionSummary, WorkspacePage,
         ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION,
-        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
+        ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
+        PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
     };
     use super::{
-        local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
-        local_group_create_fields_ready, local_group_display_name,
-        users_groups_view_with_group_assignment, users_groups_view_with_writer_group,
+        local_group_assignment_fields_ready, local_group_create_fields_ready,
+        local_group_display_name, users_groups_view_with_group_assignment,
+        users_groups_view_with_writer_group,
     };
     use crate::api::{
         ActivityCategoryResponse, ActivityTaskProgressResponse, ActivityTaskResponse,
@@ -7163,7 +7062,7 @@ mod tests {
     }
 
     #[test]
-    fn users_groups_forms_gate_required_fields_and_confirmation() {
+    fn users_groups_forms_gate_required_fields_before_acknowledgement() {
         assert!(local_group_create_fields_ready("mnemosyne-writers"));
         assert!(!local_group_create_fields_ready(" "));
         assert!(local_group_assignment_fields_ready(
@@ -7171,12 +7070,6 @@ mod tests {
             "mnemosyne-writers"
         ));
         assert!(!local_group_assignment_fields_ready("stephen", " "));
-        assert!(local_group_admin_confirmation_matches(
-            LOCAL_GROUP_ADMIN_CONFIRMATION
-        ));
-        assert!(!local_group_admin_confirmation_matches(
-            "confirm create objectstore"
-        ));
     }
 
     #[test]

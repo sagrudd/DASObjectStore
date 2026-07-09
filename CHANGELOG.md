@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.60.9 - 2026-07-09
+
+- Simplify Web Local Access group creation and user-to-group mapping by removing
+  dry-run preview buttons and visible confirmation phrase entry, replacing both
+  flows with explicit acknowledgement checkboxes while preserving daemon-side
+  administrator markers.
+- Update Local Access terminology to "data access account or tenant group" and
+  "Map user to tenant group" to align the DASObjectStore page with Prosopikon
+  tenant-access language.
+- Pick up Prosopikon shared role-template and local-access editor widget exports
+  for the Web console dependency set.
+
 ## 0.60.8 - 2026-07-09
 
 - Add server-side easyconnect API contract coverage for session revocation,
