@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.62.3 - 2026-07-09
+
+- Skip existing objects before direct-to-HDD or SSD ingest work when the
+  configured conflict policy can prove the incoming file already matches
+  recorded metadata, avoiding expensive duplicate HDD copies that fail only at
+  final placement.
+
 ## 0.62.2 - 2026-07-09
 
 - Fix the standalone Web ObjectStore browser so browse, file download, and

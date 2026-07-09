@@ -1,5 +1,6 @@
 use crate::api::{
-    DaemonIngestHddActiveTransfer, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
+    DaemonIngestConflictAction, DaemonIngestConflictPolicy, DaemonIngestHddActiveTransfer,
+    DaemonIngestObjectSnapshot, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
     DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
     DaemonIngestWorkerTelemetry, DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
@@ -8,10 +9,12 @@ use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    measure_ssd_capacity, put_object_direct_to_hdd_with_controlled_progress,
+    hash_file_sha256_with_progress, measure_ssd_capacity,
+    put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
     settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
-    IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectPutError, ObjectPutProgress,
-    ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
+    IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectInspectError, ObjectPutError,
+    ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure,
+    StagedObjectPut, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
@@ -84,6 +87,7 @@ struct ResolvedIngestEndpoint {
 struct LocalFileIngestExecutor {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
+    live_sqlite_path: PathBuf,
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
 }
@@ -93,6 +97,7 @@ impl LocalFileIngestExecutor {
         Self {
             ssd_root: default_ssd_root(),
             hdd_root: default_hdd_root(),
+            live_sqlite_path: default_live_sqlite_path(),
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
         }
@@ -240,6 +245,17 @@ impl LocalFileIngestExecutor {
         let ssd_flush_worker = spawn_ssd_flush_worker(flush_rx, settle_tx.clone(), event_tx);
 
         for entry in &files {
+            if maybe_skip_existing_object(
+                &self.live_sqlite_path,
+                &request,
+                entry,
+                copies,
+                &mut state,
+                job_id,
+                &mut progress,
+            )? {
+                continue;
+            }
             wait_for_ssd_admission(
                 &self.ssd_root,
                 &capacity_policy,
@@ -412,6 +428,25 @@ impl LocalFileIngestExecutor {
             spawn_hdd_settlement_workers(settle_rx, event_tx, hdd_worker_count, hdd_scheduler);
 
         for entry in &files {
+            if maybe_skip_existing_object(
+                &self.live_sqlite_path,
+                &request,
+                entry,
+                copies,
+                &mut state,
+                job_id,
+                &mut progress,
+            )? {
+                drain_hdd_settlement_events(
+                    &event_rx,
+                    &mut state,
+                    job_id,
+                    &request.endpoint,
+                    &mut progress,
+                    false,
+                )?;
+                continue;
+            }
             state.staged_files = state.staged_files.saturating_add(1);
             state.hdd_queued = state.hdd_queued.saturating_add(1);
             enqueue_hdd_settlement_work(
@@ -895,6 +930,16 @@ impl PipelineProgressState {
             .retain(|(object_id, _, _), _| object_id != &entry.object_id);
     }
 
+    fn mark_existing_object_skipped(&mut self, entry: &FileIngestEntry, copies: u8) {
+        self.completed_files = self.completed_files.saturating_add(1);
+        self.staged_files = self.staged_files.saturating_add(1);
+        self.completed_source_bytes = self.completed_source_bytes.saturating_add(entry.size_bytes);
+        self.completed_work_bytes = self
+            .completed_work_bytes
+            .saturating_add(entry.size_bytes.saturating_mul(u64::from(copies) + 1));
+        self.remove_active_hdd_transfers_for_entry(entry);
+    }
+
     fn active_hdd_transfer_records(&self) -> Vec<DaemonIngestHddActiveTransfer> {
         let now = Instant::now();
         self.active_hdd_transfers
@@ -1248,6 +1293,154 @@ fn landing_mode_for_ingest(
     }
 }
 
+fn maybe_skip_existing_object(
+    live_sqlite_path: &Path,
+    request: &SubmitIngestFilesRequest,
+    entry: &FileIngestEntry,
+    copies: u8,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+) -> Result<bool, DaemonIngestFilesRuntimeError> {
+    let Some(existing) = read_existing_object_snapshot(live_sqlite_path, &entry.object_id)? else {
+        return Ok(false);
+    };
+    let incoming_hash = incoming_hash_for_conflict_decision(
+        request.conflict_policy,
+        &existing,
+        entry,
+        state,
+        job_id,
+        &request.endpoint,
+        progress,
+    )?;
+    let incoming = DaemonIngestObjectSnapshot::new(entry.size_bytes, incoming_hash);
+    let decision = request
+        .conflict_policy
+        .decide_existing_object(&existing, &incoming);
+    if decision.action != DaemonIngestConflictAction::SkipExistingVersion {
+        return Ok(false);
+    }
+
+    state.mark_existing_object_skipped(entry, copies);
+    progress(DaemonIngestProgressEvent {
+        job_id: job_id.clone(),
+        endpoint: request.endpoint.clone(),
+        stage: DaemonIngestStage::Complete,
+        pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
+        work_bytes_done: state.completed_work_bytes,
+        work_bytes_total: Some(state.work_bytes_total),
+        source_bytes_done: Some(state.completed_source_bytes),
+        source_bytes_total: Some(state.source_bytes_total),
+        stage_bytes_done: Some(entry.size_bytes),
+        stage_bytes_total: Some(entry.size_bytes),
+        files_done: state.completed_files,
+        files_total: Some(state.total_files),
+        current_object_id: Some(entry.object_id.clone()),
+        ssd_pressure: Some(state.ssd_pressure),
+        telemetry: Some(state.telemetry()),
+        active_hdd_transfers: state.active_hdd_transfer_records(),
+        resource_policy: None,
+        message: Some(format!(
+            "skipped existing object by {} policy ({:?}): {}",
+            request.conflict_policy,
+            decision.reason,
+            entry.relative_path.to_string_lossy()
+        )),
+    })?;
+    Ok(true)
+}
+
+fn incoming_hash_for_conflict_decision(
+    policy: DaemonIngestConflictPolicy,
+    existing: &DaemonIngestObjectSnapshot,
+    entry: &FileIngestEntry,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+) -> Result<Option<String>, DaemonIngestFilesRuntimeError> {
+    if policy != DaemonIngestConflictPolicy::Strict || existing.content_hash.is_none() {
+        return Ok(None);
+    }
+
+    progress(DaemonIngestProgressEvent {
+        job_id: job_id.clone(),
+        endpoint: endpoint.clone(),
+        stage: DaemonIngestStage::SsdIngest,
+        pipeline_stage: Some(DaemonIngestPipelineStage::ChecksumManifestCapture),
+        work_bytes_done: state.completed_work_bytes,
+        work_bytes_total: Some(state.work_bytes_total),
+        source_bytes_done: Some(state.completed_source_bytes),
+        source_bytes_total: Some(state.source_bytes_total),
+        stage_bytes_done: Some(0),
+        stage_bytes_total: Some(entry.size_bytes),
+        files_done: state.completed_files,
+        files_total: Some(state.total_files),
+        current_object_id: Some(entry.object_id.clone()),
+        ssd_pressure: Some(state.ssd_pressure),
+        telemetry: Some(state.telemetry()),
+        active_hdd_transfers: state.active_hdd_transfer_records(),
+        resource_policy: None,
+        message: Some(format!(
+            "checking existing object checksum before HDD copy: {}",
+            entry.relative_path.to_string_lossy()
+        )),
+    })?;
+
+    let content_hash = hash_file_sha256_with_progress(&entry.source_path, |bytes_hashed| {
+        progress(DaemonIngestProgressEvent {
+            job_id: job_id.clone(),
+            endpoint: endpoint.clone(),
+            stage: DaemonIngestStage::SsdIngest,
+            pipeline_stage: Some(DaemonIngestPipelineStage::ChecksumManifestCapture),
+            work_bytes_done: state.completed_work_bytes,
+            work_bytes_total: Some(state.work_bytes_total),
+            source_bytes_done: Some(state.completed_source_bytes),
+            source_bytes_total: Some(state.source_bytes_total),
+            stage_bytes_done: Some(bytes_hashed),
+            stage_bytes_total: Some(entry.size_bytes),
+            files_done: state.completed_files,
+            files_total: Some(state.total_files),
+            current_object_id: Some(entry.object_id.clone()),
+            ssd_pressure: Some(state.ssd_pressure),
+            telemetry: Some(state.telemetry()),
+            active_hdd_transfers: state.active_hdd_transfer_records(),
+            resource_policy: None,
+            message: Some(format!(
+                "checking existing object checksum before HDD copy: {}",
+                entry.relative_path.to_string_lossy()
+            )),
+        })
+        .map_err(|err| io::Error::other(err.to_string()))
+    })?;
+    Ok(Some(content_hash))
+}
+
+fn read_existing_object_snapshot(
+    live_sqlite_path: &Path,
+    object_id: &ObjectId,
+) -> Result<Option<DaemonIngestObjectSnapshot>, DaemonIngestFilesRuntimeError> {
+    if !live_sqlite_path.exists() {
+        return Ok(None);
+    }
+    match read_object_inspect(live_sqlite_path, object_id) {
+        Ok(summary) => Ok(Some(DaemonIngestObjectSnapshot::new(
+            summary.size_bytes.unwrap_or(0),
+            summary.content_hash,
+        ))),
+        Err(ObjectInspectError::ObjectNotFound(_)) => Ok(None),
+        Err(ObjectInspectError::Sqlite(err))
+            if err.to_string().contains("no such table: objects") =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+            "failed to inspect existing object metadata for conflict handling: {err}"
+        ))),
+    }
+}
+
 fn drain_hdd_settlement_events(
     event_rx: &mpsc::Receiver<HddSettlementEvent>,
     state: &mut PipelineProgressState,
@@ -1523,6 +1716,12 @@ pub(crate) fn default_hdd_root() -> PathBuf {
     std::env::var_os(HDD_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_HDD_ROOT))
+}
+
+fn default_live_sqlite_path() -> PathBuf {
+    default_ssd_root()
+        .join(METADATA_DIR_NAME)
+        .join(LIVE_SQLITE_FILE_NAME)
 }
 
 fn validate_known_ssd_root(path: &Path) -> Result<(), DaemonIngestFilesRuntimeError> {
@@ -1818,10 +2017,11 @@ mod tests {
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
-        DiskCopyRoot, IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage,
-        ObjectPutRequest,
+        hash_file_sha256, DiskCopyRoot, IngestStagingLayout, ObjectPutProgress,
+        ObjectPutProgressStage, ObjectPutRequest,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
+    use rusqlite::Connection;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1845,6 +2045,7 @@ mod tests {
         let executor = LocalFileIngestExecutor {
             ssd_root: ssd_root.clone(),
             hdd_root: hdd_root.clone(),
+            live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
             store_registry_path: registry_path,
             subobject_registry_path,
         };
@@ -1910,6 +2111,7 @@ mod tests {
         let executor = LocalFileIngestExecutor {
             ssd_root: ssd_root.clone(),
             hdd_root: hdd_root.clone(),
+            live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
             store_registry_path: registry_path,
             subobject_registry_path,
         };
@@ -1953,6 +2155,71 @@ mod tests {
             find_payloads(&hdd_root.join("disk-a").join("objects")),
             vec![b"reproducible reference".to_vec()]
         );
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn direct_ingest_strict_skips_existing_checksum_match_before_hdd_copy() {
+        let root = temp_root("daemon-ingest-direct-strict-skip");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd");
+        let source_root = root.join("source");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        let live_sqlite_path = ssd_root.join(".dasobjectstore").join("live.sqlite");
+        write_device_marker(&ssd_root, "role=ssd");
+        write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+        fs::create_dir_all(&source_root).expect("source dir");
+        let source_path = source_root.join("reference.fa.zst");
+        fs::write(&source_path, b"reproducible reference").expect("source file");
+        let object_id = ObjectId::new("zymo_fecal_2025.05/reference.fa.zst").expect("object id");
+        let content_hash = hash_file_sha256(&source_path).expect("source hash");
+        write_existing_object_metadata(&live_sqlite_path, object_id.as_str(), &content_hash, 22);
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        write_store_registry_with_policy(&registry_path, policy);
+        fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+        let executor = LocalFileIngestExecutor {
+            ssd_root: ssd_root.clone(),
+            hdd_root: hdd_root.clone(),
+            live_sqlite_path,
+            store_registry_path: registry_path,
+            subobject_registry_path,
+        };
+
+        let mut progress_events = Vec::new();
+        executor
+            .submit(
+                SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: source_root,
+                    object_type: ObjectType::Fasta,
+                    copies: Some(1),
+                    hdd_workers: None,
+                    ingress_origin: DaemonIngressOrigin::LocalServer,
+                    conflict_policy: DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                },
+                "2026-07-09T18:44:22Z",
+                |event| {
+                    progress_events.push(event);
+                    Ok(())
+                },
+            )
+            .expect("existing object skip succeeds");
+
+        assert!(progress_events.iter().any(|event| event
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("skipped existing object"))));
+        assert!(!progress_events.iter().any(|event| {
+            event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)
+                && !event.active_hdd_transfers.is_empty()
+        }));
+        assert!(!hdd_root.join("disk-a").join("objects").exists());
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -2320,6 +2587,73 @@ mod tests {
         };
         let json = serde_json::to_string_pretty(&vec![definition]).expect("store registry json");
         fs::write(path, json).expect("store registry");
+    }
+
+    fn write_existing_object_metadata(
+        live_sqlite_path: &Path,
+        object_id: &str,
+        content_hash: &str,
+        size_bytes: i64,
+    ) {
+        let parent = live_sqlite_path.parent().expect("live sqlite parent");
+        fs::create_dir_all(parent).expect("metadata dir");
+        let connection = Connection::open(live_sqlite_path).expect("live sqlite opens");
+        connection
+            .execute_batch(
+                "CREATE TABLE stores (
+                    store_id TEXT PRIMARY KEY,
+                    class TEXT NOT NULL
+                );
+                CREATE TABLE objects (
+                    object_id TEXT PRIMARY KEY,
+                    store_id TEXT NOT NULL,
+                    object_type TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    size_bytes INTEGER,
+                    content_hash TEXT,
+                    created_at_utc TEXT NOT NULL,
+                    updated_at_utc TEXT NOT NULL
+                );
+                CREATE TABLE placements (
+                    placement_id TEXT PRIMARY KEY,
+                    object_id TEXT NOT NULL,
+                    disk_id TEXT NOT NULL,
+                    relative_path TEXT NOT NULL,
+                    content_hash TEXT,
+                    verified_at_utc TEXT
+                );",
+            )
+            .expect("metadata schema");
+        connection
+            .execute(
+                "INSERT INTO stores (store_id, class) VALUES (?1, ?2)",
+                ("zymo_fecal_2025.05", "reproducible_cache"),
+            )
+            .expect("store metadata");
+        connection
+            .execute(
+                "INSERT INTO objects (
+                    object_id,
+                    store_id,
+                    object_type,
+                    state,
+                    size_bytes,
+                    content_hash,
+                    created_at_utc,
+                    updated_at_utc
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (
+                    object_id,
+                    "zymo_fecal_2025.05",
+                    "fasta",
+                    "Committed",
+                    size_bytes,
+                    content_hash,
+                    "2026-07-09T18:43:00Z",
+                    "2026-07-09T18:43:00Z",
+                ),
+            )
+            .expect("object metadata");
     }
 
     fn find_payloads(root: &Path) -> Vec<Vec<u8>> {
