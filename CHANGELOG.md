@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.62.4 - 2026-07-09
+
+- Prefer daemon appliance telemetry for the Web Home dashboard Capacity,
+  seven-day Throughput, and Memory Stress cards when telemetry samples are
+  available, while preserving the existing filesystem, throughput JSON, and
+  ``/proc/meminfo`` fallbacks.
+- Bound Home dashboard Docker object-service probes so a missing or stalled
+  Docker CLI cannot block the Web dashboard route.
+
 ## 0.62.3 - 2026-07-09
 
 - Skip existing objects before direct-to-HDD or SSD ingest work when the

@@ -965,7 +965,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add API tests proving telemetry windows are downsampled consistently,
   unauthorized users cannot access protected telemetry, missing data is not
   interpolated, and response sizes remain bounded for 3 month windows.
-- [ ] Extend the Home dashboard API payload so existing Capacity, Throughput,
+- [x] Extend the Home dashboard API payload so existing Capacity, Throughput,
   and Memory Stress cards consume telemetry-backed summaries where available.
 - [ ] Add Home dashboard cards for IO, logged-in users, and CPU usage, with
   compact operator wording, stable card dimensions, and no dependence on

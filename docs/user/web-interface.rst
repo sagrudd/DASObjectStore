@@ -224,14 +224,20 @@ payload.
 The current Home API aggregator reads the managed SSD root
 ``/srv/dasobjectstore/ssd`` and managed HDD root ``/srv/dasobjectstore/hdd``
 by default, honours ``DASOBJECTSTORE_SSD_ROOT`` and
-``DASOBJECTSTORE_HDD_ROOT`` overrides, reads the system ObjectStore registry
-through the same registry model used by the CLI and daemon, and reads Linux
-memory pressure from ``/proc/meminfo``. Seven-day throughput and SMART warning
-summaries are optional JSON inputs at
-``/var/lib/dasobjectstore/telemetry/throughput-7d.json`` and
-``/var/lib/dasobjectstore/health/smart-warnings.json``; until those daemon
-writers are present, the dashboard reports explicit unavailable-source
-warnings rather than bootstrap fixture text.
+``DASOBJECTSTORE_HDD_ROOT`` overrides, and reads the system ObjectStore
+registry through the same registry model used by the CLI and daemon. When
+daemon appliance telemetry is present, the Capacity, seven-day Throughput, and
+Memory Stress cards prefer that telemetry so the cards match the daemon-owned
+view of managed disks, IO rates, and host memory pressure. Operators can
+override that telemetry source with
+``DASOBJECTSTORE_WEB_APPLIANCE_TELEMETRY_PATH``. If appliance telemetry is not
+available, the aggregator falls back to filesystem capacity, the optional
+seven-day throughput JSON input at
+``/var/lib/dasobjectstore/telemetry/throughput-7d.json``, and Linux memory
+pressure from ``/proc/meminfo``. SMART warning summaries remain an optional
+JSON input at ``/var/lib/dasobjectstore/health/smart-warnings.json``; until
+those daemon writers are present, the dashboard reports explicit
+unavailable-source warnings rather than bootstrap fixture text.
 
 The redesigned Home, Enclosures, ObjectStores, and Bioinformatics pages share a
 single Yew API loading contract. Each page renders explicit loading, success,

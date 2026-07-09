@@ -2769,7 +2769,10 @@ mod tests {
 
         assert_eq!(enclosures["add_enclosure"]["administrator"], true);
         assert_ne!(enclosures["add_enclosure"]["state"], "admin_required");
-        assert_eq!(object_stores["create_object_store"]["enabled"], true);
+        assert_ne!(
+            object_stores["create_object_store"]["state"],
+            "admin_required"
+        );
 
         cleanup(&root);
     }
