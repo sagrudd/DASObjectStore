@@ -464,9 +464,37 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         self.run_with_progress(request, |progress| transfer.transfer(progress))
     }
 
+    pub fn run_with_cleanup_on_failure<E>(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        cleanup_plan: RemoteUploadCancellationCleanupPlan,
+        cleanup_worker: &dyn RemoteUploadCancellationCleanupWorker,
+        transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+    where
+        E: fmt::Display,
+    {
+        self.run_with_progress_inner(request, Some((cleanup_plan, cleanup_worker)), transfer)
+    }
+
     pub fn run_with_progress<E>(
         &self,
         request: RemoteUploadS3TransferWorkerRequest,
+        transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+    where
+        E: fmt::Display,
+    {
+        self.run_with_progress_inner(request, None, transfer)
+    }
+
+    fn run_with_progress_inner<E>(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        cleanup_on_failure: Option<(
+            RemoteUploadCancellationCleanupPlan,
+            &dyn RemoteUploadCancellationCleanupWorker,
+        )>,
         transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
     ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
     where
@@ -505,6 +533,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                     progress_events: Vec::new(),
                     final_event,
                     runtime_after: summary.runtime_after,
+                    cleanup_report: None,
                 });
             }
         };
@@ -529,14 +558,23 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             events: Vec::new(),
         };
 
-        let outcome = match transfer(&mut progress_reporter) {
-            Ok(()) => RemoteUploadS3TransferJobOutcome::Completed,
-            Err(error) => RemoteUploadS3TransferJobOutcome::Failed {
-                error: error.to_string(),
-            },
-        };
+        let transfer_result = transfer(&mut progress_reporter);
         let progress_events = progress_reporter.into_events();
         drop(permit);
+
+        let (outcome, cleanup_report) = match transfer_result {
+            Ok(()) => (RemoteUploadS3TransferJobOutcome::Completed, None),
+            Err(error) => {
+                let cleanup_report = cleanup_on_failure
+                    .map(|(plan, worker)| run_remote_upload_cancellation_cleanup(plan, worker));
+                (
+                    RemoteUploadS3TransferJobOutcome::Failed {
+                        error: error.to_string(),
+                    },
+                    cleanup_report,
+                )
+            }
+        };
 
         let summary = RemoteUploadS3TransferJobSummary {
             job_id: job.job_id,
@@ -558,6 +596,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             progress_events,
             final_event,
             runtime_after: summary.runtime_after,
+            cleanup_report,
         })
     }
 }
@@ -577,6 +616,7 @@ pub struct RemoteUploadS3TransferWorkerReport {
     pub progress_events: Vec<DaemonJobEvent>,
     pub final_event: DaemonJobEvent,
     pub runtime_after: RemoteUploadRuntimeSnapshot,
+    pub cleanup_report: Option<RemoteUploadCancellationCleanupRunReport>,
 }
 
 pub struct RemoteUploadS3TransferProgressReporter<'a> {
@@ -1016,13 +1056,13 @@ mod tests {
         RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
         RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
         RemoteUploadCancellationCleanupAction, RemoteUploadCancellationCleanupActionState,
-        RemoteUploadCancellationCleanupError, RemoteUploadCancellationCleanupRequest,
-        RemoteUploadCancellationCleanupScope, RemoteUploadCancellationCleanupWorker,
-        RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError,
-        RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-        RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferProgressReporter,
-        RemoteUploadS3TransferProgressUpdate, RemoteUploadS3TransferWorker,
-        RemoteUploadS3TransferWorkerRequest,
+        RemoteUploadCancellationCleanupError, RemoteUploadCancellationCleanupPlan,
+        RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupScope,
+        RemoteUploadCancellationCleanupWorker, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
+        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
+        RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
+        RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
         DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonJobEvent, DaemonJobKind,
@@ -1637,6 +1677,73 @@ mod tests {
     }
 
     #[test]
+    fn transfer_worker_runs_cleanup_plan_after_transfer_failure() {
+        let root = temp_root("remote-upload-worker-cleanup-after-failure");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let cleanup_worker = RecordingCleanupWorker::default();
+        let cleanup_plan = cleanup_plan_for_job("remote-upload-job-030");
+
+        let report = worker
+            .run_with_cleanup_on_failure(
+                worker_request("remote-upload-job-030"),
+                cleanup_plan,
+                &cleanup_worker,
+                |_progress| Err::<(), _>("multipart upload interrupted"),
+            )
+            .expect("failure cleanup reported");
+
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(final_job.progress.stage, "remote_s3_transfer_failed");
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+        let cleanup_report = report.cleanup_report.expect("cleanup report");
+        assert!(!cleanup_report.plan.resumable);
+        assert!(cleanup_report.completed());
+        assert_eq!(cleanup_report.action_reports.len(), 2);
+        assert_eq!(
+            cleanup_worker.calls.borrow().as_slice(),
+            [
+                RemoteUploadCancellationCleanupScope::PartialSsdStage,
+                RemoteUploadCancellationCleanupScope::FailedMultipartUpload,
+            ]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_skips_cleanup_plan_after_success() {
+        let root = temp_root("remote-upload-worker-cleanup-after-success");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let cleanup_worker = RecordingCleanupWorker::default();
+        let cleanup_plan = cleanup_plan_for_job("remote-upload-job-031");
+
+        let report = worker
+            .run_with_cleanup_on_failure(
+                worker_request("remote-upload-job-031"),
+                cleanup_plan,
+                &cleanup_worker,
+                |_progress| Ok::<(), &'static str>(()),
+            )
+            .expect("success reported");
+
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected complete final event");
+        };
+        assert_eq!(final_job.progress.stage, "remote_s3_transfer_complete");
+        assert_eq!(report.cleanup_report, None);
+        assert!(cleanup_worker.calls.borrow().is_empty());
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn aws_cli_byte_transfer_runs_redacted_command_and_records_completion_progress() {
         let root = temp_root("remote-upload-aws-cli-transfer");
         let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
@@ -1940,6 +2047,20 @@ mod tests {
             }
             Ok(())
         }
+    }
+
+    fn cleanup_plan_for_job(job_id: &str) -> RemoteUploadCancellationCleanupPlan {
+        plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
+            job_id: job_id.to_string(),
+            object_store: "zymo_fecal_2025.05".to_string(),
+            source_bytes: 42,
+            staged_object_prefix: Some(format!("ssd/{job_id}")),
+            multipart_upload_id: Some(format!("multipart-{job_id}")),
+            session_id: None,
+            pairing_id: None,
+            browser_handoff_id: None,
+            reason: Some("transfer failed".to_string()),
+        })
     }
 
     struct RecordingByteTransfer {

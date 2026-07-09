@@ -371,7 +371,10 @@ partial SSD-stage removal or multipart abort, is distinguished from resumable
 session and browser-handoff cleanup so later progress views can report what is
 safe to retry. The runtime cleanup worker facade records per-action completion
 or failure and continues through the plan, so a failed multipart abort does not
-hide session or handoff cleanup status.
+hide session or handoff cleanup status. Remote upload transfer workers can now
+run that cleanup plan after a failed transfer and return the cleanup report to
+the daemon caller; concrete SSD, S3 multipart, session, pairing, and browser
+handoff cleanup adapters are the next implementation step.
 
 Credential Helper Contract
 --------------------------

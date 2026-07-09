@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.8 - 2026-07-09
 
+- Wire remote upload transfer-worker execution to cancellation cleanup plans so
+  failed transfers can return daemon-visible cleanup reports without holding S3
+  admission capacity during cleanup.
 - Include Garage bootstrap environment variables in rendered production Compose
   YAML so the selected Garage image can start with ``--default-bucket`` using a
   project-local ``.env`` file rather than failing after container creation.

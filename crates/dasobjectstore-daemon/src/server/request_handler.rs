@@ -2821,6 +2821,7 @@ mod tests {
                 progress_events: Vec::new(),
                 final_event: crate::api::DaemonJobEvent::Complete(job),
                 runtime_after: Default::default(),
+                cleanup_report: None,
             })
         }
 
