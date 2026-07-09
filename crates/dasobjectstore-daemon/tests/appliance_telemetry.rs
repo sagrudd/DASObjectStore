@@ -284,14 +284,64 @@ fn proc_collector_reads_fixture_directory_without_live_host_state() {
     fs::write(root.join("meminfo"), PROC_MEMINFO).expect("meminfo fixture written");
 
     let previous = parse_linux_cpu_snapshot(PROC_STAT_1).expect("previous snapshot");
-    let sample = LinuxProcTelemetryCollector::new(&root)
-        .collect(Some(&previous))
+    let mut collector = LinuxProcTelemetryCollector::new(&root);
+    let sample = collector
+        .collect(Some(&previous), 30)
         .expect("fixture telemetry collected");
     fs::remove_dir_all(&root).expect("fixture root removed");
 
     assert_eq!(sample.cpu.usage_percent, Some(54.55));
     assert_eq!(sample.memory.used_percent, Some(25.0));
     assert_eq!(sample.cpu_snapshot.logical_core_count, 2);
+    assert!(sample.disk_io.is_empty());
+}
+
+#[test]
+fn proc_collector_retains_diskstats_for_cadence_aware_disk_io_rates() {
+    let root = temp_root("appliance-telemetry-proc-diskstats-retained");
+    let proc_root = root.join("proc");
+    let hdd_root = root.join("hdd");
+    let disk_root = hdd_root.join("disk-a");
+    fs::create_dir_all(&proc_root).expect("proc fixture directory");
+    fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
+    fs::write(proc_root.join("stat"), PROC_STAT_1).expect("first stat fixture written");
+    fs::write(proc_root.join("loadavg"), "1.00 0.50 0.25 1/100 123\n")
+        .expect("loadavg fixture written");
+    fs::write(proc_root.join("meminfo"), PROC_MEMINFO).expect("meminfo fixture written");
+    fs::write(proc_root.join("diskstats"), PROC_DISKSTATS_1)
+        .expect("first diskstats fixture written");
+    fs::write(
+        disk_root.join(".dasobjectstore/device.env"),
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\nenclosure_id=qnap-tl-d800c-01\ndevice=/dev/disk/by-id/fixture-a\ndiskstats_device=sda\nfilesystem=ext4\n",
+    )
+    .expect("device marker written");
+
+    let mut collector = LinuxProcTelemetryCollector::new(&proc_root).with_hdd_root(&hdd_root);
+    let first = collector.collect(None, 6).expect("first sample collected");
+    fs::write(proc_root.join("stat"), PROC_STAT_2).expect("second stat fixture written");
+    fs::write(proc_root.join("diskstats"), PROC_DISKSTATS_2)
+        .expect("second diskstats fixture written");
+    let second = collector
+        .collect(Some(&first.cpu_snapshot), 6)
+        .expect("second sample collected");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(first.disk_io.len(), 1);
+    assert_eq!(first.disk_io[0].disk_id, "qnap-a");
+    assert_eq!(
+        first.disk_io[0].missing_reason,
+        Some(ApplianceTelemetryMissingReason::DaemonStartup)
+    );
+
+    assert_eq!(second.disk_io.len(), 1);
+    assert_eq!(second.disk_io[0].disk_id, "qnap-a");
+    assert_eq!(second.disk_io[0].read_bytes_per_second, Some(51_200.0));
+    assert_eq!(second.disk_io[0].write_bytes_per_second, Some(51_200.0));
+    assert_eq!(second.disk_io[0].read_operations_per_second, Some(5.0));
+    assert_eq!(second.disk_io[0].write_operations_per_second, Some(5.0));
+    assert_eq!(second.disk_io[0].average_await_millis, Some(2.5));
+    assert_eq!(second.disk_io[0].io_time_percent, Some(2.0));
+    assert_eq!(second.disk_io[0].missing_reason, None);
 }
 
 #[test]
@@ -373,6 +423,7 @@ impl ApplianceHostTelemetryCollector for FakeCollector {
     fn collect(
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
+        _elapsed_seconds: u64,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
         let snapshot = self.snapshots.remove(0);
         Ok(LinuxHostTelemetrySample {

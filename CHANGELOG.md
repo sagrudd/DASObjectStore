@@ -19,6 +19,8 @@ agreement before landing.
   path and issued/reused/rotated counts without exposing S3 secret material.
 - Package the protected object-service state directory for DEB/RPM installs and
   document the credential custody and rotation workflow for S3 uploads.
+- Wire daemon appliance telemetry to report managed-HDD capacity and Linux
+  `/proc/diskstats` read/write IO rates using retained cadence-aware samples.
 
 ## 0.61.2 - 2026-07-09
 

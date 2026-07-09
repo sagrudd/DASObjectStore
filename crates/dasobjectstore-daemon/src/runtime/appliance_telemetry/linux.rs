@@ -17,6 +17,7 @@ pub const DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT: &str = "/srv/dasobjectstore/hdd"
 pub struct LinuxProcTelemetryCollector {
     proc_root: PathBuf,
     hdd_root: Option<PathBuf>,
+    previous_diskstats: Option<BTreeMap<String, LinuxDiskIoCounters>>,
 }
 
 impl LinuxProcTelemetryCollector {
@@ -24,6 +25,7 @@ impl LinuxProcTelemetryCollector {
         Self {
             proc_root: proc_root.into(),
             hdd_root: None,
+            previous_diskstats: None,
         }
     }
 
@@ -41,16 +43,29 @@ impl LinuxProcTelemetryCollector {
     }
 
     pub fn collect(
-        &self,
+        &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
+        elapsed_seconds: u64,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
         let proc_stat = self.read_proc_file("stat")?;
         let proc_loadavg = self.read_proc_file("loadavg")?;
         let proc_meminfo = self.read_proc_file("meminfo")?;
         let cpu_snapshot = parse_linux_cpu_snapshot(&proc_stat)?;
-        let (enclosures, disks) = match self.hdd_root.as_deref() {
-            Some(hdd_root) => collect_linux_disk_capacity_telemetry(hdd_root)?,
-            None => (Vec::new(), Vec::new()),
+        let (enclosures, disks, disk_io) = match self.hdd_root.as_deref() {
+            Some(hdd_root) => {
+                let (enclosures, disks) = collect_linux_disk_capacity_telemetry(hdd_root)?;
+                let proc_diskstats = self.read_proc_file("diskstats")?;
+                let current_diskstats = parse_linux_diskstats(&proc_diskstats)?;
+                let disk_io = collect_linux_disk_io_telemetry(
+                    hdd_root,
+                    &current_diskstats,
+                    self.previous_diskstats.as_ref(),
+                    elapsed_seconds,
+                )?;
+                self.previous_diskstats = Some(current_diskstats);
+                (enclosures, disks, disk_io)
+            }
+            None => (Vec::new(), Vec::new(), Vec::new()),
         };
 
         Ok(LinuxHostTelemetrySample {
@@ -58,7 +73,7 @@ impl LinuxProcTelemetryCollector {
             memory: collect_linux_memory_telemetry(&proc_meminfo),
             enclosures,
             disks,
-            disk_io: Vec::new(),
+            disk_io,
             cpu_snapshot,
         })
     }
@@ -82,8 +97,9 @@ impl ApplianceHostTelemetryCollector for LinuxProcTelemetryCollector {
     fn collect(
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
+        elapsed_seconds: u64,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError> {
-        LinuxProcTelemetryCollector::collect(self, previous_cpu)
+        LinuxProcTelemetryCollector::collect(self, previous_cpu, elapsed_seconds)
     }
 }
 

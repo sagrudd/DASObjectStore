@@ -24,6 +24,7 @@ pub trait ApplianceHostTelemetryCollector {
     fn collect(
         &mut self,
         previous_cpu: Option<&LinuxCpuSnapshot>,
+        elapsed_seconds: u64,
     ) -> Result<LinuxHostTelemetrySample, ApplianceTelemetryCollectorError>;
 }
 
@@ -135,7 +136,7 @@ where
     ) -> Result<ApplianceTelemetrySampleSet, ApplianceTelemetryLoopError> {
         let host = self
             .collector
-            .collect(self.previous_cpu.as_ref())
+            .collect(self.previous_cpu.as_ref(), self.config.cadence_seconds)
             .map_err(|error| ApplianceTelemetryLoopError::Collector(error.to_string()))?;
         self.previous_cpu = Some(host.cpu_snapshot);
         self.samples_collected = self.samples_collected.saturating_add(1);
@@ -251,11 +252,16 @@ pub fn appliance_sample_set(
     if host.disk_io.is_empty() {
         missing_data.push(ApplianceTelemetryMissingDataMarker {
             path: "disks.io".to_string(),
-            reason: ApplianceTelemetryMissingReason::NotConfigured,
-            detail: Some(
-                "disk IO rate collection is not wired into the service loop yet".to_string(),
-            ),
+            reason: ApplianceTelemetryMissingReason::DeviceMissing,
+            detail: Some("no managed HDD IO samples were collected".to_string()),
         });
+    }
+    for disk_io in &host.disk_io {
+        push_optional_missing_marker(
+            &mut missing_data,
+            &format!("disks.{}.io", disk_io.disk_id),
+            &disk_io.missing_reason,
+        );
     }
     missing_data.push(ApplianceTelemetryMissingDataMarker {
         path: "sessions".to_string(),

@@ -51,10 +51,12 @@ When managed HDD roots contain ``.dasobjectstore/device.env`` markers with
 sample. Marker fields such as ``label``, ``device``, ``filesystem``, and
 ``enclosure_id`` are preserved when present so operator surfaces can group disk
 capacity by enclosure as the hardware registry matures.
-The telemetry schema also reserves ``disk_io`` entries for per-disk throughput
-and operation-rate data. Until the daemon wires retained ``/proc/diskstats``
-samples into the service loop, missing IO data is reported explicitly instead
-of being guessed from capacity or ingest state.
+The telemetry schema also records ``disk_io`` entries for per-disk throughput
+and operation-rate data. On Linux, the daemon retains the previous
+``/proc/diskstats`` sample internally and calculates rates over the configured
+telemetry cadence. The first sample after daemon startup or counter reset
+reports missing IO rates explicitly instead of guessing from capacity or ingest
+state.
 
 Packaged installations restrict the socket directory and socket file to the
 ``dasobjectstore`` group. A local user must be in this transport group before
