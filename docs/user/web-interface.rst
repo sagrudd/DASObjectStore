@@ -511,6 +511,17 @@ group or socket after package installation, restore access with:
    sudo usermod -aG docker dasobjectstore
    sudo systemctl restart dasobjectstore-server.service
 
+The formal report-provider container is a Grammateus-owned runtime asset. Build
+or repair it with ``make report-provider`` from a source checkout, or directly
+with:
+
+.. code-block:: console
+
+   grammateus_report_provider install --image grammateus/report:0.8.1
+
+The installer uses packaged ``/opt/grammateus`` and ``/opt/floundeR`` contexts
+when present, or explicit source paths supplied by the build target.
+
 Endpoints Workspace
 -------------------
 

@@ -205,6 +205,21 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi
 
+wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"
+if [ -x "\$wrapper" ]; then
+  if "\$wrapper" prewarm-report-provider >/dev/null 2>&1; then
+    printf 'DASObjectStore formal PDF report provider is installed and prewarmed.\n'
+  else
+    cat >&2 <<WARNING
+DASObjectStore formal PDF reporting could not prewarm the Grammateus provider.
+Install or repair Grammateus and initialise the provider with:
+  grammateus_report_provider install --image grammateus/report:0.8.1
+Then restart dasobjectstore-server.service before rebuilding reports from the
+Web interface.
+WARNING
+  fi
+fi
+
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
 %config(noreplace) /etc/pam.d/dasobjectstore

@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.13 - 2026-07-09
+
+- Add a `make report-provider` build target that initialises the formal
+  Grammateus/floundeR PDF report container through the Grammateus-owned
+  `grammateus_report_provider` installer.
+- Run the report-provider initialisation target before `make deb` and
+  `make rpm` package assembly so report-enabled appliance builds do not depend
+  on a later ad hoc Docker pull.
+- Prewarm the packaged report provider during DEB/RPM configuration when the
+  Grammateus installer is available, and report the exact repair command when
+  it is not.
+
 ## 0.54.12 - 2026-07-09
 
 - Move Web performance-report rebuild scratch space out of systemd private

@@ -407,6 +407,23 @@ formal PDF reporting is a supported operator surface. If the container runtime
 or Grammateus provider image is unavailable, the installation should not be
 treated as a complete Web-reporting installation.
 
+The report-provider image is installed through the Grammateus-owned
+``grammateus_report_provider`` command. This is the same Mnemosyne runtime
+asset pattern used by Mnematikon: Grammateus owns the report container and
+floundeR integration, while DASObjectStore calls the shared renderer with
+product-specific report inputs. Source builds can initialise the provider with:
+
+.. code-block:: console
+
+   make pull
+   make report-provider
+
+The target uses ``../grammateus`` and ``../floundeR`` by default and builds the
+requested ``grammateus/report:0.8.1`` image. ``make deb`` and ``make rpm`` run
+this target before assembling packages. Package configuration then prewarms the
+provider and reports the exact ``grammateus_report_provider install`` repair
+command when the provider is missing.
+
 Package configuration adds the ``dasobjectstore`` service user to the
 ``docker`` group and restarts the Web service so the rebuild API can access the
 Docker socket. If Docker is reinstalled or repaired manually after package

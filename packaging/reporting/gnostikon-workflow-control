@@ -79,6 +79,39 @@ ERROR
   exit 1
 }
 
+ensure_report_provider_image() {
+  local container_runtime="$1"
+  local container_image="$2"
+
+  verify_container_runtime_access "$container_runtime"
+  if "$container_runtime" image inspect "$container_image" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v grammateus_report_provider >/dev/null 2>&1; then
+    if grammateus_report_provider install \
+      --runtime "$container_runtime" \
+      --image "$container_image" >&2; then
+      return 0
+    fi
+    cat >&2 <<ERROR
+Grammateus report-provider image $container_image is missing and
+grammateus_report_provider could not initialise it. Repair the Grammateus
+installation, then run:
+  grammateus_report_provider install --image $container_image
+ERROR
+    exit 1
+  fi
+
+  cat >&2 <<ERROR
+Grammateus report-provider image $container_image is not installed, and the
+grammateus_report_provider installer command is not available. Install or repair
+Grammateus, then run:
+  grammateus_report_provider install --image $container_image
+ERROR
+  exit 127
+}
+
 run_render_report_pdf() {
   local input=""
   local output=""
@@ -151,7 +184,7 @@ run_render_report_pdf() {
     printf 'unsupported report provider: %s\n' "$provider" >&2
     exit 2
   fi
-  verify_container_runtime_access "$container_runtime"
+  ensure_report_provider_image "$container_runtime" "$container_image"
 
   local input_dir output_dir
   input_dir="$(cd "$(dirname "$input")" && pwd -P)"
@@ -191,7 +224,12 @@ run_prewarm_report_provider() {
         ;;
     esac
   done
-  verify_container_runtime_access "$container_runtime"
+  ensure_report_provider_image "$container_runtime" "$container_image"
+  if command -v grammateus_report_provider >/dev/null 2>&1; then
+    exec grammateus_report_provider prewarm \
+      --runtime "$container_runtime" \
+      --image "$container_image"
+  fi
   exec "$container_runtime" run --rm --entrypoint /bin/sh "$container_image" -lc \
     "set -eu; grammateus_markdown_pdf --help >/dev/null; Rscript -e 'pkgs <- c(\"ggplot2\", \"jsonlite\", \"scales\", \"svglite\", \"viridisLite\", \"floundeR\"); missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing)) stop(paste(\"missing R packages:\", paste(missing, collapse = \", \"))); library(floundeR); caps <- floundeR::flounder_rust_capabilities(required = TRUE); if (!isTRUE(caps\$compiled_support)) stop(\"floundeR compiled support is unavailable\"); cat(\"grammateus report provider prewarmed\\n\")'"
 }

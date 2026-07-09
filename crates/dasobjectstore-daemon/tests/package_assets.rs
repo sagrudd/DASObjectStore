@@ -137,9 +137,12 @@ fn package_installs_das_owned_report_renderer_wrapper() {
     assert_contains(REPORTING_WRAPPER, "render-report-pdf");
     assert_contains(REPORTING_WRAPPER, "prewarm-report-provider");
     assert_contains(REPORTING_WRAPPER, "verify_container_runtime_access");
+    assert_contains(REPORTING_WRAPPER, "grammateus_report_provider install");
     assert_contains(REPORTING_WRAPPER, "sudo usermod -aG docker dasobjectstore");
     assert_contains(REPORTING_WRAPPER, "grammateus_markdown_pdf");
     assert_contains(REPORTING_WRAPPER, "docker_args=(run --rm");
+    assert_contains(MAKEFILE, "report-provider");
+    assert_contains(MAKEFILE, "grammateus_report_provider");
     assert_contains(
         BUILD_DEB,
         "usr/libexec/dasobjectstore/gnostikon-workflow-control",
@@ -147,6 +150,11 @@ fn package_installs_das_owned_report_renderer_wrapper() {
     assert_contains(
         BUILD_RPM,
         "/usr/libexec/dasobjectstore/gnostikon-workflow-control",
+    );
+    assert_contains(BUILD_RPM, "prewarm-report-provider");
+    assert_contains(
+        BUILD_RPM,
+        "grammateus_report_provider install --image grammateus/report:0.8.1",
     );
 }
 
@@ -268,6 +276,12 @@ fn deb_postinst_rejects_user_owned_managed_root() {
         "ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750",
     );
     assert_contains(POSTINST, "ensure_container_runtime_access");
+    assert_contains(POSTINST, "ensure_report_provider");
+    assert_contains(POSTINST, "prewarm-report-provider");
+    assert_contains(
+        POSTINST,
+        "grammateus_report_provider install --image grammateus/report:0.8.1",
+    );
     assert_contains(POSTINST, "usermod -aG docker \"$service_user\"");
     assert_contains(POSTINST, "restart dasobjectstore-server.service");
     assert_contains(

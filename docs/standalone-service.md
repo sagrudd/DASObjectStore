@@ -138,6 +138,24 @@ DEB/RPM manifests install the DAS-owned wrapper and declare the container
 runtime as a runtime dependency so appliance installs do not silently expose a
 broken reporting surface.
 
+The formal PDF report container is initialised through the Grammateus-owned
+`grammateus_report_provider` installer. This mirrors the Mnematikon runtime
+asset pattern: the report provider is a semantically versioned Grammateus
+runtime asset, while DASObjectStore supplies the product report content and
+invokes the shared provider. For source checkouts, run:
+
+```text
+make pull
+make report-provider
+```
+
+`make report-provider` uses the sibling `../grammateus` and `../floundeR`
+contexts by default and creates the configured `grammateus/report:0.8.1` image.
+`make deb` and `make rpm` run the same target before package assembly so local
+appliance builds are report-ready before installation. During package
+configuration, DASObjectStore prewarms the installed provider and reports the
+repair command if the Grammateus installer or container image is missing.
+
 Package configuration adds the `dasobjectstore` service user to the `docker`
 group and restarts `dasobjectstore-server.service`. If Docker is repaired or
 reinstalled later, run `sudo usermod -aG docker dasobjectstore` and restart the

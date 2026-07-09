@@ -35,6 +35,26 @@ WARNING
   fi
 }
 
+ensure_report_provider() {
+  local wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"
+  if [[ ! -x "$wrapper" ]]; then
+    return 0
+  fi
+
+  if "$wrapper" prewarm-report-provider >/dev/null 2>&1; then
+    printf 'DASObjectStore formal PDF report provider is installed and prewarmed.\n'
+    return 0
+  fi
+
+  cat >&2 <<WARNING
+DASObjectStore formal PDF reporting could not prewarm the Grammateus provider.
+Install or repair Grammateus and initialise the provider with:
+  grammateus_report_provider install --image grammateus/report:0.8.1
+Then restart dasobjectstore-server.service before rebuilding reports from the
+Web interface.
+WARNING
+}
+
 ensure_owned_dir() {
   local path="$1"
   local mode="$2"
@@ -120,3 +140,5 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl enable --now dasobjectstored.service dasobjectstore-server.service || true
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi
+
+ensure_report_provider

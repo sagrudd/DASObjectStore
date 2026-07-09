@@ -5,8 +5,12 @@ SHELL := /usr/bin/env bash
 GITHUB_OWNER ?= sagrudd
 MNEMOSYNE_WORKSPACE ?= $(abspath ..)
 MNEMOSYNE_REPO_MATCH ?= mnemosyne|mneion|monas|synoptikon|mnematikon|gnostikon|grammateus|flounder
+GRAMMATEUS_DIR ?= $(MNEMOSYNE_WORKSPACE)/grammateus
+FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
+REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
+GRAMMATEUS_REPORT_PROVIDER ?= grammateus_report_provider
 
-.PHONY: help pull build web web-screenshots test fmt check deb rpm remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots report-provider test fmt check deb rpm remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -14,6 +18,7 @@ help:
 	@printf '  make build      Build release CLI, server, and daemon binaries\n'
 	@printf '  make web        Build or prepare the packaged web interface assets\n'
 	@printf '  make web-screenshots Build the Web UI and run Playwright screenshot regressions\n'
+	@printf '  make report-provider Initialise the Grammateus/floundeR formal PDF report container\n'
 	@printf '  make test       Run the full Rust workspace test suite\n'
 	@printf '  make fmt        Format Rust sources\n'
 	@printf '  make check      Run cargo check for the workspace\n'
@@ -67,6 +72,24 @@ web:
 web-screenshots:
 	node tools/web-screenshot-regression.mjs
 
+report-provider:
+	@set -euo pipefail; \
+	if command -v "$(GRAMMATEUS_REPORT_PROVIDER)" >/dev/null 2>&1; then \
+		"$(GRAMMATEUS_REPORT_PROVIDER)" install \
+			--image "$(REPORT_PROVIDER_IMAGE)" \
+			--grammateus-root "$(GRAMMATEUS_DIR)" \
+			--flounder-root "$(FLOUNDER_DIR)"; \
+	elif [ -f "$(GRAMMATEUS_DIR)/Cargo.toml" ]; then \
+		cargo run --manifest-path "$(GRAMMATEUS_DIR)/Cargo.toml" \
+			--bin grammateus_report_provider -- install \
+			--image "$(REPORT_PROVIDER_IMAGE)" \
+			--grammateus-root "$(GRAMMATEUS_DIR)" \
+			--flounder-root "$(FLOUNDER_DIR)"; \
+	else \
+		printf 'grammateus_report_provider is not installed and %s is unavailable. Run make pull or install Grammateus before building report-enabled packages.\n' "$(GRAMMATEUS_DIR)" >&2; \
+		exit 1; \
+	fi
+
 test:
 	cargo test --workspace
 
@@ -76,10 +99,10 @@ fmt:
 check:
 	cargo check --workspace
 
-deb: web
+deb: web report-provider
 	bash packaging/debian/build-deb.sh
 
-rpm: web
+rpm: web report-provider
 	bash packaging/rpm/build-rpm.sh
 
 remote-deb:
