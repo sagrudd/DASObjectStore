@@ -6,6 +6,7 @@ mod health;
 mod ingest;
 mod jobs;
 mod local_admin;
+mod object_browser;
 mod object_store;
 mod service;
 mod stores;
@@ -54,6 +55,12 @@ pub use local_admin::{
     CreateLocalGroupRequest, CreateLocalGroupResponse, DaemonLocalAdminAcceptedResponse,
     DaemonLocalAdminCommand, DaemonLocalAdminValidationError,
 };
+pub use object_browser::{
+    ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserFileNode, ObjectBrowserFolderNode,
+    ObjectBrowserPageRequest, ObjectBrowserPlacement, ObjectBrowserPlacementLocation,
+    ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
+    ObjectBrowserResponse, ObjectBrowserSort, OBJECT_BROWSER_MAX_PAGE_LIMIT,
+};
 pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
     OBJECT_STORE_CREATE_CONFIRMATION,
@@ -83,6 +90,7 @@ pub enum DaemonApiRequest {
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
+    ObjectBrowser(ObjectBrowserRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
@@ -102,6 +110,7 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(request) => request
                 .validate()
                 .map_err(create_object_store_validation_error),
+            Self::ObjectBrowser(request) => request.validate(),
             Self::UpsertEndpointInventory(request) => request
                 .validate()
                 .map_err(endpoint_inventory_validation_error),
@@ -137,6 +146,7 @@ pub enum DaemonApiResponse {
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
+    ObjectBrowser(ObjectBrowserResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
@@ -301,6 +311,7 @@ mod tests {
         DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonJobCancelRequest,
         DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest, DaemonServiceLifecycleRequest,
         DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceStatusRequest,
+        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
@@ -465,6 +476,25 @@ mod tests {
         assert_eq!(encoded["command"], "create_object_store");
         assert_eq!(encoded["payload"]["store_id"], "generated-data");
         assert_eq!(encoded["payload"]["required_copies"], 2);
+    }
+
+    #[test]
+    fn object_browser_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::ObjectBrowser(ObjectBrowserRequest {
+            endpoint: StoreId::new("ena").expect("store id"),
+            prefix: Some("ENA/Xenognostikon".to_string()),
+            search: None,
+            sort: ObjectBrowserSort::NameAsc,
+            page: ObjectBrowserPageRequest::default(),
+            include_placement: true,
+        });
+
+        request.validate().expect("request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "object_browser");
+        assert_eq!(encoded["payload"]["prefix"], "ENA/Xenognostikon");
+        assert_eq!(encoded["payload"]["page"]["limit"], 100);
     }
 
     #[test]

@@ -892,6 +892,7 @@ impl DaemonApiRequest {
             Self::ServiceProvision(_) => "service_provision",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
+            Self::ObjectBrowser(_) => "object_browser",
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",

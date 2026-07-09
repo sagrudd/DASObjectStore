@@ -17,10 +17,10 @@ use crate::api::{
     DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
     DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    IngestJobStatusRequest, IngestJobStatusResponse, PrepareEnclosureRequest,
-    PrepareEnclosureResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    IngestJobStatusRequest, IngestJobStatusResponse, ObjectBrowserRequest, ObjectBrowserResponse,
+    PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
+    StoreInventoryResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -222,6 +222,16 @@ where
         }
     }
 
+    pub fn object_browser(
+        &self,
+        request: ObjectBrowserRequest,
+    ) -> Result<ObjectBrowserResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ObjectBrowser(request))? {
+            DaemonApiResponse::ObjectBrowser(response) => Ok(response),
+            response => Err(unexpected("object_browser", response)),
+        }
+    }
+
     pub fn upsert_endpoint_inventory(
         &self,
         request: UpsertEndpointInventoryRequest,
@@ -279,6 +289,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
+        DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
@@ -300,11 +311,13 @@ mod tests {
         DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse, StoreInventoryRequest,
-        StoreInventoryResponse, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
-        UpsertEndpointInventoryResponse, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        DaemonServiceStatusResponse, ObjectBrowserPageRequest, ObjectBrowserRequest,
+        ObjectBrowserResponse, ObjectBrowserSort, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -619,6 +632,42 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::CreateObjectStore(_)]
+        ));
+    }
+
+    #[test]
+    fn object_browser_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ObjectBrowser(ObjectBrowserResponse {
+                endpoint: StoreId::new("ena").expect("store id"),
+                prefix: "ENA".to_string(),
+                breadcrumbs: Vec::new(),
+                folders: Vec::new(),
+                files: Vec::new(),
+                next_cursor: None,
+                total_entries: Some(0),
+            }))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .object_browser(ObjectBrowserRequest {
+                endpoint: StoreId::new("ena").expect("store id"),
+                prefix: Some("ENA".to_string()),
+                search: None,
+                sort: ObjectBrowserSort::NameAsc,
+                page: ObjectBrowserPageRequest::default(),
+                include_placement: true,
+            })
+            .expect("object browser response");
+
+        assert_eq!(response.endpoint.as_str(), "ena");
+        assert_eq!(response.total_entries, Some(0));
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ObjectBrowser(_)]
         ));
     }
 

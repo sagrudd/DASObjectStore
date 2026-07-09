@@ -671,7 +671,7 @@ planning are tracked under Milestones 21 and 22.
 
 ## Milestone 21: ObjectStore Web File Browser and Download Workflows
 
-- [ ] Define daemon/API DTOs for ObjectStore file browsing: folder nodes, file
+- [x] Define daemon/API DTOs for ObjectStore file browsing: folder nodes, file
   nodes, object type, size, timestamps, checksum/readiness state, lifecycle
   state, copy count, and disk placement for each settled copy.
 - [ ] Implement metadata-backed ObjectStore tree query logic with prefix
