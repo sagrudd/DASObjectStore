@@ -48,9 +48,9 @@ use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_core::DEFAULT_STANDALONE_CONFIG_PATH;
 use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
-    DaemonClientTransport, DaemonIngestProgressEvent, DaemonIngestStage, DaemonRuntimeConfig,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
-    DEFAULT_DAEMON_STATE_DIR,
+    DaemonClientTransport, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
+    DaemonRuntimeConfig, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UnixSocketDaemonTransport, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_gui_api::StandaloneServerConfig;
 use dasobjectstore_metadata::{
@@ -9667,6 +9667,7 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
         object_type: args.object_type(),
         copies: args.copies(),
         hdd_workers: args.hdd_workers(),
+        ingress_origin: DaemonIngressOrigin::LocalServer,
         conflict_policy: args.conflict_policy(),
         dry_run: args.dry_run(),
         client_request_id: None,

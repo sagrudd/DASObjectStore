@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Carry typed ingress origin through daemon file-ingest requests, default
+  legacy requests to ``local_server``, and have the daemon runtime use the
+  request origin when deciding SSD-first versus direct-to-HDD landing.
 - Route local-server daemon file ingest through direct-to-HDD landing when the
   target store policy explicitly uses ``DirectToHdd``, hashing sources before
   daemon-selected verified HDD settlement and avoiding SSD payload staging.

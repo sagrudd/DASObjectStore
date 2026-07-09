@@ -137,7 +137,7 @@ impl LocalFileIngestExecutor {
         let files = collect_ingest_files(&request.source_path, &endpoint.object_prefix)?;
         let source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
         let total_work_bytes = source_bytes.saturating_mul(u64::from(copies) + 1);
-        let landing_mode = local_server_landing_mode(&endpoint.store.policy);
+        let landing_mode = landing_mode_for_ingest(&endpoint.store.policy, request.ingress_origin);
         let summary = DaemonFileIngestSummary {
             endpoint_name: endpoint.endpoint_name.clone(),
             endpoint_kind: endpoint.endpoint_kind,
@@ -1104,11 +1104,11 @@ fn read_daemon_ssd_pressure(
     })
 }
 
-fn local_server_landing_mode(policy: &StorePolicy) -> DaemonIngressLandingMode {
-    match (
-        DaemonIngressOrigin::LocalServer.landing_mode(),
-        policy.ingest_mode,
-    ) {
+fn landing_mode_for_ingest(
+    policy: &StorePolicy,
+    origin: DaemonIngressOrigin,
+) -> DaemonIngressLandingMode {
+    match (origin.landing_mode(), policy.ingest_mode) {
         (DaemonIngressLandingMode::DirectToHddWhenPolicyAllows, IngestMode::DirectToHdd) => {
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
         }
@@ -1719,13 +1719,14 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_ingest_files, default_hdd_worker_count, resolve_hdd_worker_count,
-        sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState, HddSettlementScheduler,
-        LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState, SSD_ROOT_ENV,
+        collect_ingest_files, default_hdd_worker_count, landing_mode_for_ingest,
+        resolve_hdd_worker_count, sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState,
+        HddSettlementScheduler, LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState,
+        SSD_ROOT_ENV,
     };
     use crate::api::{
-        DaemonIngestConflictPolicy, DaemonIngestPipelineStage, DaemonSsdPressure,
-        SubmitIngestFilesRequest,
+        DaemonIngestConflictPolicy, DaemonIngestPipelineStage, DaemonIngressLandingMode,
+        DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
@@ -1770,6 +1771,7 @@ mod tests {
                     object_type: ObjectType::Fastq,
                     copies: Some(1),
                     hdd_workers: None,
+                    ingress_origin: DaemonIngressOrigin::LocalServer,
                     conflict_policy: DaemonIngestConflictPolicy::Strict,
                     dry_run: true,
                     client_request_id: None,
@@ -1834,6 +1836,7 @@ mod tests {
                     object_type: ObjectType::Fasta,
                     copies: Some(1),
                     hdd_workers: None,
+                    ingress_origin: DaemonIngressOrigin::LocalServer,
                     conflict_policy: DaemonIngestConflictPolicy::Strict,
                     dry_run: false,
                     client_request_id: None,
@@ -1859,6 +1862,25 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn direct_policy_only_bypasses_ssd_for_local_server_origin() {
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+
+        assert_eq!(
+            landing_mode_for_ingest(&policy, DaemonIngressOrigin::LocalServer),
+            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+        );
+        assert_eq!(
+            landing_mode_for_ingest(&policy, DaemonIngressOrigin::RemoteS3),
+            DaemonIngressLandingMode::SsdFirst
+        );
+        assert_eq!(
+            landing_mode_for_ingest(&policy, DaemonIngressOrigin::WebUpload),
+            DaemonIngressLandingMode::SsdFirst
+        );
     }
 
     #[test]

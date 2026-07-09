@@ -44,6 +44,8 @@ pub struct SubmitIngestFilesRequest {
     #[serde(default)]
     pub hdd_workers: Option<usize>,
     #[serde(default)]
+    pub ingress_origin: DaemonIngressOrigin,
+    #[serde(default)]
     pub conflict_policy: DaemonIngestConflictPolicy,
     pub dry_run: bool,
     pub client_request_id: Option<String>,
@@ -73,9 +75,10 @@ impl SubmitIngestFilesRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngressOrigin {
+    #[default]
     LocalServer,
     RemoteS3,
     WebUpload,
@@ -472,6 +475,7 @@ mod tests {
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             hdd_workers: None,
+            ingress_origin: DaemonIngressOrigin::LocalServer,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: Some("request-a".to_string()),
@@ -488,6 +492,7 @@ mod tests {
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             hdd_workers: None,
+            ingress_origin: DaemonIngressOrigin::LocalServer,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
@@ -511,6 +516,7 @@ mod tests {
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(0),
             hdd_workers: None,
+            ingress_origin: DaemonIngressOrigin::LocalServer,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
@@ -532,6 +538,7 @@ mod tests {
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: Some(1),
             hdd_workers: Some(0),
+            ingress_origin: DaemonIngressOrigin::LocalServer,
             conflict_policy: DaemonIngestConflictPolicy::Strict,
             dry_run: false,
             client_request_id: None,
@@ -560,6 +567,7 @@ mod tests {
 
         assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Strict);
         assert_eq!(request.hdd_workers, None);
+        assert_eq!(request.ingress_origin, DaemonIngressOrigin::LocalServer);
         assert_eq!(
             request.object_type,
             dasobjectstore_core::object_type::ObjectType::Naive
@@ -608,6 +616,7 @@ mod tests {
             object_type: dasobjectstore_core::object_type::ObjectType::Naive,
             copies: None,
             hdd_workers: None,
+            ingress_origin: DaemonIngressOrigin::LocalServer,
             conflict_policy: DaemonIngestConflictPolicy::Lazy,
             dry_run: true,
             client_request_id: None,

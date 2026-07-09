@@ -773,9 +773,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Define centralized ingress-origin classification (`local_server`,
   `remote_s3`, `web_upload`, and future Synoptikon/Mneion origins) with stable
   serialized names and deterministic landing-mode tests.
-- [ ] Wire centralized ingress-origin classification through remaining CLI,
-  Web, daemon runtime, and object-service execution paths so placement behavior
-  is deterministic everywhere.
+- [x] Wire centralized ingress-origin classification through normal CLI daemon
+  submission, daemon API request DTOs, and daemon file-ingest runtime placement
+  decisions.
+- [ ] Wire centralized ingress-origin classification through remaining Web,
+  remote/S3 object-service execution, and future Synoptikon/Mneion submission
+  paths so placement behavior is deterministic everywhere.
 - [ ] Implement the default HDD landing worker rule as
   `max(number_of_hdds_in_enclosure - 2, 2)` for SSD destage and local
   direct-to-HDD ingest, with one active writer per physical HDD and bounded

@@ -83,6 +83,7 @@ argument parsing and submits an ingest job request containing:
 * the logical object type assigned to the imported files;
 * an optional copy-count override;
 * an optional HDD settlement worker override;
+* the ingress origin, which the normal local CLI sets to ``local_server``;
 * the existing-object conflict policy;
 * whether the request is a dry run.
 

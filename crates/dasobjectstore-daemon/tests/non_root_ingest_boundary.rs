@@ -4,10 +4,10 @@ use dasobjectstore_core::store::{StoreClass, StorePolicy};
 use dasobjectstore_daemon::api::{DaemonIngestProgressEvent, DaemonServiceStatusRequest};
 use dasobjectstore_daemon::runtime::{DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError};
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonClientError, DaemonIngestConflictPolicy, DaemonLocalActor,
-    DaemonRequestHandler, DaemonServiceOrchestrator, FixedDaemonClock, InProcessDaemonTransport,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, DEFAULT_DAEMON_GROUP,
-    DEFAULT_DAEMON_SERVICE_USER,
+    DaemonClient, DaemonClientError, DaemonIngestConflictPolicy, DaemonIngressOrigin,
+    DaemonLocalActor, DaemonRequestHandler, DaemonServiceOrchestrator, FixedDaemonClock,
+    InProcessDaemonTransport, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_SERVICE_USER,
 };
 use dasobjectstore_object_service::StoreServiceDefinition;
 use std::cell::Cell;
@@ -100,6 +100,7 @@ fn ingest_request(client_request_id: &str) -> SubmitIngestFilesRequest {
         copies: Some(1),
         conflict_policy: DaemonIngestConflictPolicy::Strict,
         hdd_workers: None,
+        ingress_origin: DaemonIngressOrigin::LocalServer,
         dry_run: false,
         client_request_id: Some(client_request_id.to_string()),
     }
