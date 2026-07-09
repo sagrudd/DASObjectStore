@@ -122,7 +122,7 @@ pub fn app() -> Html {
                             }
                         }
                     });
-                });
+                })
             });
             move || drop(interval)
         });

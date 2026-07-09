@@ -4623,7 +4623,7 @@ fn download_pdf_to_host(filename: &str, bytes: &[u8]) -> Result<(), String> {
     let array = js_sys::Uint8Array::from(bytes);
     let parts = js_sys::Array::new();
     parts.push(&array);
-    let mut options = BlobPropertyBag::new();
+    let options = BlobPropertyBag::new();
     options.set_type("application/pdf");
     let blob = Blob::new_with_u8_array_sequence_and_options(&parts, &options)
         .map_err(|_| "could not prepare PDF download blob".to_string())?;

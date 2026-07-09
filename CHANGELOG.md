@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.6 - 2026-07-09
+
+- Fix Web build warnings by retaining the session heartbeat interval for effect
+  cleanup and removing an unnecessary mutable PDF download blob option binding.
+
 ## 0.54.5 - 2026-07-09
 
 - Simplify Web ObjectStore creation so operators choose store name, writer
