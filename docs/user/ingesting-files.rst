@@ -84,8 +84,9 @@ argument parsing and submits an ingest job request containing:
 
 The daemon is responsible for authorization, policy lookup, SSD staging,
 placement selection, HDD fan-out, verification, metadata mutation, and progress
-events. The operator sees job submission details first, followed by byte-level
-progress as daemon event streaming is available for the active job.
+events. During normal CLI operation the operator sees daemon-emitted byte-level
+progress lines as the job runs, followed by the final daemon job submission
+summary.
 
 File ingest uses a bounded split SSD pipeline by default. The source reader
 writes staged payload bytes to SSD and then moves on to the next file when

@@ -9497,7 +9497,15 @@ where
     if args.tui() {
         return run_ingest_files_with_tui(args, client, request, writer);
     }
-    let response = client.submit_ingest_files(request)?;
+    let started_at = Instant::now();
+    let response = client.submit_ingest_files_with_progress_and_heartbeat(
+        request,
+        |event| {
+            write_daemon_ingest_progress(writer, &event, started_at)
+                .map_err(|err| DaemonClientError::Transport(err.to_string()))
+        },
+        || Ok(()),
+    )?;
     write_daemon_ingest_submission(args, &response, writer)?;
 
     Ok(())
@@ -11019,9 +11027,9 @@ mod tests {
         CapacityBehavior, IngestMode, StoreClass, StorePolicy, StorePolicyValidationError,
     };
     use dasobjectstore_daemon::{
-        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonIngestConflictPolicy,
-        DaemonIngestProgressEvent, DaemonIngestStage, DaemonSsdPressure, InProcessDaemonTransport,
-        SubmitIngestFilesResponse,
+        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonClientError,
+        DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
+        DaemonIngestStage, DaemonSsdPressure, InProcessDaemonTransport, SubmitIngestFilesResponse,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -14414,6 +14422,94 @@ mod tests {
         assert!(output.contains("DASObjectStore Upload"));
         assert!(output.contains("Final response: job=job-zymo"));
         assert!(output.contains("zymo_fecal_2025.05"));
+    }
+
+    #[test]
+    fn ingest_files_normal_path_renders_daemon_progress_events() {
+        struct StreamingTransport {
+            source_root: PathBuf,
+        }
+
+        impl DaemonClientTransport for StreamingTransport {
+            fn send(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, DaemonClientError> {
+                panic!("normal ingest path should use progress streaming")
+            }
+
+            fn send_with_progress(
+                &self,
+                request: DaemonApiRequest,
+                progress: &mut dyn FnMut(
+                    DaemonIngestProgressEvent,
+                ) -> Result<(), DaemonClientError>,
+            ) -> Result<DaemonApiResponse, DaemonClientError> {
+                match request {
+                    DaemonApiRequest::SubmitIngestFiles(request) => {
+                        assert_eq!(request.endpoint.as_str(), "zymo_fecal_2025.05");
+                        assert_eq!(request.source_path, self.source_root);
+                    }
+                    _ => panic!("expected submit ingest files request"),
+                }
+                progress(DaemonIngestProgressEvent {
+                    job_id: IngestJobId::new("job-zymo").expect("job id"),
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    stage: DaemonIngestStage::SsdIngest,
+                    pipeline_stage: None,
+                    work_bytes_done: 512,
+                    work_bytes_total: Some(1024),
+                    source_bytes_done: Some(512),
+                    source_bytes_total: Some(1024),
+                    stage_bytes_done: Some(512),
+                    stage_bytes_total: Some(1024),
+                    files_done: 1,
+                    files_total: Some(2),
+                    current_object_id: None,
+                    ssd_pressure: Some(DaemonSsdPressure::AcceptingWrites),
+                    telemetry: None,
+                    resource_policy: None,
+                    message: None,
+                })?;
+                Ok(DaemonApiResponse::SubmitIngestFiles(
+                    SubmitIngestFilesResponse {
+                        job_id: IngestJobId::new("job-zymo").expect("job id"),
+                        accepted_at_utc: "2026-07-09T09:21:21Z".to_string(),
+                        dry_run: false,
+                    },
+                ))
+            }
+        }
+
+        let source_root = PathBuf::from("/mnt/external/zymo");
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            source_root.to_str().expect("utf8 source"),
+        ])
+        .expect("ingest files parses");
+        let Some(crate::cli::Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command");
+        };
+        let Some(crate::cli::IngestCommand::Files(files)) = args.command() else {
+            panic!("expected ingest files command");
+        };
+        let client = DaemonClient::new(StreamingTransport { source_root });
+        let mut output = Vec::new();
+
+        super::run_ingest_files_with_client(files, &client, &mut output)
+            .expect("daemon ingest submission runs");
+
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("50%"));
+        assert!(output.contains("files=1/2"));
+        assert!(output.contains("remaining=1"));
+        assert!(output.contains("stage=ssd-ingest"));
+        assert!(output.contains("ssd=AcceptingWrites"));
+        assert!(output.contains("Daemon ingest job submitted"));
     }
 
     #[cfg(target_os = "linux")]

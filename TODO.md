@@ -34,7 +34,7 @@ planning are tracked under Milestones 21 and 22.
   planned Unix-domain socket transport.
 - [x] Refactor `dasobjectstore ingest files` so the normal command path builds a
   daemon request and the daemon executes SSD-first local file ingress.
-- [ ] Render daemon progress events for normal `dasobjectstore ingest files`
+- [x] Render daemon progress events for normal `dasobjectstore ingest files`
   submissions instead of the current synchronous daemon response view.
 - [x] Add optional `dasobjectstore ingest files --tui` embedded upload rendering
   for daemon file ingest submissions.
