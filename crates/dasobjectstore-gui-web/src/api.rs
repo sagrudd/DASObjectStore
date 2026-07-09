@@ -313,6 +313,43 @@ pub struct ObjectStoresPageResponse {
     pub warnings: Vec<DashboardWarning>,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct RemoteUploadWorkspaceResponse {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub actor: RemoteUploadActorResponse,
+    pub stores: Vec<RemoteUploadObjectStoreResponse>,
+    pub warnings: Vec<DashboardWarning>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct RemoteUploadActorResponse {
+    pub username: String,
+    pub groups: Vec<String>,
+    pub sudo_administrator: bool,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct RemoteUploadObjectStoreResponse {
+    pub store_id: String,
+    pub display_name: String,
+    pub bucket: String,
+    pub store_class: String,
+    pub object_type: String,
+    pub capacity: CapacitySummaryResponse,
+    pub writer_group: Option<String>,
+    pub writer_policy_state: String,
+    pub public: bool,
+    pub endpoint_export_mode: String,
+    pub upload_allowed: bool,
+    pub upload_state: String,
+    pub upload_message: String,
+    pub warnings: Vec<DashboardWarning>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct StorageGroupResponse {
     pub group_name: String,
@@ -1020,6 +1057,13 @@ pub async fn get_object_stores_dashboard(path: &str) -> Result<ObjectStoresPageR
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn get_remote_upload_workspace(
+    path: &str,
+) -> Result<RemoteUploadWorkspaceResponse, ApiError> {
+    get_json(path).await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn get_object_browser(path: &str) -> Result<ObjectBrowserResponse, ApiError> {
     get_json(path).await
 }
@@ -1472,7 +1516,7 @@ mod tests {
         BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
         EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
         GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
-        ObjectStoresPageResponse, UsersGroupsWorkspaceResponse,
+        ObjectStoresPageResponse, RemoteUploadWorkspaceResponse, UsersGroupsWorkspaceResponse,
     };
     use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 
@@ -1889,6 +1933,49 @@ mod tests {
             decoded.create_object_store.defaults.endpoint_export_mode,
             "s3_bucket"
         );
+    }
+
+    #[test]
+    fn decodes_remote_upload_workspace_response_subset() {
+        let payload = serde_json::json!({
+            "schema_version": "dasobjectstore.web_redesign.v1",
+            "generated_at_utc": "2026-07-09T12:20:00Z",
+            "actor": {
+                "username": "stephen",
+                "groups": ["mnemosyne"],
+                "sudo_administrator": true
+            },
+            "stores": [{
+                "store_id": "zymo_fecal_2025.05",
+                "display_name": "zymo_fecal_2025.05",
+                "bucket": "dos-zymo-fecal-2025-05",
+                "store_class": "reproducible_cache",
+                "object_type": "fastq",
+                "capacity": {
+                    "total_tib": "4.0",
+                    "used_tib": "1.0",
+                    "free_tib": "3.0",
+                    "used_percent_basis_points": 2500
+                },
+                "writer_group": "mnemosyne",
+                "writer_policy_state": "ready",
+                "public": false,
+                "endpoint_export_mode": "s3",
+                "upload_allowed": true,
+                "upload_state": "ready",
+                "upload_message": "Remote upload is allowed.",
+                "warnings": []
+            }],
+            "warnings": []
+        });
+
+        let decoded = serde_json::from_value::<RemoteUploadWorkspaceResponse>(payload)
+            .expect("remote upload workspace decodes");
+
+        assert_eq!(decoded.actor.username, "stephen");
+        assert_eq!(decoded.stores[0].bucket, "dos-zymo-fecal-2025-05");
+        assert!(decoded.stores[0].upload_allowed);
+        assert_eq!(decoded.stores[0].writer_policy_state, "ready");
     }
 
     #[test]

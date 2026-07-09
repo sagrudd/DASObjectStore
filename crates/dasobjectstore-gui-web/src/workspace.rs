@@ -14,7 +14,7 @@ use crate::api::{
     CreateLocalGroupRequest, CreateObjectStoreRequest, CreateObjectStoreResponse,
     DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosurePrepareHddDevice,
     EnclosurePrepareRequest, EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse,
-    LocalGroupAdminResponse, ObjectStoreCardResponse,
+    LocalGroupAdminResponse, ObjectStoreCardResponse, RemoteUploadWorkspaceResponse,
 };
 #[cfg(test)]
 use crate::api::{
@@ -41,6 +41,7 @@ pub const OBJECTSTORES_WORKSPACE_ROUTE: &str = "dashboard/object-stores";
 pub const ACTIVITY_WORKSPACE_ROUTE: &str = crate::activity::ACTIVITY_WORKSPACE_ROUTE;
 pub const ENDPOINTS_WORKSPACE_ROUTE: &str = crate::endpoints::ENDPOINTS_WORKSPACE_ROUTE;
 pub const BIOINFORMATICS_WORKSPACE_ROUTE: &str = "workspaces/bioinformatics";
+pub const REMOTE_UPLOAD_WORKSPACE_ROUTE: &str = "workspaces/remote-upload";
 pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,6 +50,7 @@ pub enum WorkspacePage {
     Enclosures,
     ObjectStores,
     Activity,
+    RemoteUpload,
     Endpoints,
     UsersGroups,
     Bioinformatics,
@@ -61,6 +63,7 @@ impl WorkspacePage {
             Self::Enclosures => "enclosures",
             Self::ObjectStores => "objectstores",
             Self::Activity => "activity",
+            Self::RemoteUpload => "remote-upload",
             Self::Endpoints => "endpoints",
             Self::UsersGroups => "users-groups",
             Self::Bioinformatics => "bioinformatics",
@@ -73,6 +76,7 @@ impl WorkspacePage {
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
+            Self::RemoteUpload => "Remote Upload",
             Self::Endpoints => "Endpoints",
             Self::UsersGroups => "Local Access",
             Self::Bioinformatics => "Bioinformatics",
@@ -85,6 +89,7 @@ impl WorkspacePage {
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
+            Self::RemoteUpload => "Remote Upload",
             Self::Endpoints => "Endpoints",
             Self::UsersGroups => "Local Access",
             Self::Bioinformatics => "Bioinformatics",
@@ -97,6 +102,7 @@ impl WorkspacePage {
             Self::Enclosures => enclosures_workspace_api_path(api_base_path),
             Self::ObjectStores => objectstores_workspace_api_path(api_base_path),
             Self::Activity => activity_workspace_api_path(api_base_path),
+            Self::RemoteUpload => remote_upload_workspace_api_path(api_base_path),
             Self::Endpoints => endpoints_workspace_api_path(api_base_path),
             Self::UsersGroups => users_groups_workspace_api_path(api_base_path),
             Self::Bioinformatics => bioinformatics_workspace_api_path(api_base_path),
@@ -104,20 +110,22 @@ impl WorkspacePage {
     }
 }
 
-pub const PRIMARY_NAVIGATION: [WorkspacePage; 7] = [
+pub const PRIMARY_NAVIGATION: [WorkspacePage; 8] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
+    WorkspacePage::RemoteUpload,
     WorkspacePage::Endpoints,
     WorkspacePage::Activity,
     WorkspacePage::UsersGroups,
     WorkspacePage::Bioinformatics,
 ];
 
-pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 5] = [
+pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 6] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
+    WorkspacePage::RemoteUpload,
     WorkspacePage::Activity,
     WorkspacePage::Bioinformatics,
 ];
@@ -155,6 +163,14 @@ pub fn objectstores_workspace_api_path(api_base_path: &str) -> String {
 
 pub fn activity_workspace_api_path(api_base_path: &str) -> String {
     crate::activity::activity_workspace_api_path(api_base_path)
+}
+
+pub fn remote_upload_workspace_api_path(api_base_path: &str) -> String {
+    format!(
+        "{}/{}",
+        api_base_path.trim_end_matches('/'),
+        REMOTE_UPLOAD_WORKSPACE_ROUTE
+    )
 }
 
 pub fn endpoints_workspace_api_path(api_base_path: &str) -> String {
@@ -2901,6 +2917,179 @@ fn render_object_store_inventory(
                 browser_sort,
             ) }
         </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Properties)]
+pub struct RemoteUploadPageProps {
+    pub api_base_path: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[function_component(RemoteUploadPage)]
+pub fn remote_upload_page(props: &RemoteUploadPageProps) -> Html {
+    let api_path = WorkspacePage::RemoteUpload.api_path(&props.api_base_path);
+    let remote_upload_state = use_state(|| ApiLoadState::<RemoteUploadWorkspaceResponse>::Loading);
+
+    {
+        let api_path = api_path.clone();
+        let remote_upload_state = remote_upload_state.clone();
+        use_effect_with(api_path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                remote_upload_state.set(page_load_state_from_result(
+                    crate::api::get_remote_upload_workspace(&path).await,
+                    |view| {
+                        view.stores.is_empty().then(|| {
+                            view.warnings
+                                .first()
+                                .map(|warning| warning.message.clone())
+                                .unwrap_or_else(|| {
+                                    "No ObjectStores are available for remote upload.".to_string()
+                                })
+                        })
+                    },
+                ));
+            });
+            || ()
+        });
+    }
+
+    html! {
+        <section class="dos-page" data-page="remote-upload" data-api-route={api_path}>
+            <PageHeader
+                eyebrow="Easyconnect"
+                title="Remote Upload"
+                summary="Browser-approved ObjectStore selection for paired remote upload agents."
+            />
+            { render_remote_upload_state(&*remote_upload_state) }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_state(state: &ApiLoadState<RemoteUploadWorkspaceResponse>) -> Html {
+    match state {
+        ApiLoadState::Loading => render_remote_upload_state_message(
+            "Loading",
+            "Loading remote-upload workspace",
+            "The Web console is requesting accessible ObjectStores and writer readiness.",
+        ),
+        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
+            render_remote_upload_workspace(view)
+        }
+        ApiLoadState::Empty(message) => {
+            render_remote_upload_state_message("Inventory", "No remote uploads available", message)
+        }
+        ApiLoadState::PermissionDenied(message) => render_remote_upload_state_message(
+            "Permission denied",
+            "Remote upload requires an authenticated easyconnect session",
+            message,
+        ),
+        ApiLoadState::TransportError(message) => render_remote_upload_state_message(
+            "Error",
+            "Unable to load remote-upload workspace",
+            message,
+        ),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_workspace(view: &RemoteUploadWorkspaceResponse) -> Html {
+    let ready_count = view
+        .stores
+        .iter()
+        .filter(|store| store.upload_allowed)
+        .count();
+    html! {
+        <div class="dos-store-grid">
+            <section class="dos-card dos-wide-card" data-state="ready">
+                <span class="dos-card-label">{ "Current session" }</span>
+                <h2>{ format!("{} ObjectStore(s) visible", view.stores.len()) }</h2>
+                <p>{ format!("{} store(s) are ready for upload by {}. Upload execution remains delegated to the paired dasobjectstore-remote process.", ready_count, view.actor.username) }</p>
+                <div class="dos-card-row">
+                    <span class="dos-status-pill">{ if view.actor.sudo_administrator { "administrator" } else { "standard user" } }</span>
+                    <span class="dos-status-pill">{ format!("{} group(s)", view.actor.groups.len()) }</span>
+                </div>
+            </section>
+            { for view.warnings.iter().map(render_remote_upload_warning) }
+            { for view.stores.iter().map(render_remote_upload_store_card) }
+            <section class="dos-card dos-wide-card" data-state="planned">
+                <span class="dos-card-label">{ "Agent handoff" }</span>
+                <h2>{ "File selection is reserved for the paired local agent." }</h2>
+                <p>{ "Drag-and-drop folder selection, path privacy, cancellation, and resumable transfer will use this store-readiness payload without exposing appliance S3 credentials in the browser." }</p>
+            </section>
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_warning(warning: &crate::api::DashboardWarning) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card" data-state="warning">
+            <span class="dos-card-label">{ warning.code.clone() }</span>
+            <h2>{ "Remote-upload attention" }</h2>
+            <p>{ warning.message.clone() }</p>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_store_card(store: &crate::api::RemoteUploadObjectStoreResponse) -> Html {
+    html! {
+        <section class="dos-card dos-store-card" data-state={store.upload_state.clone()} data-object-type={store.object_type.clone()}>
+            <div class="dos-card-row">
+                <span class="dos-card-label">{ store.store_class.clone() }</span>
+                <span class="dos-status-pill">{ store.upload_state.clone() }</span>
+            </div>
+            <h2>{ store.display_name.clone() }</h2>
+            <p>{ store.upload_message.clone() }</p>
+            <dl class="dos-definition-list">
+                <div>
+                    <dt>{ "Bucket" }</dt>
+                    <dd>{ store.bucket.clone() }</dd>
+                </div>
+                <div>
+                    <dt>{ "Object type" }</dt>
+                    <dd>{ store.object_type.clone() }</dd>
+                </div>
+                <div>
+                    <dt>{ "Capacity used" }</dt>
+                    <dd>{ format!("{} TiB · {} bps", store.capacity.used_tib, store.capacity.used_percent_basis_points) }</dd>
+                </div>
+                <div>
+                    <dt>{ "Writer group" }</dt>
+                    <dd>{ store.writer_group.clone().unwrap_or_else(|| "not configured".to_string()) }</dd>
+                </div>
+                <div>
+                    <dt>{ "Export" }</dt>
+                    <dd>{ format!("{} · {}", store.endpoint_export_mode, if store.public { "public" } else { "restricted" }) }</dd>
+                </div>
+            </dl>
+            { if store.warnings.is_empty() {
+                Html::default()
+            } else {
+                html! {
+                    <div class="dos-card-warnings">
+                        { for store.warnings.iter().map(|warning| html! {
+                            <p>{ warning.message.clone() }</p>
+                        }) }
+                    </div>
+                }
+            } }
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_state_message(label: &str, title: &str, message: &str) -> Html {
+    html! {
+        <section class="dos-card dos-wide-card">
+            <span class="dos-card-label">{ label.to_string() }</span>
+            <h2>{ title.to_string() }</h2>
+            <p>{ message.to_string() }</p>
+        </section>
     }
 }
 
@@ -6381,11 +6570,12 @@ mod tests {
         object_store_configure_review_from_values, object_store_create_confirmation_matches,
         object_store_create_review_from_values, object_store_creation_fields_ready,
         objectstores_workspace_api_path, primary_navigation_for_host,
-        subobject_registry_preview_from_values, users_groups_summary_cards,
-        users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, WorkspacePage,
-        ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-        ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION,
-        OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+        remote_upload_workspace_api_path, subobject_registry_preview_from_values,
+        users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
+        EnclosureWizardState, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
+        BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
+        HOME_WORKSPACE_ROUTE, LOCAL_GROUP_ADMIN_CONFIRMATION, OBJECTSTORES_WORKSPACE_ROUTE,
+        PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
     };
     use super::{
         local_group_admin_confirmation_matches, local_group_assignment_fields_ready,
@@ -6420,6 +6610,7 @@ mod tests {
                 "Home",
                 "Enclosures",
                 "ObjectStores",
+                "Remote Upload",
                 "Endpoints",
                 "Activity",
                 "Local Access",
@@ -6441,6 +6632,8 @@ mod tests {
 
         assert!(standalone_labels.contains(&"Activity"));
         assert!(synoptikon_labels.contains(&"Activity"));
+        assert!(standalone_labels.contains(&"Remote Upload"));
+        assert!(synoptikon_labels.contains(&"Remote Upload"));
         assert!(standalone_labels.contains(&"Endpoints"));
         assert!(!synoptikon_labels.contains(&"Endpoints"));
         assert!(standalone_labels.contains(&"Local Access"));
@@ -6468,6 +6661,10 @@ mod tests {
             "/products/dasobjectstore/api/v1/workspaces/activity"
         );
         assert_eq!(
+            WorkspacePage::RemoteUpload.api_path(base),
+            "/products/dasobjectstore/api/v1/workspaces/remote-upload"
+        );
+        assert_eq!(
             WorkspacePage::Endpoints.api_path(base),
             "/products/dasobjectstore/api/v1/workspaces/endpoints"
         );
@@ -6487,6 +6684,7 @@ mod tests {
         assert_eq!(ENCLOSURES_WORKSPACE_ROUTE, "dashboard/enclosures");
         assert_eq!(OBJECTSTORES_WORKSPACE_ROUTE, "dashboard/object-stores");
         assert_eq!(ACTIVITY_WORKSPACE_ROUTE, "workspaces/activity");
+        assert_eq!(REMOTE_UPLOAD_WORKSPACE_ROUTE, "workspaces/remote-upload");
         assert_eq!(ENDPOINTS_WORKSPACE_ROUTE, "workspaces/endpoints");
         assert_eq!(home_workspace_api_path("/api/"), "/api/dashboard/home");
         assert_eq!(
@@ -6500,6 +6698,10 @@ mod tests {
         assert_eq!(
             activity_workspace_api_path("/api/"),
             "/api/workspaces/activity"
+        );
+        assert_eq!(
+            remote_upload_workspace_api_path("/api/"),
+            "/api/workspaces/remote-upload"
         );
         assert_eq!(
             endpoints_workspace_api_path("/api/"),

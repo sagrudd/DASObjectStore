@@ -4,7 +4,7 @@ use crate::mount::{FrontendHost, FrontendMount};
 use crate::session::{AppState, StableState};
 use crate::workspace::{
     primary_navigation_for_host, ActivityPage, BioinformaticsPage, EnclosuresPage, HomeDashboard,
-    ObjectStoresPage, UsersGroupsPage, WorkspacePage,
+    ObjectStoresPage, RemoteUploadPage, UsersGroupsPage, WorkspacePage,
 };
 use crate::{api, storage};
 use gloo_timers::callback::Interval;
@@ -500,6 +500,9 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                 },
                 WorkspacePage::Activity => html! {
                     <ActivityPage api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::RemoteUpload => html! {
+                    <RemoteUploadPage api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::Endpoints => html! {
                     <EndpointsWorkspace api_base_path={props.api_base_path.clone()} />

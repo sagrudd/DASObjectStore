@@ -746,7 +746,7 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add permission checks so remote upload sessions can list only the
   ObjectStores available to the authenticated user and can write only to stores
   where writer-group policy allows ingest.
-- [ ] Implement a Web remote-upload page reached after easyconnect login that
+- [x] Implement a Web remote-upload page reached after easyconnect login that
   lists accessible ObjectStores with writer readiness, object type, capacity
   warnings, public/export state, and whether uploads are currently allowed.
 - [ ] Add a polished drag-and-drop file/folder upload panel to the remote-upload

@@ -680,8 +680,29 @@ clear permission-denied response if they attempt to submit through the API.
 
 Legacy ``workspaces/stores`` Web holder components are not part of the primary
 browser navigation. Operators should use ``Home``, ``Enclosures``,
-``ObjectStores``, ``Activity``, ``Users/Groups``, and ``Bioinformatics`` as the
-canonical Web console surfaces.
+``ObjectStores``, ``Remote Upload``, ``Activity``, ``Users/Groups``, and
+``Bioinformatics`` as the canonical Web console surfaces.
+
+Remote Upload Page
+------------------
+
+The ``Remote Upload`` navigation item is the browser side of the easyconnect
+upload workflow. It is reached after a local-user Web login and requests
+``/products/dasobjectstore/api/v1/workspaces/remote-upload`` through the same
+authenticated session as the rest of the standalone console.
+
+The page lists only ObjectStores that the authenticated user can read through
+the daemon's easyconnect ObjectStore grant filtering. Each visible ObjectStore
+shows the derived S3 bucket, ObjectStore class, object type, capacity summary,
+writer group, public/restricted state, export mode, current warnings, and
+whether upload is currently allowed. Upload readiness is stricter than
+visibility: the store must be writable, exported through S3, and writable by
+the current user's writer-group policy.
+
+File and folder selection is intentionally not performed by the appliance
+browser page yet. Drag/drop selection, path privacy, cancellation, resumability,
+and byte transfer are reserved for the paired ``dasobjectstore-remote`` local
+agent so appliance S3 credentials do not need to be exposed in browser UI.
 
 Bioinformatics Workspace
 ------------------------

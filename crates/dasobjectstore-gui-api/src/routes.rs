@@ -9,6 +9,7 @@ use crate::workspaces::{
     OverviewWorkspaceView, ProductBioinformaticsWorkspaceView, ProductEnclosuresWorkspaceView,
     ProductHomeWorkspaceView, ProductObjectStoresWorkspaceView, StoresWorkspaceView,
 };
+use crate::RemoteUploadWorkspaceView;
 use axum::{http::StatusCode, routing::get, routing::post, Json, Router};
 
 pub fn gui_api_router() -> Router {
@@ -39,6 +40,10 @@ pub(crate) fn gui_api_router_without_redesign_dashboards() -> Router {
         .route(
             "/api/v1/workspaces/bioinformatics",
             get(product_bioinformatics_workspace),
+        )
+        .route(
+            "/api/v1/workspaces/remote-upload",
+            get(remote_upload_workspace),
         )
         // Legacy operations workspace routes remain available for compatibility.
         // The browser console now exposes Home, Enclosures, ObjectStores, and
@@ -88,6 +93,16 @@ async fn product_objectstores_workspace() -> Json<ProductObjectStoresWorkspaceVi
 
 async fn product_bioinformatics_workspace() -> Json<ProductBioinformaticsWorkspaceView> {
     Json(ProductBioinformaticsWorkspaceView::bootstrap())
+}
+
+async fn remote_upload_workspace() -> Json<RemoteUploadWorkspaceView> {
+    Json(
+        crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
+            "developer".to_string(),
+            Vec::new(),
+            false,
+        ),
+    )
 }
 
 async fn disks_workspace() -> Json<DisksWorkspaceView> {
@@ -394,6 +409,26 @@ mod tests {
             encoded["governance_bindings"][0]["state"],
             json!("binding_required")
         );
+    }
+
+    #[tokio::test]
+    async fn remote_upload_workspace_route_returns_access_payload() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/remote-upload")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("remote upload response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
+        assert_eq!(encoded["actor"]["username"], "developer");
+        assert!(encoded["stores"].is_array());
     }
 
     #[tokio::test]

@@ -120,6 +120,10 @@ fn standalone_dashboard_router_with_state(state: StandaloneDashboardRouteState) 
             "/api/v1/dashboard/object-stores",
             get(standalone_object_stores_dashboard),
         )
+        .route(
+            "/api/v1/workspaces/remote-upload",
+            get(standalone_remote_upload_workspace),
+        )
         .layer(Extension(state.auth_store.clone()))
         .with_state(state)
 }
@@ -955,6 +959,20 @@ async fn standalone_object_stores_dashboard(
     let current_user = local_standalone_user(state.local_user_provider.as_ref(), &actor)?;
     Ok(Json(
         crate::object_stores_aggregator::live_object_stores_dashboard_for_user(
+            current_user.groups,
+            current_user.sudo_administrator,
+        ),
+    ))
+}
+
+async fn standalone_remote_upload_workspace(
+    State(state): State<StandaloneDashboardRouteState>,
+    actor: AuthenticatedGuiActor,
+) -> Result<Json<crate::RemoteUploadWorkspaceView>, (StatusCode, Json<AuthRouteError>)> {
+    let current_user = local_standalone_user(state.local_user_provider.as_ref(), &actor)?;
+    Ok(Json(
+        crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
+            current_user.username,
             current_user.groups,
             current_user.sudo_administrator,
         ),

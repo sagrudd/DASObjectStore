@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.1 - 2026-07-09
 
+- Add the authenticated Web ``Remote Upload`` workspace with easyconnect
+  ObjectStore visibility filtering, writer readiness, capacity warning, export
+  state, and upload-allowed summaries for paired remote agents.
 - Add ``dasobjectstore ingest files --hdd-workers`` and daemon-side validation
   so operators can explicitly set HDD settlement fan-out while preventing more
   concurrent workers than managed HDDs.

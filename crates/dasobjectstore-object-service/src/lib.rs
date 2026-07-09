@@ -21,7 +21,10 @@ pub use garage::{
     GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH,
     DEFAULT_GARAGE_IMAGE, DEFAULT_GARAGE_SERVICE_NAME,
 };
-pub use layout::{plan_store_service_layout, StoreServiceDefinition, StoreServiceLayout};
+pub use layout::{
+    bucket_name_for_definition, plan_store_service_layout, StoreServiceDefinition,
+    StoreServiceLayout,
+};
 pub use provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus, StoreBucketBinding,

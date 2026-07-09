@@ -86,7 +86,7 @@ pub fn plan_store_service_layout(
     })
 }
 
-pub(crate) fn bucket_name_for_definition(
+pub fn bucket_name_for_definition(
     definition: &StoreServiceDefinition,
 ) -> Result<String, ObjectServiceError> {
     match &definition.bucket_name {

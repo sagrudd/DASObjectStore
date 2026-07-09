@@ -14,6 +14,7 @@ mod groups_registry;
 mod home_aggregator;
 mod object_browser_routes;
 mod object_stores_aggregator;
+mod remote_upload_aggregator;
 mod reporting;
 pub mod routes;
 pub mod server_config;
@@ -55,6 +56,9 @@ pub use endpoints::{
     EndpointBindingReadinessView, EndpointBindingView, EndpointInventoryItemView,
     EndpointInventoryView, EndpointKindView, EndpointValidationStateView, EndpointValidationView,
     EndpointWarningSeverityView, EndpointWarningView, ENDPOINT_INVENTORY_SCHEMA_VERSION,
+};
+pub use remote_upload_aggregator::{
+    RemoteUploadActorView, RemoteUploadObjectStoreView, RemoteUploadWorkspaceView,
 };
 pub use routes::gui_api_router;
 pub use server_config::{
