@@ -759,14 +759,20 @@ planning are tracked under Milestones 21 and 22.
 - [x] Implement remote CLI upload execution through the intended
   S3-compatible ObjectStore path, using appliance-issued credentials/session
   material and derived bucket/store routing rather than user-entered S3 names.
-- [ ] Ensure remote-agent uploads and direct Web uploads always stage data to
+- [x] Ensure remote-agent uploads and direct Web uploads always stage data to
   the selected ObjectStore SSD before daemon-owned HDD settlement.
+  Completed by daemon ingress-origin classification and remote easyconnect
+  handoff responses that advertise ``remote_s3``/``web_upload`` as
+  ``ssd_first`` landing paths.
 - [ ] Change server-side/local-appliance ingest policy so ingest performed on
   the DAS server itself uses direct-to-HDD writing when policy permits, rather
   than unnecessarily staging through SSD.
-- [ ] Centralize ingress-origin classification (`local_server`, `remote_s3`,
-  `web_upload`, and future Synoptikon/Mneion origins) so placement behavior is
-  deterministic and testable across CLI, Web, daemon, and object-service paths.
+- [x] Define centralized ingress-origin classification (`local_server`,
+  `remote_s3`, `web_upload`, and future Synoptikon/Mneion origins) with stable
+  serialized names and deterministic landing-mode tests.
+- [ ] Wire centralized ingress-origin classification through remaining CLI,
+  Web, daemon runtime, and object-service execution paths so placement behavior
+  is deterministic everywhere.
 - [ ] Implement the default HDD landing worker rule as
   `max(number_of_hdds_in_enclosure - 2, 2)` for SSD destage and local
   direct-to-HDD ingest, with one active writer per physical HDD and bounded

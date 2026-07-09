@@ -1,3 +1,4 @@
+use super::ingest::{DaemonIngressLandingMode, DaemonIngressOrigin};
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
@@ -370,6 +371,8 @@ pub struct RemoteEasyconnectUploadHandoffResponse {
     pub handoff_id: String,
     pub mode: RemoteEasyconnectUploadHandoffMode,
     pub state: RemoteEasyconnectUploadHandoffState,
+    pub ingress_origin: DaemonIngressOrigin,
+    pub landing_mode: DaemonIngressLandingMode,
     pub local_agent_handoff_url: String,
     pub confirmation_phrase: String,
     pub path_privacy: String,
@@ -397,6 +400,8 @@ pub fn plan_remote_easyconnect_upload_handoff(
         handoff_id,
         mode: RemoteEasyconnectUploadHandoffMode::LoopbackPost,
         state: RemoteEasyconnectUploadHandoffState::ConfirmationRequired,
+        ingress_origin: DaemonIngressOrigin::RemoteS3,
+        landing_mode: DaemonIngressOrigin::RemoteS3.landing_mode(),
         local_agent_handoff_url: format!("{base_url}{REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE}"),
         confirmation_phrase: format!("confirm upload to {}", request.object_store),
         path_privacy: "browser sends relative display paths and byte counts only; absolute local paths stay with the paired dasobjectstore-remote agent".to_string(),
@@ -600,6 +605,7 @@ fn validate_requested_lifetime(
 
 #[cfg(test)]
 mod tests {
+    use super::super::ingest::{DaemonIngressLandingMode, DaemonIngressOrigin};
     use super::{
         plan_remote_easyconnect_upload_handoff, remote_easyconnect_object_store_grants_for_actor,
         remote_easyconnect_renew_after_offset_seconds,
@@ -830,6 +836,8 @@ mod tests {
             response.state,
             RemoteEasyconnectUploadHandoffState::ConfirmationRequired
         );
+        assert_eq!(response.ingress_origin, DaemonIngressOrigin::RemoteS3);
+        assert_eq!(response.landing_mode, DaemonIngressLandingMode::SsdFirst);
         assert_eq!(
             response.local_agent_handoff_url,
             "http://127.0.0.1:49329/v1/dasobjectstore/remote/uploads/handoffs"

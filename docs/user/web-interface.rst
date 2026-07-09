@@ -714,6 +714,12 @@ paths are intentionally excluded from the browser contract. If the agent is not
 reachable, the page must report an ``agent_unreachable`` state and keep the
 selection available for retry or cancellation.
 
+The daemon classifies the Web-mediated path as ``web_upload`` and the paired
+agent transfer as ``remote_s3``. Both origins advertise ``ssd_first`` landing
+mode. This means selected bytes stage through the chosen ObjectStore's managed
+SSD first, then settle to daemon-selected HDD targets according to store policy;
+the browser and remote agent never choose or write individual disks directly.
+
 Bioinformatics Workspace
 ------------------------
 

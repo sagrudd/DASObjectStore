@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Add daemon ingress-origin classification with stable ``remote_s3``,
+  ``web_upload``, ``local_server``, ``synoptikon``, and ``mneion`` names, and
+  advertise ``ssd_first`` landing mode for remote easyconnect upload handoffs.
 - Route ``dasobjectstore-remote upload`` through paired easyconnect ObjectStore
   grants so users pass ObjectStore names, the client derives bucket routing,
   and appliance-issued session credentials are used for S3 transfer planning.

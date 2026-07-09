@@ -73,6 +73,59 @@ impl SubmitIngestFilesRequest {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngressOrigin {
+    LocalServer,
+    RemoteS3,
+    WebUpload,
+    Synoptikon,
+    Mneion,
+}
+
+impl DaemonIngressOrigin {
+    pub fn landing_mode(self) -> DaemonIngressLandingMode {
+        match self {
+            Self::LocalServer => DaemonIngressLandingMode::DirectToHddWhenPolicyAllows,
+            Self::RemoteS3 | Self::WebUpload | Self::Synoptikon | Self::Mneion => {
+                DaemonIngressLandingMode::SsdFirst
+            }
+        }
+    }
+
+    pub fn requires_ssd_staging(self) -> bool {
+        self.landing_mode() == DaemonIngressLandingMode::SsdFirst
+    }
+}
+
+impl Display for DaemonIngressOrigin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::LocalServer => "local_server",
+            Self::RemoteS3 => "remote_s3",
+            Self::WebUpload => "web_upload",
+            Self::Synoptikon => "synoptikon",
+            Self::Mneion => "mneion",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngressLandingMode {
+    SsdFirst,
+    DirectToHddWhenPolicyAllows,
+}
+
+impl Display for DaemonIngressLandingMode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::SsdFirst => "ssd_first",
+            Self::DirectToHddWhenPolicyAllows => "direct_to_hdd_when_policy_allows",
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngestConflictPolicy {
@@ -402,10 +455,10 @@ mod tests {
         DaemonIngestProgressEvent, DaemonIngestResourcePolicy, DaemonIngestSchedulingPolicy,
         DaemonIngestStage, DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry,
         DaemonIngestTargetCapacity, DaemonIngestTargetFailureState, DaemonIngestTelemetry,
-        DaemonIngestThroughputTrend, DaemonIngestWorkerCounts, DaemonRequestValidationError,
-        DaemonSourceReadBackpressureInput, DaemonSourceReadBackpressurePolicy,
-        DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdQueueUsage,
-        SubmitIngestFilesRequest,
+        DaemonIngestThroughputTrend, DaemonIngestWorkerCounts, DaemonIngressLandingMode,
+        DaemonIngressOrigin, DaemonRequestValidationError, DaemonSourceReadBackpressureInput,
+        DaemonSourceReadBackpressurePolicy, DaemonSourceReadBackpressureReason,
+        DaemonSourceReadPriority, DaemonSourceToSsdQueueUsage, SubmitIngestFilesRequest,
     };
     use crate::api::health::DaemonSsdPressure;
     use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
@@ -510,6 +563,40 @@ mod tests {
         assert_eq!(
             request.object_type,
             dasobjectstore_core::object_type::ObjectType::Naive
+        );
+    }
+
+    #[test]
+    fn ingress_origins_select_deterministic_landing_modes() {
+        assert_eq!(
+            DaemonIngressOrigin::LocalServer.landing_mode(),
+            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+        );
+        for origin in [
+            DaemonIngressOrigin::RemoteS3,
+            DaemonIngressOrigin::WebUpload,
+            DaemonIngressOrigin::Synoptikon,
+            DaemonIngressOrigin::Mneion,
+        ] {
+            assert_eq!(origin.landing_mode(), DaemonIngressLandingMode::SsdFirst);
+            assert!(origin.requires_ssd_staging());
+        }
+        assert!(!DaemonIngressOrigin::LocalServer.requires_ssd_staging());
+    }
+
+    #[test]
+    fn ingress_origin_policy_names_are_stable_snake_case() {
+        assert_eq!(
+            serde_json::to_value(DaemonIngressOrigin::RemoteS3).expect("origin serializes"),
+            "remote_s3"
+        );
+        assert_eq!(
+            serde_json::to_value(DaemonIngressOrigin::WebUpload).expect("origin serializes"),
+            "web_upload"
+        );
+        assert_eq!(
+            serde_json::to_value(DaemonIngressLandingMode::SsdFirst).expect("mode serializes"),
+            "ssd_first"
         );
     }
 

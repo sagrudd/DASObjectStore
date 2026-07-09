@@ -157,6 +157,12 @@ retry after restarting ``dasobjectstore-remote``. If the user cancels before
 confirmation, no transfer authority or appliance credentials are handed to the
 agent.
 
+Remote easyconnect uploads are classified by the daemon as ``remote_s3``
+ingress. That origin always uses ``ssd_first`` landing mode: bytes enter the
+selected ObjectStore through its managed SSD path and only then move through
+daemon-owned HDD settlement and verification. The remote client must not write
+directly to managed HDD roots and users are never asked to choose a disk.
+
 Configure a Remote Host
 -----------------------
 
