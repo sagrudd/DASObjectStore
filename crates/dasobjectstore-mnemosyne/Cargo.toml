@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 dasobjectstore-core.workspace = true
 dasobjectstore-object-service.workspace = true
+prosopikon-core.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

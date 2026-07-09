@@ -9,6 +9,7 @@ pub mod monas_host_boundary;
 pub mod nas_nfs_endpoint;
 pub mod nas_nfs_runtime;
 pub mod product_ui;
+pub mod prosopikon;
 pub mod storage_definition;
 mod validation;
 
@@ -64,6 +65,10 @@ pub use product_ui::{
     ProductUiVisibilityState, CORRELATION_ID_HEADER, DASOBJECTSTORE_API_MOUNT,
     DASOBJECTSTORE_PRODUCT_ID, DASOBJECTSTORE_PRODUCT_NAME, DASOBJECTSTORE_WEB_MOUNT,
     PRODUCT_UI_BOOTSTRAP_SCHEMA_VERSION, PRODUCT_UI_BOOTSTRAP_WELL_KNOWN_SUFFIX,
+};
+pub use prosopikon::{
+    dasobjectstore_prosopikon_profile, dasobjectstore_prosopikon_relationships,
+    dasobjectstore_prosopikon_snapshot,
 };
 pub use storage_definition::{
     export_mneion_das_storage_definition, export_mneion_nfs_storage_definition,
