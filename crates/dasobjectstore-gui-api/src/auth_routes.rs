@@ -1,4 +1,6 @@
-use crate::groups_registry::{default_groups_registry_path, read_storage_groups_for_user};
+use crate::groups_registry::{
+    default_groups_registry_path, read_storage_groups_for_user, upsert_storage_group,
+};
 use crate::{
     discover_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
     LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
@@ -1360,9 +1362,24 @@ fn submit_local_group_admin_request(
         )
     })?;
 
-    client
+    let response = client
         .submit_local_group_operation(request)
-        .map_err(|err| route_error(StatusCode::BAD_GATEWAY, "daemon_client_error", err.message))
+        .map_err(|err| route_error(StatusCode::BAD_GATEWAY, "daemon_client_error", err.message))?;
+
+    if !response.accepted.dry_run {
+        upsert_storage_group(&state.groups_registry_path, &response.group_name).map_err(|err| {
+            route_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "groups_registry_update_failed",
+                format!(
+                    "daemon accepted local group operation, but {} could not be updated: {err}",
+                    state.groups_registry_path.display()
+                ),
+            )
+        })?;
+    }
+
+    Ok(response)
 }
 
 fn submit_prepare_enclosure_request(
@@ -2531,6 +2548,94 @@ mod tests {
                 confirmation_marker: LOCAL_ADMIN_CONFIRMATION_MARKER.to_string(),
             }]
         );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn create_local_group_live_reconciles_writer_group_registry() {
+        let root = temp_root("create-local-group-registry");
+        let groups_path = root.join("groups.json");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_admin_client();
+        let app =
+            standalone_users_groups_router_with_state(test_users_groups_state_with_groups_path(
+                auth_store,
+                local_user("operator", vec!["sudo"]),
+                Some(client.clone()),
+                groups_path.clone(),
+            ));
+
+        let response = post_json_with_session::<StandaloneLocalGroupAdminResponse>(
+            app,
+            "/api/v1/workspaces/users-groups/local-groups",
+            "admin",
+            &login.session_token,
+            &CreateLocalGroupRequest {
+                group_name: "mnemosyne".to_string(),
+                dry_run: false,
+                confirmation_marker: Some(LOCAL_ADMIN_CONFIRMATION_MARKER.to_string()),
+                client_request_id: Some("request-live-group".to_string()),
+            },
+        )
+        .await;
+        let encoded: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&groups_path).expect("groups file exists"))
+                .expect("groups registry decodes");
+
+        assert_eq!(
+            response.operation,
+            StandaloneLocalGroupOperation::CreateGroup
+        );
+        assert_eq!(encoded["groups"][0]["group_name"], "mnemosyne");
+        assert_eq!(encoded["groups"][0]["source"], "local_os");
+        assert_eq!(
+            client.requests()[0].confirmation_marker,
+            LOCAL_ADMIN_CONFIRMATION_MARKER
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn assign_local_user_live_reconciles_existing_writer_group_registry() {
+        let root = temp_root("assign-local-user-registry");
+        let groups_path = root.join("groups.json");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app =
+            standalone_users_groups_router_with_state(test_users_groups_state_with_groups_path(
+                auth_store,
+                local_user("operator", vec!["sudo"]),
+                Some(recording_admin_client()),
+                groups_path.clone(),
+            ));
+
+        let response = post_json_with_session::<StandaloneLocalGroupAdminResponse>(
+            app,
+            "/api/v1/workspaces/users-groups/local-groups/members",
+            "admin",
+            &login.session_token,
+            &AssignLocalUserToGroupRequest {
+                group_name: "mnemosyne".to_string(),
+                username: "stephen".to_string(),
+                dry_run: false,
+                confirmation_marker: Some(LOCAL_ADMIN_CONFIRMATION_MARKER.to_string()),
+                client_request_id: Some("request-live-member".to_string()),
+            },
+        )
+        .await;
+        let encoded: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&groups_path).expect("groups file exists"))
+                .expect("groups registry decodes");
+
+        assert_eq!(
+            response.operation,
+            StandaloneLocalGroupOperation::AddUserToGroup
+        );
+        assert_eq!(response.username.as_deref(), Some("stephen"));
+        assert_eq!(encoded["groups"][0]["group_name"], "mnemosyne");
 
         cleanup(&root);
     }

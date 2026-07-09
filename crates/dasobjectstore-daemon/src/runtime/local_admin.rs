@@ -129,7 +129,11 @@ impl LocalGroupCommandPlanner for SystemLocalGroupCommandPlanner {
                 let group_name = validated_account_name("group_name", &request.group_name)?;
                 Ok(LocalAdminCommandPlan::new(
                     "groupadd",
-                    vec!["--".to_string(), group_name.to_string()],
+                    vec![
+                        "--force".to_string(),
+                        "--".to_string(),
+                        group_name.to_string(),
+                    ],
                 ))
             }
             LocalGroupAdministrationOperation::AssignUserToGroup => {
@@ -435,7 +439,7 @@ mod tests {
         let plan = super::LocalGroupCommandPlanner::plan(&planner, &request).expect("planned");
 
         assert_eq!(plan.program, "groupadd");
-        assert_eq!(plan.args, ["--", "daswriters"]);
+        assert_eq!(plan.args, ["--force", "--", "daswriters"]);
         assert_eq!(plan.display_args, plan.args);
     }
 
@@ -466,6 +470,7 @@ mod tests {
         assert!(response.accepted.dry_run);
         assert!(!response.executed);
         assert_eq!(response.command.program, "groupadd");
+        assert_eq!(response.command.args, ["--force", "--", "daswriters"]);
         assert!(controller.runner.calls.borrow().is_empty());
     }
 

@@ -548,6 +548,12 @@ or administrator group, or assign a local user to a managed writer group. Both
 forms submit first as a dry run through the daemon-backed local group
 administration routes, then require the exact confirmation phrase
 ``confirm local group administration`` before a live daemon job is accepted.
+Creating a group is idempotent: if the OS group already exists, the daemon
+adopts that group instead of failing, and the Web API records the group in
+``/opt/dasobjectstore/groups.json`` so ObjectStore writer-group policy and the
+Users/Groups workspace remain consistent. Assigning a user to a group also
+reconciles the same registry for cases where the group was prepared before the
+Web console knew about it.
 Non-admin sessions keep the forms visible as unavailable controls and receive a
 clear permission-denied response if they attempt to submit through the API.
 

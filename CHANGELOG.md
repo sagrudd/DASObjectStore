@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.54.4 - 2026-07-09
+
+- Make Web local group creation idempotent for host groups that already exist,
+  adopting them instead of failing a live `groupadd` operation.
+- Reconcile successful live local group creation and membership assignment into
+  `/opt/dasobjectstore/groups.json` so existing OS writer groups become visible
+  to ObjectStore policy and the Users/Groups workspace.
+
 ## 0.54.3 - 2026-07-09
 
 - Hide Web enclosure preparation controls unless the API can advertise a valid

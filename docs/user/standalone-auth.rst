@@ -42,6 +42,12 @@ present the daemon plan and require explicit confirmation before submitting the
 confirmed operation. The confirmation marker for host-local group mutation is
 ``confirm local group administration``.
 
+If a requested writer group already exists on the host, DASObjectStore treats
+group creation as an adoption/reconciliation operation rather than as a fatal
+error. A successful live create or assignment records the group in
+``/opt/dasobjectstore/groups.json`` so Web ObjectStore policy and local OS group
+membership stay aligned.
+
 After a user is added to a group, existing login sessions may not show the new
 membership. The user must start a new login session before DASObjectStore or
 other host processes can reliably see the updated group list.
