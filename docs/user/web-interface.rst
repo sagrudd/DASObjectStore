@@ -404,6 +404,65 @@ requesting the daemon-backed archive route. Downloads use the authenticated Web
 session headers, so permission failures are shown in the panel rather than
 falling back to direct managed-disk paths or anonymous links.
 
+Browser and Download Semantics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ObjectStore browser is an authenticated metadata view, not a filesystem
+explorer. Browser requests are sent to
+``/api/v1/object-stores/<endpoint>/browser`` and then forwarded to
+``dasobjectstored``. The daemon chooses the visible metadata according to the
+store's read policy: administrator authority, writer-group membership,
+reader-group membership, or public-store read access. The browser never accepts
+or displays a caller-supplied DAS disk path.
+
+Folder navigation is prefix based. Breadcrumbs move between known prefixes, the
+search field filters object names and paths server-side, and the sort selector
+requests daemon-side ordering by name, size, or modified time. The response is
+bounded by the browser API page size, so very large stores may report that more
+entries are available even though only the first bounded page is rendered.
+Operators should narrow large datasets with folder navigation or search rather
+than expecting the browser to materialize an entire tree at once.
+
+File downloads use
+``/api/v1/object-stores/<endpoint>/objects/download/<object-id>``. The daemon
+must resolve the object to an existing verified settled copy on a managed HDD
+root before the Web API opens the source file. SSD-only objects, unsettled
+objects, redownload-required cache objects, degraded or missing placements, and
+objects outside the selected store fail with an explicit not-found or
+unavailable message.
+
+Folder downloads use
+``/api/v1/object-stores/<endpoint>/folders/download/<folder-prefix>``. Before
+the response body is streamed, the daemon checks every object under the prefix
+and verifies that each archive member has a usable settled copy. If any member
+is unavailable, the archive request fails before a partial archive is offered.
+Successful folder downloads stream a ``tar.gz`` archive directly through the
+Web service without staging the whole archive on SSD or HDD. If the browser
+disconnects or cancels the download, archive generation stops rather than
+continuing to write a hidden temporary payload.
+
+Expected failure states are visible in the panel:
+
+``Permission denied``
+   The browser session is valid, but the authenticated user is not allowed by
+   administrator, writer-group, reader-group, or public-store policy.
+
+``Empty``
+   The selected prefix has no folders or files visible to the current user.
+
+``Unavailable``
+   Metadata exists, but the object cannot currently be served because no usable
+   verified settled copy is available.
+
+``Transport error``
+   The Web service could not reach the daemon, the daemon request failed, or
+   the browser session could not complete the API request.
+
+``Stale``
+   A previous payload remains visible while a refresh failed or is in progress;
+   operators should treat the visible rows as read-only until the state returns
+   to success.
+
 Creating or changing an object store is an admin-only workflow. The Web UI
 presents controls for store name, writer group, mounted enclosure, object type,
 redundancy, store class, export mode, and public visibility. Bucket name and

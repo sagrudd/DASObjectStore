@@ -108,6 +108,35 @@ List the portable registry on the DAS SSD:
 
    dasobjectstore store list --portable
 
+Browse and Download From the Web Console
+----------------------------------------
+
+The standalone Web console includes a ``Browse objects`` panel on the
+``ObjectStores`` page. Use it when you want to inspect logical ObjectStore
+contents, search by object name or path, navigate folder prefixes, check
+readiness and placement state, or download objects without using raw managed
+disk paths.
+
+Browsing and download are authorized by ``dasobjectstored``. A user may browse
+or download when they are an administrator, a member of the store writer group,
+a member of the optional reader group, or an authenticated user of a public
+store. These permissions do not grant direct filesystem access to the DAS SSD
+or HDD roots.
+
+File downloads are available only for objects with an available readiness state
+and at least one verified settled HDD copy. Folder downloads create a streamed
+``tar.gz`` archive after the daemon verifies that every object under the prefix
+has a usable settled copy. SSD-only, redownload-required, degraded, missing, or
+unsettled objects produce explicit unavailable or not-found failures instead of
+falling back to a disk path.
+
+Very large stores are returned to the browser in bounded pages. Use folder
+navigation or search to narrow large public and reproducible datasets before
+starting downloads or archive requests.
+
+See :doc:`web-interface` for the Web panel states, download endpoints,
+permission boundaries, archive behavior, and expected failure messages.
+
 Drain and Delete Stores
 -----------------------
 
