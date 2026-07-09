@@ -9,8 +9,11 @@ The CLI is the client surface. In normal operation it submits an ingest job to
 the managed ``dasobjectstored`` service, streams or references source data as
 required by the local transport, and renders daemon progress events. The daemon
 reads the store policy, discovers managed HDD members, selects copy placements,
-stages each file through the DAS SSD, writes the requested verified HDD copies,
-and reports byte-level progress while the copy is running.
+chooses the landing path allowed for the ingest origin, writes the requested
+verified HDD copies, and reports byte-level progress while the copy is running.
+Remote and Web upload origins are always SSD-first. Local-server ingest may
+write directly to HDD only when the target store policy explicitly uses
+``DirectToHdd``; otherwise it stages each file through the DAS SSD first.
 
 This command is not a local filesystem copy into a DAS member disk. The normal
 path sends a daemon request over the packaged local daemon socket. The daemon is
@@ -83,11 +86,11 @@ argument parsing and submits an ingest job request containing:
 * the existing-object conflict policy;
 * whether the request is a dry run.
 
-The daemon is responsible for authorization, policy lookup, SSD staging,
-placement selection, HDD fan-out, verification, metadata mutation, and progress
-events. During normal CLI operation the operator sees daemon-emitted byte-level
-progress lines as the job runs, followed by the final daemon job submission
-summary.
+The daemon is responsible for authorization, policy lookup, landing-mode
+selection, SSD staging when required, placement selection, HDD fan-out,
+verification, metadata mutation, and progress events. During normal CLI
+operation the operator sees daemon-emitted byte-level progress lines as the job
+runs, followed by the final daemon job submission summary.
 
 File ingest uses a bounded split SSD pipeline by default. The source reader
 writes staged payload bytes to SSD and then moves on to the next file when
@@ -97,6 +100,14 @@ for HDD settlement. In the TUI, ``ssd-stage`` means source bytes are landing on
 SSD, ``ssd-flush`` means the staged payload is being synced, and
 ``checksum-manifest-capture`` means the staged payload is being hashed before
 HDD placement.
+
+When ingest is running on the DAS server itself and the store policy permits
+``DirectToHdd``, the daemon uses ``direct_to_hdd_when_policy_allows`` landing
+mode. In that mode it hashes the local source file, reports that work as
+``source-read`` progress, and then sends verified copies directly to
+daemon-selected HDD targets without creating an SSD payload. This policy is for
+reproducible or externally recoverable datasets; protected generated or
+critical stores remain SSD-first.
 
 By default, the daemon derives HDD settlement fan-out from the managed HDDs in
 the target DAS: ``managed_hdd_count - 2``, bounded to at least one worker and

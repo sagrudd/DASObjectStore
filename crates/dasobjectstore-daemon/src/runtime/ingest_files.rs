@@ -1,15 +1,18 @@
 use crate::api::{
     DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestQueueDepths,
     DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
-    DaemonIngestWorkerTelemetry, DaemonSsdPressure, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse,
+    DaemonIngestWorkerTelemetry, DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
+use dasobjectstore_core::store::{IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    measure_ssd_capacity, settle_staged_object_to_hdd_with_controlled_progress, DiskCopyRoot,
-    IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectPutError, ObjectPutProgress,
+    hash_file_sha256_with_progress, measure_ssd_capacity,
+    settle_staged_object_to_hdd_with_controlled_progress, DiskCopyRoot, IngestJobPaths,
+    IngestStagingLayout, IngestWriteReport, ObjectPutError, ObjectPutProgress,
     ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
+    SHA256_ALGORITHM,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
@@ -134,6 +137,7 @@ impl LocalFileIngestExecutor {
         let files = collect_ingest_files(&request.source_path, &endpoint.object_prefix)?;
         let source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
         let total_work_bytes = source_bytes.saturating_mul(u64::from(copies) + 1);
+        let landing_mode = local_server_landing_mode(&endpoint.store.policy);
         let summary = DaemonFileIngestSummary {
             endpoint_name: endpoint.endpoint_name.clone(),
             endpoint_kind: endpoint.endpoint_kind,
@@ -164,11 +168,12 @@ impl LocalFileIngestExecutor {
             telemetry: None,
             resource_policy: None,
             message: Some(format!(
-                "planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s)",
+                "planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s), landing mode {}",
                 files.len(),
                 source_bytes,
                 copies,
-                hdd_worker_count
+                hdd_worker_count,
+                landing_mode
             )),
         })?;
 
@@ -193,6 +198,21 @@ impl LocalFileIngestExecutor {
                 message: Some("dry run complete; no files imported".to_string()),
             })?;
             return Ok(summary);
+        }
+
+        if landing_mode == DaemonIngressLandingMode::DirectToHddWhenPolicyAllows {
+            return self.execute_direct_to_hdd(
+                request,
+                job_id,
+                summary,
+                files,
+                managed_disk_roots,
+                copies,
+                hdd_worker_count,
+                source_bytes,
+                total_work_bytes,
+                progress,
+            );
         }
 
         let mut state = PipelineProgressState::new(
@@ -353,6 +373,136 @@ impl LocalFileIngestExecutor {
             telemetry: Some(state.telemetry()),
             resource_policy: None,
             message: Some("file ingest complete".to_string()),
+        })?;
+
+        Ok(summary)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_direct_to_hdd(
+        &self,
+        request: SubmitIngestFilesRequest,
+        job_id: &IngestJobId,
+        summary: DaemonFileIngestSummary,
+        files: Vec<FileIngestEntry>,
+        managed_disk_roots: Vec<DiskCopyRoot>,
+        copies: u8,
+        hdd_worker_count: usize,
+        source_bytes: u64,
+        total_work_bytes: u64,
+        mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
+        let mut state = PipelineProgressState::new(
+            files.len() as u64,
+            source_bytes,
+            total_work_bytes,
+            hdd_worker_count as u16,
+        );
+        let queue_capacity = HDD_SETTLEMENT_QUEUE_CAPACITY.max(hdd_worker_count.saturating_mul(2));
+        let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
+        let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
+        let hdd_scheduler = new_shared_hdd_settlement_scheduler(&managed_disk_roots)?;
+        let hdd_workers =
+            spawn_hdd_settlement_workers(settle_rx, event_tx, hdd_worker_count, hdd_scheduler);
+
+        for entry in &files {
+            let mut previous_hash_bytes = 0_u64;
+            let content_hash = hash_file_sha256_with_progress(&entry.source_path, |bytes_read| {
+                let delta = bytes_read.saturating_sub(previous_hash_bytes);
+                previous_hash_bytes = bytes_read;
+                state.completed_source_bytes = state.completed_source_bytes.saturating_add(delta);
+                state.completed_work_bytes = state.completed_work_bytes.saturating_add(delta);
+                progress(direct_source_read_progress_event(
+                    job_id,
+                    &request.endpoint,
+                    entry,
+                    &state,
+                    bytes_read,
+                ))
+                .map_err(|err| io::Error::other(err.to_string()))?;
+                drain_hdd_settlement_events(
+                    &event_rx,
+                    &mut state,
+                    job_id,
+                    &request.endpoint,
+                    &mut progress,
+                    false,
+                )
+                .map_err(|err| io::Error::other(err.to_string()))
+            })?;
+
+            state.staged_files = state.staged_files.saturating_add(1);
+            state.hdd_queued = state.hdd_queued.saturating_add(1);
+            enqueue_hdd_settlement_work(
+                &settle_tx,
+                HddSettlementWork {
+                    entry: entry.clone(),
+                    staged: StagedObjectPut {
+                        object_id: entry.object_id.clone(),
+                        object_type: request.object_type,
+                        source_path: entry.source_path.clone(),
+                        job_root: direct_to_hdd_scratch_root(&self.ssd_root, job_id, entry),
+                        staged_payload_path: entry.source_path.clone(),
+                        bytes_staged: entry.size_bytes,
+                        content_hash_algorithm: SHA256_ALGORITHM.to_string(),
+                        content_hash,
+                        disk_roots: managed_disk_roots.clone(),
+                        copy_count: copies,
+                    },
+                },
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+            )?;
+            drain_hdd_settlement_events(
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+                false,
+            )?;
+        }
+        drop(settle_tx);
+
+        while state.completed_files < files.len() as u64 {
+            drain_hdd_settlement_events(
+                &event_rx,
+                &mut state,
+                job_id,
+                &request.endpoint,
+                &mut progress,
+                true,
+            )?;
+        }
+        for hdd_worker in hdd_workers {
+            hdd_worker.join().map_err(|_| {
+                DaemonIngestFilesRuntimeError::CommandFailed(
+                    "HDD settlement worker panicked".to_string(),
+                )
+            })?;
+        }
+
+        progress(DaemonIngestProgressEvent {
+            job_id: job_id.clone(),
+            endpoint: request.endpoint,
+            stage: DaemonIngestStage::Complete,
+            pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
+            work_bytes_done: total_work_bytes,
+            work_bytes_total: Some(total_work_bytes),
+            source_bytes_done: Some(source_bytes),
+            source_bytes_total: Some(source_bytes),
+            stage_bytes_done: Some(0),
+            stage_bytes_total: Some(0),
+            files_done: files.len() as u64,
+            files_total: Some(files.len() as u64),
+            current_object_id: None,
+            ssd_pressure: Some(state.ssd_pressure),
+            telemetry: Some(state.telemetry()),
+            resource_policy: None,
+            message: Some("direct-to-HDD local file ingest complete".to_string()),
         })?;
 
         Ok(summary)
@@ -863,6 +1013,31 @@ fn enqueue_ssd_flush_work(
     }
 }
 
+fn enqueue_hdd_settlement_work(
+    settle_tx: &mpsc::SyncSender<HddSettlementWork>,
+    mut work: HddSettlementWork,
+    event_rx: &mpsc::Receiver<HddSettlementEvent>,
+    state: &mut PipelineProgressState,
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    loop {
+        match settle_tx.try_send(work) {
+            Ok(()) => return Ok(()),
+            Err(mpsc::TrySendError::Full(returned_work)) => {
+                work = returned_work;
+                drain_hdd_settlement_events(event_rx, state, job_id, endpoint, progress, true)?;
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+                    "HDD settlement worker stopped before accepting direct object".to_string(),
+                ));
+            }
+        }
+    }
+}
+
 fn wait_for_ssd_admission(
     ssd_root: &Path,
     capacity_policy: &SsdCapacityPolicy,
@@ -927,6 +1102,18 @@ fn read_daemon_ssd_pressure(
         SsdPressure::HighWatermark => DaemonSsdPressure::High,
         SsdPressure::Critical => DaemonSsdPressure::Critical,
     })
+}
+
+fn local_server_landing_mode(policy: &StorePolicy) -> DaemonIngressLandingMode {
+    match (
+        DaemonIngressOrigin::LocalServer.landing_mode(),
+        policy.ingest_mode,
+    ) {
+        (DaemonIngressLandingMode::DirectToHddWhenPolicyAllows, IngestMode::DirectToHdd) => {
+            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+        }
+        _ => DaemonIngressLandingMode::SsdFirst,
+    }
 }
 
 fn drain_hdd_settlement_events(
@@ -1100,6 +1287,37 @@ fn drain_hdd_settlement_events(
     }
 }
 
+fn direct_source_read_progress_event(
+    job_id: &IngestJobId,
+    endpoint: &StoreId,
+    entry: &FileIngestEntry,
+    state: &PipelineProgressState,
+    bytes_read: u64,
+) -> DaemonIngestProgressEvent {
+    DaemonIngestProgressEvent {
+        job_id: job_id.clone(),
+        endpoint: endpoint.clone(),
+        stage: DaemonIngestStage::Queued,
+        pipeline_stage: Some(DaemonIngestPipelineStage::SourceRead),
+        work_bytes_done: state.completed_work_bytes,
+        work_bytes_total: Some(state.work_bytes_total),
+        source_bytes_done: Some(state.completed_source_bytes),
+        source_bytes_total: Some(state.source_bytes_total),
+        stage_bytes_done: Some(bytes_read),
+        stage_bytes_total: Some(entry.size_bytes),
+        files_done: state.completed_files,
+        files_total: Some(state.total_files),
+        current_object_id: Some(entry.object_id.clone()),
+        ssd_pressure: Some(state.ssd_pressure),
+        telemetry: Some(state.telemetry()),
+        resource_policy: None,
+        message: Some(format!(
+            "hashing source for direct HDD ingest: {}",
+            entry.relative_path.to_string_lossy()
+        )),
+    }
+}
+
 fn object_progress_event(
     job_id: &IngestJobId,
     endpoint: &StoreId,
@@ -1126,6 +1344,32 @@ fn object_progress_event(
         resource_policy: None,
         message: Some(stage_message_for_object_progress(progress, entry)),
     }
+}
+
+fn direct_to_hdd_scratch_root(
+    ssd_root: &Path,
+    job_id: &IngestJobId,
+    entry: &FileIngestEntry,
+) -> PathBuf {
+    ssd_root
+        .join(".dasobjectstore")
+        .join("ingest")
+        .join("direct")
+        .join(safe_path_component(job_id.as_str()))
+        .join(safe_path_component(entry.object_id.as_str()))
+}
+
+fn safe_path_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn object_progress_stage_key(progress: &ObjectPutProgress) -> String {
@@ -1479,10 +1723,13 @@ mod tests {
         sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState, HddSettlementScheduler,
         LocalFileIngestExecutor, PendingSsdStage, PipelineProgressState, SSD_ROOT_ENV,
     };
-    use crate::api::{DaemonIngestConflictPolicy, DaemonSsdPressure, SubmitIngestFilesRequest};
+    use crate::api::{
+        DaemonIngestConflictPolicy, DaemonIngestPipelineStage, DaemonSsdPressure,
+        SubmitIngestFilesRequest,
+    };
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
-    use dasobjectstore_core::store::{StoreClass, StorePolicy};
+    use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
         IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
     };
@@ -1546,6 +1793,70 @@ mod tests {
         assert_eq!(planned.source_bytes_total, Some(4));
         assert_eq!(planned.work_bytes_done, 0);
         assert_eq!(planned.work_bytes_total, Some(8));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn local_server_direct_policy_bypasses_ssd_payload_and_writes_hdd_copy() {
+        let root = temp_root("daemon-ingest-direct-hdd");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd");
+        let source_root = root.join("source");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        write_device_marker(&ssd_root, "role=ssd");
+        write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+        fs::create_dir_all(&source_root).expect("source dir");
+        fs::write(
+            source_root.join("reference.fa.zst"),
+            b"reproducible reference",
+        )
+        .expect("source file");
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        write_store_registry_with_policy(&registry_path, policy);
+        fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+        let executor = LocalFileIngestExecutor {
+            ssd_root: ssd_root.clone(),
+            hdd_root: hdd_root.clone(),
+            store_registry_path: registry_path,
+            subobject_registry_path,
+        };
+
+        let mut progress_events = Vec::new();
+        executor
+            .submit(
+                SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: source_root,
+                    object_type: ObjectType::Fasta,
+                    copies: Some(1),
+                    hdd_workers: None,
+                    conflict_policy: DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                },
+                "2026-07-09T13:02:22Z",
+                |event| {
+                    progress_events.push(event);
+                    Ok(())
+                },
+            )
+            .expect("direct local ingest succeeds");
+
+        assert!(!ssd_root.join(".dasobjectstore/ingest/jobs").exists());
+        assert!(progress_events
+            .iter()
+            .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::SourceRead)));
+        assert!(!progress_events
+            .iter()
+            .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::SsdStage)));
+        assert_eq!(
+            find_payloads(&hdd_root.join("disk-a").join("objects")),
+            vec![b"reproducible reference".to_vec()]
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -1777,9 +2088,16 @@ mod tests {
     }
 
     fn write_store_registry(path: &Path) {
+        write_store_registry_with_policy(
+            path,
+            StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+        );
+    }
+
+    fn write_store_registry_with_policy(path: &Path, policy: StorePolicy) {
         let definition = StoreServiceDefinition {
             store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
-            policy: StorePolicy::defaults_for(StoreClass::ReproducibleCache),
+            policy,
             bucket_name: Some("dos-zymo-fecal-2025-05".to_string()),
             reader_group: None,
             writer_group: None,
@@ -1787,6 +2105,23 @@ mod tests {
         };
         let json = serde_json::to_string_pretty(&vec![definition]).expect("store registry json");
         fs::write(path, json).expect("store registry");
+    }
+
+    fn find_payloads(root: &Path) -> Vec<Vec<u8>> {
+        let mut payloads = Vec::new();
+        if !root.exists() {
+            return payloads;
+        }
+        for entry in fs::read_dir(root).expect("read object tree") {
+            let path = entry.expect("object tree entry").path();
+            if path.is_dir() {
+                payloads.extend(find_payloads(&path));
+            } else if path.file_name().and_then(|name| name.to_str()) == Some("payload") {
+                payloads.push(fs::read(path).expect("payload reads"));
+            }
+        }
+        payloads.sort();
+        payloads
     }
 
     fn temp_root(label: &str) -> PathBuf {

@@ -764,9 +764,12 @@ planning are tracked under Milestones 21 and 22.
   Completed by daemon ingress-origin classification and remote easyconnect
   handoff responses that advertise ``remote_s3``/``web_upload`` as
   ``ssd_first`` landing paths.
-- [ ] Change server-side/local-appliance ingest policy so ingest performed on
+- [x] Change server-side/local-appliance ingest policy so ingest performed on
   the DAS server itself uses direct-to-HDD writing when policy permits, rather
   than unnecessarily staging through SSD.
+  Completed by routing local-server daemon file ingest with store policy
+  ``DirectToHdd`` through source hashing plus direct verified HDD settlement,
+  while non-direct policies remain SSD-first.
 - [x] Define centralized ingress-origin classification (`local_server`,
   `remote_s3`, `web_upload`, and future Synoptikon/Mneion origins) with stable
   serialized names and deterministic landing-mode tests.

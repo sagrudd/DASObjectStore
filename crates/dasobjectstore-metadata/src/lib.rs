@@ -62,6 +62,7 @@ pub use export::{
     export_settled_object, ObjectExportError, ObjectExportReport, ObjectExportRequest,
 };
 pub use format::{FormatVersion, MetadataArtifact};
+pub use hash::{hash_file_sha256, hash_file_sha256_with_progress, SHA256_ALGORITHM};
 pub use ingest::{
     IngestJobPaths, IngestJournalChecksumManifest, IngestJournalContentHash,
     IngestJournalFileRecord, IngestJournalFileState, IngestJournalFinalizationReadiness,

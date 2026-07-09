@@ -11,24 +11,6 @@ pub struct HashWriteReport {
     pub content_hash: String,
 }
 
-pub fn copy_and_hash(
-    reader: &mut impl Read,
-    writer: &mut impl Write,
-) -> Result<HashWriteReport, std::io::Error> {
-    copy_and_hash_with_progress(reader, writer, |_| {})
-}
-
-pub(crate) fn copy_and_hash_with_progress(
-    reader: &mut impl Read,
-    writer: &mut impl Write,
-    mut progress: impl FnMut(u64),
-) -> Result<HashWriteReport, std::io::Error> {
-    copy_and_hash_with_controlled_progress(reader, writer, |bytes_written| {
-        progress(bytes_written);
-        Ok(())
-    })
-}
-
 pub(crate) fn copy_and_hash_with_controlled_progress(
     reader: &mut impl Read,
     writer: &mut impl Write,
@@ -57,9 +39,17 @@ pub(crate) fn copy_and_hash_with_controlled_progress(
 }
 
 pub fn hash_file_sha256(path: impl AsRef<Path>) -> Result<String, std::io::Error> {
+    hash_file_sha256_with_progress(path, |_| Ok(()))
+}
+
+pub fn hash_file_sha256_with_progress(
+    path: impl AsRef<Path>,
+    mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+) -> Result<String, std::io::Error> {
     let mut file = File::open(path)?;
     let mut sink = std::io::sink();
-    copy_and_hash(&mut file, &mut sink).map(|report| report.content_hash)
+    copy_and_hash_with_controlled_progress(&mut file, &mut sink, |bytes| progress(bytes))
+        .map(|report| report.content_hash)
 }
 
 fn encode_hex(bytes: &[u8]) -> String {

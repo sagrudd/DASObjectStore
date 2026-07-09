@@ -8,6 +8,9 @@ agreement before landing.
 
 ## 0.60.2 - 2026-07-09
 
+- Route local-server daemon file ingest through direct-to-HDD landing when the
+  target store policy explicitly uses ``DirectToHdd``, hashing sources before
+  daemon-selected verified HDD settlement and avoiding SSD payload staging.
 - Add daemon ingress-origin classification with stable ``remote_s3``,
   ``web_upload``, ``local_server``, ``synoptikon``, and ``mneion`` names, and
   advertise ``ssd_first`` landing mode for remote easyconnect upload handoffs.
