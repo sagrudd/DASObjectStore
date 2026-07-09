@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.64.0 - 2026-07-09
+
+- Add a global Home telemetry window control for 1 hour, 1 day, 10 days, and
+  3 months, with the Home API filtering daemon-backed telemetry summaries by
+  the selected window.
+- Render the Home telemetry window selector in the Web console and include the
+  selected window in the throughput metric state.
+
 ## 0.63.0 - 2026-07-09
 
 - Add telemetry-backed Home dashboard cards for Disk IO, CPU usage, and

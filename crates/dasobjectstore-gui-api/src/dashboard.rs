@@ -25,8 +25,8 @@ pub use redesign::{
     HealthSummaryView, HomeDashboardView, MemoryStressStateView, MemoryStressView,
     ObjectServiceStatusView, ObjectStoreCardView, ObjectStoresPageView, SmartWarningView,
     SmartWarningsSummaryView, StorageGroupView, StoreClassOptionView, TelemetryCardStateView,
-    ThroughputDayView, ThroughputSummaryView, WriterPolicyReadinessView,
-    REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    TelemetryWindowControlView, TelemetryWindowOptionView, ThroughputDayView,
+    ThroughputSummaryView, WriterPolicyReadinessView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

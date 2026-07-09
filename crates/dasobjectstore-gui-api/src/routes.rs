@@ -10,7 +10,9 @@ use crate::workspaces::{
     ProductHomeWorkspaceView, ProductObjectStoresWorkspaceView, StoresWorkspaceView,
 };
 use crate::RemoteUploadWorkspaceView;
-use axum::{http::StatusCode, routing::get, routing::post, Json, Router};
+use axum::{extract::Query, http::StatusCode, routing::get, routing::post, Json, Router};
+use dasobjectstore_daemon::api::ApplianceTelemetryWindow;
+use serde::Deserialize;
 
 pub fn gui_api_router() -> Router {
     gui_api_router_without_redesign_dashboards()
@@ -63,8 +65,26 @@ async fn actions() -> Json<GuiActionCatalog> {
     Json(action_catalog())
 }
 
-async fn home_dashboard() -> Json<HomeDashboardView> {
-    Json(crate::home_aggregator::live_home_dashboard())
+#[derive(Clone, Debug, Default, Deserialize)]
+struct HomeDashboardQuery {
+    #[serde(default)]
+    telemetry_window: Option<ApplianceTelemetryWindow>,
+    #[serde(default)]
+    window: Option<ApplianceTelemetryWindow>,
+}
+
+impl HomeDashboardQuery {
+    fn selected_window(&self) -> ApplianceTelemetryWindow {
+        self.telemetry_window
+            .or(self.window)
+            .unwrap_or_else(ApplianceTelemetryWindow::default)
+    }
+}
+
+async fn home_dashboard(Query(query): Query<HomeDashboardQuery>) -> Json<HomeDashboardView> {
+    Json(crate::home_aggregator::live_home_dashboard_for_window(
+        query.selected_window(),
+    ))
 }
 
 async fn enclosures_dashboard() -> Json<EnclosuresPageView> {
@@ -166,6 +186,7 @@ mod tests {
         assert!(encoded["health"]["last_checked_at_utc"].is_string());
         assert!(encoded["drives"]["mounted"].is_number());
         assert!(encoded["capacity"]["free_tib"].is_string());
+        assert_eq!(encoded["telemetry_window"]["selected"], "one_hour");
         assert_eq!(encoded["throughput_7d"]["window_days"], 7);
         assert!(encoded["memory_stress"]["state"].is_string());
         assert_eq!(encoded["create_object_store"]["enabled"], false);
@@ -173,6 +194,25 @@ mod tests {
             encoded["create_object_store"]["action_kind"],
             "store_create"
         );
+    }
+
+    #[tokio::test]
+    async fn home_dashboard_route_accepts_telemetry_window_query() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/home?telemetry_window=three_months")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("home dashboard response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+
+        assert_eq!(encoded["telemetry_window"]["selected"], "three_months");
+        assert_eq!(encoded["telemetry_window"]["selected_label"], "3 months");
     }
 
     #[tokio::test]

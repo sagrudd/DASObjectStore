@@ -11,6 +11,7 @@ pub struct HomeDashboardView {
     pub drives: DriveCountSummaryView,
     pub capacity: CapacitySummaryView,
     pub mounted_enclosures: Vec<DasEnclosureCardView>,
+    pub telemetry_window: TelemetryWindowControlView,
     pub throughput_7d: ThroughputSummaryView,
     pub disk_io: DiskIoSummaryView,
     pub cpu_usage: CpuUsageSummaryView,
@@ -52,6 +53,7 @@ impl HomeDashboardView {
                 used_percent_basis_points: 0,
             },
             mounted_enclosures: Vec::new(),
+            telemetry_window: TelemetryWindowControlView::bootstrap_fixture(),
             throughput_7d: ThroughputSummaryView::bootstrap_fixture(),
             disk_io: DiskIoSummaryView::unavailable(
                 "Disk IO telemetry is pending daemon integration.",
@@ -89,6 +91,51 @@ impl HomeDashboardView {
             create_object_store: CreateObjectStoreAffordanceView::admin_required(),
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TelemetryWindowControlView {
+    pub selected: String,
+    pub selected_label: String,
+    pub options: Vec<TelemetryWindowOptionView>,
+}
+
+impl TelemetryWindowControlView {
+    pub fn bootstrap_fixture() -> Self {
+        Self {
+            selected: "one_hour".to_string(),
+            selected_label: "1 hour".to_string(),
+            options: vec![
+                TelemetryWindowOptionView {
+                    value: "one_hour".to_string(),
+                    label: "1 hour".to_string(),
+                    selected: true,
+                },
+                TelemetryWindowOptionView {
+                    value: "one_day".to_string(),
+                    label: "1 day".to_string(),
+                    selected: false,
+                },
+                TelemetryWindowOptionView {
+                    value: "ten_days".to_string(),
+                    label: "10 days".to_string(),
+                    selected: false,
+                },
+                TelemetryWindowOptionView {
+                    value: "three_months".to_string(),
+                    label: "3 months".to_string(),
+                    selected: false,
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TelemetryWindowOptionView {
+    pub value: String,
+    pub label: String,
+    pub selected: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

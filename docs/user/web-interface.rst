@@ -217,7 +217,7 @@ The redesigned Home page loads its live summary from
 issued at login. The page shows authenticated loading, permission-denied, and
 transport-error states instead of presenting fixture metrics as live appliance
 state. Once loaded, the visible cards cover drive count, mounted enclosure
-count, usable capacity, seven-day throughput, memory pressure, SMART warnings,
+count, usable capacity, selected-window throughput, memory pressure, SMART warnings,
 visible ObjectStores, and operator attention items from the daemon health
 payload.
 
@@ -226,13 +226,20 @@ The current Home API aggregator reads the managed SSD root
 by default, honours ``DASOBJECTSTORE_SSD_ROOT`` and
 ``DASOBJECTSTORE_HDD_ROOT`` overrides, and reads the system ObjectStore
 registry through the same registry model used by the CLI and daemon. When
-daemon appliance telemetry is present, the Capacity, seven-day Throughput, and
+daemon appliance telemetry is present, the Capacity, Throughput, and
 Memory Stress cards prefer that telemetry so the cards match the daemon-owned
 view of managed disks, IO rates, and host memory pressure. The Home page also
 shows telemetry-backed Disk IO, CPU, and Logged-in users cards when appliance
 samples are available; those cards report explicit unavailable telemetry state
 instead of bootstrap values when the daemon has not produced samples yet.
-Operators can override that telemetry source with
+Operators can use the Home telemetry window selector to view the latest
+``1 hour``, ``1 day``, ``10 days``, or ``3 months`` of daemon appliance
+telemetry. The browser sends the selected value as
+``telemetry_window=one_hour``, ``one_day``, ``ten_days``, or
+``three_months`` on ``/products/dasobjectstore/api/v1/dashboard/home`` so the
+Capacity, Throughput, Disk IO, CPU, Memory Stress, and Logged-in users cards
+are derived from a consistent sample window. Operators can override the
+telemetry source with
 ``DASOBJECTSTORE_WEB_APPLIANCE_TELEMETRY_PATH``. If appliance telemetry is not
 available, the aggregator falls back to filesystem capacity, the optional
 seven-day throughput JSON input at

@@ -145,6 +145,14 @@ pub fn home_workspace_api_path(api_base_path: &str) -> String {
     )
 }
 
+pub fn home_dashboard_api_path_with_window(api_base_path: &str, telemetry_window: &str) -> String {
+    format!(
+        "{}?telemetry_window={}",
+        home_workspace_api_path(api_base_path),
+        telemetry_window
+    )
+}
+
 pub fn enclosures_workspace_api_path(api_base_path: &str) -> String {
     format!(
         "{}/{}",
@@ -308,13 +316,13 @@ pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetr
             ),
         ),
         DashboardMetric::new(
-            "7-day throughput",
+            "Throughput",
             format!("{} TiB ingest", view.throughput_7d.ingest_tib),
             format!(
                 "{} MiB/s write avg; {} MiB/s read avg",
                 view.throughput_7d.avg_write_mib_s, view.throughput_7d.avg_read_mib_s
             ),
-            &format!("{} days", view.throughput_7d.window_days),
+            &view.telemetry_window.selected_label,
         ),
         DashboardMetric::new(
             "Disk IO",
@@ -1750,7 +1758,11 @@ pub struct HomeDashboardProps {
 #[cfg(target_arch = "wasm32")]
 #[function_component(HomeDashboard)]
 pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
-    let api_path = WorkspacePage::Home.api_path(&props.api_base_path);
+    let selected_telemetry_window = use_state(|| "one_hour".to_string());
+    let api_path = home_dashboard_api_path_with_window(
+        &props.api_base_path,
+        selected_telemetry_window.as_str(),
+    );
     let dashboard_state = use_state(|| ApiLoadState::<HomeDashboardResponse>::Loading);
 
     {
@@ -1775,13 +1787,16 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
                 title="Home"
                 summary="Current operating posture for local storage, ingress, and object service."
             />
-            { render_home_dashboard_state(&*dashboard_state) }
+            { render_home_dashboard_state(&*dashboard_state, selected_telemetry_window) }
         </section>
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> Html {
+fn render_home_dashboard_state(
+    state: &ApiLoadState<HomeDashboardResponse>,
+    selected_telemetry_window: UseStateHandle<String>,
+) -> Html {
     match state {
         ApiLoadState::Loading => html! {
             <>
@@ -1797,6 +1812,7 @@ fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> H
         },
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => html! {
             <>
+                { render_home_telemetry_window_control(view, selected_telemetry_window) }
                 <div class="dos-metric-grid">
                     { for home_dashboard_metrics(view).into_iter().map(render_metric_card) }
                 </div>
@@ -1820,12 +1836,47 @@ fn render_home_dashboard_state(state: &ApiLoadState<HomeDashboardResponse>) -> H
 }
 
 #[cfg(target_arch = "wasm32")]
+fn render_home_telemetry_window_control(
+    view: &HomeDashboardResponse,
+    selected_telemetry_window: UseStateHandle<String>,
+) -> Html {
+    let current_window = (*selected_telemetry_window).clone();
+    html! {
+        <section class="dos-home-telemetry-toolbar" aria-label="Home telemetry time window">
+            <span class="dos-card-label">{ "Telemetry window" }</span>
+            <div class="dos-window-segments" role="group" aria-label="Home telemetry time window">
+                { for view.telemetry_window.options.iter().map(|option| {
+                    let value = option.value.clone();
+                    let selected_telemetry_window = selected_telemetry_window.clone();
+                    let is_selected = option.value == current_window;
+                    let class = if is_selected {
+                        "dos-window-segment dos-window-segment-selected"
+                    } else {
+                        "dos-window-segment"
+                    };
+                    html! {
+                        <button
+                            type="button"
+                            class={class}
+                            aria-pressed={is_selected.to_string()}
+                            onclick={Callback::from(move |_| selected_telemetry_window.set(value.clone()))}
+                        >
+                            { &option.label }
+                        </button>
+                    }
+                }) }
+            </div>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 fn home_dashboard_loading_cards() -> Vec<&'static str> {
     vec![
         "Drive inventory",
         "DAS enclosures",
         "Capacity",
-        "7-day throughput",
+        "Throughput",
         "Disk IO",
         "CPU",
         "Logged-in users",
@@ -6833,8 +6884,9 @@ mod tests {
         bioinformatics_readiness_summaries, bioinformatics_summary_cards,
         bioinformatics_workspace_api_path, enclosure_card_summaries, enclosure_prepare_candidate,
         enclosure_prepare_confirmed, enclosure_retry_clears_job_state, enclosure_ssd_root,
-        enclosures_workspace_api_path, endpoints_workspace_api_path, home_dashboard_attention,
-        home_dashboard_metrics, home_workspace_api_path, object_browser_download_disabled_reason,
+        enclosures_workspace_api_path, endpoints_workspace_api_path,
+        home_dashboard_api_path_with_window, home_dashboard_attention, home_dashboard_metrics,
+        home_workspace_api_path, object_browser_download_disabled_reason,
         object_browser_file_download_available, object_browser_file_summaries,
         object_browser_folder_download_available, object_browser_folder_summaries,
         object_browser_initial_endpoint, object_browser_placement_summary,
@@ -6960,6 +7012,10 @@ mod tests {
         assert_eq!(REMOTE_UPLOAD_WORKSPACE_ROUTE, "workspaces/remote-upload");
         assert_eq!(ENDPOINTS_WORKSPACE_ROUTE, "workspaces/endpoints");
         assert_eq!(home_workspace_api_path("/api/"), "/api/dashboard/home");
+        assert_eq!(
+            home_dashboard_api_path_with_window("/api/", "ten_days"),
+            "/api/dashboard/home?telemetry_window=ten_days"
+        );
         assert_eq!(
             enclosures_workspace_api_path("/api/"),
             "/api/dashboard/enclosures"
@@ -8145,6 +8201,16 @@ mod tests {
                 "used_percent_basis_points": 1250
             },
             "mounted_enclosures": [],
+            "telemetry_window": {
+                "selected": "one_day",
+                "selected_label": "1 day",
+                "options": [
+                    { "value": "one_hour", "label": "1 hour", "selected": false },
+                    { "value": "one_day", "label": "1 day", "selected": true },
+                    { "value": "ten_days", "label": "10 days", "selected": false },
+                    { "value": "three_months", "label": "3 months", "selected": false }
+                ]
+            },
             "throughput_7d": {
                 "window_days": 7,
                 "read_tib": "1.0",
@@ -8229,6 +8295,9 @@ mod tests {
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "Capacity" && metric.value == "87.5 TiB free"));
+        assert!(metrics
+            .iter()
+            .any(|metric| metric.label == "Throughput" && metric.state == "1 day"));
         assert!(metrics
             .iter()
             .any(|metric| metric.label == "Disk IO" && metric.value == "240 MiB/s write"));

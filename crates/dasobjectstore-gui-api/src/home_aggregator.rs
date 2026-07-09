@@ -4,9 +4,11 @@ use crate::dashboard::{
     DashboardWarning, DiskIoSummaryView, DriveCountSummaryView, EnclosureConnectionView,
     HealthSummaryView, HomeDashboardView, MemoryStressStateView, MemoryStressView,
     ObjectServiceStatusView, SmartWarningView, SmartWarningsSummaryView, TelemetryCardStateView,
-    ThroughputDayView, ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
+    TelemetryWindowControlView, TelemetryWindowOptionView, ThroughputDayView,
+    ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 use crate::object_stores_aggregator::registry_object_store_cards;
+use dasobjectstore_daemon::api::ApplianceTelemetryWindow;
 use dasobjectstore_daemon::{
     appliance_telemetry_state_path, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
     DEFAULT_DAEMON_STATE_DIR,
@@ -38,6 +40,7 @@ struct HomeDashboardAggregatorConfig {
     smart_warnings_path: PathBuf,
     meminfo_path: PathBuf,
     object_service_status: Option<ObjectServiceStatusView>,
+    telemetry_window: ApplianceTelemetryWindow,
 }
 
 impl HomeDashboardAggregatorConfig {
@@ -59,12 +62,21 @@ impl HomeDashboardAggregatorConfig {
             ),
             meminfo_path: env_path("DASOBJECTSTORE_WEB_MEMINFO_PATH", DEFAULT_MEMINFO_PATH),
             object_service_status: None,
+            telemetry_window: ApplianceTelemetryWindow::default(),
         }
     }
 }
 
 pub(crate) fn live_home_dashboard() -> HomeDashboardView {
-    build_home_dashboard(HomeDashboardAggregatorConfig::from_env())
+    live_home_dashboard_for_window(ApplianceTelemetryWindow::default())
+}
+
+pub(crate) fn live_home_dashboard_for_window(
+    window: ApplianceTelemetryWindow,
+) -> HomeDashboardView {
+    let mut config = HomeDashboardAggregatorConfig::from_env();
+    config.telemetry_window = window;
+    build_home_dashboard(config)
 }
 
 fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardView {
@@ -120,7 +132,7 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         .collect::<Vec<_>>();
     let capacity = telemetry
         .as_ref()
-        .and_then(telemetry_capacity_summary)
+        .and_then(|sample_set| telemetry_capacity_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| capacity_summary(&all_capacities));
     let drive_count = drive_count_summary(ssd_capacity.is_some(), hdd_capacities.len());
     let mounted_enclosures = enclosure_cards(
@@ -150,11 +162,11 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
     }
     let memory_stress = telemetry
         .as_ref()
-        .and_then(telemetry_memory_stress)
+        .and_then(|sample_set| telemetry_memory_stress(sample_set, config.telemetry_window))
         .unwrap_or_else(|| memory_stress(&config.meminfo_path, &mut source_warnings));
     let throughput_7d = telemetry
         .as_ref()
-        .and_then(telemetry_throughput_7d)
+        .and_then(|sample_set| telemetry_throughput(sample_set, config.telemetry_window))
         .or_else(|| read_throughput_7d(&config.throughput_path))
         .unwrap_or_else(|| {
             source_warnings.push(DashboardWarning::new(
@@ -165,17 +177,17 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         });
     let disk_io = telemetry
         .as_ref()
-        .and_then(telemetry_disk_io_summary)
+        .and_then(|sample_set| telemetry_disk_io_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| {
             DiskIoSummaryView::unavailable("Disk IO telemetry is not available yet.")
         });
     let cpu_usage = telemetry
         .as_ref()
-        .and_then(telemetry_cpu_usage_summary)
+        .and_then(|sample_set| telemetry_cpu_usage_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| CpuUsageSummaryView::unavailable("CPU telemetry is not available yet."));
     let active_users = telemetry
         .as_ref()
-        .and_then(telemetry_active_users_summary)
+        .and_then(|sample_set| telemetry_active_users_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| {
             ActiveUsersSummaryView::unavailable("Session telemetry is not available yet.")
         });
@@ -204,6 +216,7 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         drives: drive_count,
         capacity,
         mounted_enclosures,
+        telemetry_window: telemetry_window_control(config.telemetry_window),
         throughput_7d,
         disk_io,
         cpu_usage,
@@ -634,8 +647,9 @@ fn meminfo_kib(contents: &str, key: &str) -> Option<u64> {
 
 fn telemetry_capacity_summary(
     sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
 ) -> Option<CapacitySummaryView> {
-    let latest = latest_telemetry_sample(sample_set)?;
+    let latest = latest_telemetry_sample(sample_set, window)?;
     let total = sum_present(latest.disks.iter().map(|disk| disk.total_bytes))?;
     let available = sum_present(latest.disks.iter().map(|disk| disk.available_bytes))?;
     let available = available.min(total);
@@ -648,8 +662,11 @@ fn telemetry_capacity_summary(
     })
 }
 
-fn telemetry_memory_stress(sample_set: &ApplianceTelemetrySampleSet) -> Option<MemoryStressView> {
-    let latest = latest_telemetry_sample(sample_set)?;
+fn telemetry_memory_stress(
+    sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
+) -> Option<MemoryStressView> {
+    let latest = latest_telemetry_sample(sample_set, window)?;
     let total = latest.memory.total_bytes?;
     let available = latest.memory.available_bytes?.min(total);
     let used = total.saturating_sub(available);
@@ -689,16 +706,11 @@ fn telemetry_memory_stress(sample_set: &ApplianceTelemetrySampleSet) -> Option<M
     })
 }
 
-fn telemetry_throughput_7d(
+fn telemetry_throughput(
     sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
 ) -> Option<ThroughputSummaryView> {
-    let newest = latest_telemetry_sample(sample_set)?;
-    let newest_timestamp = parse_utc_timestamp_seconds(&newest.timestamp_utc)?;
-    let oldest_allowed = newest_timestamp.saturating_sub(7 * 24 * 60 * 60);
-    let samples = sorted_telemetry_samples(sample_set)
-        .into_iter()
-        .filter(|(timestamp, _)| *timestamp >= oldest_allowed)
-        .collect::<Vec<_>>();
+    let samples = telemetry_samples_in_window(sample_set, window);
     if samples.is_empty() {
         return None;
     }
@@ -750,7 +762,7 @@ fn telemetry_throughput_7d(
     let read_bytes = daily.values().map(|(read, _)| *read).sum::<u64>();
     let written_bytes = daily.values().map(|(_, written)| *written).sum::<u64>();
     Some(ThroughputSummaryView {
-        window_days: 7,
+        window_days: telemetry_window_days(window),
         read_tib: format_tib(read_bytes),
         written_tib: format_tib(written_bytes),
         ingest_tib: format_tib(written_bytes),
@@ -770,8 +782,9 @@ fn telemetry_throughput_7d(
 
 fn telemetry_disk_io_summary(
     sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
 ) -> Option<DiskIoSummaryView> {
-    let latest = latest_telemetry_sample(sample_set)?;
+    let latest = latest_telemetry_sample(sample_set, window)?;
     let mut read_bytes = 0.0;
     let mut write_bytes = 0.0;
     let mut read_ops = 0.0;
@@ -818,8 +831,9 @@ fn telemetry_disk_io_summary(
 
 fn telemetry_cpu_usage_summary(
     sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
 ) -> Option<CpuUsageSummaryView> {
-    let latest = latest_telemetry_sample(sample_set)?;
+    let latest = latest_telemetry_sample(sample_set, window)?;
     let usage_percent = latest.cpu.usage_percent.and_then(percent_float_u8);
     let load_average_1m = latest
         .cpu
@@ -851,8 +865,9 @@ fn telemetry_cpu_usage_summary(
 
 fn telemetry_active_users_summary(
     sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
 ) -> Option<ActiveUsersSummaryView> {
-    let latest = latest_telemetry_sample(sample_set)?;
+    let latest = latest_telemetry_sample(sample_set, window)?;
     let sessions = &latest.sessions;
     if sessions.web_active_sessions.is_none()
         && sessions.remote_agent_active_sessions.is_none()
@@ -879,15 +894,74 @@ fn telemetry_active_users_summary(
 
 fn latest_telemetry_sample(
     sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
 ) -> Option<&ApplianceTelemetrySample> {
-    sample_set
-        .samples
-        .iter()
-        .filter_map(|sample| {
-            parse_utc_timestamp_seconds(&sample.timestamp_utc).map(|timestamp| (timestamp, sample))
-        })
+    telemetry_samples_in_window(sample_set, window)
+        .into_iter()
         .max_by_key(|(timestamp, _)| *timestamp)
         .map(|(_, sample)| sample)
+}
+
+fn telemetry_samples_in_window(
+    sample_set: &ApplianceTelemetrySampleSet,
+    window: ApplianceTelemetryWindow,
+) -> Vec<(i64, &ApplianceTelemetrySample)> {
+    let samples = sorted_telemetry_samples(sample_set);
+    let Some((newest_timestamp, _)) = samples.last() else {
+        return Vec::new();
+    };
+    let oldest_allowed = newest_timestamp.saturating_sub(window.seconds());
+    samples
+        .into_iter()
+        .filter(|(timestamp, _)| *timestamp >= oldest_allowed)
+        .collect()
+}
+
+fn telemetry_window_control(selected: ApplianceTelemetryWindow) -> TelemetryWindowControlView {
+    TelemetryWindowControlView {
+        selected: telemetry_window_value(selected).to_string(),
+        selected_label: telemetry_window_label(selected).to_string(),
+        options: [
+            ApplianceTelemetryWindow::OneHour,
+            ApplianceTelemetryWindow::OneDay,
+            ApplianceTelemetryWindow::TenDays,
+            ApplianceTelemetryWindow::ThreeMonths,
+        ]
+        .into_iter()
+        .map(|window| TelemetryWindowOptionView {
+            value: telemetry_window_value(window).to_string(),
+            label: telemetry_window_label(window).to_string(),
+            selected: window == selected,
+        })
+        .collect(),
+    }
+}
+
+fn telemetry_window_value(window: ApplianceTelemetryWindow) -> &'static str {
+    match window {
+        ApplianceTelemetryWindow::OneHour => "one_hour",
+        ApplianceTelemetryWindow::OneDay => "one_day",
+        ApplianceTelemetryWindow::TenDays => "ten_days",
+        ApplianceTelemetryWindow::ThreeMonths => "three_months",
+    }
+}
+
+fn telemetry_window_label(window: ApplianceTelemetryWindow) -> &'static str {
+    match window {
+        ApplianceTelemetryWindow::OneHour => "1 hour",
+        ApplianceTelemetryWindow::OneDay => "1 day",
+        ApplianceTelemetryWindow::TenDays => "10 days",
+        ApplianceTelemetryWindow::ThreeMonths => "3 months",
+    }
+}
+
+fn telemetry_window_days(window: ApplianceTelemetryWindow) -> u8 {
+    match window {
+        ApplianceTelemetryWindow::OneHour => 0,
+        ApplianceTelemetryWindow::OneDay => 1,
+        ApplianceTelemetryWindow::TenDays => 10,
+        ApplianceTelemetryWindow::ThreeMonths => 92,
+    }
 }
 
 fn sorted_telemetry_samples(
@@ -1126,6 +1200,7 @@ mod tests {
     use crate::dashboard::ObjectServiceStatusView;
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
+    use dasobjectstore_daemon::api::ApplianceTelemetryWindow;
     use dasobjectstore_object_service::StoreServiceDefinition;
     use std::fs;
     use std::path::PathBuf;
@@ -1180,6 +1255,7 @@ mod tests {
             smart_warnings_path: root.join("missing-smart.json"),
             meminfo_path,
             object_service_status: Some(healthy_object_service_status()),
+            telemetry_window: ApplianceTelemetryWindow::default(),
         });
 
         assert_eq!(view.health.label, "Live inventory healthy");
@@ -1223,6 +1299,7 @@ mod tests {
                 service_state: None,
                 message: Some("S3-compatible object service is not reachable.".to_string()),
             }),
+            telemetry_window: ApplianceTelemetryWindow::default(),
         });
 
         assert_eq!(
@@ -1275,8 +1352,12 @@ mod tests {
             smart_warnings_path: root.join("missing-smart.json"),
             meminfo_path,
             object_service_status: Some(healthy_object_service_status()),
+            telemetry_window: ApplianceTelemetryWindow::TenDays,
         });
 
+        assert_eq!(view.telemetry_window.selected, "ten_days");
+        assert_eq!(view.telemetry_window.selected_label, "10 days");
+        assert_eq!(view.throughput_7d.window_days, 10);
         assert_eq!(view.capacity.total_tib, "4.0");
         assert_eq!(view.capacity.free_tib, "3.0");
         assert_eq!(view.capacity.used_percent_basis_points, 2_500);

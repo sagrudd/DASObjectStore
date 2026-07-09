@@ -970,9 +970,12 @@ planning are tracked under Milestones 21 and 22.
 - [x] Add Home dashboard cards for IO, logged-in users, and CPU usage, with
   compact operator wording, stable card dimensions, and no dependence on
   placeholder/fallback text once telemetry is available.
-- [ ] Implement a global Home telemetry time-window control with 1 hour, 1 day,
+- [x] Implement a global Home telemetry time-window control with 1 hour, 1 day,
   10 days, and 3 months options that applies consistently to all telemetry
   charts on the page.
+  Completed by adding a Home telemetry-window query contract, filtering
+  daemon-backed Home telemetry summaries by the selected window, and rendering a
+  browser-side segmented window control above the Home metric grid.
 - [ ] Ensure telemetry charts update on cadence without jitter: stable chart
   containers, stable axes/labels, bounded redraw work, no card resizing, and no
   text overlap on desktop or mobile.

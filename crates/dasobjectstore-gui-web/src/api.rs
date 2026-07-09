@@ -47,6 +47,8 @@ pub struct HomeDashboardResponse {
     pub drives: DriveCountSummaryResponse,
     pub capacity: CapacitySummaryResponse,
     pub mounted_enclosures: Vec<DasEnclosureCardResponse>,
+    #[serde(default)]
+    pub telemetry_window: TelemetryWindowControlResponse,
     pub throughput_7d: ThroughputSummaryResponse,
     #[serde(default)]
     pub disk_io: DiskIoSummaryResponse,
@@ -62,6 +64,51 @@ pub struct HomeDashboardResponse {
     pub memory_stress: MemoryStressResponse,
     pub smart_warnings: SmartWarningsSummaryResponse,
     pub object_stores: Vec<ObjectStoreCardResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct TelemetryWindowControlResponse {
+    pub selected: String,
+    pub selected_label: String,
+    pub options: Vec<TelemetryWindowOptionResponse>,
+}
+
+impl Default for TelemetryWindowControlResponse {
+    fn default() -> Self {
+        Self {
+            selected: "one_hour".to_string(),
+            selected_label: "1 hour".to_string(),
+            options: vec![
+                TelemetryWindowOptionResponse {
+                    value: "one_hour".to_string(),
+                    label: "1 hour".to_string(),
+                    selected: true,
+                },
+                TelemetryWindowOptionResponse {
+                    value: "one_day".to_string(),
+                    label: "1 day".to_string(),
+                    selected: false,
+                },
+                TelemetryWindowOptionResponse {
+                    value: "ten_days".to_string(),
+                    label: "10 days".to_string(),
+                    selected: false,
+                },
+                TelemetryWindowOptionResponse {
+                    value: "three_months".to_string(),
+                    label: "3 months".to_string(),
+                    selected: false,
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct TelemetryWindowOptionResponse {
+    pub value: String,
+    pub label: String,
+    pub selected: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -1673,6 +1720,16 @@ mod tests {
                 "used_percent_basis_points": 1250
             },
             "mounted_enclosures": [],
+            "telemetry_window": {
+                "selected": "ten_days",
+                "selected_label": "10 days",
+                "options": [
+                    { "value": "one_hour", "label": "1 hour", "selected": false },
+                    { "value": "one_day", "label": "1 day", "selected": false },
+                    { "value": "ten_days", "label": "10 days", "selected": true },
+                    { "value": "three_months", "label": "3 months", "selected": false }
+                ]
+            },
             "throughput_7d": {
                 "window_days": 7,
                 "read_tib": "1.0",
@@ -1756,6 +1813,8 @@ mod tests {
 
         assert_eq!(decoded.drives.total, 7);
         assert_eq!(decoded.capacity.free_tib, "87.5");
+        assert_eq!(decoded.telemetry_window.selected, "ten_days");
+        assert_eq!(decoded.telemetry_window.options.len(), 4);
         assert_eq!(decoded.throughput_7d.avg_write_mib_s, 240);
         assert_eq!(decoded.disk_io.write_mib_s, 240);
         assert_eq!(decoded.cpu_usage.usage_percent, Some(42));
