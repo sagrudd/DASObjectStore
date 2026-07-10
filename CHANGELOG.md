@@ -6,24 +6,29 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.25 - 2026-07-10
+
+- Require explicit operator intent for direct local landing: normal
+  `ingest files` is now SSD-first, while `ingest direct-import` remains the
+  policy-gated direct-HDD route after daemon topology verification.
+
 ## 0.69.24 - 2026-07-10
 
-- Add a daemon-owned object-store ingest-policy update contract that preserves
-  the existing policy, validates the resulting store policy, supports dry runs,
-  and requires explicit confirmation before enabling direct-HDD ingest.
-- Add the daemon-backed `store ingest-policy` CLI command for policy inspection
-  and authenticated updates; Unix peer credentials now gate policy mutation to
-  local administrators.
-- Replace the planner-only Web ObjectStore configure action with an
-  authenticated ingest-policy endpoint and dashboard control that reports the
-  current landing mode and forwards the logged-in administrator identity.
 - Package the `dasobjectstore-admin` peer group and add the Web/daemon service
   user to it so daemon-side policy mutation can verify the trusted Web process
   boundary without trusting a browser-supplied administrator claim.
 
 ## 0.69.23 - 2026-07-10
 
+- Replace the planner-only Web ObjectStore configure action with an
+  authenticated ingest-policy endpoint and dashboard control that reports the
+  current landing mode and forwards the logged-in administrator identity.
+
 ## 0.69.22 - 2026-07-10
+
+- Add the daemon-backed `store ingest-policy` CLI command for policy inspection
+  and authenticated updates; Unix peer credentials now gate policy mutation to
+  local administrators.
 
 ## 0.69.21 - 2026-07-10
 

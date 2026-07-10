@@ -31,7 +31,9 @@ fn verified_ingress_origin_with_source_local(
         | DaemonIngressOrigin::WebUpload
         | DaemonIngressOrigin::Synoptikon
         | DaemonIngressOrigin::Mneion => requested_origin,
-        DaemonIngressOrigin::LocalServer | DaemonIngressOrigin::LocalServerDirectImport => {
+        DaemonIngressOrigin::LocalServer
+        | DaemonIngressOrigin::LocalServerSsdFirst
+        | DaemonIngressOrigin::LocalServerDirectImport => {
             if source_is_server_local {
                 requested_origin
             } else {

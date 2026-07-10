@@ -2426,6 +2426,10 @@ mod tests {
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
         );
         assert_eq!(
+            landing_mode_for_ingest(&policy, DaemonIngressOrigin::LocalServerSsdFirst),
+            DaemonIngressLandingMode::SsdFirst
+        );
+        assert_eq!(
             landing_mode_for_ingest(&policy, DaemonIngressOrigin::UsbMountedDisk),
             DaemonIngressLandingMode::SsdFirst
         );
