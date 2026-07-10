@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.46 - 2026-07-10
+
+- Extract GUI API authentication and administration contracts into a dedicated
+  module while preserving route payloads and validation behavior.
+
 ## 0.69.45 - 2026-07-10
 
 - Isolate remote-upload progress reporting, telemetry enrichment, and transfer
