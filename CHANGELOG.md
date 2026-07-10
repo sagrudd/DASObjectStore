@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.18 - 2026-07-10
+
+- Add daemon executor route-plan coverage proving USB, Web, and Remote S3
+  submissions select SSD-first under a direct-capable store policy.
+
+## 0.69.17 - 2026-07-10
+
+- Add executor-level external-ingress regression coverage proving USB, Web,
+  and Remote S3 remain SSD-first even when the target store permits direct HDD.
+
 ## 0.69.16 - 2026-07-10
 
 - Render daemon-provided source-read, SSD-write, and aggregate HDD-write

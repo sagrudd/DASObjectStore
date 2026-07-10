@@ -2128,6 +2128,75 @@ mod tests {
     }
 
     #[test]
+    fn external_origins_use_ssd_first_executor_path_under_direct_policy() {
+        for origin in [
+            DaemonIngressOrigin::UsbMountedDisk,
+            DaemonIngressOrigin::WebUpload,
+            DaemonIngressOrigin::RemoteS3,
+        ] {
+            let root = temp_root(&format!("external-origin-{origin}"));
+            let ssd_root = root.join("ssd");
+            let hdd_root = root.join("hdd");
+            let source_root = root.join("source");
+            let registry_path = root.join("stores.json");
+            let subobject_registry_path = root.join("subobjects.json");
+            write_device_marker(&ssd_root, "role=ssd");
+            write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+            fs::create_dir_all(&source_root).expect("source dir");
+            fs::write(source_root.join("reference.fa.zst"), b"external source")
+                .expect("source file");
+            let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+            policy.ingest_mode = IngestMode::DirectToHdd;
+            write_store_registry_with_policy(&registry_path, policy);
+            fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+            let executor = LocalFileIngestExecutor {
+                ssd_root: ssd_root.clone(),
+                hdd_root: hdd_root.clone(),
+                live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
+                store_registry_path: registry_path,
+                subobject_registry_path,
+                source_is_server_local: |_| false,
+            };
+            let mut events = Vec::new();
+            executor
+                .submit(
+                    SubmitIngestFilesRequest {
+                        endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                        source_path: source_root,
+                        object_type: ObjectType::Fasta,
+                        copies: Some(1),
+                        hdd_workers: None,
+                        ingress_origin: origin,
+                        conflict_policy: DaemonIngestConflictPolicy::Force,
+                        dry_run: true,
+                        client_request_id: None,
+                    },
+                    "2026-07-10T13:10:00Z",
+                    |event| {
+                        events.push(event);
+                        Ok(())
+                    },
+                )
+                .expect("external origin ingest succeeds");
+
+            assert!(events.iter().any(|event| {
+                event
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("landing mode ssd_first"))
+            }));
+            assert!(
+                events
+                    .iter()
+                    .all(|event| event.pipeline_stage
+                        != Some(DaemonIngestPipelineStage::HddPlacement))
+            );
+            fs::remove_dir_all(root).expect("cleanup temp root");
+        }
+    }
+
+    #[test]
     fn direct_ingest_default_conflict_policy_skips_preflight_source_hash() {
         let root = temp_root("daemon-ingest-direct-default-no-preflight");
         let ssd_root = root.join("ssd");

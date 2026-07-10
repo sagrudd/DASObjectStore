@@ -316,7 +316,8 @@ list until every temporary size-budget exception has been removed.
 - [x] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. It now renders daemon source/SSD/aggregate-HDD phase rates explicitly; remaining checksum-conflict wording is tracked in the operator-route work.
 - [x] Add TUI regression coverage for multiple active disk assignments and non-zero per-disk rates.
 - [x] Add deterministic fan-out overlap coverage proving one source reader feeds at least two concurrent physical-disk writers while preserving per-target outputs.
-- [ ] Add regression and performance coverage proving no pre-copy hash on normal direct ingress and Remote/Web/S3 SSD-first executor routing. Broader appliance soak/SLO acceptance remains tracked under Web availability.
+- [x] Add executor route-plan regression coverage proving Remote/Web/USB external origins select SSD-first under a direct-capable store policy.
+- [ ] Add full-pipeline and performance coverage proving no pre-copy hash on normal direct ingress and external-origin SSD-first behavior through staged settlement. Broader performance/soak acceptance remains tracked under Web availability.
 
 ### Local source classification and direct-HDD operator intent
 
