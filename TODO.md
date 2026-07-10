@@ -1094,6 +1094,178 @@ list until every temporary size-budget exception has been removed.
   and registering `mnemosyne.flounder.telemetry_chart_contract.v1` in the
   public format registry.
 
+## Milestone 24: Mnemosyne Design Language Alignment
+
+This milestone supersedes the **visual and interaction assumptions** of the
+completed Milestones 19, 20, and 22. Their completed work remains valid for
+daemon ownership, API boundaries, authorization, and data loading; do not
+reopen those concerns. The current Web console must now conform to the central
+Mnemosyne design canon in `../mnemosyne_design_language/docs/brief.md` and
+`../mnemosyne_design_language/docs/interface-patterns.md`.
+
+The implementation rule is: **operational data stays on the page; a user
+performs creation, qualification, editing, and confirmation in a transient,
+contextual task pane.** A task pane is triggered by click or keyboard, never by
+pointer hover alone. It receives focus when opened, supports Escape for a
+non-destructive close, and restores focus to its trigger when closed.
+
+### 24.1 Shared tokens, assets, footer, and task-pane primitive
+
+- [ ] Import the approved Mnemosyne assets into
+  `crates/dasobjectstore-gui-web/assets/` from
+  `../mnemosyne_design_language/assets/branding/` without redrawing them:
+  `mnemosyne-biosciences-logo-master-mono.png`,
+  `mnemosyne-biosciences-logo-icon-black.png`, and
+  `mnemosyne-biosciences-partial.png`. Register every file with Trunk in
+  `crates/dasobjectstore-gui-web/index.html`. Preserve source identity with a
+  checksum or byte-comparison test/documented provenance; do not make the
+  browser fetch a sibling-repository path at runtime.
+- [ ] Replace the current near-black/monospace `.dos-product-footer` treatment
+  in `crates/dasobjectstore-gui-web/styles.css` and
+  `src/components/footer.rs` with the Mnemosyne footer contract:
+  - use `#1c2b0b` as the footer surface, not the current near-black;
+  - render the approved company wordmark on the left, reversed
+    non-destructively for the dark surface;
+  - retain compact DASObjectStore product/version/provenance text as secondary
+    content, not as the footer identity;
+  - render exactly one `aria-hidden` partial mark, oversized and cropped at the
+    lower-right edge, behind but never underneath readable text; and
+  - keep the footer in the application flex shell so it reaches the viewport
+    bottom on short pages and follows content on long pages.
+  Do not use the partial mark as a button, repeated card motif, spinner, or
+  status icon. Retain the current footer component as the one shared source of
+  truth; do not introduce page-specific footer copies.
+- [ ] Add and use semantic CSS variables for Mnemosyne footer/provenance,
+  interaction, and status roles. The current teal action treatment may remain
+  the primary interaction colour, but Mnemosyne green is reserved for company
+  provenance/footer and must not become a generic success badge or action
+  colour. Use explicit text plus colour for every state.
+- [ ] Add a reusable Yew `TaskPane` component under
+  `crates/dasobjectstore-gui-web/src/components/` or extend the existing
+  `InspectorDrawer` only if it gains the full task contract: title, selected
+  context, close button, focus management, Escape handling, labelled form
+  region, footer actions, and an optional review/confirmation step. Model open
+  state as one explicit enum (for example `Closed | Create | Edit(Id) |
+  Review`) rather than multiple unrelated booleans. A small anchored pane is
+  permitted for one-step low-risk work; use a side sheet on desktop and a
+  full-height sheet on narrow screens for the workflows below.
+- [ ] Update the shared Web CSS and component tests so panes, footer, tables,
+  status chips, and responsive layouts share primitives rather than adding
+  page-local variants. Keep the source split under the repository’s production
+  module-size budget.
+
+### 24.2 Local Access: users first, qualification and groups in one task flow
+
+- [ ] Refactor `crates/dasobjectstore-gui-web/src/workspace/users_groups.rs` so
+  the primary content is a comparable **Users** table/structured list, not the
+  permanent `create_local_group` and `assign_local_user_to_group` dashed form
+  cards. Each row must show: local user, registration/qualification state,
+  current access or tenant groups, administrator state where applicable, and a
+  scoped action. Keep group policy in a secondary Groups section/tab rather
+  than presenting it as a competing dashboard card.
+- [ ] Add one primary `Add user` action in the Local Access page header or
+  users-table toolbar. It opens a `TaskPane` above the existing table and has
+  this sequence: (1) select/identify an existing local user, (2) record or
+  select the access qualification the appliance policy requires, (3) select
+  one or more access/tenant groups, and (4) review and apply. The pane title,
+  labels, and review must identify the user being changed.
+- [ ] Do **not** create Unix/OS users from the browser. `Add user` means adding
+  or qualifying an already OS-recognised/local-account user for
+  DASObjectStore access. Preserve daemon-side authorization and the existing
+  local-group action routes. If the current workspace DTO cannot show each
+  user’s memberships/qualification, extend the daemon/API contract and
+  `UsersGroupsWorkspaceResponse` with an authoritative per-user mapping; do
+  not infer all users’ memberships from `current_user`.
+- [ ] Move group creation behind a secondary action inside the Add-user flow or
+  the Groups context. Creating a group must refresh/select the new group in the
+  user task flow. Mapping a user to a group must not be represented as an
+  independent dashboard object or permanent form card.
+- [ ] Preserve the existing policy and safety semantics: non-administrators see
+  the table and a clearly explained disabled/unavailable action; administrator
+  submissions still go through the daemon-backed create/assign routes; success
+  updates the source table; failures remain in the task pane with the user and
+  target group context. Do not introduce confirmation phrases or acknowledgement
+  checkboxes for ordinary group assignment unless the daemon policy marks that
+  action consequential.
+
+### 24.3 Endpoints: inventory first, add/edit only in a contextual pane
+
+- [ ] Refactor `crates/dasobjectstore-gui-web/src/endpoints.rs` so the endpoint
+  inventory is the primary table/list. Add a page-level `Add endpoint` action
+  and a row-level `Edit` action. Remove the always-visible
+  `render_endpoint_upsert_card` form from loading, empty, and populated
+  inventory states.
+- [ ] Implement add/edit as a `TaskPane` with explicit sections in this order:
+  endpoint identity and display name; endpoint kind and service URL;
+  validation state/evidence; optional ObjectStore/governance binding; then
+  review and submit. Pre-fill edit fields from the selected endpoint. Keep
+  binding fields hidden until binding is intentionally enabled.
+- [ ] Preserve the current authenticated daemon/API upsert contract, dry-run
+  behaviour, and high-impact live confirmation. The inventory view must not
+  expose the confirmation phrase. Show it only in the live-update review step,
+  with the endpoint ID, URL, binding, and impact summary visible immediately
+  above it.
+- [ ] On success, close the pane or show a success state and refresh/update the
+  corresponding row. On failure, keep the pane open with editable values and
+  an inline error. Loading, empty, permission-denied, and transport-error
+  states must still have a clear inventory heading and the appropriate action
+  affordance; do not regress to a form-only page.
+
+### 24.4 Remote Upload: explicit ObjectStore selection is mandatory
+
+- [ ] Remove `RemoteUpload` from the global `PRIMARY_NAVIGATION` and
+  `INTEGRATED_PRIMARY_NAVIGATION` arrays in
+  `crates/dasobjectstore-gui-web/src/workspace.rs`. A generic remote-upload
+  page must not be reachable as an unscoped primary workspace.
+- [ ] Add an `Upload` action to each writable, authorized ObjectStore row/card
+  in `src/workspace/object_stores.rs`. The action selects that exact store and
+  opens the remote-upload pane or a target-scoped workspace. Its visible title
+  must be `Upload to {ObjectStore display name}` and its context must show the
+  selected store’s writer group, object type, capacity/warnings, and ingress
+  policy before file selection.
+- [ ] Change `RemoteUploadPageProps`, the Web state in `src/app.rs`, and the
+  remote-upload API contract so a target store ID is required. The server must
+  reject a missing, unauthorised, non-writable, or disabled target; do not rely
+  on the browser’s default selection for authorization. Do not silently select
+  the first writable store.
+- [ ] Refactor `src/workspace/remote_upload.rs` so its file/folder dropzone,
+  handoff summary, and confirm action are not rendered until an explicit,
+  authorized target is present. If no writable store exists, show an explanatory
+  empty state with a route/action back to ObjectStores; do not show an active
+  dropzone beside a store catalogue.
+- [ ] Keep all existing remote-agent pairing, path privacy, S3 credential,
+  SSD-first ingress, daemon job, cancellation, and renewal behaviour. This is
+  a presentation/context refactor, not permission or transfer-policy
+  relaxation.
+
+### 24.5 Verification and documentation
+
+- [ ] Update `crates/dasobjectstore-gui-web/src/workspace/tests.rs` and the
+  visual runner under `tools/web-screenshot-regression.mjs`. The runner’s old
+  Local Access assertions still expect separate dry-run preview controls that
+  no longer match the current Yew screen; replace them with the canonical
+  users-table/task-pane assertions and fixture data that matches the live DTOs.
+- [ ] Add focused component/API tests for: footer content on login and each
+  authenticated shell state; one decorative partial mark only; keyboard open,
+  Escape close, and focus return for every task pane; Local Access per-user
+  memberships/qualification; endpoint add/edit prefill and confirmation gate;
+  and remote-upload rejection without an explicit target.
+- [ ] Add desktop and 390 px mobile visual/DOM regression coverage for the
+  closed and open Local Access, Endpoints, and target-scoped Remote Upload
+  workflows. Assert no overlap, horizontal overflow, hidden primary form,
+  unreadable footer text, or visible upload dropzone before target selection.
+- [ ] Update `docs/user/web-interface.rst` and `docs/user/remote-upload.rst`
+  with the task-pane interaction, Local Access qualification flow, endpoint
+  inventory/add-edit workflow, and ObjectStore-first upload flow. State that
+  the browser never creates OS users or mutates managed storage directly.
+
+**Milestone 24 completion gate:** run focused Rust/Yew tests and the updated
+visual regression runner; inspect desktop and mobile artifacts; compare the
+footer against the approved Grammateus reference; and confirm that the only
+staged changes are the worker’s scoped task. Do not mark the milestone complete
+until all five sub-sections are complete and the application no longer contains
+the permanent Local Access/group-mapping or endpoint-administration form cards.
+
 ## Cross-Cutting Tasks
 
 - [x] Keep CLI examples synchronized between `README.md`,
