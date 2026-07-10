@@ -122,6 +122,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Split performance workload planning and performance TUI rendering into
     dedicated modules; the production size guard now passes without adding a
     new exception.
+  - [x] Move Store drain/delete CLI presentation and daemon request adapters into
+    `run/store_write.rs`, leaving the root runner focused on dispatch.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.

@@ -2,6 +2,79 @@
 
 use super::*;
 
+pub(super) fn run_store_drain(
+    args: &StoreDrainArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    require_admin_for_destructive_store_action(args.dry_run())?;
+    if !args.dry_run() {
+        RiskGate::new(RiskPolicy {
+            allow_store_drain: args.allow_store_drain(),
+            ..RiskPolicy::default()
+        })
+        .evaluate(
+            RiskyOperation::StoreDrain,
+            &ActionConfirmation::new(args.confirm()),
+        )?;
+    }
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.store_drain(DaemonStoreDrainRequest {
+        store_id: args.store_id().to_string(),
+        dry_run: args.dry_run(),
+        allow_store_drain: args.allow_store_drain(),
+        confirmation_marker: args.confirm().to_string(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response.report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_store_drain_report(&response.report, writer)?;
+    }
+    Ok(())
+}
+
+pub(super) fn run_store_delete(
+    args: &StoreDeleteArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    require_admin_for_destructive_store_action(args.dry_run())?;
+    if !args.dry_run() {
+        RiskGate::new(RiskPolicy {
+            allow_store_delete: args.allow_store_delete(),
+            ..RiskPolicy::default()
+        })
+        .evaluate(
+            RiskyOperation::StoreDelete,
+            &ActionConfirmation::new(args.confirm()),
+        )?;
+    }
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.store_delete(DaemonStoreDeleteRequest {
+        store_id: args.store_id().to_string(),
+        dry_run: args.dry_run(),
+        allow_store_delete: args.allow_store_delete(),
+        confirmation_marker: args.confirm().to_string(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response.report)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_store_delete_report(&response.report, writer)?;
+    }
+    Ok(())
+}
+
+pub(super) fn require_admin_for_destructive_store_action(dry_run: bool) -> Result<(), CliError> {
+    if dry_run || current_user_is_root()? {
+        return Ok(());
+    }
+    Err(CliError::CommandFailed(
+        "destructive storage cleanup requires an administrative user; rerun with sudo".to_string(),
+    ))
+}
+
 pub(super) fn run_store_create(
     args: &StoreCreateArgs,
     writer: &mut impl Write,
