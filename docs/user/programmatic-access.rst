@@ -85,6 +85,24 @@ where available, or ``local-password`` with ``--username`` for standalone
 appliance authentication. Treat the plan as configuration metadata; never
 copy secret values into source files, shell history, or chat.
 
+Standalone password exchange
+-----------------------------
+
+When the appliance is running in standalone local-auth mode, the remote client
+can exchange the same local account used by the Web console for a temporary
+ObjectStore-scoped context:
+
+.. code-block:: console
+
+   dasobjectstore-remote authenticate 192.168.1.192 alleleanchor_mvp \
+     --username stephen
+
+The command prompts for the password without echoing it and prints a redacted
+summary by default. Use ``--json`` only when a trusted process must consume
+the temporary context; redirect it to a mode-0600 local file and never paste
+the output into a terminal transcript, issue, or chat. A browser login alone
+does not copy its session cookie into the remote client.
+
 S3 client settings
 ------------------
 
