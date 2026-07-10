@@ -75,6 +75,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.
+  - [x] Extract the runtime status endpoint inspection, Docker published-port
+    parsing, and status rendering into
+    `crates/dasobjectstore-cli/src/run/runtime_status.rs`; preserve the CLI
+    status output and keep published-bind parser regressions beside the module.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
