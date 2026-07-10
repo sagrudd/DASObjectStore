@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.8 - 2026-07-10
+
+- Let normal local-folder ingest provide a local-server hint, then verify its
+  mount and device topology in the daemon. Only a verified, non-removable
+  local block device may remain eligible for policy-approved direct HDD
+  landing; USB, network, FUSE, virtual, and unknown sources fail closed to
+  SSD-first.
+
 ## 0.69.7 - 2026-07-10
 
 - Replace lifetime-average active-HDD write rates with bounded short-window

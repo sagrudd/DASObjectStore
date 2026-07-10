@@ -9866,7 +9866,10 @@ fn build_daemon_ingest_files_request(args: &IngestFilesArgs) -> SubmitIngestFile
         object_type: args.object_type(),
         copies: args.copies(),
         hdd_workers: args.hdd_workers(),
-        ingress_origin: DaemonIngressOrigin::UsbMountedDisk,
+        // The daemon verifies the source mount and device topology before it
+        // honours this local-server hint. It fails closed to SSD-first for
+        // removable, network, FUSE, and unknown sources.
+        ingress_origin: DaemonIngressOrigin::LocalServer,
         conflict_policy: args.conflict_policy(),
         dry_run: args.dry_run(),
         client_request_id: None,
@@ -14849,7 +14852,7 @@ mod tests {
                     );
                     assert_eq!(request.copies, Some(1));
                     assert_eq!(request.hdd_workers, Some(5));
-                    assert_eq!(request.ingress_origin, DaemonIngressOrigin::UsbMountedDisk);
+                    assert_eq!(request.ingress_origin, DaemonIngressOrigin::LocalServer);
                     assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
                     assert!(!request.dry_run);
                 }

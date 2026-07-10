@@ -316,7 +316,7 @@ list until every temporary size-budget exception has been removed.
 
 ### Local source classification and direct-HDD operator intent
 
-- [ ] Replace the normal `ingest files` client's hard-coded `UsbMountedDisk` origin with daemon-owned source classification. The submitted path is only a hint: the daemon must verify mount and device topology, distinguishing local server NVMe/SATA paths from USB/removable, NFS/SMB/FUSE, and other remote sources. Unknown or unverifiable sources must remain SSD-first.
+- [x] Replace the normal `ingest files` client's hard-coded `UsbMountedDisk` origin with daemon-owned source classification. The submitted path is only a hint: the daemon verifies mount and device topology, distinguishing local server NVMe/SATA paths from USB/removable, NFS/SMB/FUSE, and other remote sources. Unknown or unverifiable sources remain SSD-first.
 - [ ] Add a daemon-owned, auditable store-policy status and update workflow for `ingest_mode`, including the policy and action-time confirmation required to select `DirectToHdd`. Do not require operators to edit registry files or silently change an existing store from `SsdFirst`.
 - [ ] Make normal local-folder ingest eligible for direct-to-HDD only when the daemon has classified the source as server-local, the selected store policy is `DirectToHdd`, and the operator has requested the policy-allowed route. USB/removable, Web, Remote S3, NFS/SMB/FUSE, and ambiguous sources must not be promoted by a client-provided origin value.
 - [ ] Add an ingest preflight/plan event and CLI/TUI rendering that states the verified source mount/device, classified origin, store `ingest_mode`, selected landing mode, and the exact reason SSD staging was selected. Emit it before reading source bytes.

@@ -36,6 +36,7 @@ mod endpoint;
 mod environment;
 mod progress;
 mod scheduling;
+mod source_classification;
 
 use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
 #[cfg(test)]
@@ -48,6 +49,7 @@ use scheduling::{
     new_shared_hdd_settlement_scheduler, release_hdd_settlement_roots,
     reserve_hdd_settlement_roots, resolve_hdd_worker_count, SharedHddSettlementScheduler,
 };
+use source_classification::{source_is_server_local, verified_ingress_origin_with_source_verifier};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonFileIngestSummary {
@@ -81,13 +83,14 @@ pub fn submit_ingest_files_to_local_store_with_progress(
     Ok(response)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 struct LocalFileIngestExecutor {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
     live_sqlite_path: PathBuf,
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
+    source_is_server_local: fn(&Path) -> bool,
 }
 
 impl LocalFileIngestExecutor {
@@ -98,6 +101,7 @@ impl LocalFileIngestExecutor {
             live_sqlite_path: default_live_sqlite_path(),
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
+            source_is_server_local,
         }
     }
 
@@ -141,7 +145,12 @@ impl LocalFileIngestExecutor {
         let files = collect_ingest_files(&request.source_path, &endpoint.object_prefix)?;
         let source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
         let total_work_bytes = source_bytes.saturating_mul(u64::from(copies) + 1);
-        let landing_mode = landing_mode_for_ingest(&endpoint.store.policy, request.ingress_origin);
+        let ingress_origin = verified_ingress_origin_with_source_verifier(
+            request.ingress_origin,
+            &request.source_path,
+            self.source_is_server_local,
+        );
+        let landing_mode = landing_mode_for_ingest(&endpoint.store.policy, ingress_origin);
         let summary = DaemonFileIngestSummary {
             endpoint_name: endpoint.endpoint_name.clone(),
             endpoint_kind: endpoint.endpoint_kind,
@@ -1885,6 +1894,7 @@ mod tests {
             live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
             store_registry_path: registry_path,
             subobject_registry_path,
+            source_is_server_local: |_| true,
         };
 
         let mut progress_events = Vec::new();
@@ -1951,6 +1961,7 @@ mod tests {
             live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
             store_registry_path: registry_path,
             subobject_registry_path,
+            source_is_server_local: |_| true,
         };
 
         let mut progress_events = Vec::new();
@@ -2054,6 +2065,7 @@ mod tests {
             live_sqlite_path,
             store_registry_path: registry_path,
             subobject_registry_path,
+            source_is_server_local: |_| true,
         };
         let mut progress_events = Vec::new();
         executor
@@ -2102,6 +2114,7 @@ mod tests {
             live_sqlite_path,
             store_registry_path: registry_path,
             subobject_registry_path,
+            source_is_server_local: |_| true,
         };
 
         let mut progress_events = Vec::new();
@@ -2173,6 +2186,7 @@ mod tests {
             live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
             store_registry_path: registry_path,
             subobject_registry_path,
+            source_is_server_local: |_| true,
         };
 
         let mut progress_events = Vec::new();
