@@ -6195,19 +6195,49 @@ fn run_setfacl(args: &[&str], path: &Path, action: &str) -> Result<(), CliError>
                 path.display()
             ))
         })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let detail = if stderr.is_empty() {
-            output.status.to_string()
-        } else {
-            stderr
-        };
-        return Err(CliError::CommandFailed(format!(
-            "failed to {action} for {}: {detail}",
-            path.display()
-        )));
+    if output.status.success() {
+        return Ok(());
     }
-    Ok(())
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.contains("Operation not permitted") || stderr.contains("Permission denied") {
+        // Mount roots under /run/media are commonly created by udisks as
+        // root-owned directories. A non-interactive sudo retry lets an
+        // already-authorized operator grant the daemon read-only traversal
+        // without prompting inside the TUI. It remains a no-op when sudo is
+        // unavailable or the filesystem itself does not support POSIX ACLs.
+        if let Ok(sudo_output) = ProcessCommand::new("sudo")
+            .args(["-n", "setfacl"])
+            .args(args)
+            .output()
+        {
+            if sudo_output.status.success() {
+                return Ok(());
+            }
+            let sudo_stderr = String::from_utf8_lossy(&sudo_output.stderr)
+                .trim()
+                .to_string();
+            let sudo_detail = if sudo_stderr.is_empty() {
+                sudo_output.status.to_string()
+            } else {
+                sudo_stderr
+            };
+            return Err(CliError::CommandFailed(format!(
+                "failed to {action} for {}: {stderr}; non-interactive sudo retry failed: {sudo_detail}. The source mount may not support POSIX ACLs; remount it with service-readable uid/gid/mode options or pre-grant read/traverse access to dasobjectstore.",
+                path.display()
+            )));
+        }
+    }
+
+    let detail = if stderr.is_empty() {
+        output.status.to_string()
+    } else {
+        stderr
+    };
+    Err(CliError::CommandFailed(format!(
+        "failed to {action} for {}: {detail}",
+        path.display()
+    )))
 }
 
 #[cfg(target_os = "linux")]

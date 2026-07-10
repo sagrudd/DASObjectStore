@@ -99,6 +99,14 @@ can traverse private home directories and read the selected import tree without
 requiring ``sudo`` or broad home-directory mode changes. The daemon does not
 need write access to the source path.
 
+If a removable-media parent is root-owned, the CLI retries the read-only ACL
+grant with ``sudo -n`` when the invoking user is already authorized for
+passwordless sudo. If that retry fails with ``Operation not permitted``, the
+mount likely does not support POSIX ACLs; remount it with service-readable
+``uid``, ``gid``, and ``mode`` options (or pre-grant ``dasobjectstore``
+read/traverse access) before retrying. The CLI never grants daemon write access
+to the source.
+
 DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
 for normal file ingest.
