@@ -318,7 +318,8 @@ list until every temporary size-budget exception has been removed.
 - [x] Add deterministic fan-out overlap coverage proving one source reader feeds at least two concurrent physical-disk writers while preserving per-target outputs.
 - [x] Add executor route-plan regression coverage proving Remote/Web/USB external origins select SSD-first under a direct-capable store policy.
 - [x] Add full-pipeline coverage proving external-origin SSD-first behavior through staged settlement under a direct-capable policy.
-- [ ] Add performance coverage proving no pre-copy hash on normal direct ingress and sustained external-origin throughput. Broader performance/soak acceptance remains tracked under Web availability.
+- [x] Add deterministic performance coverage for no pre-copy hash on normal direct ingress and bounded high-frequency progress delivery; existing fan-out and staged external fixtures cover byte-path correctness.
+- [ ] Add appliance sustained external-origin throughput and direct-ingest no-precopy soak acceptance. Broader performance/soak acceptance remains tracked under Web availability.
 
 ### Local source classification and direct-HDD operator intent
 

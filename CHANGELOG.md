@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.20 - 2026-07-10
+
+- Add deterministic high-frequency progress coverage proving byte-only daemon
+  events are bounded before socket delivery while preserving the latest frame.
+
 ## 0.69.19 - 2026-07-10
 
 - Exercise USB, Web, and Remote S3 origins through the staged SSD executor

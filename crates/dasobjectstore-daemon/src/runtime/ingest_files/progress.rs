@@ -171,6 +171,32 @@ mod tests {
         assert_eq!(emitted[1].work_bytes_done, 64 * 1024);
     }
 
+    #[test]
+    fn high_frequency_progress_is_bounded_before_socket_delivery() {
+        let mut emitted = Vec::new();
+        {
+            let mut coalescer = IngestProgressCoalescer::new(|event| {
+                emitted.push(event);
+                Ok(())
+            });
+            for index in 0..256 {
+                coalescer
+                    .publish(event((index + 1) * 64 * 1024, DaemonIngestStage::SsdIngest))
+                    .expect("progress publishes");
+            }
+            coalescer.flush().expect("latest progress flushes");
+        }
+
+        assert!(emitted.len() < 256, "byte-only progress must be coalesced");
+        assert_eq!(
+            emitted
+                .last()
+                .expect("terminal coalesced frame")
+                .work_bytes_done,
+            256 * 64 * 1024
+        );
+    }
+
     fn event(work_bytes_done: u64, stage: DaemonIngestStage) -> DaemonIngestProgressEvent {
         DaemonIngestProgressEvent {
             job_id: IngestJobId::new("ingest-progress-test").expect("job id"),
