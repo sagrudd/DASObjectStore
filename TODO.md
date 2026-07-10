@@ -95,9 +95,9 @@ list until every temporary size-budget exception has been removed.
 - [ ] Split GUI API authentication routes into router/auth, contracts, daemon
   clients, local-group administration, enclosure administration, and reporting
   modules; consolidate repeated confirmation and client-error adapters.
-- [ ] Move object-service Docker status/bind parsing into one shared
-  inspection module used by both CLI and GUI API, with a single timeout policy
-  and injected command runner for tests.
+- [x] Move object-service Docker status/bind parsing into one shared
+  inspection module used by both CLI and GUI API, with one bounded timeout
+  policy and parser regressions beside the shared implementation.
 - [ ] Split global Web CSS by base primitives and feature-owned styles, and
   split screenshot regression runner, fixture server, assertions, and
   per-workspace fixtures into dedicated modules.

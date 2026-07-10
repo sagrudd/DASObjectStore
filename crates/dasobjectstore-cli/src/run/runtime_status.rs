@@ -3,6 +3,10 @@ use crate::cli::StatusArgs;
 use dasobjectstore_core::DEFAULT_STANDALONE_CONFIG_PATH;
 use dasobjectstore_daemon::DaemonRuntimeConfig;
 use dasobjectstore_gui_api::StandaloneServerConfig;
+use dasobjectstore_object_service::{
+    docker_object_service_binding, docker_object_service_container_state,
+    parse_docker_published_bind_address,
+};
 use serde::Serialize;
 use std::fs;
 use std::io::Write;
@@ -171,94 +175,6 @@ fn public_host_address() -> Option<String> {
         .split_whitespace()
         .find(|address| !address.starts_with("127.") && !address.contains(':'))
         .map(str::to_string)
-}
-
-fn docker_object_service_binding(port: u16) -> Option<String> {
-    let output = ProcessCommand::new("docker")
-        .args([
-            "ps",
-            "--format",
-            "{{.Ports}}",
-            "--filter",
-            &format!("publish={port}"),
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_docker_published_bind_address(&stdout, port)
-}
-
-fn docker_object_service_container_state(port: u16) -> Option<String> {
-    let output = ProcessCommand::new("docker")
-        .args([
-            "ps",
-            "--format",
-            "{{.Status}}",
-            "--filter",
-            &format!("publish={port}"),
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let state = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .map(str::trim)
-        .filter(|state| !state.is_empty())?
-        .to_string();
-    Some(state)
-}
-
-fn parse_docker_published_bind_address(ports: &str, port: u16) -> Option<String> {
-    ports
-        .split(',')
-        .map(str::trim)
-        .find_map(|entry| parse_docker_port_entry_bind_address(entry, port))
-}
-
-fn parse_docker_port_entry_bind_address(entry: &str, port: u16) -> Option<String> {
-    let (host_side, container_side) = entry.split_once("->")?;
-    if !published_container_side_contains_port(container_side, port) {
-        return None;
-    }
-    let host_side = host_side
-        .rsplit_once(' ')
-        .map_or(host_side, |(_, value)| value);
-    let (address, host_ports) = host_side.rsplit_once(':')?;
-    if !published_host_side_contains_port(host_ports, port) {
-        return None;
-    }
-    let address = address.trim_matches(['[', ']']).trim();
-    (!address.is_empty()).then(|| address.to_string())
-}
-
-fn published_container_side_contains_port(container_side: &str, port: u16) -> bool {
-    let port_spec = container_side.split('/').next().unwrap_or(container_side);
-    published_port_spec_contains_port(port_spec, port)
-}
-
-fn published_host_side_contains_port(host_ports: &str, port: u16) -> bool {
-    published_port_spec_contains_port(host_ports, port)
-}
-
-fn published_port_spec_contains_port(port_spec: &str, port: u16) -> bool {
-    match port_spec.split_once('-') {
-        Some((start, end)) => {
-            let Ok(start) = start.parse::<u16>() else {
-                return false;
-            };
-            let Ok(end) = end.parse::<u16>() else {
-                return false;
-            };
-            (start..=end).contains(&port)
-        }
-        None => port_spec.parse::<u16>().is_ok_and(|value| value == port),
-    }
 }
 
 fn local_tcp_listener_active(addr: SocketAddr) -> bool {

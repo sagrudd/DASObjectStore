@@ -3,6 +3,7 @@
 pub mod compose;
 pub mod credentials;
 pub mod garage;
+pub mod inspection;
 pub mod layout;
 pub mod provider;
 pub mod provisioning;
@@ -24,6 +25,10 @@ pub use credentials::{
 pub use garage::{
     GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH,
     DEFAULT_GARAGE_IMAGE, DEFAULT_GARAGE_SERVICE_NAME,
+};
+pub use inspection::{
+    docker_object_service_binding, docker_object_service_container_state,
+    parse_docker_published_bind_address, DEFAULT_OBJECT_SERVICE_PORT,
 };
 pub use layout::{
     bucket_name_for_definition, plan_store_service_layout, StoreServiceDefinition,
