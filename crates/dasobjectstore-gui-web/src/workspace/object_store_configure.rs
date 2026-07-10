@@ -38,6 +38,11 @@ pub(super) fn render_object_store_configure_card(
         && !state.selected_store_id.trim().is_empty()
         && !state.store_class.trim().is_empty()
         && !state.writer_group.trim().is_empty();
+    let can_apply = enabled
+        && !state.submitting
+        && !state.selected_store_id.trim().is_empty()
+        && (state.ingest_mode != "direct_to_hdd"
+            || state.confirmation_marker.trim() == "confirm direct hdd ingest");
 
     let open_form = {
         let configure_state = configure_state.clone();
@@ -114,6 +119,50 @@ pub(super) fn render_object_store_configure_card(
         })
     };
 
+    let apply_ingest_policy = {
+        let configure_state = configure_state.clone();
+        let api_base_path = api_base_path.clone();
+        Callback::from(move |_| {
+            let mut pending = (*configure_state).clone();
+            pending.submitting = true;
+            pending.error = None;
+            pending.submitted = None;
+            configure_state.set(pending.clone());
+            let configure_state = configure_state.clone();
+            let api_base_path = api_base_path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let result = crate::api::submit_object_store_ingest_policy(
+                    &api_base_path,
+                    &ObjectStoreIngestPolicyRequest {
+                        store_id: pending.selected_store_id.trim().to_string(),
+                        ingest_mode: pending.ingest_mode.clone(),
+                        dry_run: false,
+                        client_request_id: Some(format!(
+                            "web-store-policy-{}",
+                            pending.selected_store_id.trim()
+                        )),
+                        confirmation_marker: (!pending.confirmation_marker.trim().is_empty())
+                            .then(|| pending.confirmation_marker.trim().to_string()),
+                    },
+                )
+                .await;
+                let mut next = (*configure_state).clone();
+                next.submitting = false;
+                match result {
+                    Ok(response) => {
+                        next.submitted = Some(response);
+                        next.error = None;
+                    }
+                    Err(error) => {
+                        next.submitted = None;
+                        next.error = Some(error.message);
+                    }
+                }
+                configure_state.set(next);
+            });
+        })
+    };
+
     html! {
         <section class="dos-card dos-create-card dos-objectstore-configure" data-action="store_configure">
             <span class="dos-create-mark">{ "!" }</span>
@@ -173,6 +222,34 @@ pub(super) fn render_object_store_configure_card(
                                 }
                             </select>
                         </label>
+                        <label class="dos-form-field">
+                            <span>{ "Ingest landing mode" }</span>
+                            <select onchange={{
+                                let configure_state = configure_state.clone();
+                                Callback::from(move |event: Event| {
+                                    let input: HtmlSelectElement = event.target_unchecked_into();
+                                    let mut next = (*configure_state).clone();
+                                    next.ingest_mode = input.value();
+                                    next.reset_plan();
+                                    configure_state.set(next);
+                                })
+                            }} value={state.ingest_mode.clone()}>
+                                <option value="ssd_first">{ "SSD first (safe default)" }</option>
+                                <option value="direct_to_hdd">{ "Direct to HDD (local sources only)" }</option>
+                            </select>
+                        </label>
+                        if state.ingest_mode == "direct_to_hdd" {
+                            { object_store_text_field("Confirmation", state.confirmation_marker.clone(), {
+                                let configure_state = configure_state.clone();
+                                Callback::from(move |event: InputEvent| {
+                                    let input: HtmlInputElement = event.target_unchecked_into();
+                                    let mut next = (*configure_state).clone();
+                                    next.confirmation_marker = input.value();
+                                    next.reset_plan();
+                                    configure_state.set(next);
+                                })
+                            }) }
+                        }
                         <label class="dos-form-field">
                             <span>{ "Redundancy" }</span>
                             <select onchange={{
@@ -305,12 +382,18 @@ pub(super) fn render_object_store_configure_card(
                         <button class="dos-secondary-action" type="button" disabled={!can_plan} onclick={plan}>
                             { if state.planning { "Planning..." } else { "Review configuration plan" } }
                         </button>
+                        <button class="dos-primary-action" type="button" disabled={!can_apply} onclick={apply_ingest_policy}>
+                            { if state.submitting { "Applying..." } else { "Apply ingest mode" } }
+                        </button>
                         if let Some(error) = &state.error {
                             <div class="dos-auth-error" role="alert">{ error.clone() }</div>
                         }
                         if let Some(plan) = &state.plan {
                             <code>{ plan.argv.join(" ") }</code>
                             <p class="dos-job-message">{ format!("{} · confirmation required: {}", plan.execution, plan.confirmation_required) }</p>
+                        }
+                        if let Some(response) = &state.submitted {
+                            <p class="dos-job-message">{ format!("Applied {} for {} (job {})", response.ingest_mode, response.store_id, response.job_id) }</p>
                         }
                     </section>
                 </div>

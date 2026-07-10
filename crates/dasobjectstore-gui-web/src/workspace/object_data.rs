@@ -100,6 +100,8 @@ impl ObjectStoreCreateFormState {
 pub(super) struct ObjectStoreConfigureFormState {
     pub(super) open: bool,
     pub(super) selected_store_id: String,
+    pub(super) ingest_mode: String,
+    pub(super) confirmation_marker: String,
     pub(super) store_class: String,
     pub(super) required_copies: u8,
     pub(super) writer_group: String,
@@ -112,6 +114,8 @@ pub(super) struct ObjectStoreConfigureFormState {
     pub(super) planning: bool,
     pub(super) plan: Option<GuiActionPlanResponse>,
     pub(super) error: Option<String>,
+    pub(super) submitting: bool,
+    pub(super) submitted: Option<ObjectStoreIngestPolicyResponse>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -123,6 +127,10 @@ impl ObjectStoreConfigureFormState {
             selected_store_id: selected
                 .map(|store| store.store_id.clone())
                 .unwrap_or_default(),
+            ingest_mode: selected
+                .and_then(|store| store.ingest_mode.clone())
+                .unwrap_or_else(|| "ssd_first".to_string()),
+            confirmation_marker: String::new(),
             store_class: selected
                 .and_then(|store| store.store_class.clone())
                 .or_else(|| view.map(|view| view.create_object_store.defaults.store_class.clone()))
@@ -157,11 +165,17 @@ impl ObjectStoreConfigureFormState {
             planning: false,
             plan: None,
             error: None,
+            submitting: false,
+            submitted: None,
         }
     }
 
     pub(super) fn apply_store(&mut self, store: &ObjectStoreCardResponse) {
         self.selected_store_id = store.store_id.clone();
+        self.ingest_mode = store
+            .ingest_mode
+            .clone()
+            .unwrap_or_else(|| "ssd_first".to_string());
         self.store_class = store
             .store_class
             .clone()
@@ -180,6 +194,7 @@ impl ObjectStoreConfigureFormState {
     pub(super) fn reset_plan(&mut self) {
         self.plan = None;
         self.error = None;
+        self.submitted = None;
     }
 }
 

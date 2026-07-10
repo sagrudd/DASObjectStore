@@ -316,6 +316,7 @@ mod tests {
             },
             placement_policy: "weighted".to_string(),
             endpoint_export_mode: endpoint_export_mode.to_string(),
+            ingest_mode: "ssd_first".to_string(),
             writer_group: Some("mnemosyne".to_string()),
             public: false,
             writeable,

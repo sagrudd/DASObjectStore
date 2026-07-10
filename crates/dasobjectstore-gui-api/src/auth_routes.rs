@@ -35,6 +35,8 @@ use dasobjectstore_daemon::{
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, RemoteEasyconnectAuthProvider,
     RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
+    UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
@@ -167,6 +169,10 @@ fn standalone_enclosure_admin_router_with_state(
         .route(
             "/api/v1/workspaces/object-stores/create",
             post(create_object_store),
+        )
+        .route(
+            "/api/v1/workspaces/object-stores/ingest-policy",
+            post(update_object_store_ingest_policy),
         )
         .route(
             "/api/v1/workspaces/endpoints/upsert",
@@ -352,6 +358,11 @@ trait StandaloneEnclosureAdminClient: Send + Sync {
         request: DaemonCreateObjectStoreRequest,
     ) -> Result<StandaloneCreateObjectStoreResponse, StandaloneEnclosureAdminClientError>;
 
+    fn submit_update_object_store_ingest_policy(
+        &self,
+        request: DaemonUpdateObjectStoreIngestPolicyRequest,
+    ) -> Result<StandaloneObjectStoreIngestPolicyResponse, StandaloneEnclosureAdminClientError>;
+
     fn submit_endpoint_inventory_upsert(
         &self,
         request: DaemonUpsertEndpointInventoryRequest,
@@ -485,6 +496,27 @@ pub struct CreateObjectStoreRequest {
     pub dry_run: bool,
     pub client_request_id: Option<String>,
     pub confirmation_marker: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectStoreIngestPolicyRequest {
+    pub store_id: String,
+    pub ingest_mode: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub confirmation_marker: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneObjectStoreIngestPolicyResponse {
+    pub job_id: String,
+    pub store_id: String,
+    pub previous_ingest_mode: String,
+    pub ingest_mode: String,
+    pub changed: bool,
+    pub dry_run: bool,
+    pub administrator_actor: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -808,6 +840,17 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
             .map_err(standalone_enclosure_admin_client_error)
     }
 
+    fn submit_update_object_store_ingest_policy(
+        &self,
+        request: DaemonUpdateObjectStoreIngestPolicyRequest,
+    ) -> Result<StandaloneObjectStoreIngestPolicyResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .update_object_store_ingest_policy(request)
+            .map(ingest_policy_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
     fn submit_endpoint_inventory_upsert(
         &self,
         request: DaemonUpsertEndpointInventoryRequest,
@@ -1094,6 +1137,17 @@ async fn create_object_store(
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
     submit_create_object_store_request(&state, request).map(Json)
+}
+
+async fn update_object_store_ingest_policy(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<ObjectStoreIngestPolicyRequest>,
+) -> Result<Json<StandaloneObjectStoreIngestPolicyResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let mut request = validate_object_store_ingest_policy_request(request)?;
+    let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    request.administrator_actor = Some(current_user.username);
+    submit_update_object_store_ingest_policy_request(&state, request).map(Json)
 }
 
 async fn upsert_endpoint_inventory(
@@ -1402,6 +1456,31 @@ fn validate_create_object_store_request(
     Ok(request)
 }
 
+fn validate_object_store_ingest_policy_request(
+    request: ObjectStoreIngestPolicyRequest,
+) -> Result<DaemonUpdateObjectStoreIngestPolicyRequest, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = required_field("store_id", request.store_id)?;
+    let ingest_mode = required_field("ingest_mode", request.ingest_mode)?;
+    validate_client_request_id(request.client_request_id.as_deref())?;
+    let confirmation_marker = request.confirmation_marker.unwrap_or_default();
+    let request = DaemonUpdateObjectStoreIngestPolicyRequest {
+        store_id,
+        ingest_mode,
+        dry_run: request.dry_run,
+        client_request_id: request.client_request_id,
+        administrator_actor: None,
+        confirmation_marker,
+    };
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_store_ingest_policy",
+            err.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
 fn derived_object_store_bucket_name(store_id: &str) -> String {
     store_id
         .trim()
@@ -1606,6 +1685,29 @@ fn submit_create_object_store_request(
             err.message,
         )
     })
+}
+
+fn submit_update_object_store_ingest_policy_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: DaemonUpdateObjectStoreIngestPolicyRequest,
+) -> Result<StandaloneObjectStoreIngestPolicyResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_objectstore_admin_unavailable",
+            "daemon ObjectStore administration contract is not available",
+        )
+    })?;
+
+    client
+        .submit_update_object_store_ingest_policy(request)
+        .map_err(|err| {
+            route_error(
+                StatusCode::BAD_GATEWAY,
+                "daemon_objectstore_ingest_policy_failed",
+                err.message,
+            )
+        })
 }
 
 fn submit_endpoint_inventory_upsert_request(
@@ -1952,6 +2054,28 @@ fn create_object_store_response_from_daemon(
     }
 }
 
+fn ingest_policy_response_from_daemon(
+    response: DaemonUpdateObjectStoreIngestPolicyResponse,
+) -> StandaloneObjectStoreIngestPolicyResponse {
+    StandaloneObjectStoreIngestPolicyResponse {
+        job_id: response.accepted.job_id.to_string(),
+        store_id: response.store_id.to_string(),
+        previous_ingest_mode: ingest_mode_label(response.previous_ingest_mode),
+        ingest_mode: ingest_mode_label(response.ingest_mode),
+        changed: response.changed,
+        dry_run: response.accepted.dry_run,
+        administrator_actor: response.administrator_actor,
+    }
+}
+
+fn ingest_mode_label(mode: dasobjectstore_core::store::IngestMode) -> String {
+    match mode {
+        dasobjectstore_core::store::IngestMode::SsdFirst => "ssd_first",
+        dasobjectstore_core::store::IngestMode::DirectToHdd => "direct_to_hdd",
+    }
+    .to_string()
+}
+
 fn endpoint_inventory_upsert_response_from_daemon(
     response: DaemonUpsertEndpointInventoryResponse,
 ) -> StandaloneEndpointInventoryUpsertResponse {
@@ -2171,9 +2295,10 @@ mod tests {
         CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
         DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointBindingReadiness,
         DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
-        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
+        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
+        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
         PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
         SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
         StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
@@ -2188,9 +2313,10 @@ mod tests {
         StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
         StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
         StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-        StandaloneReportingRouteState, StandaloneUsersGroupsRouteState,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
-        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
+        StandaloneObjectStoreIngestPolicyResponse, StandaloneReportingRouteState,
+        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -3433,6 +3559,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ingest_policy_update_requires_admin_and_forwards_actor() {
+        let root = temp_root("objectstore-policy-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client.clone()),
+        ));
+
+        let response = post_json_with_session::<StandaloneObjectStoreIngestPolicyResponse>(
+            app,
+            "/api/v1/workspaces/object-stores/ingest-policy",
+            "admin",
+            &login.session_token,
+            &ObjectStoreIngestPolicyRequest {
+                store_id: "zymo".to_string(),
+                ingest_mode: "direct_to_hdd".to_string(),
+                dry_run: true,
+                client_request_id: Some("policy-web-1".to_string()),
+                confirmation_marker: Some("confirm direct hdd ingest".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.store_id, "zymo");
+        assert_eq!(response.ingest_mode, "direct_to_hdd");
+        assert_eq!(response.administrator_actor.as_deref(), Some("admin"));
+        assert_eq!(
+            client.ingest_policy_requests(),
+            vec![DaemonUpdateObjectStoreIngestPolicyRequest {
+                store_id: "zymo".to_string(),
+                ingest_mode: "direct_to_hdd".to_string(),
+                dry_run: true,
+                client_request_id: Some("policy-web-1".to_string()),
+                administrator_actor: Some("admin".to_string()),
+                confirmation_marker: "confirm direct hdd ingest".to_string(),
+            }]
+        );
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn create_object_store_derives_immutable_fields_from_minimal_request() {
         let root = temp_root("objectstore-create-derived");
         let auth_store = registered_auth_store(&root);
@@ -4234,6 +4405,7 @@ mod tests {
     struct RecordingEnclosureClient {
         requests: Mutex<Vec<StandaloneEnclosurePrepareDaemonRequest>>,
         create_object_store_requests: Mutex<Vec<DaemonCreateObjectStoreRequest>>,
+        ingest_policy_requests: Mutex<Vec<DaemonUpdateObjectStoreIngestPolicyRequest>>,
         endpoint_inventory_requests: Mutex<Vec<DaemonUpsertEndpointInventoryRequest>>,
         status_requests: Mutex<Vec<StandaloneAdminJobStatusDaemonRequest>>,
         cancel_requests: Mutex<Vec<StandaloneAdminJobCancelDaemonRequest>>,
@@ -4256,6 +4428,13 @@ mod tests {
             self.endpoint_inventory_requests
                 .lock()
                 .expect("endpoint inventory requests lock")
+                .clone()
+        }
+
+        fn ingest_policy_requests(&self) -> Vec<DaemonUpdateObjectStoreIngestPolicyRequest> {
+            self.ingest_policy_requests
+                .lock()
+                .expect("ingest policy requests lock")
                 .clone()
         }
 
@@ -4377,6 +4556,31 @@ mod tests {
             })
         }
 
+        fn submit_update_object_store_ingest_policy(
+            &self,
+            request: DaemonUpdateObjectStoreIngestPolicyRequest,
+        ) -> Result<StandaloneObjectStoreIngestPolicyResponse, StandaloneEnclosureAdminClientError>
+        {
+            if let Some(message) = &self.fail_message {
+                return Err(StandaloneEnclosureAdminClientError {
+                    message: message.clone(),
+                });
+            }
+            self.ingest_policy_requests
+                .lock()
+                .expect("ingest policy requests lock")
+                .push(request.clone());
+            Ok(StandaloneObjectStoreIngestPolicyResponse {
+                job_id: "objectstore-policy-job-1".to_string(),
+                store_id: request.store_id,
+                previous_ingest_mode: "ssd_first".to_string(),
+                ingest_mode: request.ingest_mode,
+                changed: true,
+                dry_run: request.dry_run,
+                administrator_actor: request.administrator_actor,
+            })
+        }
+
         fn job_status(
             &self,
             request: StandaloneAdminJobStatusDaemonRequest,
@@ -4431,6 +4635,7 @@ mod tests {
         Arc::new(RecordingEnclosureClient {
             requests: Mutex::new(Vec::new()),
             create_object_store_requests: Mutex::new(Vec::new()),
+            ingest_policy_requests: Mutex::new(Vec::new()),
             endpoint_inventory_requests: Mutex::new(Vec::new()),
             status_requests: Mutex::new(Vec::new()),
             cancel_requests: Mutex::new(Vec::new()),

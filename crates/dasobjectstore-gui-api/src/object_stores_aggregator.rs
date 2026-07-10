@@ -142,6 +142,11 @@ pub(crate) fn registry_object_store_cards(
                 capacity: used_capacity_summary(usage.used_bytes),
                 placement_policy: placement_strategy_label(policy.placement_strategy).to_string(),
                 endpoint_export_mode: export_policy_label(policy.export_policy).to_string(),
+                ingest_mode: match policy.ingest_mode {
+                    dasobjectstore_core::store::IngestMode::SsdFirst => "ssd_first",
+                    dasobjectstore_core::store::IngestMode::DirectToHdd => "direct_to_hdd",
+                }
+                .to_string(),
                 writer_group: writer_group.clone(),
                 public,
                 writeable: policy.mutability_policy == MutabilityPolicy::Mutable

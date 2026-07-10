@@ -232,6 +232,28 @@ pub struct CreateObjectStoreRequest {
     pub confirmation_marker: Option<String>,
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ObjectStoreIngestPolicyRequest {
+    pub store_id: String,
+    pub ingest_mode: String,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    pub confirmation_marker: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectStoreIngestPolicyResponse {
+    pub job_id: String,
+    pub store_id: String,
+    pub previous_ingest_mode: String,
+    pub ingest_mode: String,
+    pub changed: bool,
+    pub dry_run: bool,
+    pub administrator_actor: Option<String>,
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct EnclosurePrepareResponse {
@@ -973,6 +995,8 @@ pub struct ObjectStoreCardResponse {
     pub capacity: Option<CapacitySummaryResponse>,
     pub placement_policy: Option<String>,
     pub endpoint_export_mode: Option<String>,
+    #[serde(default)]
+    pub ingest_mode: Option<String>,
     pub writer_group: Option<String>,
     pub public: Option<bool>,
     pub writeable: Option<bool>,
@@ -1541,6 +1565,14 @@ pub async fn submit_object_store_create(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn submit_object_store_ingest_policy(
+    api_base_path: &str,
+    request: &ObjectStoreIngestPolicyRequest,
+) -> Result<ObjectStoreIngestPolicyResponse, ApiError> {
+    post_json(&object_store_ingest_policy_path(api_base_path), request).await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn submit_endpoint_inventory_upsert(
     api_base_path: &str,
     request: &EndpointInventoryUpsertRequest,
@@ -1553,6 +1585,14 @@ pub async fn submit_endpoint_inventory_upsert(
 pub fn object_store_create_path(api_base_path: &str) -> String {
     format!(
         "{}/workspaces/object-stores/create",
+        api_base_path.trim_end_matches('/')
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn object_store_ingest_policy_path(api_base_path: &str) -> String {
+    format!(
+        "{}/workspaces/object-stores/ingest-policy",
         api_base_path.trim_end_matches('/')
     )
 }
@@ -1678,11 +1718,12 @@ mod tests {
         activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
         auth_path, endpoint_inventory_upsert_path, object_browser_api_path,
         object_download_api_path, object_folder_download_api_path, object_store_create_path,
-        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
-        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
-        EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
-        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
-        ObjectStoresPageResponse, RemoteUploadWorkspaceResponse, UsersGroupsWorkspaceResponse,
+        object_store_ingest_policy_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
+        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
+        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
+        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
+        LocalGroupAdminResponse, ObjectStoresPageResponse, RemoteUploadWorkspaceResponse,
+        UsersGroupsWorkspaceResponse,
     };
     use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 
@@ -2011,6 +2052,14 @@ mod tests {
         assert_eq!(
             object_store_create_path("/products/dasobjectstore/api/v1/"),
             "/products/dasobjectstore/api/v1/workspaces/object-stores/create"
+        );
+    }
+
+    #[test]
+    fn builds_object_store_ingest_policy_route_under_product_mount() {
+        assert_eq!(
+            object_store_ingest_policy_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/workspaces/object-stores/ingest-policy"
         );
     }
 
