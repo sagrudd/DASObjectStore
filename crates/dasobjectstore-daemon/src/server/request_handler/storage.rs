@@ -30,13 +30,20 @@ where
                     "object-store ingest policy updates require an authenticated local administrator",
                 )));
             };
-            if !actor.is_administrator() {
+            let trusted_web_peer = actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER)
+                && request
+                    .administrator_actor
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty());
+            if !actor.is_administrator() && !trusted_web_peer {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "administrator_authorization_required",
-                    "object-store ingest policy updates require root, sudo, or dasobjectstore-admin membership",
+                    "object-store ingest policy updates require root, sudo, dasobjectstore-admin membership, or the trusted authenticated Web service peer",
                 )));
             }
-            request.administrator_actor = Some(actor.display_name());
+            if actor.is_administrator() {
+                request.administrator_actor = Some(actor.display_name());
+            }
             let now = handler.clock.now_utc();
             let response = match handler.update_object_store_ingest_policy(request, &now) {
                 Ok(response) => response,

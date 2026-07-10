@@ -3,12 +3,16 @@ set -euo pipefail
 
 service_user="dasobjectstore"
 service_group="dasobjectstore"
+admin_group="dasobjectstore-admin"
 managed_root="/srv/dasobjectstore"
 product_root="/opt/dasobjectstore"
 
 ensure_group() {
   if ! getent group "$service_group" >/dev/null; then
     groupadd --system "$service_group"
+  fi
+  if ! getent group "$admin_group" >/dev/null; then
+    groupadd --system "$admin_group"
   fi
 }
 
@@ -33,6 +37,10 @@ docker group does not exist. Install or repair Docker, then add $service_user to
 the docker group and restart dasobjectstore-server.service.
 WARNING
   fi
+}
+
+ensure_web_admin_peer_membership() {
+  usermod -aG "$admin_group" "$service_user"
 }
 
 ensure_report_provider() {
@@ -103,6 +111,7 @@ ERROR
 
 ensure_group
 ensure_user
+ensure_web_admin_peer_membership
 ensure_container_runtime_access
 
 ensure_owned_dir /run/dasobjectstore 0750

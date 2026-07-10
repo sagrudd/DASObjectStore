@@ -6,7 +6,7 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
-## 0.69.23 - 2026-07-10
+## 0.69.24 - 2026-07-10
 
 - Add a daemon-owned object-store ingest-policy update contract that preserves
   the existing policy, validates the resulting store policy, supports dry runs,
@@ -17,6 +17,11 @@ agreement before landing.
 - Replace the planner-only Web ObjectStore configure action with an
   authenticated ingest-policy endpoint and dashboard control that reports the
   current landing mode and forwards the logged-in administrator identity.
+- Package the `dasobjectstore-admin` peer group and add the Web/daemon service
+  user to it so daemon-side policy mutation can verify the trusted Web process
+  boundary without trusting a browser-supplied administrator claim.
+
+## 0.69.23 - 2026-07-10
 
 ## 0.69.22 - 2026-07-10
 

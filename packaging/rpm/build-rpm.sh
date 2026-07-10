@@ -137,6 +137,7 @@ cp -a . %{buildroot}/
 set -e
 service_user="dasobjectstore"
 service_group="dasobjectstore"
+admin_group="dasobjectstore-admin"
 managed_root="/srv/dasobjectstore"
 
 if command -v systemd-sysusers >/dev/null 2>&1; then
@@ -144,6 +145,9 @@ if command -v systemd-sysusers >/dev/null 2>&1; then
 fi
 if ! getent group "\$service_group" >/dev/null; then
   groupadd --system "\$service_group"
+fi
+if ! getent group "\$admin_group" >/dev/null; then
+  groupadd --system "\$admin_group"
 fi
 if ! id -u "\$service_user" >/dev/null 2>&1; then
   useradd --system --gid "\$service_group" --home-dir /var/lib/dasobjectstore --no-create-home --shell /sbin/nologin "\$service_user"
@@ -157,6 +161,7 @@ docker group does not exist. Install or repair Docker, then add \$service_user t
 the docker group and restart dasobjectstore-server.service.
 WARNING
 fi
+usermod -aG "\$admin_group" "\$service_user"
 
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /run/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore

@@ -1762,6 +1762,43 @@ mod tests {
     }
 
     #[test]
+    fn accepts_authenticated_web_service_peer_with_resolved_actor() {
+        let root = temp_root("update-ingest-policy-web-peer");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo", Some("bioinformatics"));
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        let actor = DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpdateObjectStoreIngestPolicy(
+                    UpdateObjectStoreIngestPolicyRequest {
+                        store_id: "zymo".to_string(),
+                        ingest_mode: "ssd_first".to_string(),
+                        dry_run: true,
+                        client_request_id: Some("policy-web-peer".to_string()),
+                        administrator_actor: Some("admin".to_string()),
+                        confirmation_marker: String::new(),
+                    },
+                ),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::UpdateObjectStoreIngestPolicy(response)
+                if response.administrator_actor.as_deref() == Some("admin")
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
     fn dispatches_endpoint_inventory_upsert_with_clock_timestamp() {
         let service = FakeService::default();
         let handler =

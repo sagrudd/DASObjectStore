@@ -63,6 +63,7 @@ require_text "$web_service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobje
 
 require_text "$sysusers" "u dasobjectstore"
 require_text "$sysusers" "g dasobjectstore"
+require_text "$sysusers" "g dasobjectstore-admin"
 
 require_text "$tmpfiles" "z /srv/dasobjectstore 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /opt/dasobjectstore 0750 dasobjectstore dasobjectstore -"
@@ -84,6 +85,9 @@ require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/report-rebuil
 require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/object-service 0700'
 require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750'
 require_text "$postinst" 'ensure_container_runtime_access'
+require_text "$postinst" 'admin_group="dasobjectstore-admin"'
+require_text "$postinst" 'ensure_web_admin_peer_membership'
+require_text "$postinst" 'usermod -aG "$admin_group" "$service_user"'
 require_text "$postinst" 'usermod -aG docker "$service_user"'
 require_text "$postinst" 'restart dasobjectstore-server.service'
 require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
@@ -155,6 +159,8 @@ require_text "$build_rpm" 'BuildRequires:  pam-devel'
 require_text "$build_rpm" 'Provides:       prosopikon-native(pam)'
 require_text "$build_rpm" 'Requires:       pam'
 require_text "$build_rpm" 'usermod -aG docker "\$service_user"'
+require_text "$build_rpm" 'admin_group="dasobjectstore-admin"'
+require_text "$build_rpm" 'usermod -aG "\$admin_group" "\$service_user"'
 require_text "$build_rpm" 'Requires:       /usr/bin/docker'
 require_text "$build_rpm" 'Requires:       docker-buildx-plugin'
 require_text "$build_rpm" 'sudo dnf install clang libclang-devel pam-devel'
