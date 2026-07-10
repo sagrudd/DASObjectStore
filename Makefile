@@ -10,7 +10,7 @@ FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
 REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
 GRAMMATEUS_REPORT_PROVIDER ?= grammateus_report_provider
 
-.PHONY: help pull build web web-screenshots report-provider test fmt check module-size deb rpm remote remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots report-provider test fmt check check-lockfile module-size deb rpm remote remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -22,6 +22,7 @@ help:
 	@printf '  make test       Run the full Rust workspace test suite\n'
 	@printf '  make fmt        Format Rust sources\n'
 	@printf '  make module-size Check production Rust module size budget\n'
+	@printf '  make check-lockfile Validate Cargo.lock has no merge-conflict markers\n'
 	@printf '  make check      Run cargo check for the workspace\n'
 	@printf '  make deb        Build a Debian package under target/deb/\n'
 	@printf '  make rpm        Build an RPM package under target/rpm/rpmbuild/RPMS/\n'
@@ -68,7 +69,7 @@ pull:
 build:
 	cargo build --release --workspace
 
-web:
+web: check-lockfile
 	bash packaging/web/prepare-web-dist.sh
 
 web-screenshots:
@@ -100,6 +101,13 @@ fmt:
 
 module-size:
 	bash tools/check-rust-module-size.sh
+
+check-lockfile:
+	@if rg -n '^(<<<<<<<|=======|>>>>>>>)' Cargo.lock; then \
+		printf 'Cargo.lock contains merge-conflict markers; resolve the conflict and regenerate it with cargo generate-lockfile.\n' >&2; \
+		exit 1; \
+	fi
+	cargo metadata --locked --format-version 1 --no-deps >/dev/null
 
 check:
 	cargo check --workspace
