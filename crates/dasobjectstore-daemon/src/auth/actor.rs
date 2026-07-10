@@ -35,9 +35,36 @@ impl DaemonLocalActor {
         self.groups.iter().any(|candidate| candidate == group)
     }
 
+    pub fn is_administrator(&self) -> bool {
+        self.uid == 0 || self.has_group("dasobjectstore-admin") || self.has_group("sudo")
+    }
+
     pub fn display_name(&self) -> String {
         self.username
             .clone()
             .unwrap_or_else(|| format!("uid:{}", self.uid))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonLocalActor;
+
+    #[test]
+    fn root_and_configured_admin_groups_are_administrators() {
+        assert!(DaemonLocalActor::new(0).is_administrator());
+        assert!(DaemonLocalActor::new(1000)
+            .with_groups(["dasobjectstore-admin"])
+            .is_administrator());
+        assert!(DaemonLocalActor::new(1000)
+            .with_groups(["sudo"])
+            .is_administrator());
+    }
+
+    #[test]
+    fn ordinary_store_writer_is_not_an_administrator() {
+        assert!(!DaemonLocalActor::new(1000)
+            .with_groups(["bioinformatics"])
+            .is_administrator());
     }
 }

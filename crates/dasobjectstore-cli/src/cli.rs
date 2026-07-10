@@ -558,10 +558,63 @@ pub(crate) enum StoreCommand {
     Defaults(StoreDefaultsArgs),
     /// List system-managed object stores.
     List(StoreListArgs),
+    /// Inspect or update the daemon-owned store ingest landing policy.
+    IngestPolicy(StoreIngestPolicyArgs),
     /// Render AWS CLI commands for remote S3-compatible uploads.
     S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreIngestPolicyArgs {
+    /// Store identifier whose ingest policy should be inspected or changed.
+    store_id: StoreId,
+    /// Requested landing mode. Omit it to inspect the current policy.
+    #[arg(long, value_enum)]
+    ingest_mode: Option<StoreIngestMode>,
+    /// Apply no registry change; still validate policy and confirmation.
+    #[arg(long)]
+    dry_run: bool,
+    /// Required when selecting direct-to-HDD: "confirm direct hdd ingest".
+    #[arg(long, default_value = "")]
+    confirm: String,
+    /// Emit the daemon response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreIngestPolicyArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+    pub(crate) fn ingest_mode(&self) -> Option<StoreIngestMode> {
+        self.ingest_mode
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum StoreIngestMode {
+    SsdFirst,
+    DirectToHdd,
+}
+
+impl StoreIngestMode {
+    pub(crate) fn as_api_value(self) -> &'static str {
+        match self {
+            Self::SsdFirst => "ssd_first",
+            Self::DirectToHdd => "direct_to_hdd",
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -1861,7 +1914,7 @@ mod tests {
         Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
         MnemosyneCommand, ObjectCommand, PerformanceFileOrder, PerformanceFileSelection,
         PerformanceScenarioSelection, PoolCommand, ProbeArgs, ServiceCommand, StatusArgs,
-        StoreArgs, StoreCommand, StoreS3UploadAuth, SubobjectCommand,
+        StoreArgs, StoreCommand, StoreIngestMode, StoreS3UploadAuth, SubobjectCommand,
     };
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
@@ -3031,6 +3084,37 @@ mod tests {
                 assert_eq!(list.registry_path(), None);
             }
             _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn parses_daemon_backed_store_ingest_policy_update() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "ingest-policy",
+            "zymo",
+            "--ingest-mode",
+            "direct-to-hdd",
+            "--confirm",
+            "confirm direct hdd ingest",
+            "--dry-run",
+            "--json",
+        ])
+        .expect("store ingest-policy parses");
+
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::IngestPolicy(policy)) => {
+                assert_eq!(policy.store_id().as_str(), "zymo");
+                assert_eq!(policy.ingest_mode(), Some(StoreIngestMode::DirectToHdd));
+                assert_eq!(policy.confirm(), "confirm direct hdd ingest");
+                assert!(policy.dry_run());
+                assert!(policy.json());
+            }
+            _ => panic!("expected ingest-policy command"),
         }
     }
 

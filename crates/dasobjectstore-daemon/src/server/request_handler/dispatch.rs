@@ -26,7 +26,6 @@ where
         | DaemonApiRequest::ServiceProvision(_)
         | DaemonApiRequest::PrepareEnclosure(_)
         | DaemonApiRequest::CreateObjectStore(_)
-        | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)
         | DaemonApiRequest::UpsertEndpointInventory(_)
         | DaemonApiRequest::CreateLocalGroup(_)
         | DaemonApiRequest::AssignLocalUserToLocalGroup(_)
@@ -36,6 +35,7 @@ where
         storage_request @ (DaemonApiRequest::StoreInventory(_)
         | DaemonApiRequest::ApplianceTelemetry(_)
         | DaemonApiRequest::SubmitIngestFiles(_)
+        | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)
         | DaemonApiRequest::ObjectBrowser(_)
         | DaemonApiRequest::ObjectDownload(_)
         | DaemonApiRequest::ObjectFolderDownload(_)) => {

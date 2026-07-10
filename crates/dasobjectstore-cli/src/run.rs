@@ -10,9 +10,9 @@ use crate::cli::{
     PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
     ServiceCommand, ServiceComposeArgs, ServiceProvisionArgs, ServiceRenderComposeArgs,
     ServiceStatusArgs, StatusArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
-    StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreListArgs,
-    StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand, SubobjectCreateArgs,
-    SubobjectListArgs, SubobjectSearchArgs,
+    StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs,
+    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand,
+    SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
 mod disk_lockdown;
 mod disk_prepare;
@@ -50,8 +50,8 @@ use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
     DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig, DaemonServiceProvisionRequest,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
-    DEFAULT_DAEMON_STATE_DIR,
+    StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_gui_api::StandaloneServerConfig;
 use dasobjectstore_metadata::{
@@ -265,6 +265,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Delete(args)) => run_store_delete(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
+            Some(StoreCommand::IngestPolicy(args)) => run_store_ingest_policy(args, writer),
             Some(StoreCommand::S3Upload(args)) => run_store_s3_upload(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
@@ -8999,6 +9000,77 @@ fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), C
         write_store_list_report(&definitions, writer)?;
     }
 
+    Ok(())
+}
+
+fn run_store_ingest_policy(
+    args: &StoreIngestPolicyArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+
+    if let Some(mode) = args.ingest_mode() {
+        let response =
+            client.update_object_store_ingest_policy(UpdateObjectStoreIngestPolicyRequest {
+                store_id: args.store_id().to_string(),
+                ingest_mode: mode.as_api_value().to_string(),
+                dry_run: args.dry_run(),
+                client_request_id: Some(format!("cli-store-policy-{}", args.store_id())),
+                administrator_actor: None,
+                confirmation_marker: args.confirm().to_string(),
+            })?;
+        if args.json() {
+            serde_json::to_writer_pretty(&mut *writer, &response)?;
+            writer.write_all(b"\n")?;
+        } else {
+            writeln!(
+                writer,
+                "ObjectStore ingest policy {}",
+                if response.changed {
+                    "updated"
+                } else {
+                    "unchanged"
+                }
+            )?;
+            writeln!(writer, "Store: {}", response.store_id)?;
+            writeln!(writer, "Previous mode: {:?}", response.previous_ingest_mode)?;
+            writeln!(writer, "Requested mode: {:?}", response.ingest_mode)?;
+            writeln!(writer, "Dry run: {}", response.accepted.dry_run)?;
+            writeln!(
+                writer,
+                "Administrator: {}",
+                response.administrator_actor.as_deref().unwrap_or("unknown")
+            )?;
+        }
+    } else {
+        let response = client.store_inventory(StoreInventoryRequest {
+            include_policy: true,
+            ..StoreInventoryRequest::default()
+        })?;
+        let store = response
+            .stores
+            .into_iter()
+            .find(|store| store.store_id == *args.store_id())
+            .ok_or_else(|| {
+                CliError::CommandFailed(format!(
+                    "object store not found or not visible: {}",
+                    args.store_id()
+                ))
+            })?;
+        if args.json() {
+            serde_json::to_writer_pretty(&mut *writer, &store)?;
+            writer.write_all(b"\n")?;
+        } else {
+            writeln!(writer, "ObjectStore ingest policy")?;
+            writeln!(writer, "Store: {}", store.store_id)?;
+            writeln!(writer, "Mode: {:?}", store.policy.ingest_mode)?;
+            writeln!(writer, "Copies: {}", store.policy.copies)?;
+        }
+    }
+    if !args.json() {
+        writeln!(writer, "Daemon socket: {}", config.socket_path.display())?;
+    }
     Ok(())
 }
 

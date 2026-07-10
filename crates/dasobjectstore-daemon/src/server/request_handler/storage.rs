@@ -23,6 +23,35 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::UpdateObjectStoreIngestPolicy(mut request) => {
+            let Some(actor) = actor else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "administrator_authentication_required",
+                    "object-store ingest policy updates require an authenticated local administrator",
+                )));
+            };
+            if !actor.is_administrator() {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "administrator_authorization_required",
+                    "object-store ingest policy updates require root, sudo, or dasobjectstore-admin membership",
+                )));
+            }
+            request.administrator_actor = Some(actor.display_name());
+            let now = handler.clock.now_utc();
+            let response = match handler.update_object_store_ingest_policy(request, &now) {
+                Ok(response) => response,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "store_policy_update_failed",
+                        error.to_string(),
+                    )))
+                }
+            };
+            handler.record_admin_job(daemon_job_summary_from_update_object_store_ingest_policy(
+                &response,
+            ))?;
+            Ok(DaemonApiResponse::UpdateObjectStoreIngestPolicy(response))
+        }
         DaemonApiRequest::ApplianceTelemetry(request) => {
             match handler.appliance_telemetry_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::ApplianceTelemetry(response)),

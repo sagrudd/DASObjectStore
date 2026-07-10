@@ -1659,17 +1659,22 @@ mod tests {
         )
         .with_registry_paths(&store_registry_path, &subobject_registry_path);
 
+        let actor = DaemonLocalActor::new(0).with_username("root");
         let response = handler
-            .handle(DaemonApiRequest::UpdateObjectStoreIngestPolicy(
-                UpdateObjectStoreIngestPolicyRequest {
-                    store_id: "zymo".to_string(),
-                    ingest_mode: "direct_to_hdd".to_string(),
-                    dry_run: false,
-                    client_request_id: Some("policy-1".to_string()),
-                    administrator_actor: Some("operator".to_string()),
-                    confirmation_marker: DIRECT_TO_HDD_POLICY_CONFIRMATION.to_string(),
-                },
-            ))
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpdateObjectStoreIngestPolicy(
+                    UpdateObjectStoreIngestPolicyRequest {
+                        store_id: "zymo".to_string(),
+                        ingest_mode: "direct_to_hdd".to_string(),
+                        dry_run: false,
+                        client_request_id: Some("policy-1".to_string()),
+                        administrator_actor: Some("operator".to_string()),
+                        confirmation_marker: DIRECT_TO_HDD_POLICY_CONFIRMATION.to_string(),
+                    },
+                ),
+                Some(&actor),
+                |_| Ok(()),
+            )
             .expect("policy request handled");
 
         assert!(matches!(
@@ -1682,6 +1687,77 @@ mod tests {
         let definitions = read_store_registry(&store_registry_path).expect("registry readable");
         assert_eq!(definitions[0].policy.ingest_mode, IngestMode::DirectToHdd);
         assert_eq!(definitions[0].policy.copies, 1);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_store_ingest_policy_update_without_authenticated_actor() {
+        let root = temp_root("update-ingest-policy-no-actor");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo", Some("bioinformatics"));
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::UpdateObjectStoreIngestPolicy(
+                UpdateObjectStoreIngestPolicyRequest {
+                    store_id: "zymo".to_string(),
+                    ingest_mode: "ssd_first".to_string(),
+                    dry_run: true,
+                    client_request_id: Some("policy-unauthenticated".to_string()),
+                    administrator_actor: Some("spoofed".to_string()),
+                    confirmation_marker: String::new(),
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_store_ingest_policy_update_for_non_admin_actor() {
+        let root = temp_root("update-ingest-policy-non-admin");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo", Some("bioinformatics"));
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("operator")
+            .with_groups(["bioinformatics"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpdateObjectStoreIngestPolicy(
+                    UpdateObjectStoreIngestPolicyRequest {
+                        store_id: "zymo".to_string(),
+                        ingest_mode: "ssd_first".to_string(),
+                        dry_run: true,
+                        client_request_id: Some("policy-non-admin".to_string()),
+                        administrator_actor: Some("spoofed".to_string()),
+                        confirmation_marker: String::new(),
+                    },
+                ),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authorization_required"
+        ));
         cleanup(&root);
     }
 
