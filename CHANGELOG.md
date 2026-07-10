@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.37 - 2026-07-10
+
+- Colocate the remaining Store parser regressions with the extracted command
+  contracts in `crates/dasobjectstore-cli/src/cli/store.rs`.
+
 ## 0.69.36 - 2026-07-10
 
 - Complete extraction of the remaining Store create/adopt/list/drain/delete,

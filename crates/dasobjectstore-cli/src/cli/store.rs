@@ -470,9 +470,10 @@ impl StoreContentsArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{StoreCommand, StoreIngestMode};
+    use super::{StoreCommand, StoreIngestMode, StoreS3UploadAuth};
     use crate::cli::{Cli, Command};
     use clap::Parser;
+    use dasobjectstore_core::store::StoreClass;
     use std::path::Path;
 
     #[test]
@@ -533,5 +534,252 @@ mod tests {
                 "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"
             ))
         );
+    }
+
+    #[test]
+    fn parses_store_adopt() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "adopt",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--json",
+        ])
+        .expect("store adopt parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Adopt(adopt)) => {
+                assert_eq!(adopt.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
+                assert!(adopt.json());
+                assert_eq!(adopt.registry_path(), None);
+            }
+            _ => panic!("expected adopt command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_create() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "create",
+            "generated-data",
+            "--class",
+            "generated_data",
+            "--copies",
+            "2",
+            "--bucket",
+            "generated-data",
+            "--reader-group",
+            "mnemosyne-readers",
+            "--writer-group",
+            "mnemosyne",
+            "--public",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--json",
+        ])
+        .expect("store create parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Create(create)) => {
+                assert_eq!(create.store_id().as_str(), "generated-data");
+                assert_eq!(create.class(), StoreClass::GeneratedData);
+                assert_eq!(create.copies(), Some(2));
+                assert_eq!(create.bucket(), Some("generated-data"));
+                assert_eq!(create.reader_group(), Some("mnemosyne-readers"));
+                assert_eq!(create.writer_group(), Some("mnemosyne"));
+                assert!(create.public());
+                assert_eq!(
+                    create.ssd_root(),
+                    Some(Path::new("/srv/dasobjectstore/ssd"))
+                );
+                assert!(create.json());
+                assert_eq!(create.registry_path(), None);
+            }
+            _ => panic!("expected create command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_drain() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "drain",
+            "generated-data",
+            "--hdd-root",
+            "/srv/dasobjectstore/hdd",
+            "--allow-store-drain",
+            "--confirm",
+            "confirm store drain",
+            "--json",
+        ])
+        .expect("store drain parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Drain(drain)) => {
+                assert_eq!(drain.store_id().as_str(), "generated-data");
+                assert_eq!(drain.live_sqlite_path(), None);
+                assert_eq!(drain.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
+                assert!(drain.allow_store_drain());
+                assert_eq!(drain.confirm(), "confirm store drain");
+                assert!(drain.json());
+            }
+            _ => panic!("expected drain command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_delete() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "delete",
+            "generated-data",
+            "--live-sqlite-path",
+            "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
+            "--hdd-root",
+            "/srv/dasobjectstore/hdd",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--allow-store-delete",
+            "--confirm",
+            "confirm store delete",
+            "--dry-run",
+        ])
+        .expect("store delete parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Delete(delete)) => {
+                assert_eq!(delete.store_id().as_str(), "generated-data");
+                assert_eq!(
+                    delete.live_sqlite_path(),
+                    Path::new("/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite")
+                );
+                assert_eq!(
+                    delete.hdd_root(),
+                    Some(Path::new("/srv/dasobjectstore/hdd"))
+                );
+                assert_eq!(
+                    delete.ssd_root(),
+                    Some(Path::new("/srv/dasobjectstore/ssd"))
+                );
+                assert!(delete.allow_store_delete());
+                assert_eq!(delete.confirm(), "confirm store delete");
+                assert!(delete.dry_run());
+            }
+            _ => panic!("expected delete command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_list() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "list",
+            "--portable",
+            "--ssd-root",
+            "/srv/dasobjectstore/ssd",
+            "--json",
+        ])
+        .expect("store list parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::List(list)) => {
+                assert!(list.json());
+                assert!(list.portable());
+                assert_eq!(list.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
+                assert_eq!(list.registry_path(), None);
+            }
+            _ => panic!("expected list command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_s3_upload() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "s3-upload",
+            "generated-data",
+            "--endpoint-url",
+            "https://dos.example.test:3900",
+            "--region",
+            "garage",
+            "--profile",
+            "generated",
+            "--auth",
+            "local-password",
+            "--username",
+            "alice",
+            "--json",
+        ])
+        .expect("store s3-upload parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::S3Upload(upload)) => {
+                assert_eq!(upload.store_id().as_str(), "generated-data");
+                assert_eq!(upload.endpoint_url(), "https://dos.example.test:3900");
+                assert_eq!(upload.bucket(), None);
+                assert_eq!(upload.region(), "garage");
+                assert_eq!(upload.profile(), Some("generated"));
+                assert_eq!(upload.auth(), StoreS3UploadAuth::LocalPassword);
+                assert_eq!(upload.username(), Some("alice"));
+                assert!(upload.json());
+                assert_eq!(upload.registry_path(), None);
+            }
+            _ => panic!("expected s3-upload command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_validate_policy_file() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "store", "validate", "/tmp/policy.json"])
+            .expect("store validate parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Validate(validate)) => {
+                assert_eq!(validate.policy_file(), Path::new("/tmp/policy.json"));
+            }
+            _ => panic!("expected validate command"),
+        }
+    }
+
+    #[test]
+    fn parses_store_defaults_class() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "defaults",
+            "--class",
+            "critical_metadata",
+        ])
+        .expect("store defaults parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        match args.command() {
+            Some(StoreCommand::Defaults(defaults)) => {
+                assert_eq!(defaults.class(), StoreClass::CriticalMetadata);
+            }
+            _ => panic!("expected defaults command"),
+        }
     }
 }

@@ -61,7 +61,7 @@ list until every temporary size-budget exception has been removed.
   - [x] Move the remaining Store create/adopt/list/drain/delete/defaults,
     S3-upload, and policy-file contracts into `cli/store.rs` while preserving
     destructive confirmation and hidden registry attributes.
-  - [ ] Move the remaining Store parser tests beside the new module before
+  - [x] Move the remaining Store parser tests beside the new module before
     removing the CLI size exception.
   - [ ] Continue extracting the remaining object, service, store, disk, pool,
     and runner command families before removing the CLI size exception.
