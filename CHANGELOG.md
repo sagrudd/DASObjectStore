@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.27 - 2026-07-10
+
+- Enrich ingest preflight route explanations with the daemon-resolved mount
+  point, filesystem, backing-device source, and major:minor identifier, while
+  reporting explicit unknown values when topology verification is unavailable.
+
 ## 0.69.26 - 2026-07-10
 
 - Emit a daemon preflight route explanation before source content is read and

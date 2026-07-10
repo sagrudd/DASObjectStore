@@ -49,7 +49,9 @@ use scheduling::{
     new_shared_hdd_settlement_scheduler, release_hdd_settlement_roots,
     reserve_hdd_settlement_roots, resolve_hdd_worker_count, SharedHddSettlementScheduler,
 };
-use source_classification::{source_is_server_local, verified_ingress_origin_with_source_verifier};
+use source_classification::{
+    source_is_server_local, source_topology_details, verified_ingress_origin_with_source_verifier,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonFileIngestSummary {
@@ -184,7 +186,7 @@ impl LocalFileIngestExecutor {
             active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: Some(format!(
-                "preflight: source={} source topology={} origin={} store_ingest_mode={:?} landing mode {} reason={}; planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s)",
+                "preflight: source={} source topology={} {} origin={} store_ingest_mode={:?} landing mode {} reason={}; planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s)",
                 request.source_path.display(),
                 if matches!(
                     ingress_origin,
@@ -196,6 +198,7 @@ impl LocalFileIngestExecutor {
                 } else {
                     "external-or-unverified"
                 },
+                source_topology_details(&request.source_path),
                 ingress_origin,
                 endpoint.store.policy.ingest_mode,
                 landing_mode,
@@ -2208,6 +2211,10 @@ mod tests {
                     message.starts_with("preflight:")
                         && message.contains("source=")
                         && message.contains("source topology=")
+                        && message.contains("mount_point=")
+                        && message.contains("filesystem=")
+                        && message.contains("backing_device=")
+                        && message.contains("major_minor=")
                         && message.contains("origin=")
                         && message.contains("store_ingest_mode=")
                         && message.contains("landing mode ssd_first")
