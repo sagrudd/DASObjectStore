@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.39 - 2026-07-10
+
+- Extract the Pool command contracts and parser regressions into
+  `crates/dasobjectstore-cli/src/cli/pool.rs`, preserving debug-command gates
+  and import/repair behavior.
+
 ## 0.69.38 - 2026-07-10
 
 - Extract the Disk command contracts and parser regressions into
