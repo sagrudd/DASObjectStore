@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.1 - 2026-07-10
+
+- Stream daemon reconciliation phase events to ``store repair --reconcile-s3``
+  clients so Garage recovery no longer starts without operator-visible evidence.
+
 ## 0.71.0 - 2026-07-10
 
 - Add guarded ``dasobjectstore store repair STORE --reconcile-s3`` recovery
