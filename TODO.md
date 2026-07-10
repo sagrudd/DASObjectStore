@@ -98,6 +98,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract cancellation cleanup planning, safe managed-path removal,
     multipart aborts, and cleanup reports into
     `crates/dasobjectstore-daemon/src/runtime/remote_upload/cleanup.rs`.
+  - [x] Extract remote-upload admission gates, queue-depth snapshots, transfer
+    permits, and backpressure decisions into
+    `crates/dasobjectstore-daemon/src/runtime/remote_upload/admission.rs`.
 - [ ] Split GUI API authentication routes into router/auth, contracts, daemon
   clients, local-group administration, enclosure administration, and reporting
   modules; consolidate repeated confirmation and client-error adapters.
