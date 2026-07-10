@@ -975,7 +975,7 @@ list until every temporary size-budget exception has been removed.
   catalogue; the original zero-byte file is preserved as
   `live.sqlite.empty-20260710`. Hashes remain unverified by design.
 
-- [ ] Make an omitted browser prefix a tested root-tree request: after selecting
+- [x] Make an omitted browser prefix a tested root-tree request: after selecting
   an ObjectStore, render all immediate folders and files without requiring a
   name, path, or search value.
 - [ ] Make daemon-owned upload completion atomically register each object path,

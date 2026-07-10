@@ -563,6 +563,34 @@ mod tests {
     }
 
     #[test]
+    fn omitted_prefix_returns_root_tree_folders_and_files() {
+        let entries = vec![
+            entry("PRJEB33511/sample.fastq.gz", 100),
+            entry("PRJNA1011899/run.fastq.gz", 200),
+            entry("README.txt", 3),
+        ];
+        let request = ObjectBrowserRequest {
+            endpoint: StoreId::new("xenognostikon").expect("store id"),
+            prefix: None,
+            search: None,
+            sort: ObjectBrowserSort::NameAsc,
+            page: ObjectBrowserPageRequest::default(),
+            include_placement: false,
+            delegated_actor: None,
+        };
+
+        let response = query_object_browser_metadata(&request, &entries).expect("root succeeds");
+
+        assert_eq!(response.prefix, "");
+        assert!(response.breadcrumbs.is_empty());
+        assert_eq!(response.folders.len(), 2);
+        assert_eq!(response.folders[0].name, "PRJEB33511");
+        assert_eq!(response.folders[1].name, "PRJNA1011899");
+        assert_eq!(response.files.len(), 1);
+        assert_eq!(response.files[0].name, "README.txt");
+    }
+
+    #[test]
     fn searches_sorts_and_bounds_large_tree_pages() {
         let entries = (0..1_200)
             .map(|index| {
