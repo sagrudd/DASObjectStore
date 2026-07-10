@@ -1108,7 +1108,7 @@ impl IngestFilesArgs {
         } else if self.lazy {
             DaemonIngestConflictPolicy::Lazy
         } else {
-            DaemonIngestConflictPolicy::Strict
+            DaemonIngestConflictPolicy::Force
         }
     }
 
@@ -1409,7 +1409,7 @@ impl IngestDirectImportArgs {
         } else if self.lazy {
             DaemonIngestConflictPolicy::Lazy
         } else {
-            DaemonIngestConflictPolicy::Strict
+            DaemonIngestConflictPolicy::Force
         }
     }
 
@@ -2695,7 +2695,7 @@ mod tests {
     }
 
     #[test]
-    fn defaults_ingest_files_conflict_policy_to_strict() {
+    fn defaults_ingest_files_conflict_policy_to_force() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
             "ingest",
@@ -2711,7 +2711,7 @@ mod tests {
         };
         match args.command() {
             Some(IngestCommand::Files(files)) => {
-                assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Strict);
+                assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Force);
                 assert_eq!(files.object_type(), ObjectType::Naive);
             }
             _ => panic!("expected files command"),

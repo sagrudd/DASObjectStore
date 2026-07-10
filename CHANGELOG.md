@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.1 - 2026-07-10
+
+- Make normal file ingest bypass pre-copy strict conflict hashing so direct
+  server-to-HDD paths calculate checksums only while copying; retain
+  ``--strict`` as the explicit preflight deduplication mode.
+
 ## 0.69.0 - 2026-07-09
 
 - Preserve marker-provided DAS bay labels in daemon appliance telemetry,

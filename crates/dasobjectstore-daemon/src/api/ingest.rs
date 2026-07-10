@@ -82,9 +82,9 @@ impl SubmitIngestFilesRequest {
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngestConflictPolicy {
     #[default]
-    Strict,
-    Lazy,
     Force,
+    Lazy,
+    Strict,
 }
 
 impl DaemonIngestConflictPolicy {
@@ -517,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn submit_ingest_defaults_legacy_conflict_policy_to_strict() {
+    fn submit_ingest_defaults_conflict_policy_to_force_without_preflight_deduplication() {
         let encoded = serde_json::json!({
             "endpoint": "zymo",
             "source_path": "/mnt/external/zymo",
@@ -529,7 +529,7 @@ mod tests {
         let request: SubmitIngestFilesRequest =
             serde_json::from_value(encoded).expect("legacy request deserializes");
 
-        assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Strict);
+        assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
         assert_eq!(request.hdd_workers, None);
         assert_eq!(request.ingress_origin, DaemonIngressOrigin::LocalServer);
         assert_eq!(

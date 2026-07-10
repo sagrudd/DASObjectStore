@@ -1841,6 +1841,71 @@ mod tests {
     }
 
     #[test]
+    fn direct_ingest_default_conflict_policy_skips_preflight_source_hash() {
+        let root = temp_root("daemon-ingest-direct-default-no-preflight");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd");
+        let source_root = root.join("source");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        let live_sqlite_path = ssd_root.join(".dasobjectstore").join("live.sqlite");
+        write_device_marker(&ssd_root, "role=ssd");
+        write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+        fs::create_dir_all(&source_root).expect("source dir");
+        fs::write(
+            source_root.join("reference.fa.zst"),
+            b"new reference payload",
+        )
+        .expect("source file");
+        write_existing_object_metadata(
+            &live_sqlite_path,
+            "zymo_fecal_2025.05/reference.fa.zst",
+            "sha256:older-payload",
+            21,
+        );
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        write_store_registry_with_policy(&registry_path, policy);
+        fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+        let request: SubmitIngestFilesRequest = serde_json::from_value(serde_json::json!({
+            "endpoint": "zymo_fecal_2025.05",
+            "source_path": source_root,
+            "copies": 1,
+            "ingress_origin": "local_server",
+            "dry_run": false,
+            "client_request_id": null
+        }))
+        .expect("default request deserializes");
+        assert_eq!(request.conflict_policy, DaemonIngestConflictPolicy::Force);
+
+        let executor = LocalFileIngestExecutor {
+            ssd_root: ssd_root.clone(),
+            hdd_root: hdd_root.clone(),
+            live_sqlite_path,
+            store_registry_path: registry_path,
+            subobject_registry_path,
+        };
+        let mut progress_events = Vec::new();
+        executor
+            .submit(request, "2026-07-10T10:00:00Z", |event| {
+                progress_events.push(event);
+                Ok(())
+            })
+            .expect("default direct ingest succeeds");
+
+        assert!(progress_events.iter().all(|event| {
+            event.pipeline_stage != Some(DaemonIngestPipelineStage::ChecksumManifestCapture)
+        }));
+        assert!(progress_events.iter().any(|event| {
+            event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)
+                && !event.active_hdd_transfers.is_empty()
+        }));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn direct_ingest_strict_skips_existing_checksum_match_before_hdd_copy() {
         let root = temp_root("daemon-ingest-direct-strict-skip");
         let ssd_root = root.join("ssd");

@@ -97,9 +97,9 @@ Ingress-origin rules are deliberately simple:
 
 * ``local_server`` is used for normal ``dasobjectstore ingest files`` jobs
   submitted from the DAS appliance host. If the target store policy permits
-  direct HDD ingest, the daemon may hash the source file and write verified
-  copies directly to selected HDDs. If the policy does not permit direct HDD
-  ingest, the job stages through SSD first.
+  direct HDD ingest, the daemon writes to selected HDDs while calculating the
+  source checksum in flight. If the policy does not permit direct HDD ingest,
+  the job stages through SSD first.
 * ``remote_s3`` is used for paired ``dasobjectstore-remote`` uploads and raw
   S3-compatible remote upload plans. These uploads always stage through the
   selected ObjectStore SSD before daemon-owned HDD settlement.
@@ -122,11 +122,10 @@ HDD placement.
 
 When ingest is running on the DAS server itself and the store policy permits
 ``DirectToHdd``, the daemon uses ``direct_to_hdd_when_policy_allows`` landing
-mode. In that mode it hashes the local source file, reports that work as
-``source-read`` progress, and then sends verified copies directly to
-daemon-selected HDD targets without creating an SSD payload. This policy is for
-reproducible or externally recoverable datasets; protected generated or
-critical stores remain SSD-first.
+mode. In that mode it reads the local source only while copying, calculates its
+checksum in flight, and writes directly to daemon-selected HDD targets without
+creating an SSD payload. This policy is for reproducible or externally
+recoverable datasets; protected generated or critical stores remain SSD-first.
 
 By default, the daemon derives HDD settlement fan-out from the managed HDDs in
 the target DAS: ``max(managed_hdd_count - 2, 2)``, capped at the available HDD
@@ -210,12 +209,14 @@ Object IDs are derived from the endpoint prefix and the source-relative file
 path. If a later import contains a file that maps to an object ID already known
 to the store, DASObjectStore uses an explicit conflict policy.
 
-``--strict`` is the default and the safest commercial behavior. It reuses the
-existing object only when the incoming file checksum matches the stored object
-checksum. The local DAS metadata path records SHA-256 content hashes for this
-comparison. If a checksum is unavailable or differs, the daemon must ingest the
-incoming payload as a new stored version rather than silently overwrite the
-existing payload.
+Normal ingest does not perform a pre-copy duplicate check: it calculates the
+checksum while bytes are copied and treats the payload as a new stored version.
+Use ``--strict`` only when an operator explicitly needs preflight
+deduplication. It reads the incoming source before copying and reuses an
+existing object only when the incoming checksum matches the stored checksum.
+If a checksum is unavailable or differs, the daemon ingests the incoming
+payload as a new stored version rather than silently overwriting existing
+content.
 
 ``--lazy`` is a faster operator-selected policy for trusted repeat imports. It
 reuses the existing object when the object ID and size match. If the size
@@ -245,9 +246,10 @@ Examples:
      --source /mnt/external/zymo_fecal_2025.05 \
      --force
 
-The three policy flags are mutually exclusive. For normal operator use, prefer
-the default strict policy unless the source dataset is known to be immutable and
-the import is being repeated for operational recovery.
+The three policy flags are mutually exclusive. Normal operator use leaves them
+unset so checksum calculation stays in the copy path. Use ``--strict`` for a
+deliberate, preflight duplicate check; use ``--lazy`` only for trusted repeat
+imports where a size match is sufficient.
 
 Group Requirements
 ------------------
