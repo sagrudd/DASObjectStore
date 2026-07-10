@@ -1043,8 +1043,8 @@ pub(crate) struct IngestFilesArgs {
     /// Override the store policy copy count for this import.
     #[arg(long)]
     copies: Option<u8>,
-    /// HDD settlement worker count; defaults to max(managed HDD count minus two, two),
-    /// capped by available HDDs.
+    /// HDD settlement worker count; defaults to up to four concurrent distinct
+    /// HDD target sets, bounded by the configured copy count and HDD inventory.
     #[arg(long)]
     hdd_workers: Option<usize>,
     /// Reuse an existing object only when its recorded checksum matches the incoming file.
@@ -1361,8 +1361,8 @@ pub(crate) struct IngestDirectImportArgs {
     /// Override the store policy copy count for this import.
     #[arg(long)]
     copies: Option<u8>,
-    /// HDD writer worker count; defaults to max(managed HDD count minus two, two),
-    /// capped by available HDDs.
+    /// HDD writer worker count; defaults to up to four concurrent distinct HDD
+    /// target sets, bounded by the configured copy count and HDD inventory.
     #[arg(long)]
     hdd_workers: Option<usize>,
     /// Reuse an existing object only when its recorded checksum matches the incoming file.

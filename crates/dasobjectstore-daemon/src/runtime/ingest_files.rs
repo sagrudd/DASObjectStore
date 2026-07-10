@@ -141,7 +141,7 @@ impl LocalFileIngestExecutor {
             )));
         }
         let hdd_worker_count =
-            resolve_hdd_worker_count(request.hdd_workers, managed_disk_roots.len())?;
+            resolve_hdd_worker_count(request.hdd_workers, managed_disk_roots.len(), copies)?;
         let files = collect_ingest_files(&request.source_path, &endpoint.object_prefix)?;
         let source_bytes = files.iter().map(|entry| entry.size_bytes).sum::<u64>();
         let total_work_bytes = source_bytes.saturating_mul(u64::from(copies) + 1);
@@ -2551,11 +2551,22 @@ mod tests {
     }
 
     #[test]
-    fn hdd_workers_default_to_minus_two_with_two_worker_floor_when_possible() {
-        for (hdd_count, expected_workers) in [(1, 1), (2, 2), (3, 2), (4, 2), (5, 3), (8, 6)] {
-            assert_eq!(default_hdd_worker_count(hdd_count), expected_workers);
+    fn hdd_workers_default_to_up_to_four_concurrent_distinct_disk_sets() {
+        for (hdd_count, copies, expected_workers) in [
+            (1, 1, 1),
+            (3, 1, 3),
+            (4, 1, 4),
+            (8, 1, 4),
+            (4, 2, 2),
+            (7, 2, 3),
+            (8, 3, 2),
+        ] {
             assert_eq!(
-                resolve_hdd_worker_count(None, hdd_count).expect("workers"),
+                default_hdd_worker_count(hdd_count, copies),
+                expected_workers
+            );
+            assert_eq!(
+                resolve_hdd_worker_count(None, hdd_count, copies as u8).expect("workers"),
                 expected_workers
             );
         }
@@ -2563,22 +2574,22 @@ mod tests {
 
     #[test]
     fn hdd_workers_allow_explicit_override_within_detected_hdd_count() {
-        assert_eq!(resolve_hdd_worker_count(Some(3), 7).expect("workers"), 3);
+        assert_eq!(resolve_hdd_worker_count(Some(3), 7, 2).expect("workers"), 3);
 
-        let err = resolve_hdd_worker_count(Some(8), 7).expect_err("too many workers");
+        let err = resolve_hdd_worker_count(Some(4), 7, 2).expect_err("too many workers");
 
         assert!(err
             .to_string()
-            .contains("exceeds available managed HDD writers 7"));
+            .contains("exceeds the 3 concurrent object(s)"));
     }
 
     #[test]
     fn hdd_workers_reject_zero_and_missing_hdd_roots() {
-        assert!(resolve_hdd_worker_count(Some(0), 7)
+        assert!(resolve_hdd_worker_count(Some(0), 7, 1)
             .expect_err("zero workers")
             .to_string()
             .contains("greater than zero"));
-        assert!(resolve_hdd_worker_count(None, 0)
+        assert!(resolve_hdd_worker_count(None, 0, 1)
             .expect_err("missing HDD roots")
             .to_string()
             .contains("at least one managed HDD root"));

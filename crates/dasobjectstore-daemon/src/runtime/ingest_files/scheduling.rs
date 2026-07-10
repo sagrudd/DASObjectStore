@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 
 pub(super) const MAX_HDD_SETTLEMENT_WORKERS: usize = 32;
+const DEFAULT_MAX_HDD_SETTLEMENT_WORKERS: usize = 4;
 
 #[derive(Clone, Debug)]
 pub(super) struct HddSettlementDiskState {
@@ -184,14 +185,21 @@ fn compare_hdd_settlement_disks(
 pub(super) fn resolve_hdd_worker_count(
     requested: Option<usize>,
     managed_hdd_count: usize,
+    copies: u8,
 ) -> Result<usize, DaemonIngestFilesRuntimeError> {
     if managed_hdd_count == 0 {
         return Err(DaemonIngestFilesRuntimeError::CommandFailed(
             "ingest files requires at least one managed HDD root".to_string(),
         ));
     }
-    let maximum = managed_hdd_count.min(MAX_HDD_SETTLEMENT_WORKERS);
-    let workers = requested.unwrap_or_else(|| default_hdd_worker_count(managed_hdd_count));
+    let copies = usize::from(copies);
+    if copies == 0 {
+        return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+            "HDD worker admission requires at least one copy".to_string(),
+        ));
+    }
+    let maximum = (managed_hdd_count / copies).min(MAX_HDD_SETTLEMENT_WORKERS);
+    let workers = requested.unwrap_or_else(|| default_hdd_worker_count(managed_hdd_count, copies));
     if workers == 0 {
         return Err(DaemonIngestFilesRuntimeError::CommandFailed(
             "HDD worker count must be greater than zero".to_string(),
@@ -199,15 +207,17 @@ pub(super) fn resolve_hdd_worker_count(
     }
     if workers > maximum {
         return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "HDD worker count {workers} exceeds available managed HDD writers {maximum}"
+            "HDD worker count {workers} exceeds the {maximum} concurrent object(s) supported by {managed_hdd_count} managed HDD(s) and {copies} copy/copies"
         )));
     }
     Ok(workers)
 }
 
-pub(super) fn default_hdd_worker_count(managed_hdd_count: usize) -> usize {
-    managed_hdd_count
-        .saturating_sub(2)
-        .max(2)
-        .min(managed_hdd_count)
+pub(super) fn default_hdd_worker_count(managed_hdd_count: usize, copies: usize) -> usize {
+    if copies == 0 {
+        return 0;
+    }
+    (managed_hdd_count / copies)
+        .min(DEFAULT_MAX_HDD_SETTLEMENT_WORKERS)
+        .max(1)
 }

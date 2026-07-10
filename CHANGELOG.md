@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.10 - 2026-07-10
+
+- Make default HDD settlement admission copy-aware and permit up to four
+  concurrent distinct HDD target sets. Three- and four-disk pools no longer
+  default to two writers; redundant-copy jobs remain bounded by the number of
+  complete, distinct disk sets available.
+
 ## 0.69.9 - 2026-07-10
 
 - Separate bounded daemon Unix-socket lanes for long-running ingest and
