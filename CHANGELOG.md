@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.45 - 2026-07-10
+
+- Isolate remote-upload progress reporting, telemetry enrichment, and transfer
+  rate calculation from the runtime façade.
+
 ## 0.69.44 - 2026-07-10
 
 - Isolate remote-upload admission gates, queue snapshots, and backpressure
