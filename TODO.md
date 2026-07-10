@@ -42,6 +42,12 @@ list until every temporary size-budget exception has been removed.
 - [ ] Replace temporary size-budget exceptions by splitting the CLI runner and
   CLI argument contracts into command-family modules; keep dispatcher-only
   roots and move tests beside their owning modules.
+  - [x] Extract the ingest files/directive parser and its conflict-policy
+    contract into `crates/dasobjectstore-cli/src/cli/ingest.rs`; keep the root
+    dispatcher and existing daemon request behavior unchanged.
+  - [ ] Extract the remaining ingest queue/status/direct-import contracts and
+    move the ingest parser tests beside the new module before removing the CLI
+    baseline exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.

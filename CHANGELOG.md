@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.29 - 2026-07-10
+
+- Extract the ingest files/directive argument parser into its own CLI command
+  family module without changing daemon request behavior or wire contracts.
+
 ## 0.69.28 - 2026-07-10
 
 - Document the authenticated ingest-policy workflow, explicit server-local
