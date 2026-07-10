@@ -5750,7 +5750,7 @@ fn write_file_ingest_progress(
 }
 
 #[allow(dead_code)]
-fn write_daemon_ingest_progress(
+pub(super) fn write_daemon_ingest_progress(
     writer: &mut impl Write,
     progress: &DaemonIngestProgressEvent,
     started_at: Instant,

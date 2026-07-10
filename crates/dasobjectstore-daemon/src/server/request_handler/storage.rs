@@ -4,6 +4,39 @@ use dasobjectstore_object_service::{
     StoreRegistryDeleteReport, SubObjectRegistryStoreDeleteReport,
 };
 
+fn emit_reconciliation_progress(
+    emit_progress: &mut dyn FnMut(
+        DaemonIngestProgressEvent,
+    ) -> Result<(), DaemonIngestFilesRuntimeError>,
+    request: &StoreRepairRequest,
+    message: &str,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    use dasobjectstore_core::ids::IngestJobId;
+    emit_progress(DaemonIngestProgressEvent {
+        job_id: IngestJobId::new("store-repair-s3-reconcile").expect("static job id"),
+        endpoint: request
+            .store_id
+            .clone()
+            .expect("validated reconciliation store"),
+        stage: crate::api::DaemonIngestStage::Queued,
+        pipeline_stage: Some(crate::api::DaemonIngestPipelineStage::SourceRead),
+        work_bytes_done: 0,
+        work_bytes_total: None,
+        source_bytes_done: None,
+        source_bytes_total: None,
+        stage_bytes_done: None,
+        stage_bytes_total: None,
+        files_done: 0,
+        files_total: None,
+        current_object_id: None,
+        ssd_pressure: None,
+        telemetry: None,
+        active_hdd_transfers: Vec::new(),
+        resource_policy: None,
+        message: Some(message.to_string()),
+    })
+}
+
 /// Handles storage inventory, telemetry, ingest, and object browser requests.
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
@@ -60,7 +93,7 @@ where
             }
         }
         DaemonApiRequest::StoreRepair(request) => {
-            match handler.store_repair_for_actor(request, actor) {
+            match handler.store_repair_for_actor(request, actor, emit_progress) {
                 Ok(response) => Ok(DaemonApiResponse::StoreRepair(response)),
                 Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     code, message,
@@ -417,6 +450,9 @@ where
         &self,
         request: StoreRepairRequest,
         actor: Option<&DaemonLocalActor>,
+        emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairResponse, (&'static str, String)> {
         if !request.dry_run {
             let Some(actor) = actor else {
@@ -434,6 +470,12 @@ where
             }
         }
         let s3_reconciliation = if request.reconcile_s3 {
+            emit_reconciliation_progress(
+                emit_progress,
+                &request,
+                "starting Garage download into private SSD staging",
+            )
+            .map_err(|error| ("store_repair_progress_failed", error.to_string()))?;
             let store_id = request
                 .store_id
                 .clone()
@@ -453,6 +495,14 @@ where
         } else {
             None
         };
+        if s3_reconciliation.is_some() {
+            emit_reconciliation_progress(
+                emit_progress,
+                &request,
+                "Garage download finished; SSD-to-HDD ingest and metadata registration completed",
+            )
+            .map_err(|error| ("store_repair_progress_failed", error.to_string()))?;
+        }
         let (store_definitions, disk_roots) = self.recovery_inputs("store_repair_failed")?;
         let report = dasobjectstore_metadata::recover_live_metadata(
             &dasobjectstore_metadata::RecoverLiveMetadataRequest {

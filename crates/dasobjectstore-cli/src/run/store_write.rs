@@ -288,13 +288,20 @@ pub(super) fn run_store_repair(
 ) -> Result<(), CliError> {
     let config = DaemonRuntimeConfig::default_packaged();
     let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
-    let response = client.store_repair(DaemonStoreRepairRequest {
-        store_id: args.store_id().cloned(),
-        dry_run: !args.apply(),
-        confirmation: args.confirm().to_string(),
-        reconcile_s3: args.reconcile_s3(),
-        s3_prefix: args.s3_prefix().map(ToOwned::to_owned),
-    })?;
+    let started_at = std::time::Instant::now();
+    let response = client.store_repair_with_progress(
+        DaemonStoreRepairRequest {
+            store_id: args.store_id().cloned(),
+            dry_run: !args.apply(),
+            confirmation: args.confirm().to_string(),
+            reconcile_s3: args.reconcile_s3(),
+            s3_prefix: args.s3_prefix().map(ToOwned::to_owned),
+        },
+        |event| {
+            super::write_daemon_ingest_progress(writer, &event, started_at)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))
+        },
+    )?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response)?;
         writer.write_all(b"\n")?;

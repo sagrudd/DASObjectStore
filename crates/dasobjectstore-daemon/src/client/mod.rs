@@ -146,6 +146,20 @@ where
         }
     }
 
+    pub fn store_repair_with_progress(
+        &self,
+        request: StoreRepairRequest,
+        mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
+    ) -> Result<StoreRepairResponse, DaemonClientError> {
+        match self
+            .transport
+            .send_with_progress(DaemonApiRequest::StoreRepair(request), &mut progress)?
+        {
+            DaemonApiResponse::StoreRepair(response) => Ok(response),
+            response => Err(unexpected("store_repair", response)),
+        }
+    }
+
     pub fn store_verify(
         &self,
         request: StoreVerifyRequest,
