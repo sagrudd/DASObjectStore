@@ -305,6 +305,21 @@ pub struct DaemonIngestHddActiveTransfer {
     pub bytes_done: u64,
     pub bytes_total: u64,
     pub bytes_per_second: u64,
+    #[serde(default)]
+    pub phase: DaemonIngestHddTransferPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fsync_duration_millis: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rename_duration_millis: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngestHddTransferPhase {
+    #[default]
+    Writing,
+    Fsync,
+    Rename,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -317,6 +332,8 @@ pub enum DaemonIngestPipelineStage {
     ChecksumManifestCapture,
     HddPlacement,
     HddWrite,
+    HddFsync,
+    HddRename,
     Verification,
     Finalization,
 }

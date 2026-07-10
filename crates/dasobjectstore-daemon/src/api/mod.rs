@@ -35,6 +35,7 @@ pub use health::{
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
     DaemonHealthSummaryResponse, DaemonIngestSummary, DaemonSsdPressure,
 };
+pub use ingest::DaemonIngestHddTransferPhase;
 pub use ingest::{
     CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestAdaptiveSchedulerInput,
     DaemonIngestAdaptiveSchedulingLimit, DaemonIngestAdaptiveWorkerSchedule,

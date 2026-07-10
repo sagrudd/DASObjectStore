@@ -6,6 +6,7 @@ pub mod client;
 pub mod runtime;
 pub mod server;
 
+pub use api::DaemonIngestHddTransferPhase;
 pub use api::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
     remote_easyconnect_object_store_grants_for_actor,

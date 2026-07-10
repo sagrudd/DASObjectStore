@@ -5,8 +5,8 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use dasobjectstore_daemon::{
-    DaemonIngestPipelineStage, DaemonIngestProgressEvent, DaemonIngestStage, DaemonSsdPressure,
-    SubmitIngestFilesResponse,
+    DaemonIngestHddActiveTransfer, DaemonIngestHddTransferPhase, DaemonIngestPipelineStage,
+    DaemonIngestProgressEvent, DaemonIngestStage, DaemonSsdPressure, SubmitIngestFilesResponse,
 };
 use ratatui::{
     backend::CrosstermBackend,
@@ -405,16 +405,7 @@ fn active_hdd_landing_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'stat
 
     std::iter::once(Line::from("Active landing:"))
         .chain(event.active_hdd_transfers.iter().take(8).map(|transfer| {
-            let phase = if transfer.bytes_done >= transfer.bytes_total && transfer.bytes_total > 0 {
-                format!(
-                    "settling; avg {}",
-                    format_rate_label(transfer.bytes_per_second)
-                )
-            } else if transfer.bytes_done == 0 {
-                "copying".to_string()
-            } else {
-                format_rate_label(transfer.bytes_per_second)
-            };
+            let phase = hdd_transfer_phase_label(transfer);
             Line::from(format!(
                 "file {}/{} copy {} -> {}: {}/{} @ {} {}",
                 transfer.file_index,
@@ -462,6 +453,8 @@ fn pipeline_stage_label(stage: DaemonIngestPipelineStage) -> &'static str {
         DaemonIngestPipelineStage::ChecksumManifestCapture => "checksum-manifest-capture",
         DaemonIngestPipelineStage::HddPlacement => "hdd-placement",
         DaemonIngestPipelineStage::HddWrite => "hdd-write",
+        DaemonIngestPipelineStage::HddFsync => "hdd-fsync",
+        DaemonIngestPipelineStage::HddRename => "hdd-rename",
         DaemonIngestPipelineStage::Verification => "verification",
         DaemonIngestPipelineStage::Finalization => "finalization",
     }
@@ -495,7 +488,11 @@ fn queue_label(event: &DaemonIngestProgressEvent) -> String {
     );
     let hdd_active = matches!(
         event.pipeline_stage,
-        Some(DaemonIngestPipelineStage::HddWrite)
+        Some(
+            DaemonIngestPipelineStage::HddWrite
+                | DaemonIngestPipelineStage::HddFsync
+                | DaemonIngestPipelineStage::HddRename
+        )
     );
     format!(
         "source pending {pending} file(s), SSD active {}, HDD active {}, HDD queued 0, completed {}",
@@ -503,6 +500,21 @@ fn queue_label(event: &DaemonIngestProgressEvent) -> String {
         usize::from(hdd_active),
         event.files_done
     )
+}
+
+fn hdd_transfer_phase_label(transfer: &DaemonIngestHddActiveTransfer) -> String {
+    match transfer.phase {
+        DaemonIngestHddTransferPhase::Writing if transfer.bytes_done == 0 => "copying".to_string(),
+        DaemonIngestHddTransferPhase::Writing => format_rate_label(transfer.bytes_per_second),
+        DaemonIngestHddTransferPhase::Fsync => transfer
+            .fsync_duration_millis
+            .map(|duration| format!("fsync complete ({duration} ms); current 0 B/s"))
+            .unwrap_or_else(|| "fsync; current 0 B/s".to_string()),
+        DaemonIngestHddTransferPhase::Rename => transfer
+            .rename_duration_millis
+            .map(|duration| format!("atomic rename complete ({duration} ms); current 0 B/s"))
+            .unwrap_or_else(|| "atomic rename; current 0 B/s".to_string()),
+    }
 }
 
 fn ssd_pressure_label(event: &DaemonIngestProgressEvent) -> &'static str {
@@ -608,10 +620,10 @@ mod tests {
     use super::{UploadTui, UploadTuiContext};
     use dasobjectstore_core::ids::{DiskId, IngestJobId, StoreId};
     use dasobjectstore_daemon::{
-        DaemonIngestHddActiveTransfer, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
-        DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry,
-        DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry, DaemonSsdPressure,
-        SubmitIngestFilesResponse,
+        DaemonIngestHddActiveTransfer, DaemonIngestHddTransferPhase, DaemonIngestPipelineStage,
+        DaemonIngestProgressEvent, DaemonIngestQueueDepths, DaemonIngestStage,
+        DaemonIngestTelemetry, DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry,
+        DaemonSsdPressure, SubmitIngestFilesResponse,
     };
     use std::cell::RefCell;
     use std::io::{self, Write};
@@ -671,6 +683,9 @@ mod tests {
                 bytes_done: 512 * 1024 * 1024,
                 bytes_total: 2 * 1024 * 1024 * 1024,
                 bytes_per_second: 128 * 1024 * 1024,
+                phase: DaemonIngestHddTransferPhase::Writing,
+                fsync_duration_millis: None,
+                rename_duration_millis: None,
             }],
             resource_policy: None,
             message: Some("copying".to_string()),
@@ -697,6 +712,14 @@ mod tests {
         assert!(landing.contains(
             "file 2/9 copy 1 -> qnap-1057: 512.0 MiB/2.0 GiB @ 128.0 MiB/s raw/read-2.pod5"
         ));
+        let mut fsync_transfer = event.active_hdd_transfers[0].clone();
+        fsync_transfer.phase = DaemonIngestHddTransferPhase::Fsync;
+        fsync_transfer.bytes_per_second = 0;
+        fsync_transfer.fsync_duration_millis = Some(7);
+        assert_eq!(
+            super::hdd_transfer_phase_label(&fsync_transfer),
+            "fsync complete (7 ms); current 0 B/s"
+        );
 
         let mut tui = UploadTui::start_with_fixed_viewport(
             &mut output,

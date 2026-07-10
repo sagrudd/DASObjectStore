@@ -1,9 +1,9 @@
 use crate::api::{
     DaemonIngestConflictAction, DaemonIngestConflictPolicy, DaemonIngestHddActiveTransfer,
-    DaemonIngestObjectSnapshot, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
-    DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
-    DaemonIngestWorkerTelemetry, DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DaemonIngestHddTransferPhase, DaemonIngestObjectSnapshot, DaemonIngestPipelineStage,
+    DaemonIngestProgressEvent, DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry,
+    DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry, DaemonIngressLandingMode,
+    DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
@@ -643,6 +643,9 @@ struct ActiveHddTransferState {
     bytes_done: u64,
     bytes_total: u64,
     started_at: Instant,
+    phase: DaemonIngestHddTransferPhase,
+    fsync_duration_millis: Option<u64>,
+    rename_duration_millis: Option<u64>,
 }
 
 impl PipelineProgressState {
@@ -673,51 +676,125 @@ impl PipelineProgressState {
     }
 
     fn apply_object_progress(&mut self, entry: &FileIngestEntry, progress: &ObjectPutProgress) {
-        let key = (
-            progress.object_id.clone(),
-            object_progress_stage_key(progress),
-        );
-        let previous = *self.progress_offsets.get(&key).unwrap_or(&0);
-        let current = progress.bytes_written;
-        let delta = current.saturating_sub(previous);
-        self.progress_offsets.insert(key, current);
-        self.completed_work_bytes = self.completed_work_bytes.saturating_add(delta);
-        if matches!(progress.stage, ObjectPutProgressStage::SsdIngest) {
-            let previous_source = previous.min(entry.size_bytes);
-            let current_source = current.min(entry.size_bytes);
-            self.completed_source_bytes = self
-                .completed_source_bytes
-                .saturating_add(current_source.saturating_sub(previous_source));
-        } else if let ObjectPutProgressStage::HddCopy {
-            disk_id,
-            copy_number,
-        } = &progress.stage
-        {
-            if self.count_hdd_copy_as_source && *copy_number == 1 {
-                let previous_source = previous.min(entry.size_bytes);
-                let current_source = current.min(entry.size_bytes);
-                let source_delta = current_source.saturating_sub(previous_source);
-                self.completed_source_bytes =
-                    self.completed_source_bytes.saturating_add(source_delta);
-                self.completed_work_bytes = self.completed_work_bytes.saturating_add(source_delta);
+        match &progress.stage {
+            ObjectPutProgressStage::SsdIngest | ObjectPutProgressStage::SsdFlush => {
+                let key = (
+                    progress.object_id.clone(),
+                    object_progress_stage_key(progress),
+                );
+                let previous = *self.progress_offsets.get(&key).unwrap_or(&0);
+                let current = progress.bytes_written;
+                self.progress_offsets.insert(key, current);
+                self.completed_work_bytes = self
+                    .completed_work_bytes
+                    .saturating_add(current.saturating_sub(previous));
+                if matches!(progress.stage, ObjectPutProgressStage::SsdIngest) {
+                    self.completed_source_bytes = self.completed_source_bytes.saturating_add(
+                        current
+                            .min(entry.size_bytes)
+                            .saturating_sub(previous.min(entry.size_bytes)),
+                    );
+                }
             }
-            if let Ok(disk_id) = DiskId::new(disk_id.clone()) {
-                let key = (progress.object_id.clone(), disk_id.clone(), *copy_number);
-                let transfer = self.active_hdd_transfers.entry(key).or_insert_with(|| {
-                    ActiveHddTransferState {
-                        file_index: entry.file_index,
-                        files_total: self.total_files,
-                        object_id: entry.object_id.clone(),
-                        relative_path: entry.relative_path.to_string_lossy().to_string(),
-                        disk_id,
-                        copy_number: *copy_number,
-                        bytes_done: 0,
-                        bytes_total: entry.size_bytes,
-                        started_at: Instant::now(),
-                    }
+            ObjectPutProgressStage::HddCopy {
+                disk_id,
+                copy_number,
+            } => {
+                let key = (
+                    progress.object_id.clone(),
+                    object_progress_stage_key(progress),
+                );
+                let previous = *self.progress_offsets.get(&key).unwrap_or(&0);
+                let current = progress.bytes_written;
+                self.progress_offsets.insert(key, current);
+                let delta = current.saturating_sub(previous);
+                self.completed_work_bytes = self.completed_work_bytes.saturating_add(delta);
+                if self.count_hdd_copy_as_source && *copy_number == 1 {
+                    let source_delta = current
+                        .min(entry.size_bytes)
+                        .saturating_sub(previous.min(entry.size_bytes));
+                    self.completed_source_bytes =
+                        self.completed_source_bytes.saturating_add(source_delta);
+                    self.completed_work_bytes =
+                        self.completed_work_bytes.saturating_add(source_delta);
+                }
+                self.update_hdd_transfer(
+                    entry,
+                    disk_id,
+                    *copy_number,
+                    current,
+                    DaemonIngestHddTransferPhase::Writing,
+                    None,
+                    None,
+                );
+            }
+            ObjectPutProgressStage::HddFsync {
+                disk_id,
+                copy_number,
+                duration_millis,
+            } => self.update_hdd_transfer(
+                entry,
+                disk_id,
+                *copy_number,
+                progress.bytes_written,
+                DaemonIngestHddTransferPhase::Fsync,
+                *duration_millis,
+                None,
+            ),
+            ObjectPutProgressStage::HddRename {
+                disk_id,
+                copy_number,
+                duration_millis,
+            } => self.update_hdd_transfer(
+                entry,
+                disk_id,
+                *copy_number,
+                progress.bytes_written,
+                DaemonIngestHddTransferPhase::Rename,
+                None,
+                *duration_millis,
+            ),
+        }
+    }
+
+    fn update_hdd_transfer(
+        &mut self,
+        entry: &FileIngestEntry,
+        disk_id: &str,
+        copy_number: u8,
+        bytes_done: u64,
+        phase: DaemonIngestHddTransferPhase,
+        fsync_duration_millis: Option<u64>,
+        rename_duration_millis: Option<u64>,
+    ) {
+        let Ok(disk_id) = DiskId::new(disk_id.to_string()) else {
+            return;
+        };
+        let key = (entry.object_id.clone(), disk_id.clone(), copy_number);
+        let transfer =
+            self.active_hdd_transfers
+                .entry(key)
+                .or_insert_with(|| ActiveHddTransferState {
+                    file_index: entry.file_index,
+                    files_total: self.total_files,
+                    object_id: entry.object_id.clone(),
+                    relative_path: entry.relative_path.to_string_lossy().to_string(),
+                    disk_id,
+                    copy_number,
+                    bytes_done: 0,
+                    bytes_total: entry.size_bytes,
+                    started_at: Instant::now(),
+                    phase: DaemonIngestHddTransferPhase::Writing,
+                    fsync_duration_millis: None,
+                    rename_duration_millis: None,
                 });
-                transfer.bytes_done = current.min(entry.size_bytes);
-            }
+        transfer.bytes_done = bytes_done.min(entry.size_bytes);
+        transfer.phase = phase;
+        if fsync_duration_millis.is_some() {
+            transfer.fsync_duration_millis = fsync_duration_millis;
+        }
+        if rename_duration_millis.is_some() {
+            transfer.rename_duration_millis = rename_duration_millis;
         }
     }
 
@@ -754,7 +831,14 @@ impl PipelineProgressState {
                     copy_number: transfer.copy_number,
                     bytes_done: transfer.bytes_done,
                     bytes_total: transfer.bytes_total,
-                    bytes_per_second: (transfer.bytes_done as f64 / elapsed).round() as u64,
+                    bytes_per_second: if transfer.phase == DaemonIngestHddTransferPhase::Writing {
+                        (transfer.bytes_done as f64 / elapsed).round() as u64
+                    } else {
+                        0
+                    },
+                    phase: transfer.phase,
+                    fsync_duration_millis: transfer.fsync_duration_millis,
+                    rename_duration_millis: transfer.rename_duration_millis,
                 }
             })
             .collect()
@@ -1554,6 +1638,16 @@ fn object_progress_stage_key(progress: &ObjectPutProgress) -> String {
             disk_id,
             copy_number,
         } => format!("hdd-copy-{disk_id}-{copy_number}"),
+        ObjectPutProgressStage::HddFsync {
+            disk_id,
+            copy_number,
+            ..
+        } => format!("hdd-fsync-{disk_id}-{copy_number}"),
+        ObjectPutProgressStage::HddRename {
+            disk_id,
+            copy_number,
+            ..
+        } => format!("hdd-rename-{disk_id}-{copy_number}"),
     }
 }
 
@@ -1565,6 +1659,16 @@ fn daemon_stage_for_object_progress(progress: &ObjectPutProgress) -> DaemonInges
         ObjectPutProgressStage::HddCopy {
             disk_id,
             copy_number,
+        }
+        | ObjectPutProgressStage::HddFsync {
+            disk_id,
+            copy_number,
+            ..
+        }
+        | ObjectPutProgressStage::HddRename {
+            disk_id,
+            copy_number,
+            ..
         } => DaemonIngestStage::HddCopy {
             disk_id: DiskId::new(disk_id).expect("object progress disk id is valid"),
             copy_number: *copy_number,
@@ -1577,6 +1681,8 @@ fn pipeline_stage_for_object_progress(progress: &ObjectPutProgress) -> DaemonIng
         ObjectPutProgressStage::SsdIngest => DaemonIngestPipelineStage::SsdStage,
         ObjectPutProgressStage::SsdFlush => DaemonIngestPipelineStage::SsdFlush,
         ObjectPutProgressStage::HddCopy { .. } => DaemonIngestPipelineStage::HddWrite,
+        ObjectPutProgressStage::HddFsync { .. } => DaemonIngestPipelineStage::HddFsync,
+        ObjectPutProgressStage::HddRename { .. } => DaemonIngestPipelineStage::HddRename,
     }
 }
 
@@ -1599,6 +1705,38 @@ fn stage_message_for_object_progress(
             copy_number,
         } => format!(
             "migrating to HDD {disk_id} copy {copy_number}: {}",
+            entry.relative_path.to_string_lossy()
+        ),
+        ObjectPutProgressStage::HddFsync {
+            disk_id,
+            copy_number,
+            duration_millis: None,
+        } => format!(
+            "fsyncing HDD {disk_id} copy {copy_number}: {}",
+            entry.relative_path.to_string_lossy()
+        ),
+        ObjectPutProgressStage::HddFsync {
+            disk_id,
+            copy_number,
+            duration_millis: Some(duration_millis),
+        } => format!(
+            "fsync complete for HDD {disk_id} copy {copy_number} in {duration_millis} ms: {}",
+            entry.relative_path.to_string_lossy()
+        ),
+        ObjectPutProgressStage::HddRename {
+            disk_id,
+            copy_number,
+            duration_millis: None,
+        } => format!(
+            "atomically renaming HDD {disk_id} copy {copy_number}: {}",
+            entry.relative_path.to_string_lossy()
+        ),
+        ObjectPutProgressStage::HddRename {
+            disk_id,
+            copy_number,
+            duration_millis: Some(duration_millis),
+        } => format!(
+            "atomic rename complete for HDD {disk_id} copy {copy_number} in {duration_millis} ms: {}",
             entry.relative_path.to_string_lossy()
         ),
     }
@@ -1692,8 +1830,8 @@ mod tests {
         SSD_ROOT_ENV,
     };
     use crate::api::{
-        DaemonIngestConflictPolicy, DaemonIngestPipelineStage, DaemonIngressLandingMode,
-        DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest,
+        DaemonIngestConflictPolicy, DaemonIngestHddTransferPhase, DaemonIngestPipelineStage,
+        DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest,
     };
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
@@ -1827,6 +1965,19 @@ mod tests {
         assert!(progress_events
             .iter()
             .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)));
+        assert!(progress_events
+            .iter()
+            .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::HddFsync)));
+        assert!(progress_events
+            .iter()
+            .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::HddRename)));
+        assert!(progress_events.iter().any(|event| {
+            event.active_hdd_transfers.iter().any(|transfer| {
+                transfer.phase == DaemonIngestHddTransferPhase::Fsync
+                    && transfer.bytes_per_second == 0
+                    && transfer.fsync_duration_millis.is_some()
+            })
+        }));
         assert!(progress_events
             .iter()
             .any(|event| !event.active_hdd_transfers.is_empty()));

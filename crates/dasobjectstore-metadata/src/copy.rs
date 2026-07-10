@@ -8,6 +8,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 use std::thread;
+use std::time::Instant;
 
 pub const HDD_COPY_CONTENT_HASH_ALGORITHM: &str = SHA256_ALGORITHM;
 
@@ -77,6 +78,20 @@ pub struct HddCopyReport {
     pub bytes_written: u64,
     pub content_hash_algorithm: String,
     pub content_hash: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HddInlineHashCopyProgress {
+    BytesWritten {
+        bytes_written: u64,
+    },
+    FsyncStarted {
+        bytes_written: u64,
+    },
+    FsyncComplete {
+        bytes_written: u64,
+        duration_millis: u64,
+    },
 }
 
 #[derive(Debug)]
@@ -170,9 +185,9 @@ pub fn write_hdd_copy_with_inline_hash_with_controlled_progress(
 /// The source is opened and read once. Each bounded writer queue provides
 /// backpressure from its physical disk, while each writer calculates a local
 /// checksum and `fsync`s its temporary payload before reporting completion.
-pub fn write_hdd_copies_with_inline_hash_fanout_with_controlled_progress(
+pub(crate) fn write_hdd_copies_with_inline_hash_fanout_with_controlled_progress(
     requests: &[HddInlineHashCopyRequest],
-    mut progress: impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+    mut progress: impl FnMut(&DiskId, u8, HddInlineHashCopyProgress) -> Result<(), HddCopyError>,
 ) -> Result<Vec<HddCopyReport>, HddCopyError> {
     let source_path = validate_fanout_requests(requests)?;
     let mut source = File::open(source_path)?;
@@ -186,7 +201,7 @@ pub fn write_hdd_copies_with_inline_hash_fanout_with_controlled_progress(
 fn write_hdd_copies_from_reader_with_controlled_progress(
     source: &mut impl io::Read,
     requests: &[HddInlineHashCopyRequest],
-    mut progress: impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+    mut progress: impl FnMut(&DiskId, u8, HddInlineHashCopyProgress) -> Result<(), HddCopyError>,
 ) -> Result<Vec<HddCopyReport>, HddCopyError> {
     validate_fanout_requests(requests)?;
     let mut destinations = Vec::with_capacity(requests.len());
@@ -221,7 +236,7 @@ fn write_hdd_copies_to_open_destinations(
     source: &mut impl io::Read,
     requests: &[HddInlineHashCopyRequest],
     destinations: Vec<File>,
-    mut progress: impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+    mut progress: impl FnMut(&DiskId, u8, HddInlineHashCopyProgress) -> Result<(), HddCopyError>,
 ) -> Result<Vec<HddCopyReport>, HddCopyError> {
     const FANOUT_QUEUE_CAPACITY: usize = 2;
 
@@ -235,12 +250,11 @@ fn write_hdd_copies_to_open_destinations(
         let write_progress_tx = write_progress_tx.clone();
         let result_tx = result_tx.clone();
         workers.push(thread::spawn(move || {
-            let result =
-                write_fanout_destination(request, destination, receiver, |bytes_written| {
-                    write_progress_tx
-                        .send((index, bytes_written))
-                        .map_err(|_| HddCopyError::Cancelled)
-                });
+            let result = write_fanout_destination(request, destination, receiver, |progress| {
+                write_progress_tx
+                    .send((index, progress))
+                    .map_err(|_| HddCopyError::Cancelled)
+            });
             let _ = result_tx.send(result);
         }));
         senders.push(sender);
@@ -320,7 +334,7 @@ fn write_fanout_destination(
     request: HddInlineHashCopyRequest,
     mut destination: File,
     receiver: mpsc::Receiver<Arc<[u8]>>,
-    mut progress: impl FnMut(u64) -> Result<(), HddCopyError>,
+    mut progress: impl FnMut(HddInlineHashCopyProgress) -> Result<(), HddCopyError>,
 ) -> Result<HddCopyReport, HddCopyError> {
     let mut hasher = Sha256::new();
     let mut bytes_written = 0_u64;
@@ -328,9 +342,18 @@ fn write_fanout_destination(
         destination.write_all(&chunk)?;
         hasher.update(&chunk);
         bytes_written = bytes_written.saturating_add(chunk.len() as u64);
-        progress(bytes_written)?;
+        progress(HddInlineHashCopyProgress::BytesWritten { bytes_written })?;
     }
+    progress(HddInlineHashCopyProgress::FsyncStarted { bytes_written })?;
+    let fsync_started_at = Instant::now();
     destination.sync_all()?;
+    progress(HddInlineHashCopyProgress::FsyncComplete {
+        bytes_written,
+        duration_millis: fsync_started_at
+            .elapsed()
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64,
+    })?;
 
     Ok(HddCopyReport {
         object_id: request.object_id,
@@ -363,13 +386,13 @@ fn validate_fanout_requests(requests: &[HddInlineHashCopyRequest]) -> Result<&Pa
 }
 
 fn drain_fanout_progress(
-    receiver: &mpsc::Receiver<(usize, u64)>,
+    receiver: &mpsc::Receiver<(usize, HddInlineHashCopyProgress)>,
     requests: &[HddInlineHashCopyRequest],
-    progress: &mut impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+    progress: &mut impl FnMut(&DiskId, u8, HddInlineHashCopyProgress) -> Result<(), HddCopyError>,
 ) -> Result<(), HddCopyError> {
-    while let Ok((index, bytes_written)) = receiver.try_recv() {
+    while let Ok((index, copy_progress)) = receiver.try_recv() {
         let request = &requests[index];
-        progress(&request.disk_id, request.copy_number, bytes_written)?;
+        progress(&request.disk_id, request.copy_number, copy_progress)?;
     }
     Ok(())
 }

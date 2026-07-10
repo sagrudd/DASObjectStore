@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.5 - 2026-07-10
+
+- Expose direct-HDD per-target ``fsync`` and atomic-rename finalization states
+  in daemon ingest events, including their measured durations. The embedded TUI
+  now identifies the active finalization state and reports zero current write
+  rate while the target is not copying bytes.
+
 ## 0.69.4 - 2026-07-10
 
 - Keep only the latest byte-progress snapshot between 100 ms embedded-TUI

@@ -1,7 +1,7 @@
 use crate::copy::{
     write_hdd_copies_with_inline_hash_fanout_with_controlled_progress,
     write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest,
-    HddInlineHashCopyRequest,
+    HddInlineHashCopyProgress, HddInlineHashCopyRequest,
 };
 use crate::evacuation::DiskCopyRoot;
 use crate::ingest::{encode_path_component, IngestStagingLayout};
@@ -13,6 +13,7 @@ use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::io;
 use std::path::PathBuf;
+use std::time::Instant;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectPutRequest {
@@ -125,7 +126,20 @@ pub struct ObjectPutProgress {
 pub enum ObjectPutProgressStage {
     SsdIngest,
     SsdFlush,
-    HddCopy { disk_id: String, copy_number: u8 },
+    HddCopy {
+        disk_id: String,
+        copy_number: u8,
+    },
+    HddFsync {
+        disk_id: String,
+        copy_number: u8,
+        duration_millis: Option<u64>,
+    },
+    HddRename {
+        disk_id: String,
+        copy_number: u8,
+        duration_millis: Option<u64>,
+    },
 }
 
 pub fn put_object_ssd_first(request: &ObjectPutRequest) -> Result<ObjectPutReport, ObjectPutError> {
@@ -319,13 +333,38 @@ fn write_direct_requested_copies(
         .collect::<Vec<_>>();
     let mut copy_reports = write_hdd_copies_with_inline_hash_fanout_with_controlled_progress(
         &copy_requests,
-        |disk_id, copy_number, bytes_written| {
+        |disk_id, copy_number, copy_progress| {
+            let (stage, bytes_written) = match copy_progress {
+                HddInlineHashCopyProgress::BytesWritten { bytes_written } => (
+                    ObjectPutProgressStage::HddCopy {
+                        disk_id: disk_id.as_str().to_string(),
+                        copy_number,
+                    },
+                    bytes_written,
+                ),
+                HddInlineHashCopyProgress::FsyncStarted { bytes_written } => (
+                    ObjectPutProgressStage::HddFsync {
+                        disk_id: disk_id.as_str().to_string(),
+                        copy_number,
+                        duration_millis: None,
+                    },
+                    bytes_written,
+                ),
+                HddInlineHashCopyProgress::FsyncComplete {
+                    bytes_written,
+                    duration_millis,
+                } => (
+                    ObjectPutProgressStage::HddFsync {
+                        disk_id: disk_id.as_str().to_string(),
+                        copy_number,
+                        duration_millis: Some(duration_millis),
+                    },
+                    bytes_written,
+                ),
+            };
             progress(ObjectPutProgress {
                 object_id: request.object_id.clone(),
-                stage: ObjectPutProgressStage::HddCopy {
-                    disk_id: disk_id.as_str().to_string(),
-                    copy_number,
-                },
+                stage,
                 bytes_written,
             })
             .map_err(object_put_error_to_hdd_copy_error)
@@ -336,7 +375,31 @@ fn write_direct_requested_copies(
     for copy_report in &mut copy_reports {
         let disk_root = &request.disk_roots[(copy_report.copy_number - 1) as usize];
         let final_path = object_copy_path(disk_root, &request.object_id, &copy_report.content_hash);
+        progress(ObjectPutProgress {
+            object_id: request.object_id.clone(),
+            stage: ObjectPutProgressStage::HddRename {
+                disk_id: copy_report.disk_id.as_str().to_string(),
+                copy_number: copy_report.copy_number,
+                duration_millis: None,
+            },
+            bytes_written: copy_report.bytes_written,
+        })?;
+        let rename_started_at = Instant::now();
         move_direct_copy_into_place(&copy_report.destination_path, &final_path)?;
+        progress(ObjectPutProgress {
+            object_id: request.object_id.clone(),
+            stage: ObjectPutProgressStage::HddRename {
+                disk_id: copy_report.disk_id.as_str().to_string(),
+                copy_number: copy_report.copy_number,
+                duration_millis: Some(
+                    rename_started_at
+                        .elapsed()
+                        .as_millis()
+                        .min(u128::from(u64::MAX)) as u64,
+                ),
+            },
+            bytes_written: copy_report.bytes_written,
+        })?;
         copy_report.destination_path = final_path;
         placements.push(ObjectPutPlacementReport {
             disk_id: copy_report.disk_id.as_str().to_string(),
@@ -721,6 +784,34 @@ mod tests {
         assert!(progress_events
             .iter()
             .any(|event| matches!(event.stage, super::ObjectPutProgressStage::HddCopy { .. })));
+        assert!(progress_events.iter().any(|event| matches!(
+            event.stage,
+            super::ObjectPutProgressStage::HddFsync {
+                duration_millis: None,
+                ..
+            }
+        )));
+        assert!(progress_events.iter().any(|event| matches!(
+            event.stage,
+            super::ObjectPutProgressStage::HddFsync {
+                duration_millis: Some(_),
+                ..
+            }
+        )));
+        assert!(progress_events.iter().any(|event| matches!(
+            event.stage,
+            super::ObjectPutProgressStage::HddRename {
+                duration_millis: None,
+                ..
+            }
+        )));
+        assert!(progress_events.iter().any(|event| matches!(
+            event.stage,
+            super::ObjectPutProgressStage::HddRename {
+                duration_millis: Some(_),
+                ..
+            }
+        )));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
