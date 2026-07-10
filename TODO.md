@@ -180,6 +180,8 @@ list until every temporary size-budget exception has been removed.
   OBJECTSTORE` over verified HTTPS, with daemon-owned eight-hour scoped Garage
   sessions, redacted default output, explicit JSON connection context, and
   persisted-credential validation.
+- [x] Align remote-upload admission with the registry's canonical `s3_bucket`
+  export label so writer-group users can authenticate to exported stores.
 - [ ] Split global Web CSS by base primitives and feature-owned styles, and
   split screenshot regression runner, fixture server, assertions, and
   per-workspace fixtures into dedicated modules.

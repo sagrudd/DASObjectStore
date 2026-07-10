@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.73 - 2026-07-10
+
+- Fix remote-upload admission to accept the canonical `s3_bucket` export label
+  emitted by the ObjectStore registry and dashboard.
+
 ## 0.69.72 - 2026-07-10
 
 - Move Store contents tree/du rendering into the CLI `store_read` module and

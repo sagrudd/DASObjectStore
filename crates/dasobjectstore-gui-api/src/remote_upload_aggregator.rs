@@ -175,7 +175,9 @@ fn remote_upload_store_view(
     store: ObjectStoreCardView,
     grant: &dasobjectstore_daemon::RemoteEasyconnectObjectStoreGrant,
 ) -> RemoteUploadObjectStoreView {
-    let upload_allowed = grant.can_write && store.writeable && store.endpoint_export_mode == "s3";
+    let upload_allowed = grant.can_write
+        && store.writeable
+        && matches!(store.endpoint_export_mode.as_str(), "s3" | "s3_bucket");
     let (upload_state, upload_message) = if upload_allowed {
         (
             "ready",
@@ -260,6 +262,14 @@ mod tests {
 
         assert!(!view.upload_allowed);
         assert_eq!(view.upload_state, "export_unavailable");
+    }
+
+    #[test]
+    fn remote_upload_store_accepts_registry_s3_bucket_label() {
+        let view = remote_upload_store_view(card(true, true, "s3_bucket"), &grant(true));
+
+        assert!(view.upload_allowed);
+        assert_eq!(view.upload_state, "ready");
     }
 
     #[test]
