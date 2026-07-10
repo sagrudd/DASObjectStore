@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.36 - 2026-07-10
+
+- Complete extraction of the remaining Store create/adopt/list/drain/delete,
+  defaults, validation, and S3-upload CLI contracts into the command-family
+  module.
+
 ## 0.69.35 - 2026-07-10
 
 - Extract the Store dispatcher, ingest-policy, and contents CLI contracts with
