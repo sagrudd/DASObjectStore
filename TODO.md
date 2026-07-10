@@ -99,6 +99,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract Store create/adopt runtime handlers into
     `crates/dasobjectstore-cli/src/run/store_write.rs`, retaining shared
     validation and registry helpers behind narrow calls.
+  - [x] Extract Store ingest-policy read/update runtime handling into the
+    same module, preserving typed daemon requests and inventory rendering.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and

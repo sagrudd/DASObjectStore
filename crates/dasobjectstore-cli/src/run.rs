@@ -70,7 +70,7 @@ use self::storage_lifecycle::{
 use self::store_read::{
     run_store_contents, run_store_defaults, run_store_list, run_store_s3_upload, run_store_validate,
 };
-use self::store_write::{run_store_adopt, run_store_create};
+use self::store_write::{run_store_adopt, run_store_create, run_store_ingest_policy};
 use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -4638,77 +4638,6 @@ fn require_admin_for_destructive_store_action(dry_run: bool) -> Result<(), CliEr
     Err(CliError::CommandFailed(
         "destructive storage cleanup requires an administrative user; rerun with sudo".to_string(),
     ))
-}
-
-fn run_store_ingest_policy(
-    args: &StoreIngestPolicyArgs,
-    writer: &mut impl Write,
-) -> Result<(), CliError> {
-    let config = DaemonRuntimeConfig::default_packaged();
-    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
-
-    if let Some(mode) = args.ingest_mode() {
-        let response =
-            client.update_object_store_ingest_policy(UpdateObjectStoreIngestPolicyRequest {
-                store_id: args.store_id().to_string(),
-                ingest_mode: mode.as_api_value().to_string(),
-                dry_run: args.dry_run(),
-                client_request_id: Some(format!("cli-store-policy-{}", args.store_id())),
-                administrator_actor: None,
-                confirmation_marker: args.confirm().to_string(),
-            })?;
-        if args.json() {
-            serde_json::to_writer_pretty(&mut *writer, &response)?;
-            writer.write_all(b"\n")?;
-        } else {
-            writeln!(
-                writer,
-                "ObjectStore ingest policy {}",
-                if response.changed {
-                    "updated"
-                } else {
-                    "unchanged"
-                }
-            )?;
-            writeln!(writer, "Store: {}", response.store_id)?;
-            writeln!(writer, "Previous mode: {:?}", response.previous_ingest_mode)?;
-            writeln!(writer, "Requested mode: {:?}", response.ingest_mode)?;
-            writeln!(writer, "Dry run: {}", response.accepted.dry_run)?;
-            writeln!(
-                writer,
-                "Administrator: {}",
-                response.administrator_actor.as_deref().unwrap_or("unknown")
-            )?;
-        }
-    } else {
-        let response = client.store_inventory(StoreInventoryRequest {
-            include_policy: true,
-            ..StoreInventoryRequest::default()
-        })?;
-        let store = response
-            .stores
-            .into_iter()
-            .find(|store| store.store_id == *args.store_id())
-            .ok_or_else(|| {
-                CliError::CommandFailed(format!(
-                    "object store not found or not visible: {}",
-                    args.store_id()
-                ))
-            })?;
-        if args.json() {
-            serde_json::to_writer_pretty(&mut *writer, &store)?;
-            writer.write_all(b"\n")?;
-        } else {
-            writeln!(writer, "ObjectStore ingest policy")?;
-            writeln!(writer, "Store: {}", store.store_id)?;
-            writeln!(writer, "Mode: {:?}", store.policy.ingest_mode)?;
-            writeln!(writer, "Copies: {}", store.policy.copies)?;
-        }
-    }
-    if !args.json() {
-        writeln!(writer, "Daemon socket: {}", config.socket_path.display())?;
-    }
-    Ok(())
 }
 
 fn write_store_contents_du(

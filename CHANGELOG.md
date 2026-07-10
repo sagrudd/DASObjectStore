@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.60 - 2026-07-10
+
+- Extract Store ingest-policy read/update handling into the CLI Store write
+  module while preserving typed daemon requests and output formats.
+
 ## 0.69.59 - 2026-07-10
 
 - Extract Store create/adopt runtime handlers into a dedicated CLI write
