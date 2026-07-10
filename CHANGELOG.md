@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.43 - 2026-07-10
+
+- Isolate daemon remote-upload cancellation cleanup and multipart-abort
+  handling behind a dedicated runtime module.
+
 ## 0.69.42 - 2026-07-10
 
 - Package external-source access for Debian/RPM installations with managed
