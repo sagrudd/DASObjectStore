@@ -20,6 +20,8 @@ mod health;
 mod output;
 mod performance_plan;
 mod performance_report;
+mod performance_tui;
+mod performance_workload;
 mod probe;
 mod runtime_status;
 mod service;

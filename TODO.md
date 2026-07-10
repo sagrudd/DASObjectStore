@@ -119,6 +119,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract daemon storage authorization, telemetry access, and browser
     delegation helpers into `storage_authorization.rs`, keeping storage
     mutation handlers below the production module budget.
+  - [x] Split performance workload planning and performance TUI rendering into
+    dedicated modules; the production size guard now passes without adding a
+    new exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.
