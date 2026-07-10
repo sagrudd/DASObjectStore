@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.35 - 2026-07-10
+
+- Extract the Store dispatcher, ingest-policy, and contents CLI contracts with
+  colocated parser coverage; destructive store command contracts remain in the
+  next split slice.
+
 ## 0.69.34 - 2026-07-10
 
 - Extract Service CLI argument contracts and colocate Docker Compose parser
