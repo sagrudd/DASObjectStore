@@ -72,6 +72,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod dispatch;
+mod storage_authorization;
 
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
