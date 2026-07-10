@@ -918,19 +918,43 @@ impl PipelineProgressState {
 
     fn telemetry(&self) -> DaemonIngestTelemetry {
         let mut telemetry = DaemonIngestTelemetry::default();
+        let writing_active = self
+            .active_hdd_transfers
+            .values()
+            .filter(|transfer| transfer.phase == DaemonIngestHddTransferPhase::Writing)
+            .count() as u16;
+        let finalization_active = self
+            .active_hdd_transfers
+            .values()
+            .filter(|transfer| transfer.phase != DaemonIngestHddTransferPhase::Writing)
+            .count() as u16;
+        let source_active =
+            if self.ssd_active > 0 || (self.count_hdd_copy_as_source && writing_active > 0) {
+                1
+            } else {
+                0
+            };
         telemetry.queue_depths = DaemonIngestQueueDepths {
             source_read: self.source_pending(),
             hdd_write: self.hdd_queued,
             ..DaemonIngestQueueDepths::default()
         };
         telemetry.workers = DaemonIngestWorkerTelemetry {
+            source_read: DaemonIngestWorkerActivity {
+                active: source_active,
+                idle: u16::from(source_active == 0),
+            },
             ssd_stage: DaemonIngestWorkerActivity {
                 active: self.ssd_active,
                 idle: u16::from(self.ssd_active == 0),
             },
             hdd_write: DaemonIngestWorkerActivity {
-                active: self.hdd_active,
-                idle: self.hdd_worker_count.saturating_sub(self.hdd_active),
+                active: writing_active,
+                idle: self.hdd_worker_count.saturating_sub(writing_active),
+            },
+            finalization: DaemonIngestWorkerActivity {
+                active: finalization_active,
+                idle: u16::from(finalization_active == 0),
             },
             ..DaemonIngestWorkerTelemetry::default()
         };

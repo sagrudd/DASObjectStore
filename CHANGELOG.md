@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.13 - 2026-07-10
+
+- Populate ingest worker telemetry for source reads, SSD staging, HDD writing,
+  and durability finalization on every progress frame. The TUI queue panel now
+  names all scan/source/SSD/HDD/verification lanes and worker activity.
+
 ## 0.69.12 - 2026-07-10
 
 - Emit an explicit HDD-placement progress transition after target reservation,

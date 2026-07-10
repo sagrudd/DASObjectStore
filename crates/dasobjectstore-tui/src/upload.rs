@@ -463,11 +463,16 @@ fn pipeline_stage_label(stage: DaemonIngestPipelineStage) -> &'static str {
 fn queue_label(event: &DaemonIngestProgressEvent) -> String {
     if let Some(telemetry) = event.telemetry {
         return format!(
-            "source pending {} file(s), SSD active {}, HDD active {}, HDD queued {}, completed {}",
+            "queues scan {} source {} SSD {} HDD {} verify {}; workers source {} SSD {} HDD {} finalize {}; completed {}",
+            telemetry.queue_depths.scan,
             telemetry.queue_depths.source_read,
+            telemetry.queue_depths.ssd_stage,
+            telemetry.queue_depths.hdd_write,
+            telemetry.queue_depths.verification,
+            telemetry.workers.source_read.active,
             telemetry.workers.ssd_stage.active,
             telemetry.workers.hdd_write.active,
-            telemetry.queue_depths.hdd_write,
+            telemetry.workers.finalization.active,
             event.files_done
         );
     }
@@ -701,7 +706,7 @@ mod tests {
         assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
         let queues = format!("{:?}", super::queue_lines(&event));
         assert!(queues.contains(
-            "source pending 7 file(s), SSD active 1, HDD active 1, HDD queued 2, completed 1"
+            "queues scan 0 source 7 SSD 0 HDD 2 verify 0; workers source 0 SSD 1 HDD 1 finalize 0; completed 1"
         ));
         assert!(queues.contains("SSD pressure: high - source ingress may pause"));
         assert!(queues.contains("SSD settling: active"));
