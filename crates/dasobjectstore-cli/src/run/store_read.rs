@@ -28,6 +28,42 @@ pub(super) fn run_store_contents(
     Ok(())
 }
 
+pub(super) fn run_store_list(
+    args: &StoreListArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let registry_path = if args.portable() {
+        let ssd_root = known_ssd_root_for_adopt(args.ssd_root())?;
+        portable_store_registry_path(ssd_root)
+    } else {
+        args.registry_path()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_store_registry_path)
+    };
+    let definitions = read_store_registry(&registry_path)?;
+
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &definitions)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_store_list_report(&definitions, writer)?;
+    }
+
+    Ok(())
+}
+
+pub(super) fn run_store_defaults(
+    args: &StoreDefaultsArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let policy = StorePolicy::defaults_for(args.class());
+
+    serde_json::to_writer_pretty(&mut *writer, &policy)?;
+    writer.write_all(b"\n")?;
+
+    Ok(())
+}
+
 pub(super) fn run_store_validate(
     args: &StoreValidateArgs,
     writer: &mut impl Write,

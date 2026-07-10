@@ -66,7 +66,9 @@ use self::storage_lifecycle::{
     run_disk_drain, run_disk_force_retire, run_disk_lockdown_das, run_disk_prepare_das,
     run_disk_replace, run_disk_retire, run_pool_import, run_pool_inspect, run_pool_repair,
 };
-use self::store_read::{run_store_contents, run_store_validate};
+use self::store_read::{
+    run_store_contents, run_store_defaults, run_store_list, run_store_validate,
+};
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::PoolState;
@@ -4879,27 +4881,6 @@ fn run_store_adopt(args: &StoreAdoptArgs, writer: &mut impl Write) -> Result<(),
     Ok(())
 }
 
-fn run_store_list(args: &StoreListArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let registry_path = if args.portable() {
-        let ssd_root = known_ssd_root_for_adopt(args.ssd_root())?;
-        portable_store_registry_path(ssd_root)
-    } else {
-        args.registry_path()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(default_store_registry_path)
-    };
-    let definitions = read_store_registry(&registry_path)?;
-
-    if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &definitions)?;
-        writer.write_all(b"\n")?;
-    } else {
-        write_store_list_report(&definitions, writer)?;
-    }
-
-    Ok(())
-}
-
 fn run_store_ingest_policy(
     args: &StoreIngestPolicyArgs,
     writer: &mut impl Write,
@@ -5502,15 +5483,6 @@ fn hdd_disk_id_from_marker(marker: &str) -> Result<Option<DiskId>, CliError> {
     }
 
     Ok(None)
-}
-
-fn run_store_defaults(args: &StoreDefaultsArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let policy = StorePolicy::defaults_for(args.class());
-
-    serde_json::to_writer_pretty(&mut *writer, &policy)?;
-    writer.write_all(b"\n")?;
-
-    Ok(())
 }
 
 fn run_subobject(args: &SubobjectArgs, writer: &mut impl Write) -> Result<(), CliError> {

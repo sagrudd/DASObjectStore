@@ -85,6 +85,12 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract pool import/repair/inspection and managed-disk lifecycle
     handlers into `crates/dasobjectstore-cli/src/run/storage_lifecycle.rs`;
     preserve risk gates and read-only pool semantics.
+  - [x] Extract read-only `store contents` and `store validate` handlers into
+    `crates/dasobjectstore-cli/src/run/store_read.rs`, keeping the runner focused
+    on dispatch and shared error handling.
+  - [x] Extract read-only `store list` and `store defaults` handlers into the
+    same module, keeping registry inspection and policy rendering out of the
+    top-level runner.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
@@ -107,9 +113,6 @@ list until every temporary size-budget exception has been removed.
   - [x] Route force disk retirement through a typed daemon request with
     daemon-side administrator authorization, policy allowance, confirmation,
     timestamp, and risk-gated state transition.
-- [x] Extract read-only `store contents` and `store validate` handlers into
-  `crates/dasobjectstore-cli/src/run/store_read.rs`, keeping the runner focused
-  on dispatch and shared error handling.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.
