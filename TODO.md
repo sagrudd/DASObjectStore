@@ -173,6 +173,9 @@ list until every temporary size-budget exception has been removed.
 - [ ] Split global Web CSS by base primitives and feature-owned styles, and
   split screenshot regression runner, fixture server, assertions, and
   per-workspace fixtures into dedicated modules.
+  - [x] Move remote-upload layout and selection styles into the dedicated
+    `styles/remote-upload.css` feature sheet, register it with Trunk, and keep
+    CSS contract tests loading the shared and feature-owned sheets together.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 

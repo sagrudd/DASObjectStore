@@ -15,6 +15,14 @@ fn workspace_component_source() -> String {
     .concat()
 }
 
+fn web_styles_source() -> String {
+    [
+        include_str!("../../styles.css"),
+        include_str!("../../styles/remote-upload.css"),
+    ]
+    .concat()
+}
+
 use super::{
     activity_category_summaries, activity_queue_summary, activity_task_progress_label,
     activity_workspace_api_path, admin_job_percent, admin_job_progress_text,
@@ -1142,7 +1150,7 @@ fn object_browser_component_contract_covers_rows_downloads_and_empty_states() {
 #[test]
 fn object_browser_component_contract_covers_placement_badges_and_no_overlap_css() {
     let source = workspace_component_source();
-    let css = include_str!("../../styles.css");
+    let css = web_styles_source();
 
     assert!(source.contains("dos-object-browser-placement-stack"));
     assert!(source.contains("dos-object-browser-placement-summary"));
@@ -1824,7 +1832,7 @@ fn home_dashboard_telemetry_tests_sparse_missing_and_invalid_chart_samples() {
 #[test]
 fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     let source = workspace_component_source();
-    let css = include_str!("../../styles.css");
+    let css = web_styles_source();
 
     assert!(source.contains("<div class=\"dos-metric-grid\">"));
     assert!(source.contains("home_dashboard_metrics(view).into_iter().map(render_metric_card)"));
@@ -2164,7 +2172,7 @@ fn remote_upload_selection_summary_counts_files_folders_and_bytes() {
 #[test]
 fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
     let source = workspace_component_source();
-    let css = include_str!("../../styles.css");
+    let css = web_styles_source();
 
     assert!(source.contains("dos-remote-upload-panel"));
     assert!(source.contains("dos-remote-upload-dropzone"));

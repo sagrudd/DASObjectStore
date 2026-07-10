@@ -1,0 +1,80 @@
+/* Remote-upload workspace styles. Keep this feature-owned surface separate
+ * from the shared shell and dashboard primitives in styles.css. */
+
+.dos-remote-upload-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.dos-remote-upload-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(320px, 1.28fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.dos-remote-upload-dropzone {
+  display: grid;
+  gap: 6px;
+  min-height: 132px;
+  padding: 16px;
+  border: 2px dashed rgba(13, 83, 96, 0.28);
+  border-radius: 8px;
+  color: #173039;
+  background: #f4fafb;
+}
+
+.dos-remote-upload-dropzone strong {
+  font-size: 0.94rem;
+}
+
+.dos-remote-upload-dropzone span {
+  color: #52646b;
+  font-size: 0.84rem;
+}
+
+.dos-remote-upload-dropzone input {
+  width: 100%;
+  margin-top: 8px;
+  color: #43515a;
+  font-size: 0.82rem;
+}
+
+.dos-remote-upload-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dos-remote-upload-summary div {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #d9e0e3;
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.dos-remote-upload-summary dt {
+  color: #63707a;
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.dos-remote-upload-summary dd {
+  margin: 4px 0 0;
+  color: #1e252b;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.dos-remote-upload-samples {
+  grid-column: 1 / -1;
+}
+
+.dos-remote-upload-samples ol {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+}

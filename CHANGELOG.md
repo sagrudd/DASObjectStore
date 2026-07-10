@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.67 - 2026-07-10
+
+- Split remote-upload Web styles into a feature-owned Trunk stylesheet while
+  preserving shared CSS contract coverage.
+
 ## 0.69.66 - 2026-07-10
 
 - Extract GUI daemon response projections and stable administration/job labels
