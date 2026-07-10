@@ -302,6 +302,12 @@ list until every temporary size-budget exception has been removed.
 - [x] Add crash/restart test for an ingest job before HDD settlement.
 - [x] Add crash/restart test for an ingest job after metadata commit.
 - [x] Document exactly what is lost if SSD fails before settlement.
+- [x] Commit each finalized inline-hashed object placement to daemon-owned live
+  metadata before reporting ingest completion; fail closed when the store or
+  disk catalogue is unavailable.
+- [x] Add `dasobjectstore store repair` with read-only inspection by default and
+  explicit daemon-authorized metadata rebuild, timestamped backup, atomic
+  replacement, size-selected partial-duplicate reporting, and tests.
 
 ## Milestone 7: HDD Placement and Copy Verification
 
@@ -948,6 +954,11 @@ list until every temporary size-budget exception has been removed.
   performance limits, and expected failure states.
 
 ### Critical viewer delivery follow-up
+
+- [x] Recover the appliance empty live SQLite index without touching payload
+  files: 1,047 objects and 1,063 placements were reconstructed into a degraded
+  catalogue; the original zero-byte file is preserved as
+  `live.sqlite.empty-20260710`. Hashes remain unverified by design.
 
 - [ ] Make an omitted browser prefix a tested root-tree request: after selecting
   an ObjectStore, render all immediate folders and files without requiring a

@@ -19,7 +19,7 @@ dasobjectstore-object-service.workspace = true
 libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
-rusqlite.workspace = true
 serde_json.workspace = true

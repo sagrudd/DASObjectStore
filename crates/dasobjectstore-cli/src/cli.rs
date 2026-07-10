@@ -32,8 +32,8 @@ pub(crate) use service::{
 };
 pub(crate) use store::{
     StoreAdoptArgs, StoreArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDefaultsArgs,
-    StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs, StoreS3UploadArgs,
-    StoreValidateArgs,
+    StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs, StoreRepairArgs,
+    StoreS3UploadArgs, StoreValidateArgs,
 };
 pub(crate) use subobject::{
     SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,

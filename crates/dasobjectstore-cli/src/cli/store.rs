@@ -28,6 +28,8 @@ pub(crate) enum StoreCommand {
     Drain(StoreDrainArgs),
     /// Delete a drained object store and its registry entries.
     Delete(StoreDeleteArgs),
+    /// Verify and, with explicit confirmation, rebuild live metadata from landed payloads.
+    Repair(StoreRepairArgs),
     /// Emit the built-in JSON policy defaults for a store class.
     Defaults(StoreDefaultsArgs),
     /// List system-managed object stores.
@@ -38,6 +40,35 @@ pub(crate) enum StoreCommand {
     S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreRepairArgs {
+    /// Limit the scan/rebuild to one ObjectStore; omit to inspect all registered stores.
+    store_id: Option<StoreId>,
+    /// Apply the reconstructed metadata. Without this flag the command is read-only.
+    #[arg(long)]
+    apply: bool,
+    /// Required with --apply: "confirm store repair".
+    #[arg(long, default_value = "")]
+    confirm: String,
+    /// Emit the repair report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+impl StoreRepairArgs {
+    pub(crate) fn store_id(&self) -> Option<&StoreId> {
+        self.store_id.as_ref()
+    }
+    pub(crate) fn apply(&self) -> bool {
+        self.apply
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -623,6 +654,31 @@ mod tests {
             }
             _ => panic!("expected delete command"),
         }
+    }
+
+    #[test]
+    fn parses_store_repair_dry_run_and_apply_confirmation() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "repair",
+            "xenognostikon",
+            "--apply",
+            "--confirm",
+            "confirm store repair",
+            "--json",
+        ])
+        .expect("store repair parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command");
+        };
+        let Some(StoreCommand::Repair(args)) = args.command() else {
+            panic!("expected repair command");
+        };
+        assert!(args.apply());
+        assert_eq!(args.confirm(), "confirm store repair");
+        assert!(args.json());
+        assert_eq!(args.store_id().expect("store id").as_str(), "xenognostikon");
     }
 
     #[test]

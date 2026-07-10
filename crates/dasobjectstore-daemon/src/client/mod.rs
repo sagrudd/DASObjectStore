@@ -31,8 +31,8 @@ use crate::api::{
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
     StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -132,6 +132,16 @@ where
         match self.send(DaemonApiRequest::StoreDelete(request))? {
             DaemonApiResponse::StoreDelete(response) => Ok(response),
             response => Err(unexpected("store_delete", response)),
+        }
+    }
+
+    pub fn store_repair(
+        &self,
+        request: StoreRepairRequest,
+    ) -> Result<StoreRepairResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::StoreRepair(request))? {
+            DaemonApiResponse::StoreRepair(response) => Ok(response),
+            response => Err(unexpected("store_repair", response)),
         }
     }
 
@@ -481,6 +491,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::StoreDelete(_) => "store_delete",
+        DaemonApiResponse::StoreRepair(_) => "store_repair",
         DaemonApiResponse::ObjectPut(_) => "object_put",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",

@@ -16,6 +16,7 @@ mod remote_easyconnect;
 mod service;
 mod storage_mutation;
 mod store_policy;
+mod store_repair;
 mod stores;
 
 pub use appliance_telemetry::{
@@ -136,6 +137,10 @@ pub use store_policy::{
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
     UpdateObjectStoreIngestPolicyValidationError, DIRECT_TO_HDD_POLICY_CONFIRMATION,
 };
+pub use store_repair::{
+    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairValidationError,
+    STORE_REPAIR_CONFIRMATION,
+};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 
 use serde::{Deserialize, Serialize};
@@ -149,6 +154,7 @@ pub enum DaemonApiRequest {
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
     StoreDelete(StoreDeleteRequest),
+    StoreRepair(StoreRepairRequest),
     ObjectPut(ObjectPutRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
@@ -190,6 +196,13 @@ impl DaemonApiRequest {
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
             Self::StoreDelete(request) => request.validate().map_err(store_delete_validation_error),
+            Self::StoreRepair(request) => {
+                request
+                    .validate()
+                    .map_err(|_| DaemonRequestValidationError::ConfirmationMismatch {
+                        expected: STORE_REPAIR_CONFIRMATION,
+                    })
+            }
             Self::ObjectPut(request) => request.validate().map_err(object_put_validation_error),
             Self::IngestQueueDrain(request) => request
                 .validate()
@@ -260,6 +273,7 @@ pub enum DaemonApiResponse {
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     StoreDelete(StoreDeleteResponse),
+    StoreRepair(StoreRepairResponse),
     ObjectPut(ObjectPutResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),

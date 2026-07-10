@@ -59,6 +59,14 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::StoreRepair(request) => {
+            match handler.store_repair_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::StoreRepair(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::ObjectPut(request) => {
             match handler.object_put_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::ObjectPut(response)),
@@ -387,6 +395,72 @@ where
                 portable_registry,
                 host_subobjects,
                 portable_subobjects,
+            },
+        })
+    }
+
+    fn store_repair_for_actor(
+        &self,
+        request: StoreRepairRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<StoreRepairResponse, (&'static str, String)> {
+        if !request.dry_run {
+            let Some(actor) = actor else {
+                return Err((
+                    "administrator_authentication_required",
+                    "store repair requires an authenticated local administrator".to_string(),
+                ));
+            };
+            if !actor.is_administrator() {
+                return Err((
+                    "administrator_authorization_required",
+                    "store repair requires root, sudo, or dasobjectstore-admin membership"
+                        .to_string(),
+                ));
+            }
+        }
+        let definitions =
+            dasobjectstore_object_service::read_store_registry(&self.store_registry_path)
+                .map_err(|error| ("store_repair_failed", error.to_string()))?;
+        let store_definitions = definitions
+            .into_iter()
+            .map(|definition| {
+                let class = definition.policy.class.name().to_string();
+                let policy_json = serde_json::to_string(&definition.policy)
+                    .map_err(|error| ("store_repair_failed", error.to_string()))?;
+                Ok(dasobjectstore_metadata::RecoveryStoreDefinition {
+                    store_id: definition.store_id,
+                    class,
+                    policy_json,
+                })
+            })
+            .collect::<Result<Vec<_>, (&'static str, String)>>()?;
+        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
+            .map_err(|error| ("store_repair_failed", error.to_string()))?;
+        let report = dasobjectstore_metadata::recover_live_metadata(
+            &dasobjectstore_metadata::RecoverLiveMetadataRequest {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                store_definitions,
+                disk_roots,
+                store_id: request.store_id,
+                dry_run: request.dry_run,
+                recorded_at_utc: self.clock.now_utc(),
+            },
+        )
+        .map_err(|error| ("store_repair_failed", error.to_string()))?;
+        Ok(StoreRepairResponse {
+            report: StoreRepairReport {
+                metadata_path: report.metadata_path.display().to_string(),
+                backup_path: report.backup_path.map(|path| path.display().to_string()),
+                dry_run: report.dry_run,
+                stores_scanned: report.stores_scanned,
+                payload_files: report.payload_files,
+                objects_recovered: report.objects_recovered,
+                placements_recovered: report.placements_recovered,
+                payload_bytes: report.payload_bytes,
+                partial_duplicates_omitted: report.partial_duplicates_omitted,
+                hashes_verified: report.hashes_verified,
+                warning: report.warning,
             },
         })
     }

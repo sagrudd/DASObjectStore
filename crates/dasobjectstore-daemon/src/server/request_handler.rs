@@ -22,7 +22,8 @@ use crate::api::{
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
     StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -1272,6 +1273,7 @@ impl DaemonApiRequest {
             Self::StoreInventory(_) => "store_inventory",
             Self::StoreDrain(_) => "store_drain",
             Self::StoreDelete(_) => "store_delete",
+            Self::StoreRepair(_) => "store_repair",
             Self::ObjectPut(_) => "object_put",
             Self::IngestQueueDrain(_) => "ingest_queue_drain",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",

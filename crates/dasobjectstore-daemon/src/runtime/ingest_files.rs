@@ -9,7 +9,7 @@ use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    existing_object_payload_candidate_paths, measure_ssd_capacity,
+    commit_object_put, existing_object_payload_candidate_paths, measure_ssd_capacity,
     put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
     settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
     IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectInspectError, ObjectPutError,
@@ -116,7 +116,7 @@ impl LocalFileIngestExecutor {
         progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
         let job_id = ingest_job_id(accepted_at_utc)?;
-        let summary = self.execute(request, &job_id, progress)?;
+        let summary = self.execute(request, &job_id, accepted_at_utc, progress)?;
         Ok(SubmitIngestFilesResponse {
             job_id,
             accepted_at_utc: accepted_at_utc.to_string(),
@@ -128,6 +128,7 @@ impl LocalFileIngestExecutor {
         &self,
         request: SubmitIngestFilesRequest,
         job_id: &IngestJobId,
+        accepted_at_utc: &str,
         mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
         validate_known_ssd_root(&self.ssd_root)?;
@@ -144,6 +145,12 @@ impl LocalFileIngestExecutor {
                 managed_disk_roots.len()
             )));
         }
+        ensure_live_metadata_for_ingest(
+            &self.live_sqlite_path,
+            &endpoint.store,
+            &managed_disk_roots,
+            accepted_at_utc,
+        )?;
         let hdd_worker_count =
             resolve_hdd_worker_count(request.hdd_workers, managed_disk_roots.len(), copies)?;
         let files = collect_ingest_files(&request.source_path, &endpoint.object_prefix)?;
@@ -249,6 +256,7 @@ impl LocalFileIngestExecutor {
                 hdd_worker_count,
                 source_bytes,
                 total_work_bytes,
+                accepted_at_utc,
                 progress,
             );
         }
@@ -295,6 +303,8 @@ impl LocalFileIngestExecutor {
                 job_id,
                 &request.endpoint,
                 &mut progress,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
             let put_request = ObjectPutRequest::new(
                 entry.object_id.clone(),
@@ -327,6 +337,8 @@ impl LocalFileIngestExecutor {
                         &request.endpoint,
                         &mut progress,
                         false,
+                        &self.live_sqlite_path,
+                        accepted_at_utc,
                     )
                     .map_err(|err| io::Error::other(err.to_string()))?;
                     state.apply_object_progress(entry, &object_progress);
@@ -362,6 +374,8 @@ impl LocalFileIngestExecutor {
                 job_id,
                 &request.endpoint,
                 &mut progress,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
             drain_hdd_settlement_events(
                 &event_rx,
@@ -370,6 +384,8 @@ impl LocalFileIngestExecutor {
                 &request.endpoint,
                 &mut progress,
                 false,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
         }
         drop(flush_tx);
@@ -381,6 +397,8 @@ impl LocalFileIngestExecutor {
                 &request.endpoint,
                 &mut progress,
                 true,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
         }
         ssd_flush_worker.join().map_err(|_| {
@@ -396,6 +414,8 @@ impl LocalFileIngestExecutor {
                 &request.endpoint,
                 &mut progress,
                 true,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
         }
         for hdd_worker in hdd_workers {
@@ -442,6 +462,7 @@ impl LocalFileIngestExecutor {
         hdd_worker_count: usize,
         source_bytes: u64,
         total_work_bytes: u64,
+        accepted_at_utc: &str,
         mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
         let mut state = PipelineProgressState::new(
@@ -476,6 +497,8 @@ impl LocalFileIngestExecutor {
                     &request.endpoint,
                     &mut progress,
                     false,
+                    &self.live_sqlite_path,
+                    accepted_at_utc,
                 )?;
                 continue;
             }
@@ -500,6 +523,8 @@ impl LocalFileIngestExecutor {
                 job_id,
                 &request.endpoint,
                 &mut progress,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
             progress(DaemonIngestProgressEvent {
                 job_id: job_id.clone(),
@@ -531,6 +556,8 @@ impl LocalFileIngestExecutor {
                 &request.endpoint,
                 &mut progress,
                 false,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
         }
         drop(settle_tx);
@@ -543,6 +570,8 @@ impl LocalFileIngestExecutor {
                 &request.endpoint,
                 &mut progress,
                 true,
+                &self.live_sqlite_path,
+                accepted_at_utc,
             )?;
         }
         for hdd_worker in hdd_workers {
@@ -641,6 +670,7 @@ enum HddSettlementEvent {
     },
     Settled {
         entry: FileIngestEntry,
+        report: dasobjectstore_metadata::ObjectPutReport,
     },
     Failed {
         error: ObjectPutError,
@@ -1146,8 +1176,11 @@ fn spawn_hdd_settlement_workers(
                     break;
                 }
                 match result {
-                    Ok(_report) => {
-                        let _ = event_tx.send(HddSettlementEvent::Settled { entry: work.entry });
+                    Ok(report) => {
+                        let _ = event_tx.send(HddSettlementEvent::Settled {
+                            entry: work.entry,
+                            report,
+                        });
                     }
                     Err(error) => {
                         let _ = event_tx.send(HddSettlementEvent::Failed { error });
@@ -1162,16 +1195,16 @@ fn spawn_hdd_settlement_workers(
 fn settle_hdd_payload_with_controlled_progress(
     payload: HddSettlementPayload,
     progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
-) -> Result<(), ObjectPutError> {
+) -> Result<dasobjectstore_metadata::ObjectPutReport, ObjectPutError> {
     match payload {
         HddSettlementPayload::Staged(staged) => {
-            settle_staged_object_to_hdd_with_controlled_progress(staged, progress)?;
+            settle_staged_object_to_hdd_with_controlled_progress(staged, progress)
+                .map_err(Into::into)
         }
         HddSettlementPayload::Direct(request) => {
-            put_object_direct_to_hdd_with_controlled_progress(request, progress)?;
+            put_object_direct_to_hdd_with_controlled_progress(request, progress).map_err(Into::into)
         }
     }
-    Ok(())
 }
 
 fn enqueue_ssd_flush_work(
@@ -1182,13 +1215,24 @@ fn enqueue_ssd_flush_work(
     job_id: &IngestJobId,
     endpoint: &StoreId,
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    live_sqlite_path: &Path,
+    recorded_at_utc: &str,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         match flush_tx.try_send(work) {
             Ok(()) => return Ok(()),
             Err(mpsc::TrySendError::Full(returned_work)) => {
                 work = returned_work;
-                drain_hdd_settlement_events(event_rx, state, job_id, endpoint, progress, true)?;
+                drain_hdd_settlement_events(
+                    event_rx,
+                    state,
+                    job_id,
+                    endpoint,
+                    progress,
+                    true,
+                    live_sqlite_path,
+                    recorded_at_utc,
+                )?;
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 return Err(DaemonIngestFilesRuntimeError::CommandFailed(
@@ -1207,13 +1251,24 @@ fn enqueue_hdd_settlement_work(
     job_id: &IngestJobId,
     endpoint: &StoreId,
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    live_sqlite_path: &Path,
+    recorded_at_utc: &str,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         match settle_tx.try_send(work) {
             Ok(()) => return Ok(()),
             Err(mpsc::TrySendError::Full(returned_work)) => {
                 work = returned_work;
-                drain_hdd_settlement_events(event_rx, state, job_id, endpoint, progress, true)?;
+                drain_hdd_settlement_events(
+                    event_rx,
+                    state,
+                    job_id,
+                    endpoint,
+                    progress,
+                    true,
+                    live_sqlite_path,
+                    recorded_at_utc,
+                )?;
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 return Err(DaemonIngestFilesRuntimeError::CommandFailed(
@@ -1232,6 +1287,8 @@ fn wait_for_ssd_admission(
     job_id: &IngestJobId,
     endpoint: &StoreId,
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    live_sqlite_path: &Path,
+    recorded_at_utc: &str,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         state.ssd_pressure = read_daemon_ssd_pressure(ssd_root, capacity_policy)?;
@@ -1270,7 +1327,16 @@ fn wait_for_ssd_admission(
                         state.ssd_pressure
                     )),
                 })?;
-                drain_hdd_settlement_events(event_rx, state, job_id, endpoint, progress, true)?;
+                drain_hdd_settlement_events(
+                    event_rx,
+                    state,
+                    job_id,
+                    endpoint,
+                    progress,
+                    true,
+                    live_sqlite_path,
+                    recorded_at_utc,
+                )?;
             }
         }
     }
@@ -1289,6 +1355,61 @@ fn read_daemon_ssd_pressure(
         SsdPressure::HighWatermark => DaemonSsdPressure::High,
         SsdPressure::Critical => DaemonSsdPressure::Critical,
     })
+}
+
+fn ensure_live_metadata_for_ingest(
+    live_sqlite_path: &Path,
+    store: &dasobjectstore_object_service::StoreServiceDefinition,
+    disk_roots: &[DiskCopyRoot],
+    recorded_at_utc: &str,
+) -> Result<(), DaemonIngestFilesRuntimeError> {
+    let mut connection = rusqlite::Connection::open(live_sqlite_path)?;
+    connection.execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)?;
+    let transaction = connection.transaction()?;
+    let pool_id: String = transaction
+        .query_row(
+            "SELECT pool_id FROM pools ORDER BY pool_id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => {
+                transaction.execute(
+                    "INSERT INTO pools (pool_id, state, created_at_utc, updated_at_utc)
+                     VALUES ('pool-runtime', 'Clean', ?1, ?1)",
+                    [recorded_at_utc],
+                )?;
+                Ok("pool-runtime".to_string())
+            }
+            other => Err(other),
+        })?;
+    for disk_root in disk_roots {
+        transaction.execute(
+            "INSERT OR IGNORE INTO disks (
+                disk_id, pool_id, role, state, created_at_utc, updated_at_utc
+             ) VALUES (?1, ?2, 'hdd', 'Healthy', ?3, ?3)",
+            rusqlite::params![disk_root.disk_id.as_str(), pool_id, recorded_at_utc],
+        )?;
+    }
+    let policy_json = serde_json::to_string(&store.policy).map_err(|error| {
+        DaemonIngestFilesRuntimeError::CommandFailed(format!(
+            "failed to serialize ObjectStore policy for metadata: {error}"
+        ))
+    })?;
+    transaction.execute(
+        "INSERT OR IGNORE INTO stores (
+            store_id, pool_id, class, policy_json, created_at_utc, updated_at_utc
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+        rusqlite::params![
+            store.store_id.as_str(),
+            pool_id,
+            store.policy.class.name(),
+            policy_json,
+            recorded_at_utc,
+        ],
+    )?;
+    transaction.commit()?;
+    Ok(())
 }
 
 fn landing_mode_for_ingest(
@@ -1453,6 +1574,8 @@ fn drain_hdd_settlement_events(
     endpoint: &StoreId,
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     block: bool,
+    live_sqlite_path: &Path,
+    recorded_at_utc: &str,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         let event = if block {
@@ -1598,7 +1721,14 @@ fn drain_hdd_settlement_events(
                     &object_progress,
                 ))?;
             }
-            HddSettlementEvent::Settled { entry } => {
+            HddSettlementEvent::Settled { entry, report } => {
+                commit_object_put(live_sqlite_path, endpoint, &report, recorded_at_utc).map_err(
+                    |error| {
+                        DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                            "failed to commit completed object metadata: {error}"
+                        ))
+                    },
+                )?;
                 state.hdd_active = state.hdd_active.saturating_sub(1);
                 state.completed_files = state.completed_files.saturating_add(1);
                 let active_hdd_transfers = state.active_hdd_transfer_records();
@@ -1846,6 +1976,12 @@ impl From<io::Error> for DaemonIngestFilesRuntimeError {
 impl From<ObjectServiceError> for DaemonIngestFilesRuntimeError {
     fn from(err: ObjectServiceError) -> Self {
         Self::ObjectService(err)
+    }
+}
+
+impl From<rusqlite::Error> for DaemonIngestFilesRuntimeError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::CommandFailed(format!("live metadata SQLite operation failed: {error}"))
     }
 }
 
@@ -2777,37 +2913,28 @@ mod tests {
         fs::create_dir_all(parent).expect("metadata dir");
         let connection = Connection::open(live_sqlite_path).expect("live sqlite opens");
         connection
-            .execute_batch(
-                "CREATE TABLE stores (
-                    store_id TEXT PRIMARY KEY,
-                    class TEXT NOT NULL
-                );
-                CREATE TABLE objects (
-                    object_id TEXT PRIMARY KEY,
-                    store_id TEXT NOT NULL,
-                    object_type TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    size_bytes INTEGER,
-                    content_hash TEXT,
-                    created_at_utc TEXT NOT NULL,
-                    updated_at_utc TEXT NOT NULL
-                );
-                CREATE TABLE placements (
-                    placement_id TEXT PRIMARY KEY,
-                    object_id TEXT NOT NULL,
-                    disk_id TEXT NOT NULL,
-                    relative_path TEXT NOT NULL,
-                    content_hash TEXT,
-                    verified_at_utc TEXT
-                );",
-            )
+            .execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)
             .expect("metadata schema");
         connection
             .execute(
-                "INSERT INTO stores (store_id, class) VALUES (?1, ?2)",
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool metadata");
+        connection
+            .execute(
+                "INSERT INTO stores (store_id, pool_id, class, policy_json, created_at_utc, updated_at_utc)
+                 VALUES (?1, 'pool-a', ?2, '{}', 'now', 'now')",
                 ("zymo_fecal_2025.05", "reproducible_cache"),
             )
             .expect("store metadata");
+        connection
+            .execute(
+                "INSERT INTO disks (disk_id, pool_id, role, state, created_at_utc, updated_at_utc)
+                 VALUES ('disk-a', 'pool-a', 'hdd', 'Healthy', 'now', 'now')",
+                [],
+            )
+            .expect("disk metadata");
         connection
             .execute(
                 "INSERT INTO objects (
@@ -2824,7 +2951,7 @@ mod tests {
                     object_id,
                     "zymo_fecal_2025.05",
                     "fasta",
-                    "Committed",
+                    "HddCopyVerified",
                     size_bytes,
                     content_hash,
                     "2026-07-09T18:43:00Z",

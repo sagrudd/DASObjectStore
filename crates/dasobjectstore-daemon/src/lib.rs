@@ -73,7 +73,8 @@ pub use api::{
     RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDeleteValidationError,
     StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError, StoreInventoryItem,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairReport, StoreRepairRequest,
+    StoreRepairResponse, StoreRepairValidationError, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -85,7 +86,7 @@ pub use api::{
     REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS, REMOTE_EASYCONNECT_SESSIONS_ROUTE,
     REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
-    STORE_DELETE_CONFIRMATION, STORE_DRAIN_CONFIRMATION,
+    STORE_DELETE_CONFIRMATION, STORE_DRAIN_CONFIRMATION, STORE_REPAIR_CONFIRMATION,
 };
 pub use auth::{
     authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,

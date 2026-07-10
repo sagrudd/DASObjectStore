@@ -208,3 +208,45 @@ pub(super) fn run_store_ingest_policy(
     }
     Ok(())
 }
+
+pub(super) fn run_store_repair(
+    args: &StoreRepairArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+    let response = client.store_repair(DaemonStoreRepairRequest {
+        store_id: args.store_id().cloned(),
+        dry_run: !args.apply(),
+        confirmation: args.confirm().to_string(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        let report = response.report;
+        writeln!(writer, "ObjectStore metadata repair")?;
+        writeln!(writer, "Metadata: {}", report.metadata_path)?;
+        writeln!(writer, "Dry run: {}", report.dry_run)?;
+        writeln!(writer, "Stores scanned: {}", report.stores_scanned)?;
+        writeln!(writer, "Payload files: {}", report.payload_files)?;
+        writeln!(writer, "Objects recovered: {}", report.objects_recovered)?;
+        writeln!(
+            writer,
+            "Placements recovered: {}",
+            report.placements_recovered
+        )?;
+        writeln!(writer, "Payload bytes: {}", report.payload_bytes)?;
+        writeln!(
+            writer,
+            "Partial duplicates omitted: {}",
+            report.partial_duplicates_omitted
+        )?;
+        writeln!(writer, "Hashes verified: {}", report.hashes_verified)?;
+        if let Some(backup_path) = report.backup_path {
+            writeln!(writer, "Previous metadata backup: {backup_path}")?;
+        }
+        writeln!(writer, "Warning: {}", report.warning)?;
+    }
+    Ok(())
+}

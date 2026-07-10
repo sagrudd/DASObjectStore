@@ -23,3 +23,4 @@ stabilized in the current MVP.
    remote-s3-uploads
    remote-client
    programmatic-access
+   store-repair

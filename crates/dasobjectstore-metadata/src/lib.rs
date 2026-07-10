@@ -18,8 +18,10 @@ pub mod local_object_store;
 pub mod manifest;
 pub mod markers;
 pub mod object;
+pub mod object_commit;
 pub mod placement_log;
 pub mod queue;
+pub mod recovery;
 pub mod repair_activity;
 pub mod schema;
 mod secure_fs;
@@ -95,6 +97,7 @@ pub use markers::{
 pub use object::{
     read_object_inspect, ObjectInspectError, ObjectInspectSummary, ObjectPlacementSummary,
 };
+pub use object_commit::{commit_object_put, ObjectMetadataCommitError};
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use queue::{
     drain_ingest_queue, read_ingest_queue, read_ingest_queue_for_store, DestagePriorityPolicy,
@@ -102,6 +105,10 @@ pub use queue::{
     IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueEntry, IngestQueueJob,
     IngestQueuePlan, IngestQueueReadError, IngestQueueSnapshot,
     DEFAULT_CRITICAL_WATERMARK_MINIMUM_PRIORITY, DEFAULT_HIGH_WATERMARK_MINIMUM_PRIORITY,
+};
+pub use recovery::{
+    recover_live_metadata, RecoverLiveMetadataError, RecoverLiveMetadataReport,
+    RecoverLiveMetadataRequest, RecoveryStoreDefinition,
 };
 pub use repair_activity::{
     read_pool_repair_activity, PoolRepairActivityEvent, PoolRepairActivityReadError,

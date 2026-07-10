@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.74 - 2026-07-10
+
+- Persist completed ingest placements and inline checksums to live metadata.
+- Add daemon-owned `store repair` dry-run/apply recovery for payloads left
+  behind by interrupted or historically incomplete metadata commits, preserving
+  timestamped SQLite backups and refusing to claim hash verification.
+- Recover and document the appliance metadata index after the live SQLite file
+  was found empty while managed HDD payloads remained present.
+
 ## 0.69.73 - 2026-07-10
 
 - Fix remote-upload admission to accept the canonical `s3_bucket` export label

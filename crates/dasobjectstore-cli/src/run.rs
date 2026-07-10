@@ -10,7 +10,8 @@ use crate::cli::{
     PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
     ServiceCommand, ServiceRenderComposeArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
     StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs,
-    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCreateArgs,
+    StoreListArgs, StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs,
+    SubobjectCreateArgs,
 };
 mod command_handlers;
 mod disk_lockdown;
@@ -77,7 +78,9 @@ use self::storage_lifecycle::{
 use self::store_read::{
     run_store_contents, run_store_defaults, run_store_list, run_store_s3_upload, run_store_validate,
 };
-use self::store_write::{run_store_adopt, run_store_create, run_store_ingest_policy};
+use self::store_write::{
+    run_store_adopt, run_store_create, run_store_ingest_policy, run_store_repair,
+};
 use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -98,8 +101,9 @@ use dasobjectstore_daemon::{
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     ObjectPutRequest as DaemonObjectPutRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
-    StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
+    StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
+    UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
@@ -302,6 +306,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Drain(args)) => run_store_drain(args, writer),
             Some(StoreCommand::Delete(args)) => run_store_delete(args, writer),
+            Some(StoreCommand::Repair(args)) => run_store_repair(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
             Some(StoreCommand::IngestPolicy(args)) => run_store_ingest_policy(args, writer),
