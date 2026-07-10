@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.64 - 2026-07-10
+
+- Extract standalone GUI API route composition into `auth_router.rs`, keeping
+  authentication and administration handlers separate from router assembly.
+
 ## 0.69.63 - 2026-07-10
 
 - Extract performance-report artifact rebuild dispatch into the dedicated

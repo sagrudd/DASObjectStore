@@ -156,6 +156,9 @@ list until every temporary size-budget exception has been removed.
 - [ ] Split GUI API authentication routes into router/auth, contracts, daemon
   clients, local-group administration, enclosure administration, and reporting
   modules; consolidate repeated confirmation and client-error adapters.
+  - [x] Extract standalone route composition into
+    `crates/dasobjectstore-gui-api/src/auth_router.rs`, leaving handlers and
+    validation logic behind a narrow routing façade.
   - [x] Extract the shared authentication/admin request and response DTOs into
     `crates/dasobjectstore-gui-api/src/auth_contracts.rs` without changing JSON
     shapes or route behavior.
