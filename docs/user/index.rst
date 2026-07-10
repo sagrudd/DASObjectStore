@@ -22,3 +22,4 @@ stabilized in the current MVP.
    remote-upload
    remote-s3-uploads
    remote-client
+   programmatic-access
