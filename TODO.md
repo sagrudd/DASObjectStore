@@ -72,6 +72,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the small Object, Service, Mnemosyne, Pool-marker, and probe
     runtime handlers into `crates/dasobjectstore-cli/src/run/command_handlers.rs`;
     preserve the dispatcher and platform cfg behavior.
+  - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
+    helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
+    preserve report output and existing regressions.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and

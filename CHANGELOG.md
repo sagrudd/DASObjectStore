@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.41 - 2026-07-10
+
+- Extract performance report, JSON artifact, chart, and PDF rendering helpers
+  into `crates/dasobjectstore-cli/src/run/performance_report.rs`.
+
 ## 0.69.40 - 2026-07-10
 
 - Extract the small Object, Service, Mnemosyne, Pool-marker, and platform probe
