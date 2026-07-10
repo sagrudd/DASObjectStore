@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.12 - 2026-07-10
+
+- Emit an explicit HDD-placement progress transition after target reservation,
+  including every assigned disk/copy at zero bytes before the first write.
+  Existing coalescing preserves this assignment transition for the TUI.
+
 ## 0.69.11 - 2026-07-10
 
 - Add daemon-provided short-window source-read, SSD-write, and aggregate HDD

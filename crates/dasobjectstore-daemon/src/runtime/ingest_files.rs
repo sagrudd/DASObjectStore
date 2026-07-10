@@ -610,6 +610,7 @@ enum HddSettlementEvent {
     },
     Started {
         entry: FileIngestEntry,
+        roots: Vec<DiskCopyRoot>,
     },
     Progress {
         entry: FileIngestEntry,
@@ -1076,6 +1077,7 @@ fn spawn_hdd_settlement_workers(
                 };
                 let _ = event_tx.send(HddSettlementEvent::Started {
                     entry: work.entry.clone(),
+                    roots: roots.clone(),
                 });
                 let entry = work.entry.clone();
                 let mut payload = work.payload;
@@ -1599,17 +1601,29 @@ fn drain_hdd_settlement_events(
                     )),
                 })?;
             }
-            HddSettlementEvent::Started { entry } => {
+            HddSettlementEvent::Started { entry, roots } => {
                 state.hdd_queued = state.hdd_queued.saturating_sub(1);
                 state.hdd_active = state.hdd_active.saturating_add(1);
+                for (index, root) in roots.iter().enumerate() {
+                    state.update_hdd_transfer(
+                        &entry,
+                        root.disk_id.as_str(),
+                        (index + 1) as u8,
+                        0,
+                        DaemonIngestHddTransferPhase::Writing,
+                        None,
+                        None,
+                    );
+                }
+                let first_root = roots.first().expect("HDD placement has a target");
                 progress(DaemonIngestProgressEvent {
                     job_id: job_id.clone(),
                     endpoint: endpoint.clone(),
                     stage: DaemonIngestStage::HddCopy {
-                        disk_id: DiskId::new("pending").expect("valid pending disk id"),
+                        disk_id: first_root.disk_id.clone(),
                         copy_number: 1,
                     },
-                    pipeline_stage: Some(DaemonIngestPipelineStage::HddWrite),
+                    pipeline_stage: Some(DaemonIngestPipelineStage::HddPlacement),
                     work_bytes_done: state.completed_work_bytes,
                     work_bytes_total: Some(state.work_bytes_total),
                     source_bytes_done: Some(state.completed_source_bytes),
@@ -1624,8 +1638,13 @@ fn drain_hdd_settlement_events(
                     active_hdd_transfers: state.active_hdd_transfer_records(),
                     resource_policy: None,
                     message: Some(format!(
-                        "HDD settlement started: {}",
-                        entry.relative_path.to_string_lossy()
+                        "HDD targets assigned before write: {} ({})",
+                        entry.relative_path.to_string_lossy(),
+                        roots
+                            .iter()
+                            .map(|root| root.disk_id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     )),
                 })?;
             }
@@ -2051,6 +2070,12 @@ mod tests {
         assert!(progress_events
             .iter()
             .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)));
+        assert!(progress_events.iter().any(|event| {
+            event.pipeline_stage == Some(DaemonIngestPipelineStage::HddPlacement)
+                && event.active_hdd_transfers.iter().any(|transfer| {
+                    transfer.bytes_done == 0 && transfer.disk_id.as_str() != "pending"
+                })
+        }));
         assert!(progress_events
             .iter()
             .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::HddFsync)));
