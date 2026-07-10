@@ -11,6 +11,7 @@ mod object_browser;
 mod object_store;
 mod remote_easyconnect;
 mod service;
+mod storage_mutation;
 mod store_policy;
 mod stores;
 
@@ -114,6 +115,9 @@ pub use service::{
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
+pub use storage_mutation::{
+    StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError, STORE_DRAIN_CONFIRMATION,
+};
 pub use store_policy::{
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
     UpdateObjectStoreIngestPolicyValidationError, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -127,6 +131,7 @@ use serde::{Deserialize, Serialize};
 pub enum DaemonApiRequest {
     HealthSummary(DaemonHealthSummaryRequest),
     StoreInventory(StoreInventoryRequest),
+    StoreDrain(StoreDrainRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
     CancelIngestJob(CancelIngestJobRequest),
@@ -160,6 +165,7 @@ impl DaemonApiRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         match self {
             Self::SubmitIngestFiles(request) => request.validate(),
+            Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
             Self::CancelIngestJob(request) => request.validate(),
             Self::CancelJob(request) => request.validate().map_err(generic_job_validation_error),
             Self::ServiceLifecycle(request) => request.validate(),
@@ -222,6 +228,7 @@ impl DaemonApiRequest {
 pub enum DaemonApiResponse {
     HealthSummary(DaemonHealthSummaryResponse),
     StoreInventory(StoreInventoryResponse),
+    StoreDrain(StoreDrainResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
     CancelIngestJob(CancelIngestJobResponse),
@@ -461,6 +468,19 @@ fn local_admin_validation_error(
         }
         DaemonLocalAdminValidationError::BlankConfirmationMarker => {
             DaemonRequestValidationError::BlankConfirmationMarker
+        }
+    }
+}
+
+fn store_drain_validation_error(err: StoreDrainValidationError) -> DaemonRequestValidationError {
+    match err {
+        StoreDrainValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        StoreDrainValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: STORE_DRAIN_CONFIRMATION,
+            }
         }
     }
 }

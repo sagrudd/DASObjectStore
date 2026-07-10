@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.48 - 2026-07-10
+
+- Route `store drain` through a typed daemon-owned request with daemon-side
+  authorization, managed-disk discovery, execution, and report handling.
+
 ## 0.69.47 - 2026-07-10
 
 - Isolate remote-upload transfer execution and daemon job lifecycle handling

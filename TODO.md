@@ -92,6 +92,9 @@ list until every temporary size-budget exception has been removed.
   disk retirement, and other managed mutations still performed by the CLI.
   Do not redirect a CLI command to an acceptance-only daemon request unless the
   daemon actually performs and reports the requested operation.
+  - [x] Route `store drain` through a typed daemon request; keep authorization,
+    managed-HDD discovery, metadata mutation, and the full drain report inside
+    the daemon while preserving CLI JSON/text output.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

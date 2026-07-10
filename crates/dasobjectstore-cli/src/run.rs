@@ -78,24 +78,24 @@ use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
-    DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig, StoreInventoryRequest,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
-    UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
+    DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
+    StoreDrainRequest as DaemonStoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
-    attach_clean_pool_read_only, delete_store, drain_ingest_queue, drain_store,
-    export_settled_object, force_retire_disk, import_dirty_pool_read_only, inspect_pool_metadata,
-    measure_ssd_capacity, put_object_ssd_first, put_object_ssd_first_with_progress,
-    read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue_for_store,
-    read_object_inspect, read_store_contents, request_disk_retirement, DestagePriorityPolicy,
-    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
-    IngestQueueDrainReport, IngestQueueDrainRequest, IngestQueueReadError, IngestQueueSnapshot,
-    ObjectExportError, ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
+    attach_clean_pool_read_only, delete_store, drain_ingest_queue, export_settled_object,
+    force_retire_disk, import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity,
+    put_object_ssd_first, put_object_ssd_first_with_progress, read_disk_drain_plan,
+    read_disk_replacement_plan, read_ingest_queue_for_store, read_object_inspect,
+    read_store_contents, request_disk_retirement, DestagePriorityPolicy, DiskCopyRoot,
+    DiskDrainError, DiskRetirementError, IngestQueueDrainError, IngestQueueDrainReport,
+    IngestQueueDrainRequest, IngestQueueReadError, IngestQueueSnapshot, ObjectExportError,
+    ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
     ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
     ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
     StoreCleanupError, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
-    StoreContentsSnapshot, StoreDeleteRequest, StoreDrainRequest, LIVE_SQLITE_FILE_NAME,
-    METADATA_DIR_NAME,
+    StoreContentsSnapshot, StoreDeleteRequest, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -4670,21 +4670,15 @@ fn run_store_drain(args: &StoreDrainArgs, writer: &mut impl Write) -> Result<(),
         )?;
     }
 
-    let hdd_root = args
-        .hdd_root()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_hdd_root);
-    let live_sqlite_path = resolve_store_live_sqlite_path(
-        args.store_id(),
-        args.live_sqlite_path(),
-        args.registry_path(),
-    )?;
-    let report = drain_store(&StoreDrainRequest {
-        live_sqlite_path,
-        store_id: args.store_id().clone(),
-        disk_roots: discover_managed_hdd_roots(&hdd_root)?,
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.store_drain(DaemonStoreDrainRequest {
+        store_id: args.store_id().to_string(),
         dry_run: args.dry_run(),
+        allow_store_drain: args.allow_store_drain(),
+        confirmation_marker: args.confirm().to_string(),
     })?;
+    let report = response.report;
 
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &report)?;

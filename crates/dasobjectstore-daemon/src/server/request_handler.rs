@@ -18,10 +18,10 @@ use crate::api::{
     RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
     RemoteEasyconnectSession, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest,
+    StoreInventoryResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -1232,6 +1232,7 @@ impl DaemonApiRequest {
         match self {
             Self::HealthSummary(_) => "health_summary",
             Self::StoreInventory(_) => "store_inventory",
+            Self::StoreDrain(_) => "store_drain",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
             Self::CancelIngestJob(_) => "cancel_ingest_job",
@@ -1293,11 +1294,11 @@ mod tests {
         RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
         RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-        UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
-        UpsertEndpointInventoryResponse, DIRECT_TO_HDD_POLICY_CONFIRMATION,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        StoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
@@ -2115,6 +2116,26 @@ mod tests {
             response,
             DaemonApiResponse::Error(error) if error.code == "ingest_files_failed"
                 && error.message == "source is unreadable"
+        ));
+    }
+
+    #[test]
+    fn rejects_destructive_store_drain_without_authenticated_administrator() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let response = handler
+            .handle(DaemonApiRequest::StoreDrain(StoreDrainRequest {
+                store_id: "archive".to_string(),
+                dry_run: false,
+                allow_store_drain: true,
+                confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
         ));
     }
 

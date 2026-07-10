@@ -1,7 +1,7 @@
 use crate::evacuation::DiskCopyRoot;
 use dasobjectstore_core::ids::{DiskId, InvalidId, ObjectId, StoreId};
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display};
 use std::fs;
@@ -23,7 +23,7 @@ pub struct StoreDeleteRequest {
     pub dry_run: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreDrainReport {
     pub live_sqlite_path: PathBuf,
     pub store_id: StoreId,
@@ -36,7 +36,7 @@ pub struct StoreDrainReport {
     pub affected_payloads: Vec<StorePayloadRemoval>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreDeleteReport {
     pub live_sqlite_path: PathBuf,
     pub store_id: StoreId,
@@ -45,7 +45,7 @@ pub struct StoreDeleteReport {
     pub drain: StoreDrainReport,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StorePayloadRemoval {
     pub object_id: ObjectId,
     pub placement_id: String,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::discover_managed_hdd_roots;
 
 /// Handles storage inventory, telemetry, ingest, and object browser requests.
 pub(super) fn request<S, C>(
@@ -20,6 +21,14 @@ where
                 Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "store_inventory_failed",
                     error.to_string(),
+                ))),
+            }
+        }
+        DaemonApiRequest::StoreDrain(request) => {
+            match handler.store_drain_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::StoreDrain(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
                 ))),
             }
         }
@@ -205,6 +214,47 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    fn store_drain_for_actor(
+        &self,
+        request: StoreDrainRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<StoreDrainResponse, (&'static str, String)> {
+        if !request.dry_run {
+            let Some(actor) = actor else {
+                return Err((
+                    "administrator_authentication_required",
+                    "store drain requires an authenticated local administrator".to_string(),
+                ));
+            };
+            if !actor.is_administrator() {
+                return Err((
+                    "administrator_authorization_required",
+                    "store drain requires root, sudo, or dasobjectstore-admin membership"
+                        .to_string(),
+                ));
+            }
+            if !request.allow_store_drain {
+                return Err((
+                    "store_drain_not_allowed",
+                    "store drain requires policy allowance".to_string(),
+                ));
+            }
+        }
+        let store_id = StoreId::new(request.store_id.clone())
+            .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
+            .map_err(|error| ("managed_hdd_discovery_failed", error.to_string()))?;
+        let report =
+            dasobjectstore_metadata::drain_store(&dasobjectstore_metadata::StoreDrainRequest {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                store_id,
+                disk_roots,
+                dry_run: request.dry_run,
+            })
+            .map_err(|error| ("store_drain_failed", error.to_string()))?;
+        Ok(StoreDrainResponse { report })
+    }
+
     fn store_inventory_for_actor(
         &self,
         request: StoreInventoryRequest,

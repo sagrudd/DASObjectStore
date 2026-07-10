@@ -28,8 +28,9 @@ use crate::api::{
     RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -89,6 +90,16 @@ where
         match self.send(DaemonApiRequest::StoreInventory(request))? {
             DaemonApiResponse::StoreInventory(response) => Ok(response),
             response => Err(unexpected("store_inventory", response)),
+        }
+    }
+
+    pub fn store_drain(
+        &self,
+        request: StoreDrainRequest,
+    ) -> Result<StoreDrainResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::StoreDrain(request))? {
+            DaemonApiResponse::StoreDrain(response) => Ok(response),
+            response => Err(unexpected("store_drain", response)),
         }
     }
 
@@ -414,6 +425,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
     match response {
         DaemonApiResponse::HealthSummary(_) => "health_summary",
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
+        DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",
         DaemonApiResponse::CancelIngestJob(_) => "cancel_ingest_job",

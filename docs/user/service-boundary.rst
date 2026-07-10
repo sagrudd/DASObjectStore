@@ -98,6 +98,16 @@ group, for example ``mnemosyne``. The writer group authorizes daemon job
 submission for that store. It should not be used to grant broad write access to
 individual HDD filesystems.
 
+Daemon-owned store drain
+-------------------------
+
+``dasobjectstore store drain`` is a daemon operation. The client sends the
+store identifier, dry-run flag, policy allowance, and confirmation marker over
+the Unix socket; ``dasobjectstored`` discovers managed HDD roots, performs the
+metadata and payload removal, and returns the complete report. The client no
+longer accepts local SQLite or HDD-root overrides for this command, so a normal
+CLI process cannot redirect a destructive operation around daemon policy.
+
 The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
 user or group, package configuration stops and asks the operator to repair the

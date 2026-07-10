@@ -189,15 +189,6 @@ impl StoreS3UploadArgs {
 pub(crate) struct StoreDrainArgs {
     /// Store identifier to drain.
     store_id: StoreId,
-    /// Advanced override for the live SQLite metadata path.
-    #[arg(long, hide = true)]
-    live_sqlite_path: Option<PathBuf>,
-    /// Advanced override for the system-managed store registry path.
-    #[arg(long, hide = true)]
-    registry_path: Option<PathBuf>,
-    /// Managed HDD mount root.
-    #[arg(long)]
-    hdd_root: Option<PathBuf>,
     /// Show affected objects and payloads without deleting.
     #[arg(long)]
     dry_run: bool,
@@ -214,15 +205,6 @@ pub(crate) struct StoreDrainArgs {
 impl StoreDrainArgs {
     pub(crate) fn store_id(&self) -> &StoreId {
         &self.store_id
-    }
-    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
-        self.live_sqlite_path.as_deref()
-    }
-    pub(crate) fn registry_path(&self) -> Option<&Path> {
-        self.registry_path.as_deref()
-    }
-    pub(crate) fn hdd_root(&self) -> Option<&Path> {
-        self.hdd_root.as_deref()
     }
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
@@ -613,8 +595,6 @@ mod tests {
             "store",
             "drain",
             "generated-data",
-            "--hdd-root",
-            "/srv/dasobjectstore/hdd",
             "--allow-store-drain",
             "--confirm",
             "confirm store drain",
@@ -627,8 +607,6 @@ mod tests {
         match args.command() {
             Some(StoreCommand::Drain(drain)) => {
                 assert_eq!(drain.store_id().as_str(), "generated-data");
-                assert_eq!(drain.live_sqlite_path(), None);
-                assert_eq!(drain.hdd_root(), Some(Path::new("/srv/dasobjectstore/hdd")));
                 assert!(drain.allow_store_drain());
                 assert_eq!(drain.confirm(), "confirm store drain");
                 assert!(drain.json());
