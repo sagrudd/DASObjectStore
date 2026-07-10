@@ -431,6 +431,20 @@ list until every temporary size-budget exception has been removed.
   the product-local auth store is documented as a transitional Web session
   layer.
 
+### Web availability under heavy ingest and I/O pressure
+
+- [ ] Split the daemon Unix-socket control plane from long-running ingest execution. The listener must continue accepting health, inventory, status, and cancellation requests while an ingest streams progress; use bounded, separately admitted execution workers or a persisted job queue rather than holding the sole request handler for the transfer lifetime.
+- [ ] Give control, query, and cancellation requests reserved daemon capacity and priority over new ingest work. Bound every queue and return an explicit overload/degraded response instead of allowing an ingest to monopolize the socket or request workers.
+- [ ] Replace synchronous daemon Unix-socket calls in Axum handlers with an async bridge and bounded blocking pool. Apply per-route deadlines, cancellation propagation, and a circuit breaker so a stalled daemon produces a quick typed `503`/`429` response without exhausting HTTP accept/runtime threads.
+- [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.
+- [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
+- [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
+- [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
+- [ ] Add an authenticated, daemon-owned emergency `ingest pause/throttle/resume` operation that safely stops new source reads while preserving staged data, in-flight checksum/durability rules, and a responsive WebUI. Do not require a service restart or raw process priority changes during an incident.
+- [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
+- [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
+- [ ] Document operator triage for an ingest-pressure incident, including the availability indicators, safe daemon throttle/pause action, expected degraded WebUI behavior, and escalation evidence. Do not prescribe killing an ingest or restarting the daemon as the default recovery path.
+
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 
 - [x] Extend `dasobjectstore-mnemosyne` endpoint model with
