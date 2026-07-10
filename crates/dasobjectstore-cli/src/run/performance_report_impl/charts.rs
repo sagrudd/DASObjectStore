@@ -6,8 +6,6 @@ use super::super::super::performance_plan::{
     PerformanceIoSample, PerformanceReport, PerformanceScenarioResult,
 };
 use super::super::super::{CliError, DiskId};
-use super::*;
-
 #[derive(Clone, Debug)]
 pub(crate) struct PerformanceChartArtifact {
     pub(crate) title: String,

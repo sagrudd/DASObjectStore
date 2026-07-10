@@ -1,6 +1,5 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 pub(crate) fn json_string(value: &Value, path: &[&str]) -> Option<String> {

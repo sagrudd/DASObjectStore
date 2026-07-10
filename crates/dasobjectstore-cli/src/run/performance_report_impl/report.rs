@@ -1,6 +1,5 @@
 use super::super::super::performance_plan::{
-    PerformanceDiskResult, PerformanceFileResult, PerformanceIoSample, PerformanceReport,
-    PerformanceScenarioKind, PerformanceScenarioResult,
+    PerformanceDiskResult, PerformanceReport, PerformanceScenarioKind, PerformanceScenarioResult,
 };
 use std::collections::BTreeMap;
 
@@ -9,7 +8,6 @@ use super::super::super::{
     format_bytes_compact, format_concurrency_list, friendly_file_order, humanize_report_token,
     DiskId,
 };
-use super::*;
 use super::{
     median_rate, performance_chart_artifacts, performance_io_chart_artifacts, sha256_hex_bytes,
     throughput, yes_no,
