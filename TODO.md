@@ -164,6 +164,8 @@ list until every temporary size-budget exception has been removed.
     unavailable-daemon and bad-gateway error mapping.
   - [x] Extract daemon response projections and stable admin/job labels into
     `crates/dasobjectstore-gui-api/src/auth_reporting.rs`.
+  - [x] Extract bucket-name normalization and endpoint/enclosure enum parsing
+    into `crates/dasobjectstore-gui-api/src/auth_parsing.rs`.
   - [x] Extract the shared authentication/admin request and response DTOs into
     `crates/dasobjectstore-gui-api/src/auth_contracts.rs` without changing JSON
     shapes or route behavior.

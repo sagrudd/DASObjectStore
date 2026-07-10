@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.68 - 2026-07-10
+
+- Extract GUI authentication bucket normalization and endpoint/enclosure enum
+  parsing into a dedicated validation helper module.
+
 ## 0.69.67 - 2026-07-10
 
 - Split remote-upload Web styles into a feature-owned Trunk stylesheet while

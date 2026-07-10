@@ -10,6 +10,8 @@ use crate::{
 
 #[path = "auth_clients.rs"]
 mod auth_clients;
+#[path = "auth_parsing.rs"]
+mod auth_parsing;
 #[path = "auth_reporting.rs"]
 mod auth_reporting;
 #[path = "auth_router.rs"]
@@ -17,6 +19,7 @@ mod auth_router;
 #[path = "auth_contracts.rs"]
 mod contracts;
 use auth_clients::*;
+use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
     gui_api_router_for_host_mode, standalone_auth_router, standalone_easyconnect_router,
@@ -1040,22 +1043,6 @@ fn validate_object_store_ingest_policy_request(
     Ok(request)
 }
 
-fn derived_object_store_bucket_name(store_id: &str) -> String {
-    store_id
-        .trim()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-                character.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
-}
-
 fn validate_endpoint_inventory_upsert_request(
     request: EndpointInventoryUpsertRequest,
 ) -> Result<DaemonUpsertEndpointInventoryRequest, (StatusCode, Json<AuthRouteError>)> {
@@ -1301,72 +1288,6 @@ fn validate_endpoint_inventory_confirmation_marker(
         "confirmation_required",
         format!("confirmation_marker must be `{ENDPOINT_RECORD_CONFIRMATION}`"),
     ))
-}
-
-fn parse_prepare_enclosure_filesystem(
-    value: Option<&str>,
-) -> Result<DaemonPrepareEnclosureFilesystem, (StatusCode, Json<AuthRouteError>)> {
-    match value.unwrap_or("ext4").trim().to_ascii_lowercase().as_str() {
-        "ext4" => Ok(DaemonPrepareEnclosureFilesystem::Ext4),
-        "xfs" => Ok(DaemonPrepareEnclosureFilesystem::Xfs),
-        other => Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            format!("filesystem must be ext4 or xfs: {other}"),
-        )),
-    }
-}
-
-fn parse_endpoint_kind(
-    value: &str,
-) -> Result<DaemonEndpointKind, (StatusCode, Json<AuthRouteError>)> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "dasobjectstore_das" => Ok(DaemonEndpointKind::DasobjectstoreDas),
-        "dasobjectstore_nfs" => Ok(DaemonEndpointKind::DasobjectstoreNfs),
-        "s3_compatible" => Ok(DaemonEndpointKind::S3Compatible),
-        other => Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            format!(
-                "kind must be dasobjectstore_das, dasobjectstore_nfs, or s3_compatible: {other}"
-            ),
-        )),
-    }
-}
-
-fn parse_endpoint_validation_state(
-    value: &str,
-) -> Result<DaemonEndpointValidationState, (StatusCode, Json<AuthRouteError>)> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "draft" => Ok(DaemonEndpointValidationState::Draft),
-        "pending_validation" => Ok(DaemonEndpointValidationState::PendingValidation),
-        "validated" => Ok(DaemonEndpointValidationState::Validated),
-        "degraded" => Ok(DaemonEndpointValidationState::Degraded),
-        "rejected" => Ok(DaemonEndpointValidationState::Rejected),
-        "unknown" => Ok(DaemonEndpointValidationState::Unknown),
-        other => Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            format!(
-                "validation.state must be draft, pending_validation, validated, degraded, rejected, or unknown: {other}"
-            ),
-        )),
-    }
-}
-
-fn parse_endpoint_binding_readiness(
-    value: &str,
-) -> Result<DaemonEndpointBindingReadiness, (StatusCode, Json<AuthRouteError>)> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "ready" => Ok(DaemonEndpointBindingReadiness::Ready),
-        "degraded" => Ok(DaemonEndpointBindingReadiness::Degraded),
-        "blocked" => Ok(DaemonEndpointBindingReadiness::Blocked),
-        other => Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            format!("active_bindings.readiness must be ready, degraded, or blocked: {other}"),
-        )),
-    }
 }
 
 fn auth_route_error(err: LocalAuthStoreError) -> (StatusCode, Json<AuthRouteError>) {
