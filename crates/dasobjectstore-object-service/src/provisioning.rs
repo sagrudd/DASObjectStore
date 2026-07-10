@@ -100,7 +100,10 @@ pub fn plan_garage_provisioning(
                 GarageCliArgument::public("key"),
                 GarageCliArgument::public("import"),
                 GarageCliArgument::public("--yes"),
-                GarageCliArgument::public("--name"),
+                // Garage 2.3 accepts the key name through the short `-n`
+                // option; the long `--name` form is not available in the
+                // appliance image and causes provisioning to abort.
+                GarageCliArgument::public("-n"),
                 GarageCliArgument::public(key_name),
                 GarageCliArgument::public(&credential.access_key_id),
                 GarageCliArgument::sensitive(credential.secret_access_key.expose_secret()),
@@ -190,6 +193,10 @@ mod tests {
             GarageProvisioningCommandKind::ImportKey
         );
         assert_eq!(plan.commands[0].argv()[0..2], ["key", "import"]);
+        assert_eq!(
+            plan.commands[0].argv()[2..5],
+            ["--yes", "-n", "dasobjectstore:generated"]
+        );
         assert_eq!(
             plan.commands[1].argv(),
             ["bucket", "create", "dos-generated"]

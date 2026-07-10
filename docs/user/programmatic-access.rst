@@ -52,6 +52,39 @@ The helper command is site-owned. Keep its executable path and non-secret
 configuration in the remote client config; keep password prompts and secret
 material inside the helper boundary.
 
+Provision the ObjectStore before requesting remote access
+----------------------------------------------------------
+
+After creating or updating an ObjectStore registry entry, provision the
+configured object-service provider from that registry. Inspect the plan before
+applying it:
+
+.. code-block:: console
+
+   sudo dasobjectstore service provision --provider garage --dry-run
+   sudo dasobjectstore service provision --provider garage
+
+Provisioning creates the derived bucket and the store-scoped credential
+managed by DASObjectStore. It must be repeated after adding or changing stores;
+do not create buckets manually or use the Garage provider administrator key.
+
+Render the remote upload plan using the ObjectStore identifier, not a guessed
+bucket name:
+
+.. code-block:: console
+
+   sudo dasobjectstore store s3-upload alleleanchor_mvp \
+     --endpoint-url http://192.168.1.192:3900 \
+     --auth mneion \
+     --json
+
+The plan identifies the derived bucket, AWS profile, credential reference, and
+safe command shape. The credential authority named by ``--auth`` supplies the
+actual short-lived grant: use ``mneion`` or ``synoptikon`` site integration
+where available, or ``local-password`` with ``--username`` for standalone
+appliance authentication. Treat the plan as configuration metadata; never
+copy secret values into source files, shell history, or chat.
+
 S3 client settings
 ------------------
 

@@ -369,6 +369,9 @@ list until every temporary size-budget exception has been removed.
   with secret-redacted diagnostics.
 - [x] Wire daemon-owned Garage bucket provisioning and per-store key
   permissions from store registry bindings into the daemon API/job path.
+- [x] Validate Garage 2.3 provisioning syntax on the deployment appliance and
+  use its supported short ``-n`` key-name option so registry provisioning can
+  complete without a daemon transport failure.
 - [x] Generate Docker/Compose configuration from store and pool policy.
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.
