@@ -114,6 +114,11 @@ pub fn verify_live_metadata(
         connection.query_row("SELECT COUNT(*) FROM stores", [], |row| row.get(0))?
     };
     let records = read_placements(&connection, request.store_id.as_deref())?;
+    let all_records = if request.store_id.is_some() {
+        read_placements(&connection, None)?
+    } else {
+        records.clone()
+    };
     let objects_scanned = records
         .iter()
         .map(|record| record.object_id.as_str())
@@ -149,7 +154,10 @@ pub fn verify_live_metadata(
         findings: Vec::new(),
     };
     let mut content_groups: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut expected_payloads = HashSet::new();
+    let expected_payloads = all_records
+        .iter()
+        .map(|record| (record.disk_id.clone(), record.relative_path.clone()))
+        .collect::<HashSet<_>>();
     for record in &records {
         let Some(root) = roots.get(&record.disk_id) else {
             report.io_errors += 1;
@@ -163,7 +171,6 @@ pub fn verify_live_metadata(
             continue;
         };
         let path = root.join(&record.relative_path);
-        expected_payloads.insert((record.disk_id.clone(), record.relative_path.clone()));
         let metadata = match path.metadata() {
             Ok(metadata) if metadata.is_file() => metadata,
             Ok(_) => {
