@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.63 - 2026-07-10
+
+- Extract performance-report artifact rebuild dispatch into the dedicated
+  performance report module.
+
 ## 0.69.62 - 2026-07-10
 
 - Extract CLI platform probe dispatch into a dedicated read-only probe module.

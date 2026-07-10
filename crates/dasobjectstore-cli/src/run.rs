@@ -28,6 +28,7 @@ mod store_write;
 mod subobject;
 
 use self::performance_plan::*;
+use self::performance_report::run_performance_report;
 use self::probe::run_probe;
 
 use self::command_handlers::{
@@ -59,12 +60,14 @@ use self::performance_report::{
     active_hdd_disk_rates, active_hdd_landing_lines, hostname_for_report, json_string,
     measurement_rate, measurement_rate_with_current, performance_hdd_tui_rates,
     recommend_performance_strategy, render_performance_json, render_performance_report,
-    render_performance_report_from_json_artifact, sha256_hex_bytes, throughput,
-    update_file_read_measurements_from_disk_results, write_performance_chart_svgs_from_json,
-    zero_measurement,
+    sha256_hex_bytes, throughput, update_file_read_measurements_from_disk_results,
+    write_performance_chart_svgs_from_json, zero_measurement,
 };
 #[cfg(test)]
-use self::performance_report::{render_simple_pdf, render_svg_bar_chart, render_svg_io_line_chart};
+use self::performance_report::{
+    render_performance_report_from_json_artifact, render_simple_pdf, render_svg_bar_chart,
+    render_svg_io_line_chart,
+};
 use self::runtime_status::run_status;
 use self::service::{run_service_down, run_service_provision, run_service_status, run_service_up};
 use self::storage_lifecycle::{
@@ -337,47 +340,6 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
-}
-
-fn run_performance_report(
-    args: &PerformanceReportArgs,
-    writer: &mut impl Write,
-) -> Result<(), CliError> {
-    let artifact = read_performance_json_artifact(args.json_artifact())?;
-    let report_path = args
-        .report()
-        .map(Path::to_path_buf)
-        .or_else(|| artifact_pdf_path(&artifact))
-        .ok_or_else(|| {
-            CliError::CommandFailed(
-                "performance-report requires --report when the JSON artifact does not record a PDF path"
-                    .to_string(),
-            )
-        })?;
-    validate_pdf_report_path(&report_path)?;
-    let markdown_path = args.tmp_dir().join(format!(
-        "{}-rebuilt.md",
-        report_path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("dasobjectstore-performance-report")
-    ));
-    if let Some(parent) = markdown_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if let Some(parent) = report_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    write_performance_chart_svgs_from_json(&artifact, &report_path)?;
-    let markdown = render_performance_report_from_json_artifact(&artifact, &report_path);
-    fs::write(&markdown_path, markdown)?;
-    write_formal_performance_pdf_report_from_artifact(&markdown_path, &report_path, &artifact)?;
-    if !args.keep_markdown() {
-        let _ = fs::remove_file(&markdown_path);
-    }
-    writeln!(writer, "Report: {}", report_path.display())?;
-    writeln!(writer, "JSON: {}", args.json_artifact().display())?;
-    Ok(())
 }
 
 fn run_performance_test(

@@ -107,6 +107,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract read-only platform probe dispatch into
     `crates/dasobjectstore-cli/src/run/probe.rs`, keeping probe acquisition and
     presentation behind a small command handler.
+  - [x] Extract performance-report artifact rebuild dispatch into the existing
+    performance report module, keeping PDF/markdown lifecycle handling out of
+    the top-level runner.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
