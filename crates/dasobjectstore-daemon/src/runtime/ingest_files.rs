@@ -184,12 +184,30 @@ impl LocalFileIngestExecutor {
             active_hdd_transfers: Vec::new(),
             resource_policy: None,
             message: Some(format!(
-                "planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s), landing mode {}",
+                "preflight: source={} source topology={} origin={} store_ingest_mode={:?} landing mode {} reason={}; planned {} file(s), {} source byte(s), {} copy/copies, {} HDD settlement worker(s)",
+                request.source_path.display(),
+                if matches!(
+                    ingress_origin,
+                    DaemonIngressOrigin::LocalServer
+                        | DaemonIngressOrigin::LocalServerDirectImport
+                        | DaemonIngressOrigin::LocalServerSsdFirst
+                ) {
+                    "verified-server-local"
+                } else {
+                    "external-or-unverified"
+                },
+                ingress_origin,
+                endpoint.store.policy.ingest_mode,
+                landing_mode,
+                if landing_mode == DaemonIngressLandingMode::SsdFirst {
+                    "SSD staging selected by verified source classification or store policy"
+                } else {
+                    "direct HDD selected by explicit local route and DirectToHdd store policy"
+                },
                 files.len(),
                 source_bytes,
                 copies,
-                hdd_worker_count,
-                landing_mode
+                hdd_worker_count
             )),
         })?;
 
@@ -2186,10 +2204,15 @@ mod tests {
                 .expect("external origin ingest succeeds");
 
             assert!(events.iter().any(|event| {
-                event
-                    .message
-                    .as_deref()
-                    .is_some_and(|message| message.contains("landing mode ssd_first"))
+                event.message.as_deref().is_some_and(|message| {
+                    message.starts_with("preflight:")
+                        && message.contains("source=")
+                        && message.contains("source topology=")
+                        && message.contains("origin=")
+                        && message.contains("store_ingest_mode=")
+                        && message.contains("landing mode ssd_first")
+                        && message.contains("reason=")
+                })
             }));
             let ssd_stage_index = events
                 .iter()

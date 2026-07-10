@@ -10711,7 +10711,13 @@ fn write_daemon_ingest_progress(
         remaining_files,
         daemon_ingest_stage_label(&progress.stage),
         ssd_pressure
-    )
+    )?;
+    if let Some(message) = &progress.message {
+        if message.starts_with("preflight:") {
+            writeln!(writer, "{message}")?;
+        }
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -15112,7 +15118,7 @@ mod tests {
             telemetry: None,
             active_hdd_transfers: Vec::new(),
             resource_policy: None,
-            message: None,
+            message: Some("preflight: source=/home/stephen/zymo source topology=verified-server-local origin=local_server_ssd_first store_ingest_mode=SsdFirst landing mode ssd_first reason=SSD staging selected by verified source classification or store policy".to_string()),
         };
         let mut output = Vec::new();
 
@@ -15125,6 +15131,7 @@ mod tests {
         assert!(output.contains("remaining=2"));
         assert!(output.contains("stage=hdd-copy:disk-a:1"));
         assert!(output.contains("ssd=AcceptingWrites"));
+        assert!(output.contains("preflight: source=/home/stephen/zymo"));
     }
 
     #[test]

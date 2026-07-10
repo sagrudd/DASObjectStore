@@ -380,6 +380,11 @@ fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'sta
             event.message.clone().unwrap_or_else(|| "none".to_string())
         )),
     ];
+    if let Some(message) = &event.message {
+        if message.starts_with("preflight:") {
+            lines.insert(3, Line::from(format!("Route: {message}")));
+        }
+    }
     if let Some(telemetry) = event.telemetry {
         lines.push(Line::from(format!(
             "Phase rates: source {}    SSD {}    HDD aggregate {}",
@@ -702,7 +707,7 @@ mod tests {
                 rename_duration_millis: None,
             }],
             resource_policy: None,
-            message: Some("copying".to_string()),
+            message: Some("preflight: source=/mnt/external/zymo source topology=external-or-unverified origin=usb_mounted_disk store_ingest_mode=SsdFirst landing mode ssd_first reason=SSD staging selected by verified source classification or store policy".to_string()),
         };
         let mut second_target = event.active_hdd_transfers[0].clone();
         second_target.disk_id = DiskId::new("qnap-1058").expect("disk id");
@@ -717,6 +722,7 @@ mod tests {
         assert!(details.contains("Data: 5.0 GiB/2.0 TiB"));
         assert!(details.contains("Work: 5.0 GiB/4.0 TiB"));
         assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
+        assert!(details.contains("Route: preflight: source=/mnt/external/zymo"));
         assert!(details.contains("Phase rates: source 0 B/s    SSD 0 B/s    HDD aggregate 0 B/s"));
         let queues = format!("{:?}", super::queue_lines(&event));
         assert!(queues.contains(

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.26 - 2026-07-10
+
+- Emit a daemon preflight route explanation before source content is read and
+  render it in CLI and embedded TUI progress, including source topology,
+  classified origin, store ingest mode, landing mode, and routing reason.
+
 ## 0.69.25 - 2026-07-10
 
 - Require explicit operator intent for direct local landing: normal
