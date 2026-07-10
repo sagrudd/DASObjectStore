@@ -19,10 +19,11 @@ use crate::api::{
     RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
     RemoteEasyconnectSession, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest,
-    StoreInventoryResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
+    StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -54,9 +55,10 @@ use dasobjectstore_core::utc::{add_seconds_to_utc_timestamp, format_utc_timestam
 use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
-    generate_per_store_credentials, read_store_registry, read_subobject_registry,
-    upsert_store_definition, ObjectServiceError, ObjectServiceProviderId, StoreCredentialRequest,
-    SystemCredentialEntropy,
+    delete_store_definition, delete_subobjects_for_store, generate_per_store_credentials,
+    portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
+    read_subobject_registry, upsert_store_definition, ObjectServiceError, ObjectServiceProviderId,
+    StoreCredentialRequest, SystemCredentialEntropy,
 };
 use std::fmt::{self, Display};
 use std::fs;
@@ -1257,6 +1259,7 @@ impl DaemonApiRequest {
             Self::DiskForceRetire(_) => "disk_force_retire",
             Self::StoreInventory(_) => "store_inventory",
             Self::StoreDrain(_) => "store_drain",
+            Self::StoreDelete(_) => "store_delete",
             Self::IngestQueueDrain(_) => "ingest_queue_drain",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
@@ -1319,11 +1322,12 @@ mod tests {
         RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
         RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
         RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreDrainRequest, StoreInventoryRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
-        DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
+        UpsertEndpointInventoryResponse, DIRECT_TO_HDD_POLICY_CONFIRMATION,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
@@ -2166,6 +2170,26 @@ mod tests {
                 dry_run: false,
                 allow_store_drain: true,
                 confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+    }
+
+    #[test]
+    fn rejects_destructive_store_delete_without_authenticated_administrator() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let response = handler
+            .handle(DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                store_id: "archive".to_string(),
+                dry_run: false,
+                allow_store_delete: true,
+                confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
             }))
             .expect("request handled");
 

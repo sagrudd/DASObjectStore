@@ -116,6 +116,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Route force disk retirement through a typed daemon request with
     daemon-side administrator authorization, policy allowance, confirmation,
     timestamp, and risk-gated state transition.
+  - [x] Route `store delete` through a typed daemon request; keep metadata,
+    managed-HDD payload cleanup, host/portable registries, authorization,
+    policy allowance, and action-time confirmation inside the daemon.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

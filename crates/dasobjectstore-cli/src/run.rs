@@ -85,13 +85,13 @@ use dasobjectstore_daemon::{
     DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
     DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
-    IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
-    StoreDrainRequest as DaemonStoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
-    DEFAULT_DAEMON_STATE_DIR,
+    IngestQueueDrainRequest as DaemonIngestQueueDrainRequest, StoreDeleteCommandReport,
+    StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
+    StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
-    attach_clean_pool_read_only, delete_store, export_settled_object, import_dirty_pool_read_only,
+    attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
     inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
     put_object_ssd_first_with_progress, read_disk_drain_plan, read_disk_replacement_plan,
     read_ingest_queue_for_store, read_object_inspect, read_store_contents, DestagePriorityPolicy,
@@ -101,7 +101,7 @@ use dasobjectstore_metadata::{
     ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
     ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
     StoreCleanupError, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
-    StoreContentsSnapshot, StoreDeleteRequest, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
+    StoreContentsSnapshot, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -113,15 +113,13 @@ use dasobjectstore_mnemosyne::{
 };
 use dasobjectstore_object_service::{
     create_subobject_definition, credential_reference_for_store, default_store_registry_path,
-    default_subobject_registry_path, delete_store_definition, delete_subobjects_for_store,
-    mirror_subobject_definition, plan_remote_s3_upload, plan_store_service_layout,
-    portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
-    read_subobject_registry, render_compose, search_subobjects, upsert_store_definition,
-    ComposeRenderRequest, ComposeServiceConfig, GarageProvider, GarageProviderConfig,
-    ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId, RemoteS3UploadPlanRequest,
-    StoreRegistryDeleteReport, StoreRegistryUpdateReport, StoreServiceDefinition,
-    SubObjectDefinition, SubObjectParent, SubObjectRegistryStoreDeleteReport,
-    SubObjectRegistryUpdateReport,
+    default_subobject_registry_path, mirror_subobject_definition, plan_remote_s3_upload,
+    plan_store_service_layout, portable_store_registry_path, portable_subobject_registry_path,
+    read_store_registry, read_subobject_registry, render_compose, search_subobjects,
+    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, GarageProvider,
+    GarageProviderConfig, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
+    RemoteS3UploadPlanRequest, StoreRegistryUpdateReport, StoreServiceDefinition,
+    SubObjectDefinition, SubObjectParent, SubObjectRegistryUpdateReport,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -4621,15 +4619,6 @@ fn device_path_from_marker(marker: &str) -> Option<String> {
         .find_map(|line| line.strip_prefix("device=").map(ToOwned::to_owned))
 }
 
-#[derive(Debug, serde::Serialize)]
-pub(super) struct StoreDeleteCommandReport {
-    metadata: dasobjectstore_metadata::StoreDeleteReport,
-    host_registry: StoreRegistryDeleteReport,
-    portable_registry: Option<StoreRegistryDeleteReport>,
-    host_subobjects: SubObjectRegistryStoreDeleteReport,
-    portable_subobjects: Option<SubObjectRegistryStoreDeleteReport>,
-}
-
 fn run_store_drain(args: &StoreDrainArgs, writer: &mut impl Write) -> Result<(), CliError> {
     require_admin_for_destructive_store_action(args.dry_run())?;
     if !args.dry_run() {
@@ -4676,51 +4665,15 @@ fn run_store_delete(args: &StoreDeleteArgs, writer: &mut impl Write) -> Result<(
         )?;
     }
 
-    let hdd_root = args
-        .hdd_root()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_hdd_root);
-    let metadata_report = delete_store(&StoreDeleteRequest {
-        live_sqlite_path: args.live_sqlite_path().to_path_buf(),
-        store_id: args.store_id().clone(),
-        disk_roots: discover_managed_hdd_roots(&hdd_root)?,
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.store_delete(DaemonStoreDeleteRequest {
+        store_id: args.store_id().to_string(),
         dry_run: args.dry_run(),
+        allow_store_delete: args.allow_store_delete(),
+        confirmation_marker: args.confirm().to_string(),
     })?;
-    let host_registry_path = args
-        .registry_path()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_store_registry_path);
-    let host_subobject_registry_path = args
-        .subobject_registry_path()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_subobject_registry_path);
-    let host_registry_report =
-        delete_store_definition_maybe(&host_registry_path, args.store_id(), args.dry_run())?;
-    let host_subobject_report = delete_subobjects_for_store_maybe(
-        &host_subobject_registry_path,
-        args.store_id(),
-        args.dry_run(),
-    )?;
-    let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
-    let portable_registry_report = delete_portable_store_definition(
-        args.ssd_root(),
-        allow_default_ssd,
-        args.store_id(),
-        args.dry_run(),
-    )?;
-    let portable_subobject_report = delete_portable_subobjects(
-        args.ssd_root(),
-        allow_default_ssd,
-        args.store_id(),
-        args.dry_run(),
-    )?;
-    let report = StoreDeleteCommandReport {
-        metadata: metadata_report,
-        host_registry: host_registry_report,
-        portable_registry: portable_registry_report,
-        host_subobjects: host_subobject_report,
-        portable_subobjects: portable_subobject_report,
-    };
+    let report = response.report;
 
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &report)?;
@@ -4740,82 +4693,6 @@ fn require_admin_for_destructive_store_action(dry_run: bool) -> Result<(), CliEr
     Err(CliError::CommandFailed(
         "destructive storage cleanup requires an administrative user; rerun with sudo".to_string(),
     ))
-}
-
-fn delete_store_definition_maybe(
-    path: &Path,
-    store_id: &StoreId,
-    dry_run: bool,
-) -> Result<StoreRegistryDeleteReport, CliError> {
-    if dry_run {
-        let removed = read_store_registry(path)?
-            .iter()
-            .any(|definition| &definition.store_id == store_id);
-        return Ok(StoreRegistryDeleteReport {
-            registry_path: path.to_path_buf(),
-            store_id: store_id.clone(),
-            removed,
-        });
-    }
-
-    Ok(delete_store_definition(path, store_id)?)
-}
-
-fn delete_subobjects_for_store_maybe(
-    path: &Path,
-    store_id: &StoreId,
-    dry_run: bool,
-) -> Result<SubObjectRegistryStoreDeleteReport, CliError> {
-    if dry_run {
-        let mut removed_names = read_subobject_registry(path)?
-            .iter()
-            .filter(|definition| &definition.store_id == store_id)
-            .map(|definition| definition.name.clone())
-            .collect::<Vec<_>>();
-        removed_names.sort();
-        return Ok(SubObjectRegistryStoreDeleteReport {
-            registry_path: path.to_path_buf(),
-            store_id: store_id.clone(),
-            removed_count: removed_names.len(),
-            removed_names,
-        });
-    }
-
-    Ok(delete_subobjects_for_store(path, store_id)?)
-}
-
-fn delete_portable_store_definition(
-    ssd_root: Option<&Path>,
-    allow_default_ssd: bool,
-    store_id: &StoreId,
-    dry_run: bool,
-) -> Result<Option<StoreRegistryDeleteReport>, CliError> {
-    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)? else {
-        return Ok(None);
-    };
-    let registry_path = portable_store_registry_path(&ssd_root);
-    Ok(Some(delete_store_definition_maybe(
-        &registry_path,
-        store_id,
-        dry_run,
-    )?))
-}
-
-fn delete_portable_subobjects(
-    ssd_root: Option<&Path>,
-    allow_default_ssd: bool,
-    store_id: &StoreId,
-    dry_run: bool,
-) -> Result<Option<SubObjectRegistryStoreDeleteReport>, CliError> {
-    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)? else {
-        return Ok(None);
-    };
-    let registry_path = portable_subobject_registry_path(&ssd_root);
-    Ok(Some(delete_subobjects_for_store_maybe(
-        &registry_path,
-        store_id,
-        dry_run,
-    )?))
 }
 
 fn run_store_adopt(args: &StoreAdoptArgs, writer: &mut impl Write) -> Result<(), CliError> {

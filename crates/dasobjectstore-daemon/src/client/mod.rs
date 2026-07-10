@@ -29,9 +29,9 @@ use crate::api::{
     RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -121,6 +121,16 @@ where
         match self.send(DaemonApiRequest::StoreDrain(request))? {
             DaemonApiResponse::StoreDrain(response) => Ok(response),
             response => Err(unexpected("store_drain", response)),
+        }
+    }
+
+    pub fn store_delete(
+        &self,
+        request: StoreDeleteRequest,
+    ) -> Result<StoreDeleteResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::StoreDelete(request))? {
+            DaemonApiResponse::StoreDelete(response) => Ok(response),
+            response => Err(unexpected("store_delete", response)),
         }
     }
 
@@ -459,6 +469,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::DiskForceRetire(_) => "disk_force_retire",
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
+        DaemonApiResponse::StoreDelete(_) => "store_delete",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",

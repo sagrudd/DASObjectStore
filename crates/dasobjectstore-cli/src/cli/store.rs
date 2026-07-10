@@ -224,15 +224,6 @@ impl StoreDrainArgs {
 pub(crate) struct StoreDeleteArgs {
     /// Store identifier to delete.
     store_id: StoreId,
-    /// Path to live.sqlite for the pool.
-    #[arg(long)]
-    live_sqlite_path: PathBuf,
-    /// Managed HDD mount root.
-    #[arg(long)]
-    hdd_root: Option<PathBuf>,
-    /// DAS SSD root used for portable store and SubObject metadata.
-    #[arg(long)]
-    ssd_root: Option<PathBuf>,
     /// Show affected metadata, payloads, and registry entries without deleting.
     #[arg(long)]
     dry_run: bool,
@@ -245,25 +236,10 @@ pub(crate) struct StoreDeleteArgs {
     /// Emit the delete report as JSON.
     #[arg(long)]
     json: bool,
-    /// Advanced test override for the system-managed store registry path.
-    #[arg(long, hide = true)]
-    registry_path: Option<PathBuf>,
-    /// Advanced test override for the system-managed SubObject registry path.
-    #[arg(long, hide = true)]
-    subobject_registry_path: Option<PathBuf>,
 }
 impl StoreDeleteArgs {
     pub(crate) fn store_id(&self) -> &StoreId {
         &self.store_id
-    }
-    pub(crate) fn live_sqlite_path(&self) -> &Path {
-        &self.live_sqlite_path
-    }
-    pub(crate) fn hdd_root(&self) -> Option<&Path> {
-        self.hdd_root.as_deref()
-    }
-    pub(crate) fn ssd_root(&self) -> Option<&Path> {
-        self.ssd_root.as_deref()
     }
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
@@ -276,12 +252,6 @@ impl StoreDeleteArgs {
     }
     pub(crate) fn json(&self) -> bool {
         self.json
-    }
-    pub(crate) fn registry_path(&self) -> Option<&Path> {
-        self.registry_path.as_deref()
-    }
-    pub(crate) fn subobject_registry_path(&self) -> Option<&Path> {
-        self.subobject_registry_path.as_deref()
     }
 }
 
@@ -622,12 +592,6 @@ mod tests {
             "store",
             "delete",
             "generated-data",
-            "--live-sqlite-path",
-            "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
-            "--hdd-root",
-            "/srv/dasobjectstore/hdd",
-            "--ssd-root",
-            "/srv/dasobjectstore/ssd",
             "--allow-store-delete",
             "--confirm",
             "confirm store delete",
@@ -640,18 +604,6 @@ mod tests {
         match args.command() {
             Some(StoreCommand::Delete(delete)) => {
                 assert_eq!(delete.store_id().as_str(), "generated-data");
-                assert_eq!(
-                    delete.live_sqlite_path(),
-                    Path::new("/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite")
-                );
-                assert_eq!(
-                    delete.hdd_root(),
-                    Some(Path::new("/srv/dasobjectstore/hdd"))
-                );
-                assert_eq!(
-                    delete.ssd_root(),
-                    Some(Path::new("/srv/dasobjectstore/ssd"))
-                );
                 assert!(delete.allow_store_delete());
                 assert_eq!(delete.confirm(), "confirm store delete");
                 assert!(delete.dry_run());

@@ -126,7 +126,9 @@ pub use service::{
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
 pub use storage_mutation::{
-    StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError, STORE_DRAIN_CONFIRMATION,
+    StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDeleteValidationError,
+    StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError, STORE_DELETE_CONFIRMATION,
+    STORE_DRAIN_CONFIRMATION,
 };
 pub use store_policy::{
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
@@ -144,6 +146,7 @@ pub enum DaemonApiRequest {
     DiskForceRetire(DiskForceRetireRequest),
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
+    StoreDelete(StoreDeleteRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
@@ -183,6 +186,7 @@ impl DaemonApiRequest {
             }
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
+            Self::StoreDelete(request) => request.validate().map_err(store_delete_validation_error),
             Self::IngestQueueDrain(request) => request
                 .validate()
                 .map_err(ingest_queue_drain_validation_error),
@@ -251,6 +255,7 @@ pub enum DaemonApiResponse {
     DiskForceRetire(DiskRetireResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
+    StoreDelete(StoreDeleteResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
@@ -503,6 +508,19 @@ fn store_drain_validation_error(err: StoreDrainValidationError) -> DaemonRequest
         StoreDrainValidationError::ConfirmationMismatch => {
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: STORE_DRAIN_CONFIRMATION,
+            }
+        }
+    }
+}
+
+fn store_delete_validation_error(err: StoreDeleteValidationError) -> DaemonRequestValidationError {
+    match err {
+        StoreDeleteValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        StoreDeleteValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: STORE_DELETE_CONFIRMATION,
             }
         }
     }

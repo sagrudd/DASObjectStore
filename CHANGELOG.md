@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.56 - 2026-07-10
+
+- Route `store delete` through a typed daemon request with daemon-owned
+  metadata cleanup, registry cleanup, authorization, policy allowance, and
+  action-time confirmation.
+
 ## 0.69.55 - 2026-07-10
 
 - Extract the read-only CLI `store s3-upload` plan renderer into the dedicated

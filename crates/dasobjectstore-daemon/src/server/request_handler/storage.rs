@@ -1,5 +1,8 @@
 use super::*;
 use crate::runtime::discover_managed_hdd_roots;
+use dasobjectstore_object_service::{
+    StoreRegistryDeleteReport, SubObjectRegistryStoreDeleteReport,
+};
 
 /// Handles storage inventory, telemetry, ingest, and object browser requests.
 pub(super) fn request<S, C>(
@@ -43,6 +46,14 @@ where
         DaemonApiRequest::StoreDrain(request) => {
             match handler.store_drain_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::StoreDrain(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
+        DaemonApiRequest::StoreDelete(request) => {
+            match handler.store_delete_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::StoreDelete(response)),
                 Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     code, message,
                 ))),
@@ -277,6 +288,99 @@ where
             })
             .map_err(|error| ("store_drain_failed", error.to_string()))?;
         Ok(StoreDrainResponse { report })
+    }
+
+    fn store_delete_for_actor(
+        &self,
+        request: StoreDeleteRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<StoreDeleteResponse, (&'static str, String)> {
+        if !request.dry_run {
+            let Some(actor) = actor else {
+                return Err((
+                    "administrator_authentication_required",
+                    "store delete requires an authenticated local administrator".to_string(),
+                ));
+            };
+            if !actor.is_administrator() {
+                return Err((
+                    "administrator_authorization_required",
+                    "store delete requires root, sudo, or dasobjectstore-admin membership"
+                        .to_string(),
+                ));
+            }
+            if !request.allow_store_delete {
+                return Err((
+                    "store_delete_not_allowed",
+                    "store delete requires policy allowance".to_string(),
+                ));
+            }
+        }
+
+        let store_id = StoreId::new(request.store_id.clone())
+            .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
+            .map_err(|error| ("managed_hdd_discovery_failed", error.to_string()))?;
+        let metadata =
+            dasobjectstore_metadata::delete_store(&dasobjectstore_metadata::StoreDeleteRequest {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                store_id: store_id.clone(),
+                disk_roots,
+                dry_run: request.dry_run,
+            })
+            .map_err(|error| ("store_delete_failed", error.to_string()))?;
+        let host_registry =
+            delete_store_definition_maybe(&self.store_registry_path, &store_id, request.dry_run)
+                .map_err(|error| ("store_registry_delete_failed", error.to_string()))?;
+        let host_subobjects = delete_subobjects_for_store_maybe(
+            &self.subobject_registry_path,
+            &store_id,
+            request.dry_run,
+        )
+        .map_err(|error| ("subobject_registry_delete_failed", error.to_string()))?;
+
+        let (portable_registry, portable_subobjects) = if known_ssd_root(&default_ssd_root()) {
+            let ssd_root = default_ssd_root();
+            let portable_registry_path = portable_store_registry_path(&ssd_root);
+            let portable_subobject_path = portable_subobject_registry_path(&ssd_root);
+            (
+                Some(
+                    delete_store_definition_maybe(
+                        &portable_registry_path,
+                        &store_id,
+                        request.dry_run,
+                    )
+                    .map_err(|error| {
+                        ("portable_store_registry_delete_failed", error.to_string())
+                    })?,
+                ),
+                Some(
+                    delete_subobjects_for_store_maybe(
+                        &portable_subobject_path,
+                        &store_id,
+                        request.dry_run,
+                    )
+                    .map_err(|error| {
+                        (
+                            "portable_subobject_registry_delete_failed",
+                            error.to_string(),
+                        )
+                    })?,
+                ),
+            )
+        } else {
+            (None, None)
+        };
+
+        Ok(StoreDeleteResponse {
+            report: StoreDeleteCommandReport {
+                metadata,
+                host_registry,
+                portable_registry,
+                host_subobjects,
+                portable_subobjects,
+            },
+        })
     }
 
     fn disk_retire_for_actor(
@@ -651,4 +755,52 @@ where
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
         self.authorize_endpoint_read(actor, &request.endpoint)
     }
+}
+
+fn known_ssd_root(path: &Path) -> bool {
+    fs::read_to_string(path.join(".dasobjectstore").join("device.env"))
+        .map(|marker| marker.lines().any(|line| line == "role=ssd"))
+        .unwrap_or(false)
+}
+
+fn delete_store_definition_maybe(
+    path: &Path,
+    store_id: &StoreId,
+    dry_run: bool,
+) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
+    if dry_run {
+        let removed = read_store_registry(path)?
+            .iter()
+            .any(|definition| &definition.store_id == store_id);
+        return Ok(StoreRegistryDeleteReport {
+            registry_path: path.to_path_buf(),
+            store_id: store_id.clone(),
+            removed,
+        });
+    }
+
+    delete_store_definition(path, store_id)
+}
+
+fn delete_subobjects_for_store_maybe(
+    path: &Path,
+    store_id: &StoreId,
+    dry_run: bool,
+) -> Result<SubObjectRegistryStoreDeleteReport, ObjectServiceError> {
+    if dry_run {
+        let mut removed_names = read_subobject_registry(path)?
+            .iter()
+            .filter(|definition| &definition.store_id == store_id)
+            .map(|definition| definition.name.clone())
+            .collect::<Vec<_>>();
+        removed_names.sort();
+        return Ok(SubObjectRegistryStoreDeleteReport {
+            registry_path: path.to_path_buf(),
+            store_id: store_id.clone(),
+            removed_count: removed_names.len(),
+            removed_names,
+        });
+    }
+
+    delete_subobjects_for_store(path, store_id)
 }
