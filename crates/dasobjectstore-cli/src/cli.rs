@@ -4,7 +4,6 @@ use dasobjectstore_core::ids::PoolId;
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::StoreClass;
-use dasobjectstore_daemon::DaemonIngestConflictPolicy;
 use dasobjectstore_object_service::{ObjectServiceProviderId, RemoteS3AuthAuthority};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -12,7 +11,10 @@ use std::path::{Path, PathBuf};
 mod ingest;
 mod performance;
 
-pub(crate) use ingest::{IngestArgs, IngestCommand, IngestFilesArgs};
+pub(crate) use ingest::{
+    IngestArgs, IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs,
+    IngestQueueArgs, IngestStatusArgs,
+};
 
 pub(crate) use performance::{
     PerformanceFileOrder, PerformanceFileSelection, PerformanceReportArgs,
@@ -1152,194 +1154,6 @@ impl SubobjectSearchArgs {
 
     pub(crate) fn registry_path(&self) -> Option<&Path> {
         self.registry_path.as_deref()
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct IngestStatusArgs {
-    /// Path to the mandatory SSD ingest root.
-    #[arg(long)]
-    ssd_root: PathBuf,
-    /// SSD used percentage at which lower-priority writes should pause.
-    #[arg(long, default_value_t = dasobjectstore_metadata::DEFAULT_SSD_HIGH_WATERMARK_PERCENT)]
-    high_watermark_percent: u8,
-    /// SSD used percentage at which non-critical writes should be rejected.
-    #[arg(long, default_value_t = dasobjectstore_metadata::DEFAULT_SSD_CRITICAL_WATERMARK_PERCENT)]
-    critical_watermark_percent: u8,
-    /// Minimum free bytes to preserve on the SSD ingest filesystem.
-    #[arg(long, default_value_t = 0)]
-    minimum_free_bytes: u64,
-}
-
-impl IngestStatusArgs {
-    pub(crate) fn ssd_root(&self) -> &Path {
-        &self.ssd_root
-    }
-
-    pub(crate) fn high_watermark_percent(&self) -> u8 {
-        self.high_watermark_percent
-    }
-
-    pub(crate) fn critical_watermark_percent(&self) -> u8 {
-        self.critical_watermark_percent
-    }
-
-    pub(crate) fn minimum_free_bytes(&self) -> u64 {
-        self.minimum_free_bytes
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct IngestQueueArgs {
-    /// Store identifier whose queue entries should be listed.
-    store_id: StoreId,
-    /// Advanced override for the live SQLite metadata path.
-    #[arg(long, hide = true)]
-    live_sqlite_path: Option<PathBuf>,
-    /// Emit queue entries as JSON.
-    #[arg(long)]
-    json: bool,
-}
-
-impl IngestQueueArgs {
-    pub(crate) fn store_id(&self) -> &StoreId {
-        &self.store_id
-    }
-
-    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
-        self.live_sqlite_path.as_deref()
-    }
-
-    pub(crate) fn json(&self) -> bool {
-        self.json
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct IngestDrainQueueArgs {
-    /// Store identifier whose active ingest jobs should be cancelled.
-    store_id: StoreId,
-    /// Advanced override for the live SQLite metadata path.
-    #[arg(long, hide = true)]
-    live_sqlite_path: Option<PathBuf>,
-    /// Show active queue jobs that would be cancelled without mutating metadata.
-    #[arg(long)]
-    dry_run: bool,
-    /// Policy allowance for cancelling active ingest queue jobs.
-    #[arg(long)]
-    allow_ingest_queue_drain: bool,
-    /// Action-time confirmation phrase: "confirm ingest queue drain".
-    #[arg(long, default_value = "")]
-    confirm: String,
-    /// Reason recorded on cancelled ingest jobs.
-    #[arg(long, default_value = "operator drained ingest queue")]
-    reason: String,
-    /// Emit the drain report as JSON.
-    #[arg(long)]
-    json: bool,
-}
-
-impl IngestDrainQueueArgs {
-    pub(crate) fn store_id(&self) -> &StoreId {
-        &self.store_id
-    }
-
-    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
-        self.live_sqlite_path.as_deref()
-    }
-
-    pub(crate) fn dry_run(&self) -> bool {
-        self.dry_run
-    }
-
-    pub(crate) fn allow_ingest_queue_drain(&self) -> bool {
-        self.allow_ingest_queue_drain
-    }
-
-    pub(crate) fn confirm(&self) -> &str {
-        &self.confirm
-    }
-
-    pub(crate) fn reason(&self) -> &str {
-        &self.reason
-    }
-
-    pub(crate) fn json(&self) -> bool {
-        self.json
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct IngestDirectImportArgs {
-    /// Store or SubObject endpoint receiving the imported files.
-    endpoint: StoreId,
-    /// Mounted source directory containing files to import.
-    #[arg(long)]
-    source: PathBuf,
-    /// Logical object type assigned to imported files.
-    #[arg(long, default_value_t = ObjectType::Naive)]
-    object_type: ObjectType,
-    /// Override the store policy copy count for this import.
-    #[arg(long)]
-    copies: Option<u8>,
-    /// HDD writer worker count; defaults to up to four concurrent distinct HDD
-    /// target sets, bounded by the configured copy count and HDD inventory.
-    #[arg(long)]
-    hdd_workers: Option<usize>,
-    /// Reuse an existing object only when its recorded checksum matches the incoming file.
-    #[arg(long, conflicts_with_all = ["lazy", "force"])]
-    strict: bool,
-    /// Reuse an existing object when the object path and file size match.
-    #[arg(long, conflicts_with_all = ["strict", "force"])]
-    lazy: bool,
-    /// Always ingest every file as a new stored version/payload.
-    #[arg(long, conflicts_with_all = ["strict", "lazy"])]
-    force: bool,
-    /// Render the upload context and daemon progress view while the upload runs.
-    #[arg(long)]
-    tui: bool,
-    /// Show the planned file set without importing.
-    #[arg(long)]
-    dry_run: bool,
-}
-
-impl IngestDirectImportArgs {
-    pub(crate) fn endpoint(&self) -> &StoreId {
-        &self.endpoint
-    }
-
-    pub(crate) fn source(&self) -> &Path {
-        &self.source
-    }
-
-    pub(crate) fn object_type(&self) -> ObjectType {
-        self.object_type
-    }
-
-    pub(crate) fn copies(&self) -> Option<u8> {
-        self.copies
-    }
-
-    pub(crate) fn hdd_workers(&self) -> Option<usize> {
-        self.hdd_workers
-    }
-
-    pub(crate) fn conflict_policy(&self) -> DaemonIngestConflictPolicy {
-        if self.force {
-            DaemonIngestConflictPolicy::Force
-        } else if self.lazy {
-            DaemonIngestConflictPolicy::Lazy
-        } else {
-            DaemonIngestConflictPolicy::Force
-        }
-    }
-
-    pub(crate) fn tui(&self) -> bool {
-        self.tui
-    }
-
-    pub(crate) fn dry_run(&self) -> bool {
-        self.dry_run
     }
 }
 

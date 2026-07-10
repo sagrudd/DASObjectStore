@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.30 - 2026-07-10
+
+- Complete extraction of the ingest status, queue, drain, and direct-import
+  argument contracts into the CLI ingest command-family module.
+
 ## 0.69.29 - 2026-07-10
 
 - Extract the ingest files/directive argument parser into its own CLI command

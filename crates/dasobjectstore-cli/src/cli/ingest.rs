@@ -1,4 +1,3 @@
-use super::{IngestDirectImportArgs, IngestDrainQueueArgs, IngestQueueArgs, IngestStatusArgs};
 use clap::{Args, Subcommand};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::object_type::ObjectType;
@@ -125,5 +124,150 @@ impl IngestFilesArgs {
     }
     pub(crate) fn subobject_registry_path(&self) -> Option<&Path> {
         self.subobject_registry_path.as_deref()
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestStatusArgs {
+    #[arg(long)]
+    ssd_root: PathBuf,
+    #[arg(long, default_value_t = dasobjectstore_metadata::DEFAULT_SSD_HIGH_WATERMARK_PERCENT)]
+    high_watermark_percent: u8,
+    #[arg(long, default_value_t = dasobjectstore_metadata::DEFAULT_SSD_CRITICAL_WATERMARK_PERCENT)]
+    critical_watermark_percent: u8,
+    #[arg(long, default_value_t = 0)]
+    minimum_free_bytes: u64,
+}
+
+impl IngestStatusArgs {
+    pub(crate) fn ssd_root(&self) -> &Path {
+        &self.ssd_root
+    }
+    pub(crate) fn high_watermark_percent(&self) -> u8 {
+        self.high_watermark_percent
+    }
+    pub(crate) fn critical_watermark_percent(&self) -> u8 {
+        self.critical_watermark_percent
+    }
+    pub(crate) fn minimum_free_bytes(&self) -> u64 {
+        self.minimum_free_bytes
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestQueueArgs {
+    store_id: StoreId,
+    #[arg(long, hide = true)]
+    live_sqlite_path: Option<PathBuf>,
+    #[arg(long)]
+    json: bool,
+}
+
+impl IngestQueueArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
+        self.live_sqlite_path.as_deref()
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestDrainQueueArgs {
+    store_id: StoreId,
+    #[arg(long, hide = true)]
+    live_sqlite_path: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    allow_ingest_queue_drain: bool,
+    #[arg(long, default_value = "")]
+    confirm: String,
+    #[arg(long, default_value = "operator drained ingest queue")]
+    reason: String,
+    #[arg(long)]
+    json: bool,
+}
+
+impl IngestDrainQueueArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
+        self.live_sqlite_path.as_deref()
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub(crate) fn allow_ingest_queue_drain(&self) -> bool {
+        self.allow_ingest_queue_drain
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn reason(&self) -> &str {
+        &self.reason
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestDirectImportArgs {
+    endpoint: StoreId,
+    #[arg(long)]
+    source: PathBuf,
+    #[arg(long, default_value_t = ObjectType::Naive)]
+    object_type: ObjectType,
+    #[arg(long)]
+    copies: Option<u8>,
+    #[arg(long)]
+    hdd_workers: Option<usize>,
+    #[arg(long, conflicts_with_all = ["lazy", "force"])]
+    strict: bool,
+    #[arg(long, conflicts_with_all = ["strict", "force"])]
+    lazy: bool,
+    #[arg(long, conflicts_with_all = ["strict", "lazy"])]
+    force: bool,
+    #[arg(long)]
+    tui: bool,
+    #[arg(long)]
+    dry_run: bool,
+}
+
+impl IngestDirectImportArgs {
+    pub(crate) fn endpoint(&self) -> &StoreId {
+        &self.endpoint
+    }
+    pub(crate) fn source(&self) -> &Path {
+        &self.source
+    }
+    pub(crate) fn object_type(&self) -> ObjectType {
+        self.object_type
+    }
+    pub(crate) fn copies(&self) -> Option<u8> {
+        self.copies
+    }
+    pub(crate) fn hdd_workers(&self) -> Option<usize> {
+        self.hdd_workers
+    }
+    pub(crate) fn conflict_policy(&self) -> DaemonIngestConflictPolicy {
+        if self.force {
+            DaemonIngestConflictPolicy::Force
+        } else if self.lazy {
+            DaemonIngestConflictPolicy::Lazy
+        } else {
+            DaemonIngestConflictPolicy::Force
+        }
+    }
+    pub(crate) fn tui(&self) -> bool {
+        self.tui
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
     }
 }
