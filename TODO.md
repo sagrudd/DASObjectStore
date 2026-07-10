@@ -51,6 +51,8 @@ list until every temporary size-budget exception has been removed.
     module now retains only top-level dispatch coverage.
   - [x] Extract the SubObject argument contracts and parser regression into
     `crates/dasobjectstore-cli/src/cli/subobject.rs`.
+  - [x] Extract the Object argument contracts and parser regressions into
+    `crates/dasobjectstore-cli/src/cli/object.rs`.
   - [ ] Continue extracting the remaining object, service, store, disk, pool,
     and runner command families before removing the CLI size exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
