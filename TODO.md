@@ -69,6 +69,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the Pool argument contracts and parser regressions into
     `crates/dasobjectstore-cli/src/cli/pool.rs`, preserving debug-command
     feature gates and import/repair accessors.
+  - [x] Extract the small Object, Service, Mnemosyne, Pool-marker, and probe
+    runtime handlers into `crates/dasobjectstore-cli/src/run/command_handlers.rs`;
+    preserve the dispatcher and platform cfg behavior.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and

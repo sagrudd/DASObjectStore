@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.40 - 2026-07-10
+
+- Extract the small Object, Service, Mnemosyne, Pool-marker, and platform probe
+  runtime handlers into `crates/dasobjectstore-cli/src/run/command_handlers.rs`.
+
 ## 0.69.39 - 2026-07-10
 
 - Extract the Pool command contracts and parser regressions into
