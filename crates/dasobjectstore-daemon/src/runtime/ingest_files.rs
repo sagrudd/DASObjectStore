@@ -30,6 +30,7 @@ use std::time::Instant;
 
 const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
 const SSD_FLUSH_QUEUE_CAPACITY: usize = 2;
+const HDD_WRITE_RATE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
 
 mod endpoint;
 mod environment;
@@ -642,7 +643,9 @@ struct ActiveHddTransferState {
     copy_number: u8,
     bytes_done: u64,
     bytes_total: u64,
-    started_at: Instant,
+    last_write_sample_at: Instant,
+    last_write_sample_bytes: u64,
+    current_bytes_per_second: u64,
     phase: DaemonIngestHddTransferPhase,
     fsync_duration_millis: Option<u64>,
     rename_duration_millis: Option<u64>,
@@ -783,13 +786,30 @@ impl PipelineProgressState {
                     copy_number,
                     bytes_done: 0,
                     bytes_total: entry.size_bytes,
-                    started_at: Instant::now(),
+                    last_write_sample_at: Instant::now(),
+                    last_write_sample_bytes: 0,
+                    current_bytes_per_second: 0,
                     phase: DaemonIngestHddTransferPhase::Writing,
                     fsync_duration_millis: None,
                     rename_duration_millis: None,
                 });
         transfer.bytes_done = bytes_done.min(entry.size_bytes);
         transfer.phase = phase;
+        if phase == DaemonIngestHddTransferPhase::Writing {
+            let now = Instant::now();
+            let elapsed = now
+                .duration_since(transfer.last_write_sample_at)
+                .as_secs_f64()
+                .max(0.001);
+            let delta = transfer
+                .bytes_done
+                .saturating_sub(transfer.last_write_sample_bytes);
+            transfer.current_bytes_per_second = (delta as f64 / elapsed).round() as u64;
+            transfer.last_write_sample_at = now;
+            transfer.last_write_sample_bytes = transfer.bytes_done;
+        } else {
+            transfer.current_bytes_per_second = 0;
+        }
         if fsync_duration_millis.is_some() {
             transfer.fsync_duration_millis = fsync_duration_millis;
         }
@@ -817,29 +837,26 @@ impl PipelineProgressState {
         let now = Instant::now();
         self.active_hdd_transfers
             .values()
-            .map(|transfer| {
-                let elapsed = now
-                    .duration_since(transfer.started_at)
-                    .as_secs_f64()
-                    .max(0.001);
-                DaemonIngestHddActiveTransfer {
-                    file_index: transfer.file_index,
-                    files_total: Some(transfer.files_total),
-                    object_id: transfer.object_id.clone(),
-                    relative_path: transfer.relative_path.clone(),
-                    disk_id: transfer.disk_id.clone(),
-                    copy_number: transfer.copy_number,
-                    bytes_done: transfer.bytes_done,
-                    bytes_total: transfer.bytes_total,
-                    bytes_per_second: if transfer.phase == DaemonIngestHddTransferPhase::Writing {
-                        (transfer.bytes_done as f64 / elapsed).round() as u64
-                    } else {
-                        0
-                    },
-                    phase: transfer.phase,
-                    fsync_duration_millis: transfer.fsync_duration_millis,
-                    rename_duration_millis: transfer.rename_duration_millis,
-                }
+            .map(|transfer| DaemonIngestHddActiveTransfer {
+                file_index: transfer.file_index,
+                files_total: Some(transfer.files_total),
+                object_id: transfer.object_id.clone(),
+                relative_path: transfer.relative_path.clone(),
+                disk_id: transfer.disk_id.clone(),
+                copy_number: transfer.copy_number,
+                bytes_done: transfer.bytes_done,
+                bytes_total: transfer.bytes_total,
+                bytes_per_second: if transfer.phase == DaemonIngestHddTransferPhase::Writing
+                    && now.duration_since(transfer.last_write_sample_at)
+                        <= HDD_WRITE_RATE_STALE_AFTER
+                {
+                    transfer.current_bytes_per_second
+                } else {
+                    0
+                },
+                phase: transfer.phase,
+                fsync_duration_millis: transfer.fsync_duration_millis,
+                rename_duration_millis: transfer.rename_duration_millis,
             })
             .collect()
     }
@@ -2367,6 +2384,23 @@ mod tests {
         assert_eq!(active[0].bytes_done, 25);
         assert_eq!(active[0].bytes_total, 100);
         assert_eq!(active[0].relative_path, "a.fastq.gz");
+        assert!(active[0].bytes_per_second > 0);
+
+        state.apply_object_progress(
+            &entry,
+            &ObjectPutProgress {
+                object_id: entry.object_id.clone(),
+                stage: ObjectPutProgressStage::HddFsync {
+                    disk_id: "disk-a".to_string(),
+                    copy_number: 1,
+                    duration_millis: Some(7),
+                },
+                bytes_written: 25,
+            },
+        );
+        let finalizing = state.active_hdd_transfer_records();
+        assert_eq!(finalizing[0].bytes_per_second, 0);
+        assert_eq!(finalizing[0].fsync_duration_millis, Some(7));
     }
 
     #[test]

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.7 - 2026-07-10
+
+- Replace lifetime-average active-HDD write rates with bounded short-window
+  samples that decay to zero when copying stalls and remain zero in durability
+  finalization states.
+
 ## 0.69.6 - 2026-07-10
 
 - Restore CLI and Debian-package builds after the direct-HDD durability update
