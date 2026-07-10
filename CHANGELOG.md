@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.6 - 2026-07-10
+
+- Restore CLI and Debian-package builds after the direct-HDD durability update
+  by rendering the explicit HDD ``fsync`` and atomic-rename progress stages.
+
 ## 0.69.5 - 2026-07-10
 
 - Expose direct-HDD per-target ``fsync`` and atomic-rename finalization states

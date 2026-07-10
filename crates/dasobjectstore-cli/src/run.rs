@@ -10513,6 +10513,16 @@ fn progress_stage_key(progress: &ObjectPutProgress) -> String {
             disk_id,
             copy_number,
         } => format!("hdd-copy-{disk_id}-{copy_number}"),
+        ObjectPutProgressStage::HddFsync {
+            disk_id,
+            copy_number,
+            ..
+        } => format!("hdd-fsync-{disk_id}-{copy_number}"),
+        ObjectPutProgressStage::HddRename {
+            disk_id,
+            copy_number,
+            ..
+        } => format!("hdd-rename-{disk_id}-{copy_number}"),
     }
 }
 
@@ -10524,6 +10534,29 @@ fn progress_stage_label(progress: &ObjectPutProgress) -> String {
             disk_id,
             copy_number,
         } => format!("hdd-copy:{disk_id}:{copy_number}"),
+        ObjectPutProgressStage::HddFsync {
+            disk_id,
+            copy_number,
+            duration_millis,
+        } => hdd_finalization_stage_label("hdd-fsync", disk_id, *copy_number, *duration_millis),
+        ObjectPutProgressStage::HddRename {
+            disk_id,
+            copy_number,
+            duration_millis,
+        } => hdd_finalization_stage_label("hdd-rename", disk_id, *copy_number, *duration_millis),
+    }
+}
+
+fn hdd_finalization_stage_label(
+    stage: &str,
+    disk_id: &str,
+    copy_number: u8,
+    duration_millis: Option<u64>,
+) -> String {
+    let label = format!("{stage}:{disk_id}:{copy_number}");
+    match duration_millis {
+        Some(duration_millis) => format!("{label}:{duration_millis}ms"),
+        None => label,
     }
 }
 
@@ -11353,7 +11386,7 @@ mod tests {
     use crate::cli::{Cli, PerformanceFileOrder, PerformanceFileSelection};
     use clap::Parser;
     use dasobjectstore_core::health::{HealthScore, HealthSignals};
-    use dasobjectstore_core::ids::{DiskId, IngestJobId, PoolId, StoreId};
+    use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, PoolId, StoreId};
     use dasobjectstore_core::lifecycle::{DiskState, PoolState};
     use dasobjectstore_core::store::{
         CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
@@ -14745,6 +14778,37 @@ mod tests {
         assert!(output.contains("File ingest complete"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn local_ingest_progress_labels_hdd_finalization_stages() {
+        let object_id = ObjectId::new("zymo/sample.fastq.gz").expect("object id");
+        let fsync = dasobjectstore_metadata::ObjectPutProgress {
+            object_id: object_id.clone(),
+            stage: dasobjectstore_metadata::ObjectPutProgressStage::HddFsync {
+                disk_id: "disk-a".to_string(),
+                copy_number: 1,
+                duration_millis: Some(12),
+            },
+            bytes_written: 512,
+        };
+        let rename = dasobjectstore_metadata::ObjectPutProgress {
+            object_id,
+            stage: dasobjectstore_metadata::ObjectPutProgressStage::HddRename {
+                disk_id: "disk-a".to_string(),
+                copy_number: 1,
+                duration_millis: None,
+            },
+            bytes_written: 512,
+        };
+
+        assert_eq!(super::progress_stage_key(&fsync), "hdd-fsync-disk-a-1");
+        assert_eq!(
+            super::progress_stage_label(&fsync),
+            "hdd-fsync:disk-a:1:12ms"
+        );
+        assert_eq!(super::progress_stage_key(&rename), "hdd-rename-disk-a-1");
+        assert_eq!(super::progress_stage_label(&rename), "hdd-rename:disk-a:1");
     }
 
     #[test]
