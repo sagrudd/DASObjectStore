@@ -3,9 +3,10 @@ use crate::cli::StatusArgs;
 use dasobjectstore_core::DEFAULT_STANDALONE_CONFIG_PATH;
 use dasobjectstore_daemon::DaemonRuntimeConfig;
 use dasobjectstore_gui_api::StandaloneServerConfig;
+#[cfg(test)]
+use dasobjectstore_object_service::parse_docker_published_bind_address;
 use dasobjectstore_object_service::{
     docker_object_service_binding, docker_object_service_container_state,
-    parse_docker_published_bind_address,
 };
 use serde::Serialize;
 use std::fs;

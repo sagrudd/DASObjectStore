@@ -82,6 +82,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract service provisioning, Compose lifecycle, and service-status
     handlers into `crates/dasobjectstore-cli/src/run/service.rs`; keep the
     top-level runner limited to dispatch and shared error handling.
+  - [x] Extract pool import/repair/inspection and managed-disk lifecycle
+    handlers into `crates/dasobjectstore-cli/src/run/storage_lifecycle.rs`;
+    preserve risk gates and read-only pool semantics.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
