@@ -49,6 +49,10 @@ list until every temporary size-budget exception has been removed.
     the same command-family module without changing parser behavior.
   - [x] Move the ingest parser tests beside the new module; the root CLI test
     module now retains only top-level dispatch coverage.
+  - [x] Extract the SubObject argument contracts and parser regression into
+    `crates/dasobjectstore-cli/src/cli/subobject.rs`.
+  - [ ] Continue extracting the remaining object, service, store, disk, pool,
+    and runner command families before removing the CLI size exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.

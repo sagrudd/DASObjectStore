@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.32 - 2026-07-10
+
+- Extract SubObject CLI argument contracts and colocate their parser regression
+  in the command-family module.
+
 ## 0.69.31 - 2026-07-10
 
 - Move ingest parser regression tests beside the extracted CLI ingest command

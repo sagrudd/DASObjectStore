@@ -10,10 +10,14 @@ use std::path::{Path, PathBuf};
 
 mod ingest;
 mod performance;
+mod subobject;
 
 pub(crate) use ingest::{
     IngestArgs, IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs,
     IngestQueueArgs, IngestStatusArgs,
+};
+pub(crate) use subobject::{
+    SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
 
 pub(crate) use performance::{
@@ -1057,107 +1061,6 @@ impl StoreValidateArgs {
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct SubobjectArgs {
-    #[command(subcommand)]
-    command: SubobjectCommand,
-}
-
-impl SubobjectArgs {
-    pub(crate) fn command(&self) -> &SubobjectCommand {
-        &self.command
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Subcommand)]
-pub(crate) enum SubobjectCommand {
-    /// Create a named SubObject endpoint.
-    Create(SubobjectCreateArgs),
-    /// List named SubObject endpoints.
-    List(SubobjectListArgs),
-    /// Search SubObject endpoints by name or path.
-    Search(SubobjectSearchArgs),
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct SubobjectCreateArgs {
-    /// Unique SubObject endpoint name.
-    name: String,
-    /// Parent object store for a top-level SubObject.
-    #[arg(long, conflicts_with = "parent")]
-    store: Option<StoreId>,
-    /// Parent SubObject name for a nested SubObject.
-    #[arg(long)]
-    parent: Option<String>,
-    /// DAS SSD root used for portable SubObject metadata.
-    #[arg(long)]
-    ssd_root: Option<PathBuf>,
-    /// Advanced test override for the system-managed SubObject registry path.
-    #[arg(long, hide = true)]
-    registry_path: Option<PathBuf>,
-    /// Advanced test override for the system-managed store registry path.
-    #[arg(long, hide = true)]
-    stores_registry_path: Option<PathBuf>,
-}
-
-impl SubobjectCreateArgs {
-    pub(crate) fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub(crate) fn store(&self) -> Option<&StoreId> {
-        self.store.as_ref()
-    }
-
-    pub(crate) fn parent(&self) -> Option<&str> {
-        self.parent.as_deref()
-    }
-
-    pub(crate) fn ssd_root(&self) -> Option<&Path> {
-        self.ssd_root.as_deref()
-    }
-
-    pub(crate) fn registry_path(&self) -> Option<&Path> {
-        self.registry_path.as_deref()
-    }
-
-    pub(crate) fn stores_registry_path(&self) -> Option<&Path> {
-        self.stores_registry_path.as_deref()
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct SubobjectListArgs {
-    /// Advanced test override for the system-managed SubObject registry path.
-    #[arg(long, hide = true)]
-    registry_path: Option<PathBuf>,
-}
-
-impl SubobjectListArgs {
-    pub(crate) fn registry_path(&self) -> Option<&Path> {
-        self.registry_path.as_deref()
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct SubobjectSearchArgs {
-    /// Case-insensitive name or path fragment.
-    query: String,
-    /// Advanced test override for the system-managed SubObject registry path.
-    #[arg(long, hide = true)]
-    registry_path: Option<PathBuf>,
-}
-
-impl SubobjectSearchArgs {
-    pub(crate) fn query(&self) -> &str {
-        &self.query
-    }
-
-    pub(crate) fn registry_path(&self) -> Option<&Path> {
-        self.registry_path.as_deref()
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct ObjectArgs {
     #[command(subcommand)]
     command: ObjectCommand,
@@ -1593,10 +1496,10 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs,
-        MnemosyneCommand, ObjectCommand, PerformanceFileOrder, PerformanceFileSelection,
+        Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, MnemosyneCommand,
+        ObjectCommand, PerformanceFileOrder, PerformanceFileSelection,
         PerformanceScenarioSelection, PoolCommand, ProbeArgs, ServiceCommand, StatusArgs,
-        StoreArgs, StoreCommand, StoreIngestMode, StoreS3UploadAuth, SubobjectCommand,
+        StoreArgs, StoreCommand, StoreIngestMode, StoreS3UploadAuth,
     };
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
@@ -2352,31 +2255,6 @@ mod tests {
             ObjectCommand::Export(_) | ObjectCommand::Inspect(_) => {
                 panic!("expected put command")
             }
-        }
-    }
-
-    #[test]
-    fn parses_subobject_create_under_store() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "subobject",
-            "create",
-            "Xenognostikon",
-            "--store",
-            "ENA",
-        ])
-        .expect("subobject create parses");
-
-        let Some(Command::Subobject(args)) = cli.command() else {
-            panic!("expected subobject command");
-        };
-        match args.command() {
-            SubobjectCommand::Create(create) => {
-                assert_eq!(create.name(), "Xenognostikon");
-                assert_eq!(create.store().expect("store").as_str(), "ENA");
-                assert_eq!(create.parent(), None);
-            }
-            _ => panic!("expected create command"),
         }
     }
 
