@@ -24,6 +24,17 @@ planning are tracked under Milestones 21 and 22.
 
 ## Milestone 12: Managed Daemon and Client Boundary
 
+### Ingress correctness and live operator telemetry follow-up
+
+- [ ] Remove the default strict-conflict pre-copy source hash for direct NVMe-to-HDD ingest. Checksums must be calculated while bytes are copied, never as an unconditional prior read; retain any preflight deduplication only as an explicit operator-selected mode.
+- [ ] Preserve ingress routing invariants: local NVMe/server ingress may use direct-to-HDD only when the store policy permits it; USB-mounted source disks, Web uploads, Remote S3, and other remote ingress must stage through the DAS SSD.
+- [ ] Replace serial redundant-copy settlement with bounded fan-out: read each direct-ingest source stream once, calculate its checksum in flight, and concurrently land copies on distinct HDDs. Do not reopen and re-read the NVMe source once per target disk.
+- [ ] Make HDD worker admission and disk placement permit concurrent writes to three or four distinct HDDs when capacity and policy allow; verify throughput is constrained by the HDDs rather than artificial single-channel scheduling.
+- [ ] Extend daemon ingest events with source-read, SSD-write, and aggregate/per-HDD write rates, target-disk assignment before copying begins, bytes written, and queue/worker state. Use short-window rates so stalled transfers are distinguishable from active ones.
+- [ ] Decouple progress reporting from the I/O hot path: coalesce per-transfer events and Unix-socket frames by byte/time cadence, and redraw the TUI from its latest snapshot at a bounded refresh rate. A 64 KiB copy callback must not synchronously serialize JSON and redraw the terminal for every chunk.
+- [ ] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. Do not show a generic `checksum-manifest-capture` phase while a preflight source read is occurring without clearly identifying it as an explicit conflict check.
+- [ ] Add regression and performance tests for: no pre-copy hash on normal direct ingress; a single source read fan-outs to concurrent HDD writes; Remote/Web/S3 remain SSD-first; and TUI progress contains all active disk assignments and non-zero per-disk rates.
+
 - [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
   daemon configuration type, and unit tests for default runtime paths.
 - [x] Define the daemon API contract for health summary, store inventory,
