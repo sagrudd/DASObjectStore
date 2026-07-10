@@ -108,6 +108,11 @@ metadata and payload removal, and returns the complete report. The client no
 longer accepts local SQLite or HDD-root overrides for this command, so a normal
 CLI process cannot redirect a destructive operation around daemon policy.
 
+The same boundary applies to ``dasobjectstore ingest drain-queue``. The CLI
+sends the store, reason, dry-run, allowance, and confirmation fields to the
+daemon; the daemon selects its live metadata path, authorizes the administrator,
+updates queue state, and returns the cancellation report.
+
 The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
 user or group, package configuration stops and asks the operator to repair the

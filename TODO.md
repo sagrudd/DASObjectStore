@@ -98,6 +98,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Make non-dry-run WebUI object-store creation persist the validated
     registry definition before recording the administrator job complete; add a
     regression proving acceptance follows registry persistence.
+  - [x] Route ingest queue drain through a typed daemon request so daemon-owned
+    metadata paths, authorization, timestamps, and cancellation reporting are
+    used instead of CLI-side SQLite mutation.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

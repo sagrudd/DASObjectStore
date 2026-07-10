@@ -9,19 +9,20 @@ use crate::api::{
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, ObjectBrowserDelegatedActor,
-    ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureRequest,
-    PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSession, RemoteEasyconnectSessionRenewal,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest,
-    StoreInventoryResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, IngestQueueDrainRequest,
+    IngestQueueDrainResponse, ObjectBrowserDelegatedActor, ObjectDownloadRequest,
+    ObjectFolderDownloadRequest, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+    RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -1254,6 +1255,7 @@ impl DaemonApiRequest {
             Self::HealthSummary(_) => "health_summary",
             Self::StoreInventory(_) => "store_inventory",
             Self::StoreDrain(_) => "store_drain",
+            Self::IngestQueueDrain(_) => "ingest_queue_drain",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
             Self::CancelIngestJob(_) => "cancel_ingest_job",
@@ -1304,19 +1306,19 @@ mod tests {
         DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserDelegatedActor,
-        ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
-        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
-        ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        DaemonServiceStatusResponse, DaemonSsdPressure, IngestQueueDrainRequest,
+        ObjectBrowserDelegatedActor, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
+        ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreDrainRequest, StoreInventoryRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
         ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
@@ -2163,6 +2165,29 @@ mod tests {
                 allow_store_drain: true,
                 confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
             }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+    }
+
+    #[test]
+    fn rejects_destructive_ingest_queue_drain_without_authenticated_administrator() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let response = handler
+            .handle(DaemonApiRequest::IngestQueueDrain(
+                IngestQueueDrainRequest {
+                    store_id: "archive".to_string(),
+                    reason: "operator requested drain".to_string(),
+                    dry_run: false,
+                    allow_ingest_queue_drain: true,
+                    confirmation_marker: crate::api::INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+                },
+            ))
             .expect("request handled");
 
         assert!(matches!(

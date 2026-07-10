@@ -34,6 +34,7 @@ where
         | DaemonApiRequest::CancelJob(_)) => service::request(handler, service_request),
         storage_request @ (DaemonApiRequest::StoreInventory(_)
         | DaemonApiRequest::StoreDrain(_)
+        | DaemonApiRequest::IngestQueueDrain(_)
         | DaemonApiRequest::ApplianceTelemetry(_)
         | DaemonApiRequest::SubmitIngestFiles(_)
         | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)

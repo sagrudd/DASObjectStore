@@ -5,7 +5,7 @@ use dasobjectstore_core::lifecycle::IngestJobState;
 use dasobjectstore_core::object_type::{ObjectType, ObjectTypeParseError};
 use rusqlite::types::Type;
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
 
@@ -172,7 +172,7 @@ pub struct IngestQueueDrainRequest {
     pub dry_run: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct IngestQueueDrainReport {
     pub live_sqlite_path: PathBuf,
     pub store_id: StoreId,

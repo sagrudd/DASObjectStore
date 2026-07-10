@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.50 - 2026-07-10
+
+- Route ingest queue drain through a typed daemon-owned request with explicit
+  authorization, daemon timestamps, and queue-drain reporting.
+
 ## 0.69.49 - 2026-07-10
 
 - Persist non-dry-run WebUI object-store creation requests in the daemon-owned

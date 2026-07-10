@@ -5,6 +5,7 @@ mod enclosure;
 mod endpoint;
 mod health;
 mod ingest;
+mod ingest_mutation;
 mod jobs;
 mod local_admin;
 mod object_browser;
@@ -58,6 +59,10 @@ pub use ingest::{
     DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy,
     DaemonSourceToSsdQueueUsage, IngestJobStatusRequest, IngestJobStatusResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+};
+pub use ingest_mutation::{
+    IngestQueueDrainRequest, IngestQueueDrainResponse, IngestQueueDrainValidationError,
+    INGEST_QUEUE_DRAIN_CONFIRMATION,
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
@@ -132,6 +137,7 @@ pub enum DaemonApiRequest {
     HealthSummary(DaemonHealthSummaryRequest),
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
+    IngestQueueDrain(IngestQueueDrainRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
     CancelIngestJob(CancelIngestJobRequest),
@@ -166,6 +172,9 @@ impl DaemonApiRequest {
         match self {
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
+            Self::IngestQueueDrain(request) => request
+                .validate()
+                .map_err(ingest_queue_drain_validation_error),
             Self::CancelIngestJob(request) => request.validate(),
             Self::CancelJob(request) => request.validate().map_err(generic_job_validation_error),
             Self::ServiceLifecycle(request) => request.validate(),
@@ -229,6 +238,7 @@ pub enum DaemonApiResponse {
     HealthSummary(DaemonHealthSummaryResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
+    IngestQueueDrain(IngestQueueDrainResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
     CancelIngestJob(CancelIngestJobResponse),
@@ -480,6 +490,21 @@ fn store_drain_validation_error(err: StoreDrainValidationError) -> DaemonRequest
         StoreDrainValidationError::ConfirmationMismatch => {
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: STORE_DRAIN_CONFIRMATION,
+            }
+        }
+    }
+}
+
+fn ingest_queue_drain_validation_error(
+    err: IngestQueueDrainValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        IngestQueueDrainValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        IngestQueueDrainValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: INGEST_QUEUE_DRAIN_CONFIRMATION,
             }
         }
     }

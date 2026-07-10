@@ -79,19 +79,19 @@ use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
     DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
+    IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     StoreDrainRequest as DaemonStoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
     DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
-    attach_clean_pool_read_only, delete_store, drain_ingest_queue, export_settled_object,
-    force_retire_disk, import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity,
-    put_object_ssd_first, put_object_ssd_first_with_progress, read_disk_drain_plan,
-    read_disk_replacement_plan, read_ingest_queue_for_store, read_object_inspect,
-    read_store_contents, request_disk_retirement, DestagePriorityPolicy, DiskCopyRoot,
-    DiskDrainError, DiskRetirementError, IngestQueueDrainError, IngestQueueDrainReport,
-    IngestQueueDrainRequest, IngestQueueReadError, IngestQueueSnapshot, ObjectExportError,
-    ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
+    attach_clean_pool_read_only, delete_store, export_settled_object, force_retire_disk,
+    import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
+    put_object_ssd_first_with_progress, read_disk_drain_plan, read_disk_replacement_plan,
+    read_ingest_queue_for_store, read_object_inspect, read_store_contents, request_disk_retirement,
+    DestagePriorityPolicy, DiskCopyRoot, DiskDrainError, DiskRetirementError,
+    IngestQueueDrainError, IngestQueueDrainReport, IngestQueueReadError, IngestQueueSnapshot,
+    ObjectExportError, ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
     ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
     ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
     StoreCleanupError, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
@@ -6775,14 +6775,16 @@ fn run_ingest_drain_queue(
         )?;
     }
 
-    let request = IngestQueueDrainRequest {
-        live_sqlite_path: resolve_live_sqlite_path(args.live_sqlite_path()),
-        store_id: args.store_id().clone(),
-        updated_at_utc: now_utc_string(),
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.ingest_queue_drain(DaemonIngestQueueDrainRequest {
+        store_id: args.store_id().to_string(),
         reason: args.reason().to_string(),
         dry_run: args.dry_run(),
-    };
-    let report = drain_ingest_queue(&request)?;
+        allow_ingest_queue_drain: args.allow_ingest_queue_drain(),
+        confirmation_marker: args.confirm().to_string(),
+    })?;
+    let report = response.report;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &report)?;
         writer.write_all(b"\n")?;
@@ -11216,48 +11218,6 @@ mod tests {
     }
 
     #[test]
-    fn ingest_drain_queue_marks_active_jobs_cancelled() {
-        let root = temp_root("ingest-drain-queue");
-        fs::create_dir_all(&root).expect("create temp root");
-        let live_sqlite_path = root.join("live.sqlite");
-        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
-        connection
-            .execute_batch(LIVE_SCHEMA_SQL)
-            .expect("schema applies");
-        insert_store(&connection);
-        insert_ingest_job(
-            &connection,
-            "job-active",
-            "Queued",
-            0,
-            "2026-01-01T00:00:00Z",
-        );
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "drain-queue",
-            "store-a",
-            "--live-sqlite-path",
-            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
-            "--dry-run",
-            "--allow-ingest-queue-drain",
-            "--confirm",
-            "confirm ingest queue drain",
-        ])
-        .expect("ingest drain-queue parses");
-        let mut output = Vec::new();
-
-        run(&cli, &mut output).expect("ingest queue drains");
-
-        let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("Ingest queue drain"));
-        assert!(output.contains("Jobs would cancel: 1"));
-        assert_eq!(ingest_job_state(&live_sqlite_path, "job-active"), "Queued");
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
-    }
-
-    #[test]
     fn object_inspect_writes_pretty_summary() {
         let root = temp_root("object-inspect-pretty");
         let live_sqlite_path = create_live_sqlite_with_object(&root);
@@ -11895,17 +11855,6 @@ mod tests {
                 ),
             )
             .expect("ingest job inserts");
-    }
-
-    fn ingest_job_state(live_sqlite_path: &Path, ingest_job_id: &str) -> String {
-        let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
-        connection
-            .query_row(
-                "SELECT state FROM ingest_jobs WHERE ingest_job_id = ?1",
-                [ingest_job_id],
-                |row| row.get(0),
-            )
-            .expect("ingest job state")
     }
 
     fn insert_disk(connection: &Connection, disk_id: &str, state: &str) {

@@ -32,6 +32,14 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::IngestQueueDrain(request) => {
+            match handler.ingest_queue_drain_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::IngestQueueDrain(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::UpdateObjectStoreIngestPolicy(mut request) => {
             let Some(actor) = actor else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -253,6 +261,47 @@ where
             })
             .map_err(|error| ("store_drain_failed", error.to_string()))?;
         Ok(StoreDrainResponse { report })
+    }
+
+    fn ingest_queue_drain_for_actor(
+        &self,
+        request: IngestQueueDrainRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<IngestQueueDrainResponse, (&'static str, String)> {
+        if !request.dry_run {
+            let Some(actor) = actor else {
+                return Err((
+                    "administrator_authentication_required",
+                    "ingest queue drain requires an authenticated local administrator".to_string(),
+                ));
+            };
+            if !actor.is_administrator() {
+                return Err((
+                    "administrator_authorization_required",
+                    "ingest queue drain requires root, sudo, or dasobjectstore-admin membership"
+                        .to_string(),
+                ));
+            }
+            if !request.allow_ingest_queue_drain {
+                return Err((
+                    "ingest_queue_drain_not_allowed",
+                    "ingest queue drain requires policy allowance".to_string(),
+                ));
+            }
+        }
+        let store_id = StoreId::new(request.store_id.clone())
+            .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        let report = dasobjectstore_metadata::drain_ingest_queue(
+            &dasobjectstore_metadata::IngestQueueDrainRequest {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                store_id,
+                updated_at_utc: self.clock.now_utc(),
+                reason: request.reason,
+                dry_run: request.dry_run,
+            },
+        )
+        .map_err(|error| ("ingest_queue_drain_failed", error.to_string()))?;
+        Ok(IngestQueueDrainResponse { report })
     }
 
     fn store_inventory_for_actor(

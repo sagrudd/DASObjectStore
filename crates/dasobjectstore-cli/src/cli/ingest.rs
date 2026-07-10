@@ -178,8 +178,6 @@ impl IngestQueueArgs {
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct IngestDrainQueueArgs {
     store_id: StoreId,
-    #[arg(long, hide = true)]
-    live_sqlite_path: Option<PathBuf>,
     #[arg(long)]
     dry_run: bool,
     #[arg(long)]
@@ -195,9 +193,6 @@ pub(crate) struct IngestDrainQueueArgs {
 impl IngestDrainQueueArgs {
     pub(crate) fn store_id(&self) -> &StoreId {
         &self.store_id
-    }
-    pub(crate) fn live_sqlite_path(&self) -> Option<&Path> {
-        self.live_sqlite_path.as_deref()
     }
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
@@ -421,7 +416,6 @@ mod tests {
             panic!("expected drain-queue command")
         };
         assert_eq!(drain.store_id().as_str(), "generated-data");
-        assert_eq!(drain.live_sqlite_path(), None);
         assert!(drain.dry_run());
         assert!(drain.allow_ingest_queue_drain());
         assert_eq!(drain.confirm(), "confirm ingest queue drain");
