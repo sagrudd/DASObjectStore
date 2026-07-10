@@ -10,8 +10,7 @@ use crate::cli::{
     PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
     ServiceCommand, ServiceRenderComposeArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
     StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs,
-    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCommand,
-    SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
+    StoreListArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod command_handlers;
 mod disk_lockdown;
@@ -23,6 +22,7 @@ mod runtime_status;
 mod service;
 mod storage_lifecycle;
 mod store_read;
+mod subobject;
 
 use self::performance_plan::*;
 
@@ -69,6 +69,7 @@ use self::storage_lifecycle::{
 use self::store_read::{
     run_store_contents, run_store_defaults, run_store_list, run_store_s3_upload, run_store_validate,
 };
+use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::PoolState;
@@ -119,7 +120,7 @@ use dasobjectstore_object_service::{
     upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, GarageProvider,
     GarageProviderConfig, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     RemoteS3UploadPlanRequest, StoreRegistryUpdateReport, StoreServiceDefinition,
-    SubObjectDefinition, SubObjectParent, SubObjectRegistryUpdateReport,
+    SubObjectDefinition,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -5305,171 +5306,6 @@ fn hdd_disk_id_from_marker(marker: &str) -> Result<Option<DiskId>, CliError> {
     }
 
     Ok(None)
-}
-
-fn run_subobject(args: &SubobjectArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    match args.command() {
-        SubobjectCommand::Create(args) => run_subobject_create(args, writer),
-        SubobjectCommand::List(args) => run_subobject_list(args, writer),
-        SubobjectCommand::Search(args) => run_subobject_search(args, writer),
-    }
-}
-
-fn run_subobject_create(
-    args: &SubobjectCreateArgs,
-    writer: &mut impl Write,
-) -> Result<(), CliError> {
-    let registry_path = args
-        .registry_path()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_subobject_registry_path);
-    let parent = subobject_parent_from_args(args)?;
-    let report = create_subobject_definition(&registry_path, args.name(), parent)?;
-    let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
-    let portable_report = mirror_portable_subobject_definition(
-        args.ssd_root(),
-        allow_default_ssd,
-        &report.definition,
-    )?;
-    grant_subobject_writer_group_registry_access(args, &report.definition, &registry_path)?;
-
-    write_subobject_create_report(&report, portable_report.as_ref(), writer)
-}
-
-fn subobject_parent_from_args(args: &SubobjectCreateArgs) -> Result<SubObjectParent, CliError> {
-    match (args.store(), args.parent()) {
-        (Some(store_id), None) => {
-            let stores_registry_path = args
-                .stores_registry_path()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(default_store_registry_path);
-            let store_exists = read_store_registry(&stores_registry_path)?
-                .iter()
-                .any(|definition| definition.store_id == *store_id);
-            if !store_exists {
-                return Err(CliError::CommandFailed(format!(
-                    "store {} was not found in {}",
-                    store_id,
-                    stores_registry_path.display()
-                )));
-            }
-            Ok(SubObjectParent::Store {
-                store_id: store_id.clone(),
-            })
-        }
-        (None, Some(name)) => Ok(SubObjectParent::SubObject {
-            name: name.to_string(),
-        }),
-        _ => Err(CliError::CommandFailed(
-            "subobject create requires exactly one of --store or --parent".to_string(),
-        )),
-    }
-}
-
-fn run_subobject_list(args: &SubobjectListArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let registry_path = args
-        .registry_path()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_subobject_registry_path);
-    let definitions = read_subobject_registry(&registry_path)?;
-
-    writeln!(writer, "SubObjects: {}", definitions.len())?;
-    for definition in definitions {
-        write_subobject_definition_line(&definition, writer)?;
-    }
-
-    Ok(())
-}
-
-fn run_subobject_search(
-    args: &SubobjectSearchArgs,
-    writer: &mut impl Write,
-) -> Result<(), CliError> {
-    let registry_path = args
-        .registry_path()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_subobject_registry_path);
-    let definitions = read_subobject_registry(&registry_path)?;
-    let matches = search_subobjects(&definitions, args.query());
-
-    writeln!(writer, "SubObjects matched: {}", matches.len())?;
-    for definition in matches {
-        write_subobject_definition_line(definition, writer)?;
-    }
-
-    Ok(())
-}
-
-fn write_subobject_create_report(
-    report: &SubObjectRegistryUpdateReport,
-    portable_report: Option<&SubObjectRegistryUpdateReport>,
-    writer: &mut impl Write,
-) -> Result<(), CliError> {
-    writeln!(writer, "SubObject {}", report.action.as_str())?;
-    writeln!(writer, "Name: {}", report.definition.name)?;
-    writeln!(writer, "Store: {}", report.definition.store_id)?;
-    writeln!(
-        writer,
-        "Parent: {}",
-        subobject_parent_label(&report.definition.parent)
-    )?;
-    writeln!(
-        writer,
-        "Object prefix: {}",
-        report.definition.object_prefix()
-    )?;
-    writeln!(
-        writer,
-        "Registry: {}",
-        report.registry_path.to_string_lossy()
-    )?;
-    match portable_report {
-        Some(report) => writeln!(
-            writer,
-            "Portable registry: {}",
-            report.registry_path.to_string_lossy()
-        )?,
-        None => writeln!(writer, "Portable registry: not detected")?,
-    }
-
-    Ok(())
-}
-
-fn mirror_portable_subobject_definition(
-    ssd_root: Option<&Path>,
-    allow_default_ssd: bool,
-    definition: &SubObjectDefinition,
-) -> Result<Option<SubObjectRegistryUpdateReport>, CliError> {
-    let Some(ssd_root) = known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)? else {
-        return Ok(None);
-    };
-    let registry_path = portable_subobject_registry_path(&ssd_root);
-    let report = mirror_subobject_definition(&registry_path, definition.clone())?;
-
-    Ok(Some(report))
-}
-
-fn write_subobject_definition_line(
-    definition: &SubObjectDefinition,
-    writer: &mut impl Write,
-) -> Result<(), CliError> {
-    writeln!(
-        writer,
-        "- {} store={} parent={} prefix={}",
-        definition.name,
-        definition.store_id,
-        subobject_parent_label(&definition.parent),
-        definition.object_prefix()
-    )?;
-
-    Ok(())
-}
-
-fn subobject_parent_label(parent: &SubObjectParent) -> String {
-    match parent {
-        SubObjectParent::Store { store_id } => format!("store:{store_id}"),
-        SubObjectParent::SubObject { name } => format!("subobject:{name}"),
-    }
 }
 
 #[derive(Clone, Debug)]

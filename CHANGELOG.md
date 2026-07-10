@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.58 - 2026-07-10
+
+- Extract SubObject CLI runtime handlers and registry report helpers into a
+  dedicated command-family module.
+
 ## 0.69.57 - 2026-07-10
 
 - Route CLI `object put` through a typed daemon request so staged placement and

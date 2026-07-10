@@ -94,6 +94,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the read-only `store s3-upload` plan renderer into the same
     module, keeping service-layout lookup and AWS command planning out of the
     top-level runner.
+  - [x] Extract SubObject create/list/search runtime handlers and report
+    helpers into `crates/dasobjectstore-cli/src/run/subobject.rs`.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
