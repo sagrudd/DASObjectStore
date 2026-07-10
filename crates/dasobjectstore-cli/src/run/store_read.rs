@@ -28,6 +28,145 @@ pub(super) fn run_store_contents(
     Ok(())
 }
 
+fn write_store_contents_du(
+    snapshot: &StoreContentsSnapshot,
+    depth: usize,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(writer, "Store contents")?;
+    writeln!(writer, "Store: {}", snapshot.store_id)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        snapshot.live_sqlite_path.display()
+    )?;
+    if let Some(filter) = &snapshot.filter {
+        writeln!(writer, "Filter: {filter}")?;
+    }
+    writeln!(writer, "Objects: {}", snapshot.objects.len())?;
+    writeln!(
+        writer,
+        "Total: {}",
+        format_bytes(snapshot.total_size_bytes() as f64)
+    )?;
+    writeln!(writer, "Mode: du depth={depth}")?;
+    for (path, size_bytes) in store_contents_du_entries(&snapshot.objects, depth) {
+        writeln!(writer, "{}\t{path}", format_bytes(size_bytes as f64))?;
+    }
+    Ok(())
+}
+
+fn write_store_contents_tree(
+    snapshot: &StoreContentsSnapshot,
+    depth: usize,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(writer, "Store contents")?;
+    writeln!(writer, "Store: {}", snapshot.store_id)?;
+    writeln!(
+        writer,
+        "Live metadata: {}",
+        snapshot.live_sqlite_path.display()
+    )?;
+    if let Some(filter) = &snapshot.filter {
+        writeln!(writer, "Filter: {filter}")?;
+    }
+    writeln!(writer, "Objects: {}", snapshot.objects.len())?;
+    writeln!(
+        writer,
+        "Total: {}",
+        format_bytes(snapshot.total_size_bytes() as f64)
+    )?;
+    writeln!(writer, "Mode: tree depth={depth}")?;
+    let tree = StoreContentsTreeNode::from_objects(&snapshot.objects);
+    writeln!(writer, ". {}", format_bytes(tree.size_bytes as f64))?;
+    write_store_contents_tree_children(&tree, 1, depth, writer)
+}
+
+fn store_contents_du_entries(objects: &[StoreContentsObject], depth: usize) -> Vec<(String, u64)> {
+    let mut entries = BTreeMap::<String, u64>::new();
+    entries.insert(
+        ".".to_string(),
+        objects.iter().map(|object| object.size_bytes).sum(),
+    );
+    if depth == 0 {
+        return entries.into_iter().collect();
+    }
+    for object in objects {
+        let parts = store_contents_path_parts(&object.path);
+        for prefix_depth in 1..=depth.min(parts.len()) {
+            let prefix = parts[..prefix_depth].join("/");
+            *entries.entry(prefix).or_insert(0) += object.size_bytes;
+        }
+    }
+    entries.into_iter().collect()
+}
+
+#[derive(Default)]
+struct StoreContentsTreeNode {
+    size_bytes: u64,
+    file_size_bytes: Option<u64>,
+    children: BTreeMap<String, StoreContentsTreeNode>,
+}
+
+impl StoreContentsTreeNode {
+    fn from_objects(objects: &[StoreContentsObject]) -> Self {
+        let mut root = Self::default();
+        for object in objects {
+            root.insert(&store_contents_path_parts(&object.path), object.size_bytes);
+        }
+        root
+    }
+
+    fn insert(&mut self, parts: &[String], size_bytes: u64) {
+        self.size_bytes = self.size_bytes.saturating_add(size_bytes);
+        if let Some((head, tail)) = parts.split_first() {
+            self.children
+                .entry(head.clone())
+                .or_default()
+                .insert(tail, size_bytes);
+        } else {
+            self.file_size_bytes = Some(size_bytes);
+        }
+    }
+}
+
+fn write_store_contents_tree_children(
+    node: &StoreContentsTreeNode,
+    current_depth: usize,
+    max_depth: usize,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    if current_depth > max_depth {
+        return Ok(());
+    }
+    for (name, child) in &node.children {
+        let indent = "  ".repeat(current_depth.saturating_sub(1));
+        if child.children.is_empty() {
+            writeln!(
+                writer,
+                "{indent}- {name} {}",
+                format_bytes(child.size_bytes as f64)
+            )?;
+        } else {
+            writeln!(
+                writer,
+                "{indent}- {name}/ {}",
+                format_bytes(child.size_bytes as f64)
+            )?;
+            write_store_contents_tree_children(child, current_depth + 1, max_depth, writer)?;
+        }
+    }
+    Ok(())
+}
+
+fn store_contents_path_parts(path: &str) -> Vec<String> {
+    path.split('/')
+        .filter(|part| !part.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 pub(super) fn run_store_list(
     args: &StoreListArgs,
     writer: &mut impl Write,

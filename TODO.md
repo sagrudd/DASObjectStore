@@ -114,6 +114,8 @@ list until every temporary size-budget exception has been removed.
     the top-level runner.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
+  - [x] Move Store contents tree/du rendering and aggregation helpers beside
+    the `store_read` handlers, keeping output contracts and tests unchanged.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.
