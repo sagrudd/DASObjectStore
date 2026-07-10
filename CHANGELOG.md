@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.4 - 2026-07-10
+
+- Keep only the latest byte-progress snapshot between 100 ms embedded-TUI
+  redraws, while rendering pipeline, HDD-target, and terminal transitions
+  immediately.
+
 ## 0.69.3 - 2026-07-10
 
 - Classify mounted-disk ingest as USB SSD-first and require the target store's

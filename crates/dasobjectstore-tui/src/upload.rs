@@ -21,6 +21,9 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+const PROGRESS_RENDER_CADENCE: Duration = Duration::from_millis(100);
+const HEARTBEAT_RENDER_CADENCE: Duration = Duration::from_millis(500);
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UploadTuiContext {
     pub endpoint: String,
@@ -103,17 +106,31 @@ where
     }
 
     pub fn render_progress(&mut self, event: DaemonIngestProgressEvent) -> io::Result<()> {
+        let render_transition = self
+            .last_event
+            .as_ref()
+            .is_none_or(|previous| progress_transition(previous, &event));
         self.update_rate(&event);
-        self.render_frame(
-            Some(&event),
-            event.message.as_deref().unwrap_or("upload running"),
-        )?;
         self.last_event = Some(event);
+
+        if !render_transition && self.last_render_at.elapsed() < PROGRESS_RENDER_CADENCE {
+            return Ok(());
+        }
+
+        let event = self
+            .last_event
+            .clone()
+            .expect("latest progress event exists");
+        let status = event
+            .message
+            .clone()
+            .unwrap_or_else(|| "upload running".to_string());
+        self.render_frame(Some(&event), &status)?;
         Ok(())
     }
 
     pub fn render_heartbeat(&mut self) -> io::Result<()> {
-        if self.last_render_at.elapsed() < Duration::from_millis(500) {
+        if self.last_render_at.elapsed() < HEARTBEAT_RENDER_CADENCE {
             return Ok(());
         }
         let last_event = self.last_event.clone();
@@ -285,6 +302,23 @@ where
         }
         Ok(())
     }
+}
+
+fn progress_transition(
+    previous: &DaemonIngestProgressEvent,
+    current: &DaemonIngestProgressEvent,
+) -> bool {
+    previous.stage != current.stage
+        || previous.pipeline_stage != current.pipeline_stage
+        || previous.current_object_id != current.current_object_id
+        || previous
+            .active_hdd_transfers
+            .iter()
+            .map(|transfer| (&transfer.disk_id, transfer.copy_number))
+            .ne(current
+                .active_hdd_transfers
+                .iter()
+                .map(|transfer| (&transfer.disk_id, transfer.copy_number)))
 }
 
 impl<W> Drop for UploadTui<'_, W>
@@ -579,7 +613,10 @@ mod tests {
         DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry, DaemonSsdPressure,
         SubmitIngestFilesResponse,
     };
+    use std::cell::RefCell;
+    use std::io::{self, Write};
     use std::path::PathBuf;
+    use std::rc::Rc;
 
     #[test]
     fn renders_live_upload_progress_frame() {
@@ -681,5 +718,96 @@ mod tests {
         assert!(output.contains("qnap-1057"));
         assert!(output.contains("raw/read-2.pod5"));
         assert!(output.contains("Final response: job=ingest-files-1"));
+    }
+
+    #[test]
+    fn keeps_the_latest_byte_progress_snapshot_until_the_render_cadence() {
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let mut writer = SharedWriter::new(Rc::clone(&bytes));
+        let mut tui = UploadTui::start_with_fixed_viewport(
+            &mut writer,
+            context(),
+            ratatui::layout::Rect::new(0, 0, 100, 28),
+        )
+        .expect("tui starts");
+
+        tui.render_progress(progress_event(64 * 1024))
+            .expect("initial progress renders");
+        let rendered_bytes = bytes.borrow().len();
+        tui.last_render_at = std::time::Instant::now();
+
+        for bytes_done in [128, 192, 256, 320, 384, 448, 512, 576, 640] {
+            tui.render_progress(progress_event(bytes_done * 1024))
+                .expect("byte update is accepted");
+        }
+
+        assert_eq!(bytes.borrow().len(), rendered_bytes);
+        assert_eq!(
+            tui.last_event
+                .as_ref()
+                .and_then(|event| event.source_bytes_done),
+            Some(640 * 1024)
+        );
+
+        let mut complete = progress_event(640 * 1024);
+        complete.stage = DaemonIngestStage::Complete;
+        tui.render_progress(complete)
+            .expect("terminal progress renders immediately");
+        assert!(bytes.borrow().len() > rendered_bytes);
+    }
+
+    fn context() -> UploadTuiContext {
+        UploadTuiContext {
+            endpoint: "zymo_fecal_2025.05".to_string(),
+            source_path: PathBuf::from("/mnt/external/zymo"),
+            object_type: "fastq".to_string(),
+            conflict_policy: "force".to_string(),
+            dry_run: false,
+        }
+    }
+
+    fn progress_event(bytes_done: u64) -> DaemonIngestProgressEvent {
+        DaemonIngestProgressEvent {
+            job_id: IngestJobId::new("ingest-progress-cadence").expect("job id"),
+            endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+            stage: DaemonIngestStage::SsdIngest,
+            pipeline_stage: Some(DaemonIngestPipelineStage::SsdStage),
+            work_bytes_done: bytes_done,
+            work_bytes_total: Some(1024 * 1024),
+            source_bytes_done: Some(bytes_done),
+            source_bytes_total: Some(1024 * 1024),
+            stage_bytes_done: Some(bytes_done),
+            stage_bytes_total: Some(1024 * 1024),
+            files_done: 0,
+            files_total: Some(1),
+            current_object_id: None,
+            ssd_pressure: None,
+            telemetry: None,
+            active_hdd_transfers: Vec::new(),
+            resource_policy: None,
+            message: Some("copying".to_string()),
+        }
+    }
+
+    #[derive(Clone)]
+    struct SharedWriter {
+        bytes: Rc<RefCell<Vec<u8>>>,
+    }
+
+    impl SharedWriter {
+        fn new(bytes: Rc<RefCell<Vec<u8>>>) -> Self {
+            Self { bytes }
+        }
+    }
+
+    impl Write for SharedWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.bytes.borrow_mut().extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 }
