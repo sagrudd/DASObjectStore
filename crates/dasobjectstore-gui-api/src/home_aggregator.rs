@@ -1,3 +1,5 @@
+#![allow(dead_code)] // Transitional: telemetry helpers are being moved to `telemetry` below.
+
 use crate::dashboard::{
     ActiveUsersSummaryView, CapacitySummaryView, CpuUsageSummaryView,
     CreateObjectStoreAffordanceView, DasEnclosureCardView, DashboardHealthStateView,
@@ -19,17 +21,17 @@ use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+mod object_service;
+mod telemetry;
 
 pub(crate) const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 pub(crate) const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 const DEFAULT_THROUGHPUT_PATH: &str = "/var/lib/dasobjectstore/telemetry/throughput-7d.json";
 const DEFAULT_SMART_WARNINGS_PATH: &str = "/var/lib/dasobjectstore/health/smart-warnings.json";
 const DEFAULT_MEMINFO_PATH: &str = "/proc/meminfo";
-const DEFAULT_OBJECT_SERVICE_PORT: u16 = 3900;
-const DEFAULT_OBJECT_SERVICE_BIND_ADDRESS: &str = "0.0.0.0";
 
 #[derive(Clone, Debug)]
 struct HomeDashboardAggregatorConfig {
@@ -118,13 +120,12 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         ));
     }
 
-    let telemetry =
-        read_appliance_telemetry(&config.appliance_telemetry_path).unwrap_or_else(|warning| {
-            if config.appliance_telemetry_path.exists() {
-                source_warnings.push(warning);
-            }
-            None
-        });
+    let telemetry = telemetry::read(&config.appliance_telemetry_path).unwrap_or_else(|warning| {
+        if config.appliance_telemetry_path.exists() {
+            source_warnings.push(warning);
+        }
+        None
+    });
 
     let all_capacities = ssd_capacity
         .iter()
@@ -133,7 +134,7 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         .collect::<Vec<_>>();
     let capacity = telemetry
         .as_ref()
-        .and_then(|sample_set| telemetry_capacity_summary(sample_set, config.telemetry_window))
+        .and_then(|sample_set| telemetry::capacity_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| capacity_summary(&all_capacities));
     let drive_count = drive_count_summary(ssd_capacity.is_some(), hdd_capacities.len());
     let mounted_enclosures = enclosure_cards(
@@ -154,7 +155,7 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         registry_object_store_cards(&config.store_registry_path, None, &[], &mut source_warnings);
     let object_service = config
         .object_service_status
-        .unwrap_or_else(object_service_status);
+        .unwrap_or_else(object_service::status);
     if let Some(message) = &object_service.message {
         source_warnings.push(DashboardWarning::new(
             "object_service_status",
@@ -163,7 +164,7 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
     }
     let memory_stress = telemetry
         .as_ref()
-        .and_then(|sample_set| telemetry_memory_stress(sample_set, config.telemetry_window))
+        .and_then(|sample_set| telemetry::memory_stress(sample_set, config.telemetry_window))
         .unwrap_or_else(|| memory_stress(&config.meminfo_path, &mut source_warnings));
     let throughput_7d = telemetry
         .as_ref()
@@ -178,17 +179,17 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
         });
     let disk_io = telemetry
         .as_ref()
-        .and_then(|sample_set| telemetry_disk_io_summary(sample_set, config.telemetry_window))
+        .and_then(|sample_set| telemetry::disk_io_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| {
             DiskIoSummaryView::unavailable("Disk IO telemetry is not available yet.")
         });
     let cpu_usage = telemetry
         .as_ref()
-        .and_then(|sample_set| telemetry_cpu_usage_summary(sample_set, config.telemetry_window))
+        .and_then(|sample_set| telemetry::cpu_usage_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| CpuUsageSummaryView::unavailable("CPU telemetry is not available yet."));
     let active_users = telemetry
         .as_ref()
-        .and_then(|sample_set| telemetry_active_users_summary(sample_set, config.telemetry_window))
+        .and_then(|sample_set| telemetry::active_users_summary(sample_set, config.telemetry_window))
         .unwrap_or_else(|| {
             ActiveUsersSummaryView::unavailable("Session telemetry is not available yet.")
         });
@@ -405,176 +406,6 @@ fn enclosure_cards(
         last_seen_at_utc: generated_at_utc.to_string(),
         warnings: source_warnings.to_vec(),
     }]
-}
-
-fn object_service_status() -> ObjectServiceStatusView {
-    let port = DEFAULT_OBJECT_SERVICE_PORT;
-    let bind_address = docker_object_service_binding(port)
-        .unwrap_or_else(|| DEFAULT_OBJECT_SERVICE_BIND_ADDRESS.to_string());
-    let active = local_tcp_listener_active(&bind_address, port);
-    let remote_ready = active && !is_loopback_bind(&bind_address);
-    let local_url = format!("http://127.0.0.1:{port}");
-    let remote_url = remote_ready.then(|| remote_object_service_url(&bind_address, port));
-    let service_state = docker_object_service_container_state(port);
-    let message = if !active {
-        Some("S3-compatible object service is not reachable on the appliance.".to_string())
-    } else if is_loopback_bind(&bind_address) {
-        Some(
-            "S3-compatible object service is bound to loopback and cannot accept remote uploads."
-                .to_string(),
-        )
-    } else {
-        None
-    };
-
-    ObjectServiceStatusView {
-        active,
-        remote_ready,
-        bind_address,
-        port,
-        local_url,
-        remote_url,
-        service_state,
-        message,
-    }
-}
-
-fn docker_object_service_binding(port: u16) -> Option<String> {
-    let mut command = Command::new("docker");
-    command.args([
-        "ps",
-        "--format",
-        "{{.Ports}}",
-        "--filter",
-        &format!("publish={port}"),
-    ]);
-    let output = bounded_command_output(command, Duration::from_secs(2))?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_docker_published_bind_address(&stdout, port)
-}
-
-fn docker_object_service_container_state(port: u16) -> Option<String> {
-    let mut command = Command::new("docker");
-    command.args([
-        "ps",
-        "--format",
-        "{{.Status}}",
-        "--filter",
-        &format!("publish={port}"),
-    ]);
-    let output = bounded_command_output(command, Duration::from_secs(2))?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .map(str::trim)
-        .filter(|state| !state.is_empty())
-        .map(str::to_string)
-}
-
-fn bounded_command_output(mut command: Command, timeout: Duration) -> Option<Output> {
-    command.stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = command.spawn().ok()?;
-    let started_at = Instant::now();
-    loop {
-        if child.try_wait().ok()?.is_some() {
-            return child.wait_with_output().ok();
-        }
-        if started_at.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-fn parse_docker_published_bind_address(ports: &str, port: u16) -> Option<String> {
-    ports
-        .split(',')
-        .map(str::trim)
-        .find_map(|entry| parse_docker_port_entry_bind_address(entry, port))
-}
-
-fn parse_docker_port_entry_bind_address(entry: &str, port: u16) -> Option<String> {
-    let (host_side, container_side) = entry.split_once("->")?;
-    if !published_port_spec_contains_port(container_side.split('/').next()?, port) {
-        return None;
-    }
-    let host_side = host_side
-        .rsplit_once(' ')
-        .map_or(host_side, |(_, value)| value);
-    let (address, host_ports) = host_side.rsplit_once(':')?;
-    if !published_port_spec_contains_port(host_ports, port) {
-        return None;
-    }
-    let address = address.trim_matches(['[', ']']).trim();
-    (!address.is_empty()).then(|| address.to_string())
-}
-
-fn published_port_spec_contains_port(port_spec: &str, port: u16) -> bool {
-    match port_spec.split_once('-') {
-        Some((start, end)) => {
-            let Ok(start) = start.parse::<u16>() else {
-                return false;
-            };
-            let Ok(end) = end.parse::<u16>() else {
-                return false;
-            };
-            (start..=end).contains(&port)
-        }
-        None => port_spec.parse::<u16>().is_ok_and(|value| value == port),
-    }
-}
-
-fn local_tcp_listener_active(bind_address: &str, port: u16) -> bool {
-    use std::net::{IpAddr, SocketAddr, TcpStream};
-    use std::time::Duration;
-
-    let connect_host = match bind_address.parse::<IpAddr>() {
-        Ok(address) if address.is_unspecified() => "127.0.0.1",
-        Ok(_) => bind_address,
-        Err(_) => "127.0.0.1",
-    };
-    let Ok(connect_addr) = format!("{connect_host}:{port}").parse::<SocketAddr>() else {
-        return false;
-    };
-    TcpStream::connect_timeout(&connect_addr, Duration::from_millis(200)).is_ok()
-}
-
-fn is_loopback_bind(bind_address: &str) -> bool {
-    matches!(bind_address, "127.0.0.1" | "::1" | "localhost")
-}
-
-fn remote_object_service_url(bind_address: &str, port: u16) -> String {
-    let host = if bind_address == "0.0.0.0" || bind_address == "::" {
-        public_host_address().unwrap_or_else(|| bind_address.to_string())
-    } else {
-        bind_address.to_string()
-    };
-    format!("http://{host}:{port}")
-}
-
-fn public_host_address() -> Option<String> {
-    if let Ok(host) = env::var("DASOBJECTSTORE_PUBLIC_HOST") {
-        let host = host.trim();
-        if !host.is_empty() {
-            return Some(host.to_string());
-        }
-    }
-    let output = Command::new("hostname").arg("-I").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .find(|address| !address.starts_with("127.") && !address.contains(':'))
-        .map(str::to_string)
 }
 
 fn memory_stress(path: &Path, warnings: &mut Vec<DashboardWarning>) -> MemoryStressView {
@@ -1102,26 +933,26 @@ fn health_label(
     }
 }
 
-fn percent_basis_points(used: u64, total: u64) -> u16 {
+pub(super) fn percent_basis_points(used: u64, total: u64) -> u16 {
     if total == 0 {
         return 0;
     }
     ((u128::from(used) * 10_000) / u128::from(total)).min(u128::from(u16::MAX)) as u16
 }
 
-fn percent_u8(used: u64, total: u64) -> u8 {
+pub(super) fn percent_u8(used: u64, total: u64) -> u8 {
     if total == 0 {
         return 0;
     }
     ((u128::from(used) * 100) / u128::from(total)).min(100) as u8
 }
 
-fn format_tib(bytes: u64) -> String {
+pub(super) fn format_tib(bytes: u64) -> String {
     const TIB: f64 = 1024.0 * 1024.0 * 1024.0 * 1024.0;
     format!("{:.1}", bytes as f64 / TIB)
 }
 
-fn mib_per_second(bytes_per_second: u64) -> u32 {
+pub(super) fn mib_per_second(bytes_per_second: u64) -> u32 {
     (bytes_per_second / (1024 * 1024)).min(u64::from(u32::MAX)) as u32
 }
 

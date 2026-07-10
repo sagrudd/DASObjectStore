@@ -14,28 +14,38 @@ use dasobjectstore_metadata::{
     settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
     IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectInspectError, ObjectPutError,
     ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure,
-    StagedObjectPut, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
+    StagedObjectPut,
 };
 use dasobjectstore_object_service::{
-    default_store_registry_path, default_subobject_registry_path, read_store_registry,
-    read_subobject_registry, ObjectServiceError, StoreServiceDefinition,
+    default_store_registry_path, default_subobject_registry_path, ObjectServiceError,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
-const SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
-const HDD_ROOT_ENV: &str = "DASOBJECTSTORE_HDD_ROOT";
-const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
-const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
 const SSD_FLUSH_QUEUE_CAPACITY: usize = 2;
-const MAX_HDD_SETTLEMENT_WORKERS: usize = 32;
+
+mod endpoint;
+mod environment;
+mod scheduling;
+
+use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
+#[cfg(test)]
+use environment::SSD_ROOT_ENV;
+pub(crate) use environment::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
+use environment::{default_live_sqlite_path, validate_known_ssd_root};
+#[cfg(test)]
+use scheduling::{default_hdd_worker_count, HddSettlementDiskState, HddSettlementScheduler};
+use scheduling::{
+    new_shared_hdd_settlement_scheduler, release_hdd_settlement_roots,
+    reserve_hdd_settlement_roots, resolve_hdd_worker_count, SharedHddSettlementScheduler,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonFileIngestSummary {
@@ -64,23 +74,6 @@ pub fn submit_ingest_files_to_local_store_with_progress(
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
     let executor = LocalFileIngestExecutor::from_environment();
     executor.submit(request, accepted_at_utc, progress)
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FileIngestEntry {
-    source_path: PathBuf,
-    relative_path: PathBuf,
-    object_id: ObjectId,
-    size_bytes: u64,
-    file_index: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ResolvedIngestEndpoint {
-    endpoint_name: String,
-    endpoint_kind: &'static str,
-    store: StoreServiceDefinition,
-    object_prefix: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -587,209 +580,6 @@ impl HddSettlementPayload {
             Self::Direct(request) => request.disk_roots = roots,
         }
     }
-}
-
-#[derive(Clone, Debug)]
-struct HddSettlementDiskState {
-    disk_id: DiskId,
-    root_path: PathBuf,
-    active: bool,
-    total_bytes: u64,
-    available_bytes: u64,
-    assigned_bytes: u64,
-}
-
-#[derive(Debug)]
-struct HddSettlementScheduler {
-    disks: Vec<HddSettlementDiskState>,
-}
-
-type SharedHddSettlementScheduler = Arc<(Mutex<HddSettlementScheduler>, Condvar)>;
-
-impl HddSettlementScheduler {
-    fn new(roots: &[DiskCopyRoot]) -> Result<Self, DaemonIngestFilesRuntimeError> {
-        let mut seen_disk_ids = BTreeSet::new();
-        for root in roots {
-            if !seen_disk_ids.insert(root.disk_id.clone()) {
-                return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                    "managed HDD root inventory contains duplicate disk ID {}; redundant copies require distinct physical disks",
-                    root.disk_id
-                )));
-            }
-        }
-
-        Ok(Self {
-            disks: roots
-                .iter()
-                .map(|root| {
-                    let capacity = measure_ssd_capacity(&root.root_path)?;
-                    Ok(HddSettlementDiskState {
-                        disk_id: root.disk_id.clone(),
-                        root_path: root.root_path.clone(),
-                        active: false,
-                        total_bytes: capacity.total_bytes,
-                        available_bytes: capacity.available_bytes,
-                        assigned_bytes: 0,
-                    })
-                })
-                .collect::<Result<Vec<_>, DaemonIngestFilesRuntimeError>>()?,
-        })
-    }
-
-    fn reserve_roots(
-        &mut self,
-        copy_count: usize,
-        object_size_bytes: u64,
-    ) -> Result<Option<Vec<DiskCopyRoot>>, DaemonIngestFilesRuntimeError> {
-        let eligible_count = self
-            .disks
-            .iter()
-            .filter(|disk| disk.projected_available_bytes() >= object_size_bytes)
-            .count();
-        if eligible_count < copy_count {
-            return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                "HDD settlement needs {copy_count} disk(s) with at least {object_size_bytes} byte(s) free; found {eligible_count}"
-            )));
-        }
-
-        let mut candidates = self
-            .disks
-            .iter()
-            .enumerate()
-            .filter(|(_, disk)| {
-                !disk.active && disk.projected_available_bytes() >= object_size_bytes
-            })
-            .collect::<Vec<_>>();
-        if candidates.len() < copy_count {
-            return Ok(None);
-        }
-        candidates.sort_by(|(_, left), (_, right)| compare_hdd_settlement_disks(right, left));
-        let selected = candidates
-            .into_iter()
-            .take(copy_count)
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        let mut roots = Vec::with_capacity(copy_count);
-        for index in selected {
-            let disk = &mut self.disks[index];
-            disk.active = true;
-            roots.push(DiskCopyRoot::new(
-                disk.disk_id.clone(),
-                disk.root_path.clone(),
-            ));
-        }
-        Ok(Some(roots))
-    }
-
-    fn release_roots(&mut self, roots: &[DiskCopyRoot], bytes_per_root: u64) {
-        for root in roots {
-            if let Some(disk) = self
-                .disks
-                .iter_mut()
-                .find(|disk| disk.disk_id == root.disk_id)
-            {
-                disk.active = false;
-                disk.assigned_bytes = disk.assigned_bytes.saturating_add(bytes_per_root);
-            }
-        }
-    }
-}
-
-impl HddSettlementDiskState {
-    fn projected_available_bytes(&self) -> u64 {
-        self.available_bytes.saturating_sub(self.assigned_bytes)
-    }
-}
-
-fn new_shared_hdd_settlement_scheduler(
-    roots: &[DiskCopyRoot],
-) -> Result<SharedHddSettlementScheduler, DaemonIngestFilesRuntimeError> {
-    Ok(Arc::new((
-        Mutex::new(HddSettlementScheduler::new(roots)?),
-        Condvar::new(),
-    )))
-}
-
-fn reserve_hdd_settlement_roots(
-    scheduler: &SharedHddSettlementScheduler,
-    copy_count: usize,
-    object_size_bytes: u64,
-) -> Result<Vec<DiskCopyRoot>, DaemonIngestFilesRuntimeError> {
-    let (lock, condvar) = &**scheduler;
-    let mut scheduler = lock.lock().map_err(|_| {
-        DaemonIngestFilesRuntimeError::CommandFailed(
-            "HDD settlement scheduler lock poisoned".to_string(),
-        )
-    })?;
-    loop {
-        if let Some(roots) = scheduler.reserve_roots(copy_count, object_size_bytes)? {
-            return Ok(roots);
-        }
-        scheduler = condvar.wait(scheduler).map_err(|_| {
-            DaemonIngestFilesRuntimeError::CommandFailed(
-                "HDD settlement scheduler lock poisoned".to_string(),
-            )
-        })?;
-    }
-}
-
-fn release_hdd_settlement_roots(
-    scheduler: &SharedHddSettlementScheduler,
-    roots: &[DiskCopyRoot],
-    bytes_per_root: u64,
-) -> Result<(), DaemonIngestFilesRuntimeError> {
-    let (lock, condvar) = &**scheduler;
-    let mut scheduler = lock.lock().map_err(|_| {
-        DaemonIngestFilesRuntimeError::CommandFailed(
-            "HDD settlement scheduler lock poisoned".to_string(),
-        )
-    })?;
-    scheduler.release_roots(roots, bytes_per_root);
-    condvar.notify_all();
-    Ok(())
-}
-
-fn compare_hdd_settlement_disks(
-    left: &HddSettlementDiskState,
-    right: &HddSettlementDiskState,
-) -> std::cmp::Ordering {
-    let left_free = left.projected_available_bytes();
-    let right_free = right.projected_available_bytes();
-    (u128::from(left_free) * u128::from(right.total_bytes.max(1)))
-        .cmp(&(u128::from(right_free) * u128::from(left.total_bytes.max(1))))
-        .then_with(|| left_free.cmp(&right_free))
-        .then_with(|| right.disk_id.cmp(&left.disk_id))
-}
-
-fn resolve_hdd_worker_count(
-    requested: Option<usize>,
-    managed_hdd_count: usize,
-) -> Result<usize, DaemonIngestFilesRuntimeError> {
-    if managed_hdd_count == 0 {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(
-            "ingest files requires at least one managed HDD root".to_string(),
-        ));
-    }
-    let maximum = managed_hdd_count.min(MAX_HDD_SETTLEMENT_WORKERS);
-    let workers = requested.unwrap_or_else(|| default_hdd_worker_count(managed_hdd_count));
-    if workers == 0 {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(
-            "HDD worker count must be greater than zero".to_string(),
-        ));
-    }
-    if workers > maximum {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "HDD worker count {workers} exceeds available managed HDD writers {maximum}"
-        )));
-    }
-    Ok(workers)
-}
-
-fn default_hdd_worker_count(managed_hdd_count: usize) -> usize {
-    managed_hdd_count
-        .saturating_sub(2)
-        .max(2)
-        .min(managed_hdd_count)
 }
 
 #[derive(Debug)]
@@ -1811,222 +1601,6 @@ fn stage_message_for_object_progress(
             entry.relative_path.to_string_lossy()
         ),
     }
-}
-
-pub(crate) fn default_ssd_root() -> PathBuf {
-    std::env::var_os(SSD_ROOT_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_SSD_ROOT))
-}
-
-pub(crate) fn default_hdd_root() -> PathBuf {
-    std::env::var_os(HDD_ROOT_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_HDD_ROOT))
-}
-
-fn default_live_sqlite_path() -> PathBuf {
-    default_ssd_root()
-        .join(METADATA_DIR_NAME)
-        .join(LIVE_SQLITE_FILE_NAME)
-}
-
-fn validate_known_ssd_root(path: &Path) -> Result<(), DaemonIngestFilesRuntimeError> {
-    let marker = read_device_marker(path).map_err(|err| {
-        DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "{} is not a known DASObjectStore SSD root: {err}",
-            path.display()
-        ))
-    })?;
-    if !marker.lines().any(|line| line == "role=ssd") {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "{} is not a DASObjectStore SSD root; expected role=ssd in .dasobjectstore/device.env",
-            path.display()
-        )));
-    }
-
-    Ok(())
-}
-
-fn read_device_marker(path: &Path) -> Result<String, io::Error> {
-    fs::read_to_string(path.join(".dasobjectstore").join("device.env"))
-}
-
-pub(crate) fn discover_managed_hdd_roots(
-    hdd_root: &Path,
-) -> Result<Vec<DiskCopyRoot>, DaemonIngestFilesRuntimeError> {
-    let mut roots = Vec::new();
-    let entries = match fs::read_dir(hdd_root) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(roots),
-        Err(err) => return Err(DaemonIngestFilesRuntimeError::Io(err)),
-    };
-
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let root_path = entry.path();
-        let marker = match read_device_marker(&root_path) {
-            Ok(marker) => marker,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(DaemonIngestFilesRuntimeError::Io(err)),
-        };
-        let Some(disk_id) = hdd_disk_id_from_marker(&marker)? else {
-            continue;
-        };
-        roots.push(DiskCopyRoot::new(disk_id, root_path));
-    }
-
-    roots.sort_by(|left, right| left.disk_id.cmp(&right.disk_id));
-    Ok(roots)
-}
-
-fn hdd_disk_id_from_marker(marker: &str) -> Result<Option<DiskId>, DaemonIngestFilesRuntimeError> {
-    for line in marker.lines() {
-        let Some(role) = line.strip_prefix("role=") else {
-            continue;
-        };
-        let Some(disk_id) = role.strip_prefix("hdd:") else {
-            return Ok(None);
-        };
-        return DiskId::new(disk_id)
-            .map(Some)
-            .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()));
-    }
-
-    Ok(None)
-}
-
-fn resolve_ingest_endpoint(
-    endpoint: &StoreId,
-    store_registry_path: &Path,
-    subobject_registry_path: &Path,
-) -> Result<ResolvedIngestEndpoint, DaemonIngestFilesRuntimeError> {
-    let stores = read_store_registry(store_registry_path)?;
-    let store_match = stores
-        .iter()
-        .find(|definition| definition.store_id == *endpoint);
-    let subobjects = read_subobject_registry(subobject_registry_path)?;
-    let subobject_match = subobjects
-        .iter()
-        .find(|definition| definition.name == endpoint.as_str());
-
-    if store_match.is_some() && subobject_match.is_some() {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "ingest endpoint {} is ambiguous; both an object store and a SubObject use that name",
-            endpoint
-        )));
-    }
-
-    if let Some(store) = store_match {
-        return Ok(ResolvedIngestEndpoint {
-            endpoint_name: endpoint.as_str().to_string(),
-            endpoint_kind: "object_store",
-            store: store.clone(),
-            object_prefix: store.store_id.as_str().to_string(),
-        });
-    }
-
-    if let Some(subobject) = subobject_match {
-        let store = stores
-            .iter()
-            .find(|definition| definition.store_id == subobject.store_id)
-            .ok_or_else(|| {
-                DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                    "SubObject {} references missing store {} in {}",
-                    subobject.name,
-                    subobject.store_id,
-                    store_registry_path.display()
-                ))
-            })?;
-        return Ok(ResolvedIngestEndpoint {
-            endpoint_name: subobject.name.clone(),
-            endpoint_kind: "subobject",
-            store: store.clone(),
-            object_prefix: subobject.object_prefix(),
-        });
-    }
-
-    Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-        "ingest endpoint {} was not found in {} or {}",
-        endpoint,
-        store_registry_path.display(),
-        subobject_registry_path.display()
-    )))
-}
-
-fn collect_ingest_files(
-    root: &Path,
-    object_prefix: &str,
-) -> Result<Vec<FileIngestEntry>, DaemonIngestFilesRuntimeError> {
-    if !root.is_dir() {
-        return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-            "ingest source must be a directory: {}",
-            root.display()
-        )));
-    }
-
-    let mut files = Vec::new();
-    collect_ingest_files_into(root, root, object_prefix, &mut files)?;
-    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    for (index, file) in files.iter_mut().enumerate() {
-        file.file_index = index as u64 + 1;
-    }
-
-    Ok(files)
-}
-
-fn collect_ingest_files_into(
-    root: &Path,
-    current: &Path,
-    object_prefix: &str,
-    files: &mut Vec<FileIngestEntry>,
-) -> Result<(), DaemonIngestFilesRuntimeError> {
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
-        if is_hidden_entry_name(&entry.file_name()) {
-            continue;
-        }
-        let path = entry.path();
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
-            collect_ingest_files_into(root, &path, object_prefix, files)?;
-        } else if file_type.is_file() {
-            let metadata = entry.metadata()?;
-            let relative_path = path
-                .strip_prefix(root)
-                .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))?
-                .to_path_buf();
-            files.push(FileIngestEntry {
-                object_id: object_id_for_ingested_file(object_prefix, &relative_path)?,
-                source_path: path,
-                relative_path,
-                size_bytes: metadata.len(),
-                file_index: 0,
-            });
-        }
-    }
-
-    Ok(())
-}
-
-fn is_hidden_entry_name(name: &std::ffi::OsStr) -> bool {
-    name.to_string_lossy().starts_with('.')
-}
-
-fn object_id_for_ingested_file(
-    object_prefix: &str,
-    relative_path: &Path,
-) -> Result<ObjectId, DaemonIngestFilesRuntimeError> {
-    let relative = relative_path
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/");
-    ObjectId::new(format!("{object_prefix}/{relative}"))
-        .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))
 }
 
 fn ingest_job_id(accepted_at_utc: &str) -> Result<IngestJobId, DaemonIngestFilesRuntimeError> {
