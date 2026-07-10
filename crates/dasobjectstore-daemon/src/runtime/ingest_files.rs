@@ -9,8 +9,8 @@ use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    existing_object_payload_candidate_paths, hash_file_sha256_with_progress, measure_ssd_capacity,
-    object_payload_path, put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
+    existing_object_payload_candidate_paths, measure_ssd_capacity,
+    put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
     settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
     IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectInspectError, ObjectPutError,
     ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure,
@@ -1313,18 +1313,11 @@ fn maybe_skip_existing_object(
     job_id: &IngestJobId,
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
 ) -> Result<bool, DaemonIngestFilesRuntimeError> {
-    let mut incoming_hash = None::<String>;
     if let Some(existing) = read_existing_object_snapshot(live_sqlite_path, &entry.object_id)? {
-        incoming_hash = incoming_hash_for_conflict_decision(
-            request.conflict_policy,
-            &existing,
-            entry,
-            state,
-            job_id,
-            &request.endpoint,
-            progress,
-        )?;
-        let incoming = DaemonIngestObjectSnapshot::new(entry.size_bytes, incoming_hash.clone());
+        // Strict conflict decisions are deliberately deferred until the copy has
+        // produced its checksum in flight. Reading the source into a hash sink
+        // here doubles NVMe reads and blocks direct HDD landing.
+        let incoming = DaemonIngestObjectSnapshot::new(entry.size_bytes, None::<String>);
         let decision = request
             .conflict_policy
             .decide_existing_object(&existing, &incoming);
@@ -1371,35 +1364,8 @@ fn maybe_skip_existing_object(
             }
         }
         DaemonIngestConflictPolicy::Strict => {
-            let hash = match incoming_hash {
-                Some(hash) => hash,
-                None => hash_source_file_for_conflict(
-                    entry,
-                    state,
-                    job_id,
-                    &request.endpoint,
-                    progress,
-                )?,
-            };
-            if managed_disk_roots.iter().any(|root| {
-                let expected_path = object_payload_path(root, &entry.object_id, &hash);
-                expected_path.exists()
-                    && expected_path
-                        .metadata()
-                        .map(|metadata| metadata.len() == entry.size_bytes)
-                        .unwrap_or(false)
-            }) {
-                emit_existing_object_skip(
-                    request,
-                    entry,
-                    copies,
-                    state,
-                    job_id,
-                    progress,
-                    "payload checksum match".to_string(),
-                )?;
-                return Ok(true);
-            }
+            // The content-addressed destination is checked after the in-flight
+            // copy has computed its checksum. Never hash the source separately.
         }
         DaemonIngestConflictPolicy::Force => {}
     }
@@ -1442,82 +1408,6 @@ fn emit_existing_object_skip(
             entry.relative_path.to_string_lossy()
         )),
     })
-}
-
-fn incoming_hash_for_conflict_decision(
-    policy: DaemonIngestConflictPolicy,
-    existing: &DaemonIngestObjectSnapshot,
-    entry: &FileIngestEntry,
-    state: &mut PipelineProgressState,
-    job_id: &IngestJobId,
-    endpoint: &StoreId,
-    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
-) -> Result<Option<String>, DaemonIngestFilesRuntimeError> {
-    if policy != DaemonIngestConflictPolicy::Strict || existing.content_hash.is_none() {
-        return Ok(None);
-    }
-
-    hash_source_file_for_conflict(entry, state, job_id, endpoint, progress).map(Some)
-}
-
-fn hash_source_file_for_conflict(
-    entry: &FileIngestEntry,
-    state: &mut PipelineProgressState,
-    job_id: &IngestJobId,
-    endpoint: &StoreId,
-    progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
-) -> Result<String, DaemonIngestFilesRuntimeError> {
-    progress(DaemonIngestProgressEvent {
-        job_id: job_id.clone(),
-        endpoint: endpoint.clone(),
-        stage: DaemonIngestStage::SsdIngest,
-        pipeline_stage: Some(DaemonIngestPipelineStage::ChecksumManifestCapture),
-        work_bytes_done: state.completed_work_bytes,
-        work_bytes_total: Some(state.work_bytes_total),
-        source_bytes_done: Some(state.completed_source_bytes),
-        source_bytes_total: Some(state.source_bytes_total),
-        stage_bytes_done: Some(0),
-        stage_bytes_total: Some(entry.size_bytes),
-        files_done: state.completed_files,
-        files_total: Some(state.total_files),
-        current_object_id: Some(entry.object_id.clone()),
-        ssd_pressure: Some(state.ssd_pressure),
-        telemetry: Some(state.telemetry()),
-        active_hdd_transfers: state.active_hdd_transfer_records(),
-        resource_policy: None,
-        message: Some(format!(
-            "checking existing object checksum before HDD copy: {}",
-            entry.relative_path.to_string_lossy()
-        )),
-    })?;
-
-    let content_hash = hash_file_sha256_with_progress(&entry.source_path, |bytes_hashed| {
-        progress(DaemonIngestProgressEvent {
-            job_id: job_id.clone(),
-            endpoint: endpoint.clone(),
-            stage: DaemonIngestStage::SsdIngest,
-            pipeline_stage: Some(DaemonIngestPipelineStage::ChecksumManifestCapture),
-            work_bytes_done: state.completed_work_bytes,
-            work_bytes_total: Some(state.work_bytes_total),
-            source_bytes_done: Some(state.completed_source_bytes),
-            source_bytes_total: Some(state.source_bytes_total),
-            stage_bytes_done: Some(bytes_hashed),
-            stage_bytes_total: Some(entry.size_bytes),
-            files_done: state.completed_files,
-            files_total: Some(state.total_files),
-            current_object_id: Some(entry.object_id.clone()),
-            ssd_pressure: Some(state.ssd_pressure),
-            telemetry: Some(state.telemetry()),
-            active_hdd_transfers: state.active_hdd_transfer_records(),
-            resource_policy: None,
-            message: Some(format!(
-                "checking existing object checksum before HDD copy: {}",
-                entry.relative_path.to_string_lossy()
-            )),
-        })
-        .map_err(|err| io::Error::other(err.to_string()))
-    })?;
-    Ok(content_hash)
 }
 
 fn read_existing_object_snapshot(
@@ -2300,8 +2190,8 @@ mod tests {
     }
 
     #[test]
-    fn direct_ingest_strict_skips_existing_checksum_match_before_hdd_copy() {
-        let root = temp_root("daemon-ingest-direct-strict-skip");
+    fn direct_ingest_strict_hashes_during_hdd_copy_when_metadata_exists() {
+        let root = temp_root("daemon-ingest-direct-strict-in-flight-hash");
         let ssd_root = root.join("ssd");
         let hdd_root = root.join("hdd");
         let source_root = root.join("source");
@@ -2351,24 +2241,26 @@ mod tests {
                     Ok(())
                 },
             )
-            .expect("existing object skip succeeds");
+            .expect("strict direct ingest succeeds");
 
-        assert!(progress_events.iter().any(|event| event
-            .message
-            .as_deref()
-            .is_some_and(|message| message.contains("skipped existing object"))));
         assert!(!progress_events.iter().any(|event| {
+            event.pipeline_stage == Some(DaemonIngestPipelineStage::ChecksumManifestCapture)
+        }));
+        assert!(progress_events.iter().any(|event| {
             event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)
                 && !event.active_hdd_transfers.is_empty()
         }));
-        assert!(!hdd_root.join("disk-a").join("objects").exists());
+        assert_eq!(
+            find_payloads(&hdd_root.join("disk-a").join("objects")),
+            vec![b"reproducible reference".to_vec()]
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
     #[test]
-    fn direct_ingest_strict_skips_existing_payload_without_metadata_before_hdd_copy() {
-        let root = temp_root("daemon-ingest-direct-strict-payload-skip");
+    fn direct_ingest_strict_deduplicates_existing_payload_after_in_flight_hash() {
+        let root = temp_root("daemon-ingest-direct-strict-payload-dedupe");
         let ssd_root = root.join("ssd");
         let hdd_root = root.join("hdd");
         let source_root = root.join("source");
@@ -2424,13 +2316,12 @@ mod tests {
                     Ok(())
                 },
             )
-            .expect("existing payload skip succeeds");
+            .expect("strict direct ingest deduplicates existing payload");
 
-        assert!(progress_events.iter().any(|event| event
-            .message
-            .as_deref()
-            .is_some_and(|message| message.contains("payload checksum match"))));
         assert!(!progress_events.iter().any(|event| {
+            event.pipeline_stage == Some(DaemonIngestPipelineStage::ChecksumManifestCapture)
+        }));
+        assert!(progress_events.iter().any(|event| {
             event.pipeline_stage == Some(DaemonIngestPipelineStage::HddWrite)
                 && !event.active_hdd_transfers.is_empty()
         }));

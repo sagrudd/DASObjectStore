@@ -342,7 +342,7 @@ list until every temporary size-budget exception has been removed.
 
 ### Ingress correctness and live operator telemetry follow-up
 
-- [x] Remove the default strict-conflict pre-copy source hash for direct NVMe-to-HDD ingest. Checksums must be calculated while bytes are copied, never as an unconditional prior read; retain any preflight deduplication only as an explicit operator-selected mode.
+- [x] Remove strict-conflict pre-copy source hashing from every ingress route. Checksums are calculated while bytes are copied; content-addressed destinations are deduplicated after that in-flight hash is available, so direct NVMe-to-HDD ingest never performs an unconditional prior read.
 - [x] Preserve ingress routing invariants: local NVMe/server ingress may use direct-to-HDD only when the store policy permits it; USB-mounted source disks, Web uploads, Remote S3, and other remote ingress stage through the DAS SSD.
 - [x] Replace serial redundant-copy settlement with bounded fan-out: direct-ingest reads each source stream once, calculates source and target checksums in flight, and concurrently lands bounded copies on distinct HDDs before per-target `fsync` and atomic placement.
 - [x] Make HDD worker admission and disk placement permit concurrent writes to three or four distinct HDDs when capacity and policy allow; worker admission is copy-aware and defaults to up to four distinct HDD target sets, while redundant-copy jobs remain bounded by complete distinct disk sets.

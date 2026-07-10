@@ -385,7 +385,11 @@ fn write_direct_requested_copies(
             bytes_written: copy_report.bytes_written,
         })?;
         let rename_started_at = Instant::now();
-        move_direct_copy_into_place(&copy_report.destination_path, &final_path)?;
+        move_direct_copy_into_place(
+            &copy_report.destination_path,
+            &final_path,
+            copy_report.bytes_written,
+        )?;
         progress(ObjectPutProgress {
             object_id: request.object_id.clone(),
             stage: ObjectPutProgressStage::HddRename {
@@ -470,6 +474,31 @@ fn write_requested_copies(
             let copy_number = (index + 1) as u8;
             let destination_path =
                 object_copy_path(disk_root, &staged.object_id, &staged.content_hash);
+            if destination_path
+                .metadata()
+                .map(|metadata| metadata.len() == staged.bytes_staged)
+                .unwrap_or(false)
+            {
+                // The staged copy already computed this content hash while it
+                // was read and written. A content-addressed destination with
+                // the same hash and expected size is therefore a safe
+                // post-copy deduplication; do not reread either payload.
+                progress(ObjectPutProgress {
+                    object_id: staged.object_id.clone(),
+                    stage: ObjectPutProgressStage::HddCopy {
+                        disk_id: disk_root.disk_id.as_str().to_string(),
+                        copy_number,
+                    },
+                    bytes_written: staged.bytes_staged,
+                })?;
+                return Ok(ObjectPutPlacementReport {
+                    disk_id: disk_root.disk_id.as_str().to_string(),
+                    copy_number,
+                    destination_path,
+                    bytes_written: staged.bytes_staged,
+                    content_hash: staged.content_hash.clone(),
+                });
+            }
             let copy_report = write_verified_hdd_copy_with_controlled_progress(
                 &HddCopyRequest::new(
                     staged.object_id.clone(),
@@ -529,16 +558,27 @@ fn direct_object_copy_temporary_path(
 fn move_direct_copy_into_place(
     temporary_path: &std::path::Path,
     final_path: &std::path::Path,
+    expected_bytes: u64,
 ) -> Result<(), ObjectPutError> {
     if let Some(parent) = final_path.parent() {
         create_private_dir_all(parent)?;
         restrict_object_tree_dirs(parent)?;
     }
     if final_path.exists() {
-        fs::remove_file(temporary_path)?;
+        if final_path.metadata()?.len() == expected_bytes {
+            fs::remove_file(temporary_path)?;
+            // Direct imports compute the content hash while writing the
+            // temporary payload. A matching, same-sized content-addressed
+            // destination is a safe dedupe; avoid a second source read or
+            // treating an idempotent retry as an ingest failure.
+            return Ok(());
+        }
         return Err(ObjectPutError::Io(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("object payload already exists: {}", final_path.display()),
+            format!(
+                "object payload already exists with unexpected size: {}",
+                final_path.display()
+            ),
         )));
     }
     fs::rename(temporary_path, final_path)?;
