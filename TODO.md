@@ -58,6 +58,8 @@ list until every temporary size-budget exception has been removed.
     defaults and help text.
   - [x] Extract the Store dispatcher, ingest-policy, and contents contracts
     with their parser regressions into `crates/dasobjectstore-cli/src/cli/store.rs`.
+  - [x] Document `store objects` and `store list-contents` aliases for the
+    read-only ObjectStore contents listing command.
   - [x] Move the remaining Store create/adopt/list/drain/delete/defaults,
     S3-upload, and policy-file contracts into `cli/store.rs` while preserving
     destructive confirmation and hidden registry attributes.

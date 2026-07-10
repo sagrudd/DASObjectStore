@@ -20,6 +20,7 @@ pub(crate) enum StoreCommand {
     /// Adopt portable object stores from a DAS SSD on this host.
     Adopt(StoreAdoptArgs),
     /// Inspect objects and aggregate folder sizes in a store.
+    #[command(alias = "objects", alias = "list-contents")]
     Contents(StoreContentsArgs),
     /// Create or update a system-managed object store.
     Create(StoreCreateArgs),
@@ -486,6 +487,18 @@ mod tests {
                 "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"
             ))
         );
+    }
+
+    #[test]
+    fn parses_object_store_contents_aliases() {
+        for alias in ["objects", "list-contents"] {
+            let cli = Cli::try_parse_from(["dasobjectstore", "store", alias, "zymo"])
+                .expect("contents alias parses");
+            let Some(Command::Store(args)) = cli.command() else {
+                panic!("expected store command")
+            };
+            assert!(matches!(args.command(), Some(StoreCommand::Contents(_))));
+        }
     }
 
     #[test]

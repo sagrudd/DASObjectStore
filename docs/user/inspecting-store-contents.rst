@@ -5,6 +5,10 @@ Use ``dasobjectstore store contents`` to inspect the logical contents recorded
 for an object store. The command reads live metadata and does not walk or mutate
 managed HDD payload directories.
 
+The equivalent ``dasobjectstore store objects`` and
+``dasobjectstore store list-contents`` aliases are available when a shorter
+listing-oriented command is more convenient.
+
 Show a du-style summary
 -----------------------
 

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.70 - 2026-07-10
+
+- Add `store objects` and `store list-contents` aliases for the ObjectStore
+  contents listing command.
+
 ## 0.69.69 - 2026-07-10
 
 - Extract Web screenshot viewport, role, and workspace fixture matrices into a
