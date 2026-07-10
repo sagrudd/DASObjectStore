@@ -51,6 +51,17 @@ where
             handler.record_admin_job(daemon_job_summary_from_create_object_store(&response))?;
             Ok(DaemonApiResponse::CreateObjectStore(response))
         }
+        DaemonApiRequest::UpdateObjectStoreIngestPolicy(request) => {
+            let now = handler.clock.now_utc();
+            let response = handler
+                .update_object_store_ingest_policy(request, &now)
+                .map_err(DaemonServiceRuntimeError::ObjectService)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            handler.record_admin_job(daemon_job_summary_from_update_object_store_ingest_policy(
+                &response,
+            ))?;
+            Ok(DaemonApiResponse::UpdateObjectStoreIngestPolicy(response))
+        }
         DaemonApiRequest::UpsertEndpointInventory(request) => {
             let now = handler.clock.now_utc();
             let response = handler

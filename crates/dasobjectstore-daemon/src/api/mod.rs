@@ -11,6 +11,7 @@ mod object_browser;
 mod object_store;
 mod remote_easyconnect;
 mod service;
+mod store_policy;
 mod stores;
 
 pub use appliance_telemetry::{
@@ -113,6 +114,10 @@ pub use service::{
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusDetail,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
+pub use store_policy::{
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpdateObjectStoreIngestPolicyValidationError, DIRECT_TO_HDD_POLICY_CONFIRMATION,
+};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 
 use serde::{Deserialize, Serialize};
@@ -134,6 +139,7 @@ pub enum DaemonApiRequest {
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
+    UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyRequest),
     ObjectBrowser(ObjectBrowserRequest),
     ObjectDownload(ObjectDownloadRequest),
     ObjectFolderDownload(ObjectFolderDownloadRequest),
@@ -164,6 +170,10 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(request) => request
                 .validate()
                 .map_err(create_object_store_validation_error),
+            Self::UpdateObjectStoreIngestPolicy(request) => request
+                .validate()
+                .map(|_| ())
+                .map_err(update_object_store_ingest_policy_validation_error),
             Self::ObjectBrowser(request) => request.validate(),
             Self::ObjectDownload(request) => request.validate(),
             Self::ObjectFolderDownload(request) => request.validate(),
@@ -224,6 +234,7 @@ pub enum DaemonApiResponse {
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
+    UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyResponse),
     ObjectBrowser(ObjectBrowserResponse),
     ObjectDownload(ObjectDownloadResponse),
     ObjectFolderDownload(ObjectFolderDownloadResponse),
@@ -354,6 +365,33 @@ fn create_object_store_validation_error(
         }
         CreateObjectStoreValidationError::InvalidPolicy { message } => {
             DaemonRequestValidationError::InvalidPolicy { message }
+        }
+    }
+}
+
+fn update_object_store_ingest_policy_validation_error(
+    err: UpdateObjectStoreIngestPolicyValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        UpdateObjectStoreIngestPolicyValidationError::InvalidStoreId(value) => {
+            DaemonRequestValidationError::UnsafeLocalName {
+                field: "store_id",
+                value,
+            }
+        }
+        UpdateObjectStoreIngestPolicyValidationError::InvalidIngestMode(value) => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "ingest_mode",
+                value,
+            }
+        }
+        UpdateObjectStoreIngestPolicyValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+        UpdateObjectStoreIngestPolicyValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: DIRECT_TO_HDD_POLICY_CONFIRMATION,
+            }
         }
     }
 }

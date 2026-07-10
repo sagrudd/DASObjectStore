@@ -26,6 +26,7 @@ where
         | DaemonApiRequest::ServiceProvision(_)
         | DaemonApiRequest::PrepareEnclosure(_)
         | DaemonApiRequest::CreateObjectStore(_)
+        | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)
         | DaemonApiRequest::UpsertEndpointInventory(_)
         | DaemonApiRequest::CreateLocalGroup(_)
         | DaemonApiRequest::AssignLocalUserToLocalGroup(_)

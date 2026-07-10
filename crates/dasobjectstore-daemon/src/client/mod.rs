@@ -29,7 +29,8 @@ use crate::api::{
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
     RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpsertEndpointInventoryRequest,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
 
@@ -242,6 +243,16 @@ where
         }
     }
 
+    pub fn update_object_store_ingest_policy(
+        &self,
+        request: UpdateObjectStoreIngestPolicyRequest,
+    ) -> Result<UpdateObjectStoreIngestPolicyResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::UpdateObjectStoreIngestPolicy(request))? {
+            DaemonApiResponse::UpdateObjectStoreIngestPolicy(response) => Ok(response),
+            response => Err(unexpected("update_object_store_ingest_policy", response)),
+        }
+    }
+
     pub fn object_browser(
         &self,
         request: ObjectBrowserRequest,
@@ -415,6 +426,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
+        DaemonApiResponse::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
         DaemonApiResponse::ObjectFolderDownload(_) => "object_folder_download",

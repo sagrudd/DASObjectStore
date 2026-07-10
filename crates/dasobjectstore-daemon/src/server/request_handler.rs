@@ -19,7 +19,9 @@ use crate::api::{
     RemoteEasyconnectSession, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -52,7 +54,8 @@ use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
     generate_per_store_credentials, read_store_registry, read_subobject_registry,
-    ObjectServiceError, ObjectServiceProviderId, StoreCredentialRequest, SystemCredentialEntropy,
+    upsert_store_definition, ObjectServiceError, ObjectServiceProviderId, StoreCredentialRequest,
+    SystemCredentialEntropy,
 };
 use std::fmt::{self, Display};
 use std::fs;
@@ -242,6 +245,65 @@ where
         }
         self.service_orchestrator
             .cancel_job(request, accepted_at_utc)
+    }
+
+    fn update_object_store_ingest_policy(
+        &self,
+        request: UpdateObjectStoreIngestPolicyRequest,
+        accepted_at_utc: &str,
+    ) -> Result<UpdateObjectStoreIngestPolicyResponse, ObjectServiceError> {
+        let ingest_mode = request
+            .validate()
+            .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
+        let store_id = StoreId::new(request.store_id.clone()).map_err(|_| {
+            ObjectServiceError::InvalidConfiguration(format!(
+                "invalid store_id: {}",
+                request.store_id
+            ))
+        })?;
+        let mut definitions = read_store_registry(&self.store_registry_path)?;
+        let definition = definitions
+            .iter_mut()
+            .find(|definition| definition.store_id == store_id)
+            .ok_or_else(|| {
+                ObjectServiceError::InvalidConfiguration(format!(
+                    "unknown object store: {store_id}"
+                ))
+            })?;
+        let previous_ingest_mode = definition.policy.ingest_mode;
+        definition.policy.ingest_mode = ingest_mode;
+        definition
+            .policy
+            .validate()
+            .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
+        let updated_definition = definition.clone();
+        if !request.dry_run {
+            upsert_store_definition(&self.store_registry_path, updated_definition)?;
+        }
+        let job_id_value = format!(
+            "objectstore-policy-{}",
+            accepted_at_utc
+                .chars()
+                .map(|character| if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_ascii_lowercase()
+        );
+        let job_id = crate::api::DaemonJobId::new(job_id_value.clone()).map_err(|_| {
+            ObjectServiceError::InvalidConfiguration(format!("invalid job id: {job_id_value}"))
+        })?;
+        Ok(UpdateObjectStoreIngestPolicyResponse::accepted(
+            job_id,
+            accepted_at_utc,
+            &request,
+            previous_ingest_mode,
+            ingest_mode,
+            store_id,
+        ))
     }
 }
 
@@ -755,6 +817,22 @@ fn daemon_job_summary_from_create_object_store(
     )
 }
 
+fn daemon_job_summary_from_update_object_store_ingest_policy(
+    response: &UpdateObjectStoreIngestPolicyResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "ObjectStore {} ingest mode changed from {:?} to {:?}",
+            response.store_id, response.previous_ingest_mode, response.ingest_mode
+        ),
+    )
+}
+
 fn daemon_job_summary_from_endpoint_inventory(
     response: &UpsertEndpointInventoryResponse,
 ) -> DaemonJobSummary {
@@ -1166,6 +1244,7 @@ impl DaemonApiRequest {
             Self::ServiceProvision(_) => "service_provision",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
+            Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
             Self::ObjectBrowser(_) => "object_browser",
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
@@ -1215,7 +1294,8 @@ mod tests {
         RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
+        UpsertEndpointInventoryResponse, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -1235,10 +1315,10 @@ mod tests {
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
-    use dasobjectstore_core::store::{ExportPolicy, StoreClass, StorePolicy};
+    use dasobjectstore_core::store::{ExportPolicy, IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
-        ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
+        read_store_registry, ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
     };
     use rusqlite::{params, Connection};
     use std::cell::RefCell;
@@ -1566,6 +1646,43 @@ mod tests {
                 true,
             )]
         );
+    }
+
+    #[test]
+    fn updates_only_store_ingest_mode_with_direct_hdd_confirmation() {
+        let root = temp_root("update-ingest-policy");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo", Some("bioinformatics"));
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::UpdateObjectStoreIngestPolicy(
+                UpdateObjectStoreIngestPolicyRequest {
+                    store_id: "zymo".to_string(),
+                    ingest_mode: "direct_to_hdd".to_string(),
+                    dry_run: false,
+                    client_request_id: Some("policy-1".to_string()),
+                    administrator_actor: Some("operator".to_string()),
+                    confirmation_marker: DIRECT_TO_HDD_POLICY_CONFIRMATION.to_string(),
+                },
+            ))
+            .expect("policy request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::UpdateObjectStoreIngestPolicy(response)
+                if response.previous_ingest_mode == IngestMode::SsdFirst
+                    && response.ingest_mode == IngestMode::DirectToHdd
+                    && response.changed
+        ));
+        let definitions = read_store_registry(&store_registry_path).expect("registry readable");
+        assert_eq!(definitions[0].policy.ingest_mode, IngestMode::DirectToHdd);
+        assert_eq!(definitions[0].policy.copies, 1);
+        cleanup(&root);
     }
 
     #[test]
