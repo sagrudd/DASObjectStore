@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.28 - 2026-07-10
+
+- Document the authenticated ingest-policy workflow, explicit server-local
+  direct-import route, preflight fallback interpretation, and copy-aware HDD
+  worker admission for operators.
+
 ## 0.69.27 - 2026-07-10
 
 - Enrich ingest preflight route explanations with the daemon-resolved mount

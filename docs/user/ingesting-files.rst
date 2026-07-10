@@ -54,6 +54,45 @@ example above, membership in ``mnemosyne`` is required. Ingest does not require
 ``sudo`` because the daemon, not the user's shell process, owns managed storage
 mutation.
 
+Inspect and request the local landing policy explicitly before using the
+server-local direct-import workflow:
+
+.. code-block:: console
+
+   dasobjectstore store ingest-policy zymo_fecal_2025.05 --json
+
+Enabling direct HDD landing is an administrator action and requires the exact
+confirmation marker. It changes only the store's ingest mode; it does not grant
+permission to write managed disks or bypass source verification:
+
+.. code-block:: console
+
+   sudo dasobjectstore store ingest-policy zymo_fecal_2025.05 \
+     --ingest-mode direct-to-hdd \
+     --confirm "confirm direct hdd ingest"
+
+For data already on a server-local NVMe/SATA path, request the explicit route
+and keep the daemon progress view visible:
+
+.. code-block:: console
+
+   dasobjectstore ingest direct-import zymo_fecal_2025.05 \
+     --source /home/stephen/zymo_fecal_2025.05 \
+     --copies 1 \
+     --hdd-workers 4 \
+     --tui \
+     --lazy
+
+The first progress frame is a daemon preflight explanation. It reports the
+source topology, mount point, filesystem, backing-device source, major:minor
+identifier, classified origin, store policy, selected landing mode, and routing
+reason. ``direct_to_hdd_when_policy_allows`` means the verified local source is
+being copied directly to distinct HDD targets; ``ssd_first`` means the daemon
+will stage through SSD. A USB/removable, NFS/SMB/FUSE, virtual, or unknown source
+always remains SSD-first even when the store policy permits direct HDD landing.
+If mount or device details are unavailable, the daemon reports them as
+``unknown`` and keeps the fail-closed SSD-first route.
+
 The packaged daemon reads the path supplied with ``--source``. On Linux, the CLI
 prepares source ACLs before submitting the job so the ``dasobjectstore`` service
 can traverse private home directories and read the selected import tree without
@@ -135,15 +174,15 @@ ingest or source verification fails. This policy is for reproducible or
 externally recoverable datasets; protected generated or critical stores remain
 SSD-first.
 
-By default, the daemon derives HDD settlement fan-out from the managed HDDs in
-the target DAS: ``max(managed_hdd_count - 2, 2)``, capped at the available HDD
-count. A one-HDD test or degraded enclosure therefore uses one worker, two to
-four HDDs use two workers, five HDDs use three workers, and an eight-HDD DAS
-uses six workers by default. This keeps source-to-SSD staging moving while
-leaving headroom for the appliance and avoiding multiple concurrent writes to
-the same disk. The daemon also rejects managed HDD inventories that present the
-same physical disk more than once, because redundant copies must land on
-distinct disks. Operators may override this for a run:
+By default, the daemon derives HDD settlement fan-out from complete distinct
+HDD target sets: ``min(managed_hdd_count / copies, 4)``, with at least one
+worker when a valid target exists. A one-HDD test or degraded enclosure uses
+one worker; a four-HDD, single-copy ingest can use four concurrent writers; and
+redundant-copy jobs are bounded by the number of complete distinct disk sets.
+This keeps source-to-SSD staging moving without concurrent writes to the same
+disk. The daemon also rejects managed HDD inventories that present the same
+physical disk more than once, because redundant copies must land on distinct
+disks. Operators may override this for a run:
 
 .. code-block:: console
 
