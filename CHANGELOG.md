@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.69 - 2026-07-10
+
+- Extract Web screenshot viewport, role, and workspace fixture matrices into a
+  dedicated module shared by the visual runner.
+
 ## 0.69.68 - 2026-07-10
 
 - Extract GUI authentication bucket normalization and endpoint/enclosure enum

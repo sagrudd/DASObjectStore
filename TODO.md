@@ -178,6 +178,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Move remote-upload layout and selection styles into the dedicated
     `styles/remote-upload.css` feature sheet, register it with Trunk, and keep
     CSS contract tests loading the shared and feature-owned sheets together.
+  - [x] Move screenshot viewport, role, and page matrices into the shared
+    `tools/web-screenshot-fixtures.mjs` module so runner orchestration does not
+    own fixture definitions.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
