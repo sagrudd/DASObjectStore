@@ -101,6 +101,9 @@ list until every temporary size-budget exception has been removed.
     validation and registry helpers behind narrow calls.
   - [x] Extract Store ingest-policy read/update runtime handling into the
     same module, preserving typed daemon requests and inventory rendering.
+  - [x] Extract health output-mode dispatch into
+    `crates/dasobjectstore-cli/src/run/health.rs`, leaving platform health
+    projection helpers shared and testable.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and

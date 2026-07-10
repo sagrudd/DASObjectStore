@@ -15,6 +15,7 @@ use crate::cli::{
 mod command_handlers;
 mod disk_lockdown;
 mod disk_prepare;
+mod health;
 mod output;
 mod performance_plan;
 mod performance_report;
@@ -41,6 +42,7 @@ use self::disk_prepare::{
     prepare_das, PrepareDasDevice, PrepareDasError, PrepareDasRequest, PrepareDasRole,
     PrepareFilesystem,
 };
+use self::health::run_health;
 use self::output::{
     write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
     write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
@@ -4102,37 +4104,6 @@ fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> 
         writer.write_all(b"\n")?;
     } else {
         write_pretty_report(&report, writer)?;
-    }
-
-    Ok(())
-}
-
-fn run_health(args: &HealthArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let selected_modes = [
-        args.summary(),
-        args.verbose(),
-        args.connections(),
-        args.json(),
-    ]
-    .into_iter()
-    .filter(|selected| *selected)
-    .count();
-    if selected_modes > 1 {
-        return Err(CliError::UnsupportedHealthFormat);
-    }
-
-    if args.connections() {
-        let report = read_current_platform_connection_status()?;
-        write_host_connection_status(&report, writer)?;
-    } else if args.json() {
-        let report = read_current_platform_health()?;
-        write_health_json(&report, writer)?;
-    } else if args.verbose() {
-        let report = read_current_platform_health()?;
-        write_health_verbose(&report, writer)?;
-    } else {
-        let report = read_current_platform_health()?;
-        write_health_summary(&report, writer)?;
     }
 
     Ok(())
