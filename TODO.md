@@ -60,51 +60,6 @@ list until every temporary size-budget exception has been removed.
   split screenshot regression runner, fixture server, assertions, and
   per-workspace fixtures into dedicated modules.
 
-## Milestone 12: Managed Daemon and Client Boundary
-
-### Ingress correctness and live operator telemetry follow-up
-
-- [x] Remove the default strict-conflict pre-copy source hash for direct NVMe-to-HDD ingest. Checksums must be calculated while bytes are copied, never as an unconditional prior read; retain any preflight deduplication only as an explicit operator-selected mode.
-- [x] Preserve ingress routing invariants: local NVMe/server ingress may use direct-to-HDD only when the store policy permits it; USB-mounted source disks, Web uploads, Remote S3, and other remote ingress stage through the DAS SSD.
-- [x] Replace serial redundant-copy settlement with bounded fan-out: direct-ingest reads each source stream once, calculates source and target checksums in flight, and concurrently lands bounded copies on distinct HDDs before per-target `fsync` and atomic placement.
-- [ ] Make HDD worker admission and disk placement permit concurrent writes to three or four distinct HDDs when capacity and policy allow; verify throughput is constrained by the HDDs rather than artificial single-channel scheduling.
-- [ ] Extend daemon ingest events with source-read, SSD-write, and aggregate/per-HDD write rates, target-disk assignment before copying begins, bytes written, and queue/worker state. Use short-window rates so stalled transfers are distinguishable from active ones.
-- [x] Model direct-copy durability finalization explicitly: direct HDD targets now emit separate `fsync` and atomic-rename states with durations and zero current byte-write rate while finalizing. Direct metadata commits remain daemon-owned follow-up work.
-- [ ] Replace lifetime-average per-HDD rates with short-window sampled rates and retain both current and completed-copy summaries. A full-size transfer waiting in `fsync` must display zero current write rate plus its finalization state, not an apparently active 54 MiB/s average.
-- [x] Decouple daemon progress/socket reporting from the I/O hot path with byte/time coalescing that preserves phase and target-assignment transitions; the embedded TUI retains the latest snapshot and redraws byte-only updates at a bounded cadence.
-- [ ] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. Do not show a generic `checksum-manifest-capture` phase while a preflight source read is occurring without clearly identifying it as an explicit conflict check.
-- [ ] Add regression and performance tests for: no pre-copy hash on normal direct ingress; a single source read fan-outs to concurrent HDD writes; Remote/Web/S3 remain SSD-first; and TUI progress contains all active disk assignments and non-zero per-disk rates.
-
-- [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
-  daemon configuration type, and unit tests for default runtime paths.
-- [x] Define the daemon API contract for health summary, store inventory,
-  ingest job submission, ingest progress events, job status, and cancellation.
-- [x] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
-  view models, and Synoptikon adapters do not duplicate API shapes.
-- [x] Add a daemon client abstraction with an in-process test transport and a
-  planned Unix-domain socket transport.
-- [x] Refactor `dasobjectstore ingest files` so the normal command path builds a
-  daemon request and the daemon executes SSD-first local file ingress.
-- [x] Render daemon progress events for normal `dasobjectstore ingest files`
-  submissions instead of the current synchronous daemon response view.
-- [x] Add optional `dasobjectstore ingest files --tui` embedded upload rendering
-  for daemon file ingest submissions.
-- [x] Move current direct local ingest execution behind an explicit hidden
-  developer/test flag or test transport until it can be removed.
-- [x] Implement daemon-side local authorization using Linux peer credentials and
-  store writer-group policy for the first Linux slice.
-- [x] Add package assets for `dasobjectstored`: system user, systemd service,
-  socket/runtime directory, state directory, log directory, and permission
-  expectations.
-- [x] Update DEB validation to ensure managed DAS roots are owned by the daemon
-  service identity, not ordinary ingest users.
-- [x] Add integration tests proving normal non-root ingest succeeds through the
-  daemon without granting direct write permission to managed DAS roots.
-- [x] Update user documentation so ingest is described as a client/server job
-  submission with byte-level progress, not a local filesystem write.
-- [x] Update Synoptikon/Mneion integration docs so all storage-mutating actions
-  call the daemon API and inherit the common audit/authentication model.
-
 ## Milestone 1: Workspace, Naming, and Release Baseline
 
 - [x] Add Rust workspace `Cargo.toml` with placeholder crates for core, CLI,
@@ -343,6 +298,51 @@ list until every temporary size-budget exception has been removed.
   macOS.
 - [x] Document macOS limits for Docker Desktop, service management, SMART,
   filesystem support, permissions, and performance.
+
+## Milestone 12: Managed Daemon and Client Boundary
+
+### Ingress correctness and live operator telemetry follow-up
+
+- [x] Remove the default strict-conflict pre-copy source hash for direct NVMe-to-HDD ingest. Checksums must be calculated while bytes are copied, never as an unconditional prior read; retain any preflight deduplication only as an explicit operator-selected mode.
+- [x] Preserve ingress routing invariants: local NVMe/server ingress may use direct-to-HDD only when the store policy permits it; USB-mounted source disks, Web uploads, Remote S3, and other remote ingress stage through the DAS SSD.
+- [x] Replace serial redundant-copy settlement with bounded fan-out: direct-ingest reads each source stream once, calculates source and target checksums in flight, and concurrently lands bounded copies on distinct HDDs before per-target `fsync` and atomic placement.
+- [ ] Make HDD worker admission and disk placement permit concurrent writes to three or four distinct HDDs when capacity and policy allow; verify throughput is constrained by the HDDs rather than artificial single-channel scheduling.
+- [ ] Extend daemon ingest events with source-read, SSD-write, and aggregate/per-HDD write rates, target-disk assignment before copying begins, bytes written, and queue/worker state. Use short-window rates so stalled transfers are distinguishable from active ones.
+- [x] Model direct-copy durability finalization explicitly: direct HDD targets now emit separate `fsync` and atomic-rename states with durations and zero current byte-write rate while finalizing. Direct metadata commits remain daemon-owned follow-up work.
+- [ ] Replace lifetime-average per-HDD rates with short-window sampled rates and retain both current and completed-copy summaries. A full-size transfer waiting in `fsync` must display zero current write rate plus its finalization state, not an apparently active 54 MiB/s average.
+- [x] Decouple daemon progress/socket reporting from the I/O hot path with byte/time coalescing that preserves phase and target-assignment transitions; the embedded TUI retains the latest snapshot and redraws byte-only updates at a bounded cadence.
+- [ ] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. Do not show a generic `checksum-manifest-capture` phase while a preflight source read is occurring without clearly identifying it as an explicit conflict check.
+- [ ] Add regression and performance tests for: no pre-copy hash on normal direct ingress; a single source read fan-outs to concurrent HDD writes; Remote/Web/S3 remain SSD-first; and TUI progress contains all active disk assignments and non-zero per-disk rates.
+
+- [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
+  daemon configuration type, and unit tests for default runtime paths.
+- [x] Define the daemon API contract for health summary, store inventory,
+  ingest job submission, ingest progress events, job status, and cancellation.
+- [x] Add shared request/response DTOs for daemon jobs so CLI, Axum routes, Yew
+  view models, and Synoptikon adapters do not duplicate API shapes.
+- [x] Add a daemon client abstraction with an in-process test transport and a
+  planned Unix-domain socket transport.
+- [x] Refactor `dasobjectstore ingest files` so the normal command path builds a
+  daemon request and the daemon executes SSD-first local file ingress.
+- [x] Render daemon progress events for normal `dasobjectstore ingest files`
+  submissions instead of the current synchronous daemon response view.
+- [x] Add optional `dasobjectstore ingest files --tui` embedded upload rendering
+  for daemon file ingest submissions.
+- [x] Move current direct local ingest execution behind an explicit hidden
+  developer/test flag or test transport until it can be removed.
+- [x] Implement daemon-side local authorization using Linux peer credentials and
+  store writer-group policy for the first Linux slice.
+- [x] Add package assets for `dasobjectstored`: system user, systemd service,
+  socket/runtime directory, state directory, log directory, and permission
+  expectations.
+- [x] Update DEB validation to ensure managed DAS roots are owned by the daemon
+  service identity, not ordinary ingest users.
+- [x] Add integration tests proving normal non-root ingest succeeds through the
+  daemon without granting direct write permission to managed DAS roots.
+- [x] Update user documentation so ingest is described as a client/server job
+  submission with byte-level progress, not a local filesystem write.
+- [x] Update Synoptikon/Mneion integration docs so all storage-mutating actions
+  call the daemon API and inherit the common audit/authentication model.
 
 ## Milestone 13: Web UI, Read-Only Exports, and Mnemosyne Adapter Draft
 
@@ -771,6 +771,32 @@ list until every temporary size-budget exception has been removed.
 - [x] Update `docs/user/web-interface.rst` and ObjectStore user docs with
   browser behavior, permission boundaries, download/archive semantics,
   performance limits, and expected failure states.
+
+### Critical viewer delivery follow-up
+
+- [ ] Make an omitted browser prefix a tested root-tree request: after selecting
+  an ObjectStore, render all immediate folders and files without requiring a
+  name, path, or search value.
+- [ ] Make daemon-owned upload completion atomically register each object path,
+  size, checksum, lifecycle state, and readable managed/provider location in
+  the ObjectBrowser catalogue before reporting the upload as complete.
+- [ ] Add a guarded, resumable reconciliation operation for already-uploaded
+  S3/object-service keys missing from the ObjectBrowser catalogue; report
+  collisions, malformed keys, and inaccessible objects without silently
+  overwriting metadata.
+- [ ] Extend daemon-authorized Web download to stream a verified
+  provider-backed object when no settled managed-HDD payload is available,
+  preserving existing public/read/write authorization and safe disposition
+  headers.
+- [ ] Show explicit browser diagnostics for a genuinely empty store versus
+  uncatalogued backend objects, including catalogue count, backend count, last
+  reconciliation time, and actionable failure details.
+- [ ] Add end-to-end appliance acceptance coverage for upload, root-tree
+  refresh, folder navigation, individual download, and content/checksum
+  verification; cover both managed-HDD and provider-backed uploads.
+- [ ] Document the operator recovery workflow for backend objects absent from
+  the browser catalogue and the acceptance path proving an uploaded file can
+  be browsed and downloaded.
 
 ## Milestone 22: Remote Easyconnect Uploads and Ingress Policy Simplification
 
