@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.9 - 2026-07-10
+
+- Separate bounded daemon Unix-socket lanes for long-running ingest and
+  control requests. Active ingest streams can no longer monopolize socket
+  acceptance or the capacity reserved for status, inventory, and cancellation
+  work; exhausted lanes return a typed ``server_busy`` response.
+
 ## 0.69.8 - 2026-07-10
 
 - Let normal local-folder ingest provide a local-server hint, then verify its

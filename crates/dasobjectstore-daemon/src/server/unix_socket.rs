@@ -9,8 +9,12 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 const SOCKET_MODE: u32 = 0o660;
+const MAX_CONTROL_CONNECTIONS: usize = 8;
+const MAX_INGEST_CONNECTIONS: usize = 2;
 
 pub struct UnixSocketDaemonServer<H> {
     socket_path: PathBuf,
@@ -32,23 +36,84 @@ where
         &self.socket_path
     }
 
-    pub fn serve_forever(&self) -> Result<(), UnixSocketDaemonServerError> {
+    pub fn serve_forever(&self) -> Result<(), UnixSocketDaemonServerError>
+    where
+        H: Sync,
+    {
         let listener = bind_listener(&self.socket_path)?;
-        for stream in listener.incoming() {
-            let stream = stream.map_err(UnixSocketDaemonServerError::Accept)?;
-            if let Err(error) = self.handle_stream(stream) {
-                if error.is_client_disconnect() {
-                    eprintln!("daemon client disconnected: {error}");
+        let control_connections = AtomicUsize::new(0);
+        let ingest_connections = AtomicUsize::new(0);
+
+        thread::scope(|scope| {
+            for stream in listener.incoming() {
+                let stream = stream.map_err(UnixSocketDaemonServerError::Accept)?;
+                let Some(pending) = receive_stream(stream)? else {
                     continue;
-                }
-                return Err(error);
+                };
+                let active_connections = if pending.request.is_ingest_submission() {
+                    (&ingest_connections, MAX_INGEST_CONNECTIONS)
+                } else {
+                    (&control_connections, MAX_CONTROL_CONNECTIONS)
+                };
+                let Some(permit) =
+                    ConnectionPermit::try_acquire(active_connections.0, active_connections.1)
+                else {
+                    let mut stream = pending.stream;
+                    write_response_frame(
+                        &mut stream,
+                        &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "server_busy",
+                            "daemon request capacity is currently reserved for active work; retry shortly",
+                        )),
+                    )?;
+                    continue;
+                };
+                let handler = &self.handler;
+                scope.spawn(move || {
+                    let _permit = permit;
+                    if let Err(error) = handle_pending_stream(pending, handler) {
+                        if !error.is_client_disconnect() {
+                            eprintln!("daemon client request failed: {error}");
+                        }
+                    }
+                });
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     pub fn handle_stream(&self, stream: UnixStream) -> Result<(), UnixSocketDaemonServerError> {
         handle_stream(stream, &self.handler)
+    }
+}
+
+struct ConnectionPermit<'a> {
+    active_connections: &'a AtomicUsize,
+}
+
+impl<'a> ConnectionPermit<'a> {
+    fn try_acquire(active_connections: &'a AtomicUsize, limit: usize) -> Option<Self> {
+        let mut current = active_connections.load(Ordering::Acquire);
+        loop {
+            if current >= limit {
+                return None;
+            }
+            match active_connections.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(Self { active_connections }),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+impl Drop for ConnectionPermit<'_> {
+    fn drop(&mut self) {
+        self.active_connections.fetch_sub(1, Ordering::Release);
     }
 }
 
@@ -216,11 +281,13 @@ fn bind_listener(socket_path: &Path) -> Result<UnixListener, UnixSocketDaemonSer
 }
 
 fn handle_stream(
-    mut stream: UnixStream,
+    stream: UnixStream,
     handler: &impl DaemonApiHandler,
 ) -> Result<(), UnixSocketDaemonServerError> {
-    let actor = peer_actor_for_stream(&stream)?;
-    let result = handle_stream_inner(&mut stream, handler, actor.as_ref());
+    let Some(pending) = receive_stream(stream)? else {
+        return Ok(());
+    };
+    let result = handle_pending_stream(pending, handler);
     if result
         .as_ref()
         .is_err_and(UnixSocketDaemonServerError::is_client_disconnect)
@@ -230,11 +297,16 @@ fn handle_stream(
     result
 }
 
-fn handle_stream_inner(
-    stream: &mut UnixStream,
-    handler: &impl DaemonApiHandler,
-    actor: Option<&DaemonLocalActor>,
-) -> Result<(), UnixSocketDaemonServerError> {
+struct PendingStream {
+    stream: UnixStream,
+    request: DaemonApiRequest,
+    actor: Option<DaemonLocalActor>,
+}
+
+fn receive_stream(
+    mut stream: UnixStream,
+) -> Result<Option<PendingStream>, UnixSocketDaemonServerError> {
+    let actor = peer_actor_for_stream(&stream)?;
     let mut line = String::new();
     BufReader::new(
         stream
@@ -245,20 +317,48 @@ fn handle_stream_inner(
     .map_err(UnixSocketDaemonServerError::Io)?;
 
     match serde_json::from_str::<DaemonApiRequest>(&line) {
-        Ok(request) => {
-            let mut emit_response = |response| write_response_frame(stream, &response);
-            handler.handle_api_request_streaming_for_actor(request, actor, &mut emit_response)?;
-        }
-        Err(error) => write_response_frame(
+        Ok(request) => Ok(Some(PendingStream {
             stream,
-            &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "bad_request",
-                format!("failed to decode daemon request: {error}"),
-            )),
-        )?,
+            request,
+            actor,
+        })),
+        Err(error) => {
+            write_response_frame(
+                &mut stream,
+                &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "bad_request",
+                    format!("failed to decode daemon request: {error}"),
+                )),
+            )?;
+            Ok(None)
+        }
     }
+}
 
+fn handle_pending_stream(
+    mut pending: PendingStream,
+    handler: &impl DaemonApiHandler,
+) -> Result<(), UnixSocketDaemonServerError> {
+    let mut emit_response = |response| write_response_frame(&mut pending.stream, &response);
+    handler.handle_api_request_streaming_for_actor(
+        pending.request,
+        pending.actor.as_ref(),
+        &mut emit_response,
+    )?;
     Ok(())
+}
+
+trait DaemonApiRequestClass {
+    fn is_ingest_submission(&self) -> bool;
+}
+
+impl DaemonApiRequestClass for DaemonApiRequest {
+    fn is_ingest_submission(&self) -> bool {
+        matches!(
+            self,
+            Self::SubmitIngestFiles(_) | Self::RemoteEasyconnectSubmitAwsCliUpload(_)
+        )
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -301,6 +401,9 @@ mod tests {
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
+    use std::sync::{mpsc, Mutex};
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn handles_one_line_json_request() {
@@ -531,5 +634,129 @@ mod tests {
         server
             .handle_stream(server_stream)
             .expect("client disconnect does not fail the server stream");
+    }
+
+    #[test]
+    fn serves_control_requests_while_an_ingest_stream_is_active() {
+        struct BlockingHandler {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl super::DaemonApiHandler for BlockingHandler {
+            fn handle_api_request(
+                &self,
+                request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                match request {
+                    DaemonApiRequest::ServiceStatus(_) => Ok(DaemonApiResponse::ServiceStatus(
+                        DaemonServiceStatusResponse {
+                            provider_id: ObjectServiceProviderId::Garage,
+                            state: ServiceState::Running,
+                            endpoint: None,
+                            message: None,
+                            detail: None,
+                        },
+                    )),
+                    _ => panic!("unexpected control request"),
+                }
+            }
+
+            fn handle_api_request_streaming(
+                &self,
+                request: DaemonApiRequest,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                match request {
+                    DaemonApiRequest::SubmitIngestFiles(_) => {
+                        self.entered.send(()).expect("ingest entered signal");
+                        self.release
+                            .lock()
+                            .expect("release lock")
+                            .recv()
+                            .expect("ingest release signal");
+                        emit_response(DaemonApiResponse::SubmitIngestFiles(
+                            SubmitIngestFilesResponse {
+                                job_id: IngestJobId::new("ingest-files-1").expect("job id"),
+                                accepted_at_utc: "2026-07-10T10:00:00Z".to_string(),
+                                dry_run: false,
+                            },
+                        ))
+                    }
+                    request => self.handle_api_request(request).and_then(emit_response),
+                }
+            }
+        }
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let socket_path =
+            std::env::temp_dir().join(format!("dasobjectstored-control-{suffix}.sock"));
+        let (entered_sender, entered_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let server = UnixSocketDaemonServer::new(
+            &socket_path,
+            BlockingHandler {
+                entered: entered_sender,
+                release: Mutex::new(release_receiver),
+            },
+        );
+        thread::spawn(move || server.serve_forever().expect("server runs"));
+        for _ in 0..20 {
+            if socket_path.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let mut ingest = UnixStream::connect(&socket_path).expect("ingest connects");
+        serde_json::to_writer(
+            &mut ingest,
+            &DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                endpoint: StoreId::new("zymo").expect("store id"),
+                source_path: "/tmp/source".into(),
+                object_type: ObjectType::Naive,
+                copies: None,
+                hdd_workers: None,
+                ingress_origin: crate::api::DaemonIngressOrigin::LocalServer,
+                conflict_policy: crate::api::DaemonIngestConflictPolicy::Force,
+                dry_run: false,
+                client_request_id: None,
+            }),
+        )
+        .expect("ingest request encoded");
+        ingest.write_all(b"\n").expect("ingest request newline");
+        entered_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("ingest handler entered");
+
+        let mut control = UnixStream::connect(&socket_path).expect("control connects");
+        control
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .expect("control timeout set");
+        serde_json::to_writer(
+            &mut control,
+            &DaemonApiRequest::ServiceStatus(Default::default()),
+        )
+        .expect("control request encoded");
+        control.write_all(b"\n").expect("control request newline");
+        let mut line = String::new();
+        BufReader::new(control)
+            .read_line(&mut line)
+            .expect("control response remains responsive");
+        assert!(matches!(
+            serde_json::from_str::<DaemonApiResponse>(&line).expect("control response decoded"),
+            DaemonApiResponse::ServiceStatus(DaemonServiceStatusResponse {
+                state: ServiceState::Running,
+                ..
+            })
+        ));
+
+        release_sender.send(()).expect("release ingest");
     }
 }
