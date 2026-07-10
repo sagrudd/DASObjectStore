@@ -23,10 +23,11 @@ use crate::api::{
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
     StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
-    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreVerifyReport,
-    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairS3Reconciliation,
+    StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -712,6 +713,18 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn reconcile_store_s3(
+        &self,
+        _store_id: StoreId,
+        _prefix: Option<String>,
+        _dry_run: bool,
+        _accepted_at_utc: &str,
+    ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "S3 reconciliation requires an object-service command runner".to_string(),
+        })
+    }
+
     fn prepare_enclosure(
         &self,
         _request: PrepareEnclosureRequest,
@@ -1076,6 +1089,22 @@ where
     ) -> Result<crate::runtime::RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
         GarageServiceController::remote_easyconnect_aws_cli_upload_job(
             self, registry, gate, request,
+        )
+    }
+
+    fn reconcile_store_s3(
+        &self,
+        store_id: StoreId,
+        prefix: Option<String>,
+        dry_run: bool,
+        accepted_at_utc: &str,
+    ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
+        GarageServiceController::reconcile_store_s3(
+            self,
+            store_id,
+            prefix,
+            dry_run,
+            accepted_at_utc,
         )
     }
 

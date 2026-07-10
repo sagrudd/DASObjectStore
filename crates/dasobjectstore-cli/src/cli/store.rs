@@ -60,6 +60,12 @@ pub(crate) struct StoreRepairArgs {
     /// Emit the repair report as JSON.
     #[arg(long)]
     json: bool,
+    /// Retrieve uncatalogued objects from this store's Garage bucket through SSD staging before repairing metadata.
+    #[arg(long)]
+    reconcile_s3: bool,
+    /// Limit Garage reconciliation to an object-key prefix.
+    #[arg(long)]
+    s3_prefix: Option<String>,
 }
 impl StoreRepairArgs {
     pub(crate) fn store_id(&self) -> Option<&StoreId> {
@@ -73,6 +79,12 @@ impl StoreRepairArgs {
     }
     pub(crate) fn json(&self) -> bool {
         self.json
+    }
+    pub(crate) fn reconcile_s3(&self) -> bool {
+        self.reconcile_s3
+    }
+    pub(crate) fn s3_prefix(&self) -> Option<&str> {
+        self.s3_prefix.as_deref()
     }
 }
 
@@ -772,6 +784,9 @@ mod tests {
             "--confirm",
             "confirm store repair",
             "--json",
+            "--reconcile-s3",
+            "--s3-prefix",
+            "variants/chm13",
         ])
         .expect("store repair parses");
         let Some(Command::Store(args)) = cli.command() else {
@@ -783,6 +798,8 @@ mod tests {
         assert!(args.apply());
         assert_eq!(args.confirm(), "confirm store repair");
         assert!(args.json());
+        assert!(args.reconcile_s3());
+        assert_eq!(args.s3_prefix(), Some("variants/chm13"));
         assert_eq!(args.store_id().expect("store id").as_str(), "xenognostikon");
     }
 

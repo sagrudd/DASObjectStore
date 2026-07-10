@@ -144,8 +144,8 @@ pub use store_policy::{
     UpdateObjectStoreIngestPolicyValidationError, DIRECT_TO_HDD_POLICY_CONFIRMATION,
 };
 pub use store_repair::{
-    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairValidationError,
-    STORE_REPAIR_CONFIRMATION,
+    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairS3Reconciliation,
+    StoreRepairValidationError, STORE_REPAIR_CONFIRMATION,
 };
 pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};

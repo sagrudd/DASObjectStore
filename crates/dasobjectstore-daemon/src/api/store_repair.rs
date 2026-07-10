@@ -9,12 +9,28 @@ pub struct StoreRepairRequest {
     pub store_id: Option<StoreId>,
     pub dry_run: bool,
     pub confirmation: String,
+    /// Fetch uncatalogued objects from the provisioned Garage bucket and ingest
+    /// them through SSD staging before scanning managed payloads.
+    #[serde(default)]
+    pub reconcile_s3: bool,
+    #[serde(default)]
+    pub s3_prefix: Option<String>,
 }
 
 impl StoreRepairRequest {
     pub fn validate(&self) -> Result<(), StoreRepairValidationError> {
         if !self.dry_run && self.confirmation != STORE_REPAIR_CONFIRMATION {
             return Err(StoreRepairValidationError::ConfirmationMismatch);
+        }
+        if self.reconcile_s3 && self.store_id.is_none() {
+            return Err(StoreRepairValidationError::StoreRequiredForS3Reconciliation);
+        }
+        if self
+            .s3_prefix
+            .as_deref()
+            .is_some_and(|prefix| prefix.trim().is_empty())
+        {
+            return Err(StoreRepairValidationError::BlankS3Prefix);
         }
         Ok(())
     }
@@ -23,6 +39,17 @@ impl StoreRepairRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreRepairResponse {
     pub report: StoreRepairReport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub s3_reconciliation: Option<StoreRepairS3Reconciliation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StoreRepairS3Reconciliation {
+    pub bucket_name: String,
+    pub prefix: Option<String>,
+    pub staging_path: String,
+    pub ingest_job_id: Option<String>,
+    pub dry_run: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -43,6 +70,8 @@ pub struct StoreRepairReport {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StoreRepairValidationError {
     ConfirmationMismatch,
+    StoreRequiredForS3Reconciliation,
+    BlankS3Prefix,
 }
 
 impl Display for StoreRepairValidationError {
@@ -52,6 +81,12 @@ impl Display for StoreRepairValidationError {
                 formatter,
                 "store repair requires confirmation phrase: {STORE_REPAIR_CONFIRMATION}"
             ),
+            Self::StoreRequiredForS3Reconciliation => {
+                formatter.write_str("S3 reconciliation requires a single ObjectStore identifier")
+            }
+            Self::BlankS3Prefix => {
+                formatter.write_str("S3 reconciliation prefix must not be blank")
+            }
         }
     }
 }
@@ -68,6 +103,8 @@ mod tests {
             store_id: None,
             dry_run: false,
             confirmation: String::new(),
+            reconcile_s3: false,
+            s3_prefix: None,
         };
         assert_eq!(
             request.validate(),
@@ -77,6 +114,8 @@ mod tests {
             store_id: None,
             dry_run: false,
             confirmation: STORE_REPAIR_CONFIRMATION.to_string(),
+            reconcile_s3: false,
+            s3_prefix: None,
         };
         assert!(request.validate().is_ok());
     }

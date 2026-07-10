@@ -292,12 +292,17 @@ pub(super) fn run_store_repair(
         store_id: args.store_id().cloned(),
         dry_run: !args.apply(),
         confirmation: args.confirm().to_string(),
+        reconcile_s3: args.reconcile_s3(),
+        s3_prefix: args.s3_prefix().map(ToOwned::to_owned),
     })?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response)?;
         writer.write_all(b"\n")?;
     } else {
-        let report = response.report;
+        let dasobjectstore_daemon::StoreRepairResponse {
+            report,
+            s3_reconciliation,
+        } = response;
         writeln!(writer, "ObjectStore metadata repair")?;
         writeln!(writer, "Metadata: {}", report.metadata_path)?;
         writeln!(writer, "Dry run: {}", report.dry_run)?;
@@ -320,6 +325,17 @@ pub(super) fn run_store_repair(
             writeln!(writer, "Previous metadata backup: {backup_path}")?;
         }
         writeln!(writer, "Warning: {}", report.warning)?;
+        if let Some(reconciliation) = s3_reconciliation {
+            writeln!(writer, "Garage S3 reconciliation")?;
+            writeln!(writer, "Bucket: {}", reconciliation.bucket_name)?;
+            if let Some(prefix) = reconciliation.prefix {
+                writeln!(writer, "Prefix: {prefix}")?;
+            }
+            writeln!(writer, "SSD staging: {}", reconciliation.staging_path)?;
+            if let Some(job_id) = reconciliation.ingest_job_id {
+                writeln!(writer, "Ingest job: {job_id}")?;
+            }
+        }
     }
     Ok(())
 }

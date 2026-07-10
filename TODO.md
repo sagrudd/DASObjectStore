@@ -981,10 +981,13 @@ list until every temporary size-budget exception has been removed.
 - [ ] Make daemon-owned upload completion atomically register each object path,
   size, checksum, lifecycle state, and readable managed/provider location in
   the ObjectBrowser catalogue before reporting the upload as complete.
-- [ ] Add a guarded, resumable reconciliation operation for already-uploaded
+- [~] Add a guarded, resumable reconciliation operation for already-uploaded
   S3/object-service keys missing from the ObjectBrowser catalogue; report
   collisions, malformed keys, and inaccessible objects without silently
-  overwriting metadata.
+  overwriting metadata. ``store repair STORE --reconcile-s3 --apply`` now
+  performs a safe SSD-first Garage import and catalogue registration; remaining
+  work is resumable per-key manifests, collision reporting, and non-Garage
+  providers.
 - [ ] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition

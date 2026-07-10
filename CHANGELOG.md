@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.0 - 2026-07-10
+
+- Add guarded ``dasobjectstore store repair STORE --reconcile-s3`` recovery
+  for uncatalogued Garage objects. The daemon downloads through private SSD
+  staging, checksums and settles via normal RemoteS3 ingest, then runs the
+  existing metadata repair flow; it never registers a bucket listing as data.
+
 ## 0.70.0 - 2026-07-10
 
 - Add daemon-owned `store verify` health checks with optional in-flight payload

@@ -29,6 +29,29 @@ repair cannot accidentally replace metadata for other stores.
 The daemon owns this mutation. It creates and integrity-checks a replacement
 SQLite database, preserves the previous database as a timestamped
 ``live.sqlite.pre-repair-*`` backup, and atomically installs the replacement.
+
+Recover uncatalogued Garage uploads
+-----------------------------------
+
+An S3-compatible bucket is not the ObjectStore catalogue.  A successful
+direct Garage upload is not accepted by DASObjectStore until the daemon has
+copied it through the SSD-first ingest pipeline, calculated checksums while
+copying, settled the configured HDD copies, and committed live metadata.
+
+If objects are known to exist in a provisioned Garage bucket but are absent
+from the browser or ``store contents``, use the guarded repair mode for that
+one store:
+
+.. code-block:: console
+
+   sudo dasobjectstore store repair alleleanchor_mvp --reconcile-s3 --apply \
+     --confirm "confirm store repair"
+
+Use ``--s3-prefix variants/chm13/v2.0/chr20`` to recover a bounded prefix.
+Without ``--apply`` the command only reports the private SSD staging location
+and does not contact Garage.  The command uses the daemon's provisioned
+credentials; do not copy access keys into a shell command.  It never creates
+catalogue rows solely from a bucket listing and it never deletes bucket data.
 Payload files are never moved or deleted. Export/protection should remain
 disabled for recovered entries until a subsequent hash-verification workflow
 has completed.

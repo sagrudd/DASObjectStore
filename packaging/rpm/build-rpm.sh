@@ -126,7 +126,7 @@ Requires(post): coreutils
 Requires(post): findutils
 Requires(post): shadow-utils
 Requires(post): systemd
-Recommends:      awscli
+Requires:         awscli
 
 %description
 DASObjectStore provides CLI and service binaries for staging objects on SSD

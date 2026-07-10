@@ -433,6 +433,26 @@ where
                 ));
             }
         }
+        let s3_reconciliation = if request.reconcile_s3 {
+            let store_id = request
+                .store_id
+                .clone()
+                .expect("validated reconciliation store id");
+            Some(
+                self.service_orchestrator
+                    .reconcile_store_s3(
+                        store_id,
+                        request.s3_prefix.clone(),
+                        request.dry_run,
+                        &self.clock.now_utc(),
+                    )
+                    .map_err(|error| {
+                        ("store_repair_s3_reconciliation_failed", error.to_string())
+                    })?,
+            )
+        } else {
+            None
+        };
         let (store_definitions, disk_roots) = self.recovery_inputs("store_repair_failed")?;
         let report = dasobjectstore_metadata::recover_live_metadata(
             &dasobjectstore_metadata::RecoverLiveMetadataRequest {
@@ -459,6 +479,7 @@ where
                 hashes_verified: report.hashes_verified,
                 warning: report.warning,
             },
+            s3_reconciliation,
         })
     }
 

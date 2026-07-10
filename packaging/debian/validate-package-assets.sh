@@ -187,6 +187,7 @@ require_text "$build_rpm" 'admin_group="dasobjectstore-admin"'
 require_text "$build_rpm" 'usermod -aG "\$admin_group" "\$service_user"'
 require_text "$build_rpm" 'Requires:       /usr/bin/docker'
 require_text "$build_rpm" 'Requires:       docker-buildx-plugin'
+require_text "$build_rpm" 'Requires:         awscli'
 require_text "$build_rpm" 'sudo dnf install clang libclang-devel pam-devel'
 
 require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
