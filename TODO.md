@@ -91,6 +91,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract read-only `store list` and `store defaults` handlers into the
     same module, keeping registry inspection and policy rendering out of the
     top-level runner.
+  - [x] Extract the read-only `store s3-upload` plan renderer into the same
+    module, keeping service-layout lookup and AWS command planning out of the
+    top-level runner.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and

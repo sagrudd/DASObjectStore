@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.55 - 2026-07-10
+
+- Extract the read-only CLI `store s3-upload` plan renderer into the dedicated
+  store-read runner module.
+
 ## 0.69.54 - 2026-07-10
 
 - Extract read-only CLI `store list` and `store defaults` handlers into the

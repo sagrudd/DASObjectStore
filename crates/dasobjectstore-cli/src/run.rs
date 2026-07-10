@@ -67,7 +67,7 @@ use self::storage_lifecycle::{
     run_disk_replace, run_disk_retire, run_pool_import, run_pool_inspect, run_pool_repair,
 };
 use self::store_read::{
-    run_store_contents, run_store_defaults, run_store_list, run_store_validate,
+    run_store_contents, run_store_defaults, run_store_list, run_store_s3_upload, run_store_validate,
 };
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -5097,61 +5097,6 @@ fn store_contents_path_parts(path: &str) -> Vec<String> {
         .filter(|part| !part.is_empty())
         .map(ToOwned::to_owned)
         .collect()
-}
-
-fn run_store_s3_upload(args: &StoreS3UploadArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    let (bucket_name, credential_reference) = match args.bucket() {
-        Some(bucket_name) => (
-            bucket_name.to_string(),
-            credential_reference_for_store(args.store_id()),
-        ),
-        None => {
-            let registry_path = args
-                .registry_path()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(default_store_registry_path);
-            let definitions = read_store_registry(&registry_path)?;
-            let definition = definitions
-                .iter()
-                .find(|definition| definition.store_id == *args.store_id())
-                .cloned()
-                .ok_or_else(|| {
-                    CliError::CommandFailed(format!(
-                        "store {} was not found in {}",
-                        args.store_id(),
-                        registry_path.display()
-                    ))
-                })?;
-            let layout = plan_store_service_layout(&[definition])?;
-            let binding = layout.bucket_bindings.into_iter().next().ok_or_else(|| {
-                CliError::CommandFailed(format!("store {} is not S3-exported", args.store_id()))
-            })?;
-            (binding.bucket_name, binding.credential_reference)
-        }
-    };
-    let profile_name = args
-        .profile()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("dasobjectstore-{}", args.store_id()));
-    let plan = plan_remote_s3_upload(RemoteS3UploadPlanRequest {
-        store_id: args.store_id().clone(),
-        bucket_name,
-        endpoint_url: args.endpoint_url().to_string(),
-        region: args.region().to_string(),
-        profile_name,
-        credential_reference,
-        auth_authority: args.auth().into(),
-        username: args.username().map(ToOwned::to_owned),
-    })?;
-
-    if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &plan)?;
-        writer.write_all(b"\n")?;
-    } else {
-        write_remote_s3_upload_plan(&plan, writer)?;
-    }
-
-    Ok(())
 }
 
 fn upsert_portable_store_definition(
