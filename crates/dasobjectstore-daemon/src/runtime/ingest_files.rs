@@ -91,6 +91,7 @@ struct LocalFileIngestExecutor {
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
     source_is_server_local: fn(&Path) -> bool,
+    capacity_policy: SsdCapacityPolicy,
 }
 
 impl LocalFileIngestExecutor {
@@ -102,6 +103,7 @@ impl LocalFileIngestExecutor {
             store_registry_path: default_store_registry_path(),
             subobject_registry_path: default_subobject_registry_path(),
             source_is_server_local,
+            capacity_policy: SsdCapacityPolicy::default(),
         }
     }
 
@@ -237,7 +239,7 @@ impl LocalFileIngestExecutor {
             hdd_worker_count as u16,
             false,
         );
-        let capacity_policy = SsdCapacityPolicy::default();
+        let capacity_policy = self.capacity_policy.clone();
         let queue_capacity = HDD_SETTLEMENT_QUEUE_CAPACITY.max(hdd_worker_count.saturating_mul(2));
         let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
         let (flush_tx, flush_rx) = mpsc::sync_channel::<SsdFlushWork>(SSD_FLUSH_QUEUE_CAPACITY);
@@ -1965,7 +1967,7 @@ mod tests {
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
         hash_file_sha256, object_payload_path, DiskCopyRoot, IngestStagingLayout,
-        ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest,
+        ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
     use rusqlite::Connection;
@@ -1996,6 +1998,7 @@ mod tests {
             store_registry_path: registry_path,
             subobject_registry_path,
             source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
         };
 
         let mut progress_events = Vec::new();
@@ -2063,6 +2066,7 @@ mod tests {
             store_registry_path: registry_path,
             subobject_registry_path,
             source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
         };
 
         let mut progress_events = Vec::new();
@@ -2157,6 +2161,7 @@ mod tests {
                 store_registry_path: registry_path,
                 subobject_registry_path,
                 source_is_server_local: |_| false,
+                capacity_policy: SsdCapacityPolicy::new(99, 100, 0).expect("capacity policy"),
             };
             let mut events = Vec::new();
             executor
@@ -2169,7 +2174,7 @@ mod tests {
                         hdd_workers: None,
                         ingress_origin: origin,
                         conflict_policy: DaemonIngestConflictPolicy::Force,
-                        dry_run: true,
+                        dry_run: false,
                         client_request_id: None,
                     },
                     "2026-07-10T13:10:00Z",
@@ -2186,12 +2191,13 @@ mod tests {
                     .as_deref()
                     .is_some_and(|message| message.contains("landing mode ssd_first"))
             }));
-            assert!(
-                events
-                    .iter()
-                    .all(|event| event.pipeline_stage
-                        != Some(DaemonIngestPipelineStage::HddPlacement))
-            );
+            let ssd_stage_index = events
+                .iter()
+                .position(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::SsdStage))
+                .expect("SSD stage event");
+            assert!(events[ssd_stage_index..]
+                .iter()
+                .any(|event| event.pipeline_stage == Some(DaemonIngestPipelineStage::SsdFlush)));
             fs::remove_dir_all(root).expect("cleanup temp root");
         }
     }
@@ -2242,6 +2248,7 @@ mod tests {
             store_registry_path: registry_path,
             subobject_registry_path,
             source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
         };
         let mut progress_events = Vec::new();
         executor
@@ -2291,6 +2298,7 @@ mod tests {
             store_registry_path: registry_path,
             subobject_registry_path,
             source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
         };
 
         let mut progress_events = Vec::new();
@@ -2363,6 +2371,7 @@ mod tests {
             store_registry_path: registry_path,
             subobject_registry_path,
             source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
         };
 
         let mut progress_events = Vec::new();

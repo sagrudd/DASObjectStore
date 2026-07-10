@@ -317,7 +317,8 @@ list until every temporary size-budget exception has been removed.
 - [x] Add TUI regression coverage for multiple active disk assignments and non-zero per-disk rates.
 - [x] Add deterministic fan-out overlap coverage proving one source reader feeds at least two concurrent physical-disk writers while preserving per-target outputs.
 - [x] Add executor route-plan regression coverage proving Remote/Web/USB external origins select SSD-first under a direct-capable store policy.
-- [ ] Add full-pipeline and performance coverage proving no pre-copy hash on normal direct ingress and external-origin SSD-first behavior through staged settlement. Broader performance/soak acceptance remains tracked under Web availability.
+- [x] Add full-pipeline coverage proving external-origin SSD-first behavior through staged settlement under a direct-capable policy.
+- [ ] Add performance coverage proving no pre-copy hash on normal direct ingress and sustained external-origin throughput. Broader performance/soak acceptance remains tracked under Web availability.
 
 ### Local source classification and direct-HDD operator intent
 

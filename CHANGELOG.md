@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.19 - 2026-07-10
+
+- Exercise USB, Web, and Remote S3 origins through the staged SSD executor
+  path under a direct-capable policy, with explicit SSD-stage and SSD-flush
+  progress assertions.
+
 ## 0.69.18 - 2026-07-10
 
 - Add daemon executor route-plan coverage proving USB, Web, and Remote S3
