@@ -13,8 +13,8 @@ use crate::api::{
 use dasobjectstore_object_service::{
     default_garage_credential_registry_path, generate_per_store_credentials,
     plan_garage_provisioning, plan_store_service_layout, read_store_registry,
-    resolve_managed_store_credentials, ObjectServiceError, ObjectServiceProviderId, ServiceState,
-    StoreServiceCredential, SystemCredentialEntropy,
+    resolve_managed_store_credentials, GarageProvisioningCommandKind, ObjectServiceError,
+    ObjectServiceProviderId, ServiceState, StoreServiceCredential, SystemCredentialEntropy,
 };
 use serde_json::Value;
 use std::fmt::{self, Display};
@@ -133,8 +133,17 @@ where
                 &self.config,
                 garage_exec_args(&self.config.service_name, command.redacted_argv()),
             );
-            self.runner
-                .run_with_display_args("docker", &raw_args, &redacted_args)?;
+            if let Err(error) =
+                self.runner
+                    .run_with_display_args("docker", &raw_args, &redacted_args)
+            {
+                if command.kind == GarageProvisioningCommandKind::CreateBucket
+                    && is_existing_bucket_error(&error)
+                {
+                    continue;
+                }
+                return Err(error);
+            }
         }
 
         Ok(GarageProvisioningSummary {
@@ -152,6 +161,15 @@ where
     ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
         run_remote_easyconnect_aws_cli_upload_job(registry, gate, &self.runner, request)
     }
+}
+
+fn is_existing_bucket_error(error: &DaemonServiceRuntimeError) -> bool {
+    matches!(
+        error,
+        DaemonServiceRuntimeError::CommandFailed { stderr, .. }
+            if stderr.contains("BucketAlreadyExists")
+                || stderr.contains("bucket already exists")
+    )
 }
 
 pub trait ServiceCommandRunner {
@@ -591,6 +609,7 @@ struct FakeRunner {
     calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
     display_calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
     fail_with_display_args: bool,
+    bucket_already_exists: bool,
 }
 
 #[cfg(test)]
@@ -603,12 +622,20 @@ impl FakeRunner {
             calls: std::cell::RefCell::new(Vec::new()),
             display_calls: std::cell::RefCell::new(Vec::new()),
             fail_with_display_args: false,
+            bucket_already_exists: false,
         }
     }
 
     fn failing() -> Self {
         Self {
             fail_with_display_args: true,
+            ..Self::with_stdout("")
+        }
+    }
+
+    fn bucket_already_exists() -> Self {
+        Self {
+            bucket_already_exists: true,
             ..Self::with_stdout("")
         }
     }
@@ -645,6 +672,14 @@ impl ServiceCommandRunner for FakeRunner {
                 args: display_args.to_vec(),
                 status: "exit status: 1".to_string(),
                 stderr: "failed".to_string(),
+            });
+        }
+        if self.bucket_already_exists && args.iter().any(|arg| arg == "create") {
+            return Err(DaemonServiceRuntimeError::CommandFailed {
+                program: program.to_string(),
+                args: display_args.to_vec(),
+                status: "exit status: 1".to_string(),
+                stderr: "Error: CreateBucket returned BucketAlreadyExists (409)".to_string(),
             });
         }
         Ok(self.output.borrow().clone())
@@ -778,6 +813,20 @@ mod tests {
 
         assert!(!message.contains(&secret));
         assert!(message.contains("<redacted>"));
+    }
+
+    #[test]
+    fn provision_buckets_treats_existing_bucket_as_idempotent() {
+        let credentials = credentials();
+        let runner = super::FakeRunner::bucket_already_exists();
+        let controller = GarageServiceController::new(config(), runner);
+
+        let summary = controller
+            .provision_buckets(&credentials)
+            .expect("existing bucket is safe to reuse");
+
+        assert_eq!(summary.buckets, 1);
+        assert_eq!(controller.runner.calls.borrow().len(), 3);
     }
 
     #[test]
