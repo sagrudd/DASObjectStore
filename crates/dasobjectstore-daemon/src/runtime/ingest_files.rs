@@ -640,6 +640,37 @@ struct PipelineProgressState {
     count_hdd_copy_as_source: bool,
     progress_offsets: BTreeMap<(ObjectId, String), u64>,
     active_hdd_transfers: BTreeMap<(ObjectId, DiskId, u8), ActiveHddTransferState>,
+    source_read_rate: SampledRate,
+    ssd_write_rate: SampledRate,
+}
+
+#[derive(Debug, Default)]
+struct SampledRate {
+    last_at: Option<Instant>,
+    last_bytes: u64,
+    current_bytes_per_second: u64,
+}
+
+impl SampledRate {
+    fn update(&mut self, bytes: u64) {
+        let now = Instant::now();
+        if let Some(last_at) = self.last_at {
+            let elapsed = now.duration_since(last_at).as_secs_f64();
+            if elapsed > 0.0 {
+                self.current_bytes_per_second =
+                    ((bytes.saturating_sub(self.last_bytes) as f64) / elapsed) as u64;
+            }
+        }
+        self.last_at = Some(now);
+        self.last_bytes = bytes;
+    }
+
+    fn current(&self) -> u64 {
+        self.last_at
+            .filter(|at| at.elapsed() <= HDD_WRITE_RATE_STALE_AFTER)
+            .map(|_| self.current_bytes_per_second)
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug)]
@@ -684,6 +715,8 @@ impl PipelineProgressState {
             count_hdd_copy_as_source,
             progress_offsets: BTreeMap::new(),
             active_hdd_transfers: BTreeMap::new(),
+            source_read_rate: SampledRate::default(),
+            ssd_write_rate: SampledRate::default(),
         }
     }
 
@@ -701,11 +734,16 @@ impl PipelineProgressState {
                     .completed_work_bytes
                     .saturating_add(current.saturating_sub(previous));
                 if matches!(progress.stage, ObjectPutProgressStage::SsdIngest) {
+                    self.source_read_rate.update(current);
+                    self.ssd_write_rate.update(current);
                     self.completed_source_bytes = self.completed_source_bytes.saturating_add(
                         current
                             .min(entry.size_bytes)
                             .saturating_sub(previous.min(entry.size_bytes)),
                     );
+                }
+                if matches!(progress.stage, ObjectPutProgressStage::SsdFlush) {
+                    self.ssd_write_rate.update(current);
                 }
             }
             ObjectPutProgressStage::HddCopy {
@@ -895,6 +933,26 @@ impl PipelineProgressState {
             },
             ..DaemonIngestWorkerTelemetry::default()
         };
+        let now = Instant::now();
+        let aggregate_hdd_write_bytes_per_second = self
+            .active_hdd_transfers
+            .values()
+            .filter(|transfer| {
+                transfer.phase == DaemonIngestHddTransferPhase::Writing
+                    && now.duration_since(transfer.last_write_sample_at)
+                        <= HDD_WRITE_RATE_STALE_AFTER
+            })
+            .map(|transfer| transfer.current_bytes_per_second)
+            .sum();
+        telemetry.throughput.source_read_bytes_per_second = self.source_read_rate.current();
+        telemetry.throughput.ssd_write_bytes_per_second = self.ssd_write_rate.current();
+        telemetry.throughput.aggregate_hdd_write_bytes_per_second =
+            aggregate_hdd_write_bytes_per_second;
+        telemetry.throughput.current_bytes_per_second = self
+            .source_read_rate
+            .current()
+            .max(self.ssd_write_rate.current())
+            .max(aggregate_hdd_write_bytes_per_second);
         telemetry.pressure.ssd = self.ssd_pressure;
         telemetry
     }
@@ -2372,6 +2430,14 @@ mod tests {
             &entry,
             &ObjectPutProgress {
                 object_id: entry.object_id.clone(),
+                stage: ObjectPutProgressStage::SsdIngest,
+                bytes_written: 80,
+            },
+        );
+        state.apply_object_progress(
+            &entry,
+            &ObjectPutProgress {
+                object_id: entry.object_id.clone(),
                 stage: ObjectPutProgressStage::HddCopy {
                     disk_id: "disk-a".to_string(),
                     copy_number: 1,
@@ -2379,23 +2445,37 @@ mod tests {
                 bytes_written: 25,
             },
         );
+        state.apply_object_progress(
+            &entry,
+            &ObjectPutProgress {
+                object_id: entry.object_id.clone(),
+                stage: ObjectPutProgressStage::HddCopy {
+                    disk_id: "disk-a".to_string(),
+                    copy_number: 1,
+                },
+                bytes_written: 50,
+            },
+        );
 
         let telemetry = state.telemetry();
-        assert_eq!(state.completed_source_bytes, 40);
-        assert_eq!(state.completed_work_bytes, 65);
+        assert_eq!(state.completed_source_bytes, 80);
+        assert_eq!(state.completed_work_bytes, 130);
         assert_eq!(telemetry.queue_depths.source_read, 6);
         assert_eq!(telemetry.queue_depths.hdd_write, 2);
         assert_eq!(telemetry.workers.ssd_stage.active, 1);
         assert_eq!(telemetry.workers.hdd_write.active, 1);
         assert_eq!(telemetry.workers.hdd_write.idle, 2);
         assert_eq!(telemetry.pressure.ssd, DaemonSsdPressure::High);
+        assert!(telemetry.throughput.source_read_bytes_per_second > 0);
+        assert!(telemetry.throughput.ssd_write_bytes_per_second > 0);
+        assert!(telemetry.throughput.aggregate_hdd_write_bytes_per_second > 0);
         let active = state.active_hdd_transfer_records();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].file_index, 1);
         assert_eq!(active[0].files_total, Some(10));
         assert_eq!(active[0].disk_id.as_str(), "disk-a");
         assert_eq!(active[0].copy_number, 1);
-        assert_eq!(active[0].bytes_done, 25);
+        assert_eq!(active[0].bytes_done, 50);
         assert_eq!(active[0].bytes_total, 100);
         assert_eq!(active[0].relative_path, "a.fastq.gz");
         assert!(active[0].bytes_per_second > 0);
@@ -2409,12 +2489,19 @@ mod tests {
                     copy_number: 1,
                     duration_millis: Some(7),
                 },
-                bytes_written: 25,
+                bytes_written: 50,
             },
         );
         let finalizing = state.active_hdd_transfer_records();
         assert_eq!(finalizing[0].bytes_per_second, 0);
         assert_eq!(finalizing[0].fsync_duration_millis, Some(7));
+        assert_eq!(
+            state
+                .telemetry()
+                .throughput
+                .aggregate_hdd_write_bytes_per_second,
+            0
+        );
     }
 
     #[test]

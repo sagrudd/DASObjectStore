@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.11 - 2026-07-10
+
+- Add daemon-provided short-window source-read, SSD-write, and aggregate HDD
+  write rates to ingest progress telemetry, with stale and finalization rates
+  reported as zero while existing per-target rates remain authoritative.
+
 ## 0.69.10 - 2026-07-10
 
 - Make default HDD settlement admission copy-aware and permit up to four

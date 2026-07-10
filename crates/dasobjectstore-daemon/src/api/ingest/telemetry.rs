@@ -85,6 +85,12 @@ impl Default for DaemonIngestBottleneck {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonIngestThroughputTelemetry {
+    #[serde(default)]
+    pub source_read_bytes_per_second: u64,
+    #[serde(default)]
+    pub ssd_write_bytes_per_second: u64,
+    #[serde(default)]
+    pub aggregate_hdd_write_bytes_per_second: u64,
     pub current_bytes_per_second: u64,
     pub moving_average_bytes_per_second: u64,
     pub recent_high_bytes_per_second: u64,
