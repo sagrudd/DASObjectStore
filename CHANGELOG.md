@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.57 - 2026-07-10
+
+- Route CLI `object put` through a typed daemon request so staged placement and
+  metadata mutation remain behind the authenticated daemon boundary.
+
 ## 0.69.56 - 2026-07-10
 
 - Route `store delete` through a typed daemon request with daemon-owned

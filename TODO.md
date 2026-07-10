@@ -119,6 +119,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Route `store delete` through a typed daemon request; keep metadata,
     managed-HDD payload cleanup, host/portable registries, authorization,
     policy allowance, and action-time confirmation inside the daemon.
+  - [x] Route `object put` through a typed daemon request so staged SSD/HDD
+    placement and metadata mutation execute behind the authenticated daemon
+    boundary rather than in the CLI process.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

@@ -59,6 +59,14 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::ObjectPut(request) => {
+            match handler.object_put_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::ObjectPut(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::IngestQueueDrain(request) => {
             match handler.ingest_queue_drain_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::IngestQueueDrain(response)),
@@ -381,6 +389,34 @@ where
                 portable_subobjects,
             },
         })
+    }
+
+    fn object_put_for_actor(
+        &self,
+        request: ObjectPutRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<ObjectPutResponse, (&'static str, String)> {
+        if actor.is_none() {
+            return Err((
+                "authentication_required",
+                "object put requires an authenticated local actor".to_string(),
+            ));
+        }
+        let object_id = dasobjectstore_core::ids::ObjectId::new(request.object_id.clone())
+            .map_err(|error| ("invalid_object_id", error.to_string()))?;
+        let disk_roots = parse_disk_copy_roots(&request.disk_roots)
+            .map_err(|error| ("invalid_disk_root", error))?;
+        let metadata_request = MetadataObjectPutRequest::new(
+            object_id,
+            request.source_path,
+            request.ssd_root,
+            disk_roots,
+            request.copies,
+        )
+        .with_object_type(request.object_type);
+        let report = put_object_ssd_first(&metadata_request)
+            .map_err(|error| ("object_put_failed", error.to_string()))?;
+        Ok(ObjectPutResponse { report })
     }
 
     fn disk_retire_for_actor(
@@ -761,6 +797,23 @@ fn known_ssd_root(path: &Path) -> bool {
     fs::read_to_string(path.join(".dasobjectstore").join("device.env"))
         .map(|marker| marker.lines().any(|line| line == "role=ssd"))
         .unwrap_or(false)
+}
+
+fn parse_disk_copy_roots(entries: &[String]) -> Result<Vec<DiskCopyRoot>, String> {
+    entries
+        .iter()
+        .map(|entry| {
+            let (disk_id, root_path) = entry
+                .split_once('=')
+                .ok_or_else(|| format!("disk root must use disk-id=/path syntax: {entry}"))?;
+            let disk_id = dasobjectstore_core::ids::DiskId::new(disk_id)
+                .map_err(|error| format!("invalid disk id {disk_id}: {error}"))?;
+            if root_path.is_empty() {
+                return Err(format!("disk root path must not be empty: {entry}"));
+            }
+            Ok(DiskCopyRoot::new(disk_id, root_path))
+        })
+        .collect()
 }
 
 fn delete_store_definition_maybe(

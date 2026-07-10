@@ -44,15 +44,20 @@ pub(crate) fn run_object_put(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     let disk_roots = parse_disk_roots(args.disk_roots())?;
-    let request = ObjectPutRequest::new(
-        args.object_id().clone(),
-        args.source(),
-        args.ssd_root(),
-        disk_roots,
-        args.copies(),
-    )
-    .with_object_type(args.object_type());
-    let report = put_object_ssd_first(&request)?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.object_put(DaemonObjectPutRequest {
+        object_id: args.object_id().to_string(),
+        source_path: args.source().to_path_buf(),
+        ssd_root: args.ssd_root().to_path_buf(),
+        disk_roots: disk_roots
+            .into_iter()
+            .map(|root| format!("{}={}", root.disk_id, root.root_path.display()))
+            .collect(),
+        copies: args.copies(),
+        object_type: args.object_type(),
+    })?;
+    let report = response.report;
 
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &report)?;

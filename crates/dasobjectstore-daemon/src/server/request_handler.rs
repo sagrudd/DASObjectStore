@@ -12,16 +12,17 @@ use crate::api::{
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
-    PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSession, RemoteEasyconnectSessionRenewal,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
-    StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+    RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, StoreDeleteCommandReport, StoreDeleteRequest,
+    StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse, StoreInventoryItem,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -52,7 +53,10 @@ use crate::runtime::{
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
 use dasobjectstore_core::utc::{add_seconds_to_utc_timestamp, format_utc_timestamp_seconds};
-use dasobjectstore_metadata::{LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME};
+use dasobjectstore_metadata::{
+    put_object_ssd_first, DiskCopyRoot, ObjectPutRequest as MetadataObjectPutRequest,
+    LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
+};
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
     delete_store_definition, delete_subobjects_for_store, generate_per_store_credentials,
@@ -1260,6 +1264,7 @@ impl DaemonApiRequest {
             Self::StoreInventory(_) => "store_inventory",
             Self::StoreDrain(_) => "store_drain",
             Self::StoreDelete(_) => "store_delete",
+            Self::ObjectPut(_) => "object_put",
             Self::IngestQueueDrain(_) => "ingest_queue_drain",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
@@ -1314,7 +1319,7 @@ mod tests {
         DaemonServiceStatusResponse, DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest,
         ObjectBrowserDelegatedActor, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
         ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
         RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
@@ -2197,6 +2202,27 @@ mod tests {
             response,
             DaemonApiResponse::Error(error)
                 if error.code == "administrator_authentication_required"
+        ));
+    }
+
+    #[test]
+    fn rejects_object_put_without_authenticated_actor() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let response = handler
+            .handle(DaemonApiRequest::ObjectPut(ObjectPutRequest {
+                object_id: "object-a".to_string(),
+                source_path: "/tmp/source".into(),
+                ssd_root: "/tmp/ssd".into(),
+                disk_roots: vec!["disk-a=/tmp/disk-a".to_string()],
+                copies: 1,
+                object_type: dasobjectstore_core::object_type::ObjectType::Naive,
+            }))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "authentication_required"
         ));
     }
 

@@ -85,23 +85,23 @@ use dasobjectstore_daemon::{
     DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
     DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
-    IngestQueueDrainRequest as DaemonIngestQueueDrainRequest, StoreDeleteCommandReport,
+    IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
+    ObjectPutRequest as DaemonObjectPutRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
     UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
-    inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
-    put_object_ssd_first_with_progress, read_disk_drain_plan, read_disk_replacement_plan,
-    read_ingest_queue_for_store, read_object_inspect, read_store_contents, DestagePriorityPolicy,
-    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
-    IngestQueueDrainReport, IngestQueueReadError, IngestQueueSnapshot, ObjectExportError,
-    ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
-    ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
-    ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
-    StoreCleanupError, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
-    StoreContentsSnapshot, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
+    inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first_with_progress,
+    read_disk_drain_plan, read_disk_replacement_plan, read_ingest_queue_for_store,
+    read_object_inspect, read_store_contents, DestagePriorityPolicy, DiskCopyRoot, DiskDrainError,
+    DiskRetirementError, IngestQueueDrainError, IngestQueueDrainReport, IngestQueueReadError,
+    IngestQueueSnapshot, ObjectExportError, ObjectExportRequest, ObjectInspectError,
+    ObjectPutError, ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, PoolInspectError,
+    ReadOnlyAttachError, ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy,
+    SsdCapacityPolicyError, StoreCleanupError, StoreContentsObject, StoreContentsReadError,
+    StoreContentsRequest, StoreContentsSnapshot, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 #[cfg(feature = "debug-commands")]
 use dasobjectstore_metadata::{record_pool_state_marker_at, PoolStateMarker};
@@ -10965,49 +10965,6 @@ mod tests {
             fs::read(&destination_path).expect("read exported payload"),
             b"settled payload"
         );
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
-    }
-
-    #[test]
-    fn object_put_stages_and_settles_verified_copies() {
-        let root = temp_root("object-put");
-        let source_path = root.join("source.fastq.gz");
-        let ssd_root = root.join("ssd");
-        let disk_a = root.join("disk-a");
-        let disk_b = root.join("disk-b");
-        fs::create_dir_all(&root).expect("create temp root");
-        fs::write(&source_path, b"settle this payload").expect("write source");
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "object",
-            "put",
-            "object-a",
-            "--source",
-            source_path.to_str().expect("utf8 source path"),
-            "--object-type",
-            "fastq",
-            "--ssd-root",
-            ssd_root.to_str().expect("utf8 ssd path"),
-            "--disk-root",
-            &format!("disk-a={}", disk_a.to_string_lossy()),
-            "--disk-root",
-            &format!("disk-b={}", disk_b.to_string_lossy()),
-            "--copies",
-            "2",
-        ])
-        .expect("object put parses");
-        let mut output = Vec::new();
-
-        run(&cli, &mut output).expect("object put runs");
-
-        let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("Object put complete"));
-        assert!(output.contains("Object: object-a"));
-        assert!(output.contains("Object type: fastq"));
-        assert!(output.contains("Settled copies: 2"));
-        assert!(output.contains("disk=disk-a"));
-        assert!(output.contains("disk=disk-b"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

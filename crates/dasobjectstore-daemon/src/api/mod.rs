@@ -10,6 +10,7 @@ mod ingest_mutation;
 mod jobs;
 mod local_admin;
 mod object_browser;
+mod object_mutation;
 mod object_store;
 mod remote_easyconnect;
 mod service;
@@ -88,6 +89,7 @@ pub use object_browser::{
     ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
     ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
 };
+pub use object_mutation::{ObjectPutRequest, ObjectPutResponse, ObjectPutValidationError};
 pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
     OBJECT_STORE_CREATE_CONFIRMATION,
@@ -147,6 +149,7 @@ pub enum DaemonApiRequest {
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
     StoreDelete(StoreDeleteRequest),
+    ObjectPut(ObjectPutRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
@@ -187,6 +190,7 @@ impl DaemonApiRequest {
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
             Self::StoreDelete(request) => request.validate().map_err(store_delete_validation_error),
+            Self::ObjectPut(request) => request.validate().map_err(object_put_validation_error),
             Self::IngestQueueDrain(request) => request
                 .validate()
                 .map_err(ingest_queue_drain_validation_error),
@@ -256,6 +260,7 @@ pub enum DaemonApiResponse {
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     StoreDelete(StoreDeleteResponse),
+    ObjectPut(ObjectPutResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
@@ -522,6 +527,20 @@ fn store_delete_validation_error(err: StoreDeleteValidationError) -> DaemonReque
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: STORE_DELETE_CONFIRMATION,
             }
+        }
+    }
+}
+
+fn object_put_validation_error(err: ObjectPutValidationError) -> DaemonRequestValidationError {
+    match err {
+        ObjectPutValidationError::BlankField { field } => {
+            DaemonRequestValidationError::BlankField { field }
+        }
+        ObjectPutValidationError::RelativePath { field, path } => {
+            DaemonRequestValidationError::RelativePath { field, path }
+        }
+        ObjectPutValidationError::InvalidCopyCount => {
+            DaemonRequestValidationError::InvalidCopyCount { copies: 0 }
         }
     }
 }

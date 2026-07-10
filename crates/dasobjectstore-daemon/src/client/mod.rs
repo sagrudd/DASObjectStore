@@ -21,17 +21,18 @@ use crate::api::{
     IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
     IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest,
     ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreDeleteRequest, StoreDeleteResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -131,6 +132,16 @@ where
         match self.send(DaemonApiRequest::StoreDelete(request))? {
             DaemonApiResponse::StoreDelete(response) => Ok(response),
             response => Err(unexpected("store_delete", response)),
+        }
+    }
+
+    pub fn object_put(
+        &self,
+        request: ObjectPutRequest,
+    ) -> Result<ObjectPutResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ObjectPut(request))? {
+            DaemonApiResponse::ObjectPut(response) => Ok(response),
+            response => Err(unexpected("object_put", response)),
         }
     }
 
@@ -470,6 +481,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::StoreDelete(_) => "store_delete",
+        DaemonApiResponse::ObjectPut(_) => "object_put",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",

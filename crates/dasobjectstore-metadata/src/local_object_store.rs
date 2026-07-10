@@ -8,7 +8,7 @@ use crate::ingest::{encode_path_component, IngestStagingLayout};
 use crate::secure_fs::{create_private_dir_all, set_private_dir_permissions};
 use dasobjectstore_core::ids::{IngestJobId, InvalidId, ObjectId};
 use dasobjectstore_core::object_type::ObjectType;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::io;
@@ -80,7 +80,7 @@ impl ObjectPutRequest {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ObjectPutReport {
     pub object_id: ObjectId,
     pub object_type: ObjectType,
@@ -106,7 +106,7 @@ pub struct StagedObjectPut {
     pub copy_count: u8,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ObjectPutPlacementReport {
     pub disk_id: String,
     pub copy_number: u8,
