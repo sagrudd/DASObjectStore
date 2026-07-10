@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.38 - 2026-07-10
+
+- Extract the Disk command contracts and parser regressions into
+  `crates/dasobjectstore-cli/src/cli/disk.rs`, preserving destructive
+  confirmation and preparation defaults.
+
 ## 0.69.37 - 2026-07-10
 
 - Colocate the remaining Store parser regressions with the extracted command

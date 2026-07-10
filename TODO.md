@@ -63,8 +63,11 @@ list until every temporary size-budget exception has been removed.
     destructive confirmation and hidden registry attributes.
   - [x] Move the remaining Store parser tests beside the new module before
     removing the CLI size exception.
-  - [ ] Continue extracting the remaining object, service, store, disk, pool,
-    and runner command families before removing the CLI size exception.
+  - [x] Extract the Disk argument contracts and parser regressions into
+    `crates/dasobjectstore-cli/src/cli/disk.rs`, preserving destructive
+    confirmation and preparation defaults.
+  - [ ] Continue extracting the remaining pool command family and the large
+    CLI runner before removing the CLI size exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.
