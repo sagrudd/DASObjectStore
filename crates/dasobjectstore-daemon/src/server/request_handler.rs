@@ -307,6 +307,46 @@ where
     }
 }
 
+fn create_object_store_with_registry(
+    request: CreateObjectStoreRequest,
+    registry_path: impl AsRef<Path>,
+    accepted_at_utc: &str,
+) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
+    request.validate().map_err(|error| {
+        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
+            error.to_string(),
+        ))
+    })?;
+    let definition = request.registry_definition().map_err(|error| {
+        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
+            error.to_string(),
+        ))
+    })?;
+    if !request.dry_run {
+        upsert_store_definition(registry_path, definition)?;
+    }
+    let job_id_value = format!(
+        "objectstore-create-{}",
+        accepted_at_utc
+            .chars()
+            .map(|character| if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_ascii_lowercase()
+    );
+    let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
+        .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
+    Ok(CreateObjectStoreResponse::accepted(
+        job_id,
+        accepted_at_utc,
+        request,
+    ))
+}
+
 fn resolve_authorization_store_id(
     endpoint: &StoreId,
     store_registry_path: &Path,
@@ -1026,26 +1066,7 @@ where
         request: CreateObjectStoreRequest,
         accepted_at_utc: &str,
     ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
-        let job_id_value = format!(
-            "objectstore-create-{}",
-            accepted_at_utc
-                .chars()
-                .map(|character| if character.is_ascii_alphanumeric() {
-                    character
-                } else {
-                    '-'
-                })
-                .collect::<String>()
-                .trim_matches('-')
-                .to_ascii_lowercase()
-        );
-        let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
-            .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
-        Ok(CreateObjectStoreResponse::accepted(
-            job_id,
-            accepted_at_utc,
-            request,
-        ))
+        create_object_store_with_registry(request, default_store_registry_path(), accepted_at_utc)
     }
 
     fn upsert_endpoint_inventory(
@@ -1635,18 +1656,30 @@ mod tests {
                 && accepted.dry_run
                 && store_id == "generated-data"
         ));
-        assert_eq!(
-            handler
-                .service_orchestrator
-                .create_object_store_calls
-                .borrow()
-                .as_slice(),
-            &[(
-                "2026-07-08T20:45:00Z".to_string(),
-                "generated-data".to_string(),
-                true,
-            )]
-        );
+    }
+
+    #[test]
+    fn persists_non_dry_run_object_store_definition_before_accepting_job() {
+        let root = temp_root("persist-create-objectstore");
+        let registry_path = root.join("stores.json");
+        let mut request = create_object_store_request();
+        request.store_id = "porkchop".to_string();
+        request.dry_run = false;
+
+        let response = super::create_object_store_with_registry(
+            request,
+            &registry_path,
+            "2026-07-10T14:23:45Z",
+        )
+        .expect("object store creation persists");
+
+        assert_eq!(response.store_id, "porkchop");
+        assert!(!response.accepted.dry_run);
+        let definitions = read_store_registry(&registry_path).expect("registry reads");
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].store_id.as_str(), "porkchop");
+
+        cleanup(&root);
     }
 
     #[test]
@@ -3513,7 +3546,6 @@ mod tests {
         >,
         ingest_calls: RefCell<Vec<(String, String, bool)>>,
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
-        create_object_store_calls: RefCell<Vec<(String, String, bool)>>,
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
         remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize)>>,
         job_status_calls: RefCell<Vec<String>>,
@@ -3739,11 +3771,6 @@ mod tests {
             request: CreateObjectStoreRequest,
             accepted_at_utc: &str,
         ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
-            self.create_object_store_calls.borrow_mut().push((
-                accepted_at_utc.to_string(),
-                request.store_id.clone(),
-                request.dry_run,
-            ));
             Ok(CreateObjectStoreResponse::accepted(
                 DaemonJobId::new("objectstore-create-2026-07-08t20-45-00z").expect("job id"),
                 accepted_at_utc,

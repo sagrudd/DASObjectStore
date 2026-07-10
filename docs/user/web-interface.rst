@@ -529,7 +529,9 @@ first calls the GUI
 action-plan endpoint and renders the generated ``dasobjectstore store create``
 plan for administrator review. Submission then requires the exact phrase
 ``confirm create objectstore`` and is forwarded to ``dasobjectstored`` through
-the daemon ObjectStore creation contract. The browser displays the accepted
+the daemon ObjectStore creation contract. For a non-dry-run request, the daemon
+persists the validated definition in its managed store registry before it
+records the administrator job complete. The browser displays the accepted
 administrator job identifier, dry-run state, administrator actor, client request
 identifier, and policy summary after the daemon accepts the request.
 The Web route validates this request against the same store-service definition

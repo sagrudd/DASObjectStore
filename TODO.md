@@ -95,6 +95,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Route `store drain` through a typed daemon request; keep authorization,
     managed-HDD discovery, metadata mutation, and the full drain report inside
     the daemon while preserving CLI JSON/text output.
+  - [x] Make non-dry-run WebUI object-store creation persist the validated
+    registry definition before recording the administrator job complete; add a
+    regression proving acceptance follows registry persistence.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.
