@@ -56,6 +56,31 @@ fn write_store_contents_du(
         format_bytes(snapshot.total_size_bytes() as f64)
     )?;
     writeln!(writer, "Mode: du depth={depth}")?;
+    if snapshot.prefix.is_some() {
+        let root_is_file = snapshot.objects.len() == 1 && snapshot.objects[0].path.is_empty();
+        if root_is_file {
+            writeln!(
+                writer,
+                "[FILE]\t{}\t.",
+                format_bytes(snapshot.objects[0].size_bytes as f64)
+            )?;
+        } else {
+            writeln!(
+                writer,
+                "[DIR]\t{}\t.",
+                format_bytes(snapshot.total_size_bytes() as f64)
+            )?;
+            for object in &snapshot.objects {
+                writeln!(
+                    writer,
+                    "[FILE]\t{}\t{}",
+                    format_bytes(object.size_bytes as f64),
+                    object.path
+                )?;
+            }
+        }
+        return Ok(());
+    }
     let single_file = snapshot.objects.len() == 1 && snapshot.objects[0].path.is_empty();
     for (path, size_bytes) in store_contents_du_entries(&snapshot.objects, depth) {
         let kind = if single_file { "FILE" } else { "DIR" };
