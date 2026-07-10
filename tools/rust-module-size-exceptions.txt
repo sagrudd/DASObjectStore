@@ -1,0 +1,12 @@
+# Temporary baseline exceptions. Each entry must be a production Rust module
+# whose size has been reviewed; new modules must remain at or below 1,000 LOC.
+# Remove entries as the corresponding module is split.
+crates/dasobjectstore-cli/src/cli.rs
+crates/dasobjectstore-cli/src/run.rs
+crates/dasobjectstore-daemon/src/runtime/ingest_files.rs
+crates/dasobjectstore-daemon/src/runtime/remote_upload.rs
+crates/dasobjectstore-daemon/src/server/request_handler.rs
+crates/dasobjectstore-gui-api/src/auth_routes.rs
+crates/dasobjectstore-gui-api/src/home_aggregator.rs
+crates/dasobjectstore-gui-api/src/workspaces.rs
+crates/dasobjectstore-gui-web/src/api.rs

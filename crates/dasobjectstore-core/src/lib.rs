@@ -13,6 +13,7 @@ pub mod remote_upload;
 pub mod repair;
 pub mod risk;
 pub mod store;
+pub mod utc;
 
 pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,

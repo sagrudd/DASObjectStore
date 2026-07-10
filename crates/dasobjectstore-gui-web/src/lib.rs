@@ -1,6 +1,7 @@
 //! Yew frontend scaffold for Monas and Synoptikon delivery surfaces.
 
 pub mod activity;
+#[cfg(any(target_arch = "wasm32", test))]
 mod api;
 pub mod components;
 pub mod disks;
@@ -47,10 +48,12 @@ pub use users_groups::{
 pub use workspace::{
     bioinformatics_workspace_api_path, enclosures_workspace_api_path, home_workspace_api_path,
     objectstores_workspace_api_path, primary_navigation_for_host, remote_upload_workspace_api_path,
-    ApiLoadState, DashboardMetric, EnclosureCardSummary, ObjectStoreCardSummary, WorkspacePage,
-    BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE,
-    OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
+    ApiLoadState, WorkspacePage, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+    HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+    REMOTE_UPLOAD_WORKSPACE_ROUTE,
 };
+#[cfg(any(target_arch = "wasm32", test))]
+pub use workspace::{DashboardMetric, EnclosureCardSummary, ObjectStoreCardSummary};
 
 /// Returns the GUI web crate version.
 pub fn version() -> &'static str {

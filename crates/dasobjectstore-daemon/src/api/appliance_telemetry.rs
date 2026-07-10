@@ -2,6 +2,7 @@ use crate::runtime::{
     ApplianceDiskCapacityTelemetry, ApplianceDiskIoTelemetry, ApplianceTelemetryMissingReason,
     ApplianceTelemetrySample, ApplianceTelemetrySampleSet, ApplianceTelemetrySource,
 };
+use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -502,58 +503,6 @@ fn rounded_u64(value: Option<f64>) -> Option<u64> {
     Some(value.round() as u64)
 }
 
-fn parse_utc_timestamp_seconds(value: &str) -> Option<i64> {
-    let value = value.strip_suffix('Z')?;
-    let (date, time) = value.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year = date_parts.next()?.parse::<i32>().ok()?;
-    let month = date_parts.next()?.parse::<u32>().ok()?;
-    let day = date_parts.next()?.parse::<u32>().ok()?;
-    if date_parts.next().is_some() {
-        return None;
-    }
-    let time = time.split_once('.').map_or(time, |(whole, _)| whole);
-    let mut time_parts = time.split(':');
-    let hour = time_parts.next()?.parse::<u32>().ok()?;
-    let minute = time_parts.next()?.parse::<u32>().ok()?;
-    let second = time_parts.next()?.parse::<u32>().ok()?;
-    if time_parts.next().is_some()
-        || hour > 23
-        || minute > 59
-        || second > 59
-        || !(1..=12).contains(&month)
-    {
-        return None;
-    }
-    let month_day_count = days_in_month(year, month);
-    if day == 0 || day > month_day_count {
-        return None;
-    }
-    let mut days = 0i64;
-    for current_year in 1970..year {
-        days += if is_leap_year(current_year) { 366 } else { 365 };
-    }
-    for current_month in 1..month {
-        days += i64::from(days_in_month(year, current_month));
-    }
-    days += i64::from(day - 1);
-    Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
-}
-
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::{query_appliance_telemetry, ApplianceTelemetryRequest, ApplianceTelemetryWindow};
@@ -563,6 +512,7 @@ mod tests {
         ApplianceTelemetryMissingDataMarker, ApplianceTelemetryMissingReason,
         ApplianceTelemetrySample, ApplianceTelemetrySampleSet, ApplianceTelemetrySource,
     };
+    use dasobjectstore_core::utc::{format_utc_timestamp_seconds, parse_utc_timestamp_seconds};
 
     #[test]
     fn query_returns_current_summary_series_and_missing_intervals_for_window() {
@@ -854,34 +804,10 @@ mod tests {
     }
 
     fn timestamp_seconds(value: &str) -> i64 {
-        super::parse_utc_timestamp_seconds(value).expect("valid test timestamp")
+        parse_utc_timestamp_seconds(value).expect("valid test timestamp")
     }
 
     fn format_timestamp(timestamp: i64) -> String {
-        let mut days = timestamp.div_euclid(86_400);
-        let seconds_of_day = timestamp.rem_euclid(86_400);
-        let mut year = 1970;
-        loop {
-            let days_in_year = if super::is_leap_year(year) { 366 } else { 365 };
-            if days < days_in_year {
-                break;
-            }
-            days -= days_in_year;
-            year += 1;
-        }
-        let mut month = 1;
-        loop {
-            let days_in_month = i64::from(super::days_in_month(year, month));
-            if days < days_in_month {
-                break;
-            }
-            days -= days_in_month;
-            month += 1;
-        }
-        let day = days + 1;
-        let hour = seconds_of_day / 3_600;
-        let minute = (seconds_of_day % 3_600) / 60;
-        let second = seconds_of_day % 60;
-        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+        format_utc_timestamp_seconds(timestamp)
     }
 }

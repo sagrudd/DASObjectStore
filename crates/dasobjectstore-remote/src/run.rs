@@ -19,6 +19,7 @@ use crate::s3::{
     execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload_with_credentials,
     AwsS3CredentialSource, RemoteS3Error,
 };
+use dasobjectstore_core::utc::parse_canonical_utc_timestamp_seconds as parse_rfc3339_utc_seconds;
 use dasobjectstore_daemon::{
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonJobEvent, DaemonJobSummary,
     RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
@@ -631,64 +632,6 @@ fn remote_upload_session_expired(
     Ok(expires_at <= now)
 }
 
-fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
-    if value.len() != 20 || !value.ends_with('Z') {
-        return None;
-    }
-    let year = value.get(0..4)?.parse::<i64>().ok()?;
-    let month = value.get(5..7)?.parse::<u32>().ok()?;
-    let day = value.get(8..10)?.parse::<u32>().ok()?;
-    let hour = value.get(11..13)?.parse::<u32>().ok()?;
-    let minute = value.get(14..16)?.parse::<u32>().ok()?;
-    let second = value.get(17..19)?.parse::<u32>().ok()?;
-    if value.as_bytes().get(4) != Some(&b'-')
-        || value.as_bytes().get(7) != Some(&b'-')
-        || value.as_bytes().get(10) != Some(&b'T')
-        || value.as_bytes().get(13) != Some(&b':')
-        || value.as_bytes().get(16) != Some(&b':')
-        || !(1..=12).contains(&month)
-        || !(1..=days_in_month(year, month)).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 59
-    {
-        return None;
-    }
-
-    let days = days_before_year(year) + days_before_month(year, month) + i64::from(day - 1);
-    Some(days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second))
-}
-
-fn days_before_year(year: i64) -> i64 {
-    let years = year - 1970;
-    (years * 365) + leap_days_before_year(year) - leap_days_before_year(1970)
-}
-
-fn leap_days_before_year(year: i64) -> i64 {
-    let previous = year - 1;
-    previous / 4 - previous / 100 + previous / 400
-}
-
-fn days_before_month(year: i64, month: u32) -> i64 {
-    (1..month)
-        .map(|current| i64::from(days_in_month(year, current)))
-        .sum()
-}
-
-fn days_in_month(year: i64, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
-}
-
-fn is_leap_year(year: i64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
 fn session_credentials(session: &RemoteUploadSession) -> RemoteS3Credentials {
     RemoteS3Credentials {
         access_key_id: session.credentials.access_key_id.clone(),
@@ -1221,8 +1164,8 @@ mod tests {
                 }],
                 session: Some(RemoteUploadSession {
                     session_id: "SESSIONREFERENCE7890".to_string(),
-                    issued_at: "2026-07-09T11:30:00Z".to_string(),
-                    expires_at: "2026-07-09T19:30:00Z".to_string(),
+                    issued_at: "2099-07-09T11:30:00Z".to_string(),
+                    expires_at: "2099-07-09T19:30:00Z".to_string(),
                     credentials: RemoteSessionCredentials {
                         access_key_id: "DOSREMOTEACCESSKEY1234".to_string(),
                         secret_access_key: "super-secret".to_string(),

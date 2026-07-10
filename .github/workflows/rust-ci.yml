@@ -26,6 +26,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
+      - name: Check Rust module size budget
+        run: make module-size
+
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 

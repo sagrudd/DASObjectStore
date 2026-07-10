@@ -8,6 +8,7 @@ use crate::dashboard::{
     ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 use crate::object_stores_aggregator::registry_object_store_cards;
+use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
 use dasobjectstore_daemon::api::ApplianceTelemetryWindow;
 use dasobjectstore_daemon::{
     appliance_telemetry_state_path, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
@@ -1009,58 +1010,6 @@ fn mean_rate(values: &[f64]) -> u64 {
         return 0;
     }
     (values.iter().sum::<f64>() / values.len() as f64).round() as u64
-}
-
-fn parse_utc_timestamp_seconds(value: &str) -> Option<i64> {
-    let value = value.strip_suffix('Z')?;
-    let (date, time) = value.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year = date_parts.next()?.parse::<i32>().ok()?;
-    let month = date_parts.next()?.parse::<u32>().ok()?;
-    let day = date_parts.next()?.parse::<u32>().ok()?;
-    if date_parts.next().is_some() {
-        return None;
-    }
-    let time = time.split_once('.').map_or(time, |(whole, _)| whole);
-    let mut time_parts = time.split(':');
-    let hour = time_parts.next()?.parse::<u32>().ok()?;
-    let minute = time_parts.next()?.parse::<u32>().ok()?;
-    let second = time_parts.next()?.parse::<u32>().ok()?;
-    if time_parts.next().is_some()
-        || hour > 23
-        || minute > 59
-        || second > 59
-        || !(1..=12).contains(&month)
-    {
-        return None;
-    }
-    let month_day_count = days_in_month(year, month);
-    if day == 0 || day > month_day_count {
-        return None;
-    }
-    let mut days = 0i64;
-    for current_year in 1970..year {
-        days += if is_leap_year(current_year) { 366 } else { 365 };
-    }
-    for current_month in 1..month {
-        days += i64::from(days_in_month(year, current_month));
-    }
-    days += i64::from(day - 1);
-    Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
-}
-
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 #[derive(Debug, Deserialize)]

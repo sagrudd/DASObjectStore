@@ -10,7 +10,7 @@ FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
 REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
 GRAMMATEUS_REPORT_PROVIDER ?= grammateus_report_provider
 
-.PHONY: help pull build web web-screenshots report-provider test fmt check deb rpm remote remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots report-provider test fmt check module-size deb rpm remote remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -21,6 +21,7 @@ help:
 	@printf '  make report-provider Initialise the Grammateus/floundeR formal PDF report container\n'
 	@printf '  make test       Run the full Rust workspace test suite\n'
 	@printf '  make fmt        Format Rust sources\n'
+	@printf '  make module-size Check production Rust module size budget\n'
 	@printf '  make check      Run cargo check for the workspace\n'
 	@printf '  make deb        Build a Debian package under target/deb/\n'
 	@printf '  make rpm        Build an RPM package under target/rpm/rpmbuild/RPMS/\n'
@@ -96,6 +97,9 @@ test:
 
 fmt:
 	cargo fmt --all
+
+module-size:
+	bash tools/check-rust-module-size.sh
 
 check:
 	cargo check --workspace

@@ -11,6 +11,7 @@ use crate::api::{
 use dasobjectstore_core::remote_upload::{
     RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
 };
+use dasobjectstore_core::utc::parse_canonical_utc_timestamp_seconds;
 use std::{
     fmt, fs,
     path::{Component, Path, PathBuf},
@@ -944,61 +945,14 @@ fn remote_upload_s3_bytes_per_second(
     started_at_utc: &str,
     updated_at_utc: &str,
 ) -> Option<u64> {
-    let started = parse_utc_timestamp_seconds(started_at_utc)?;
-    let updated = parse_utc_timestamp_seconds(updated_at_utc)?;
+    let started = parse_canonical_utc_timestamp_seconds(started_at_utc.trim())?;
+    let updated = parse_canonical_utc_timestamp_seconds(updated_at_utc.trim())?;
     let elapsed = u64::try_from(updated.checked_sub(started)?).ok()?;
     if elapsed == 0 {
         return None;
     }
     let rate = bytes_done / elapsed;
     (rate > 0).then_some(rate)
-}
-
-fn parse_utc_timestamp_seconds(value: &str) -> Option<i64> {
-    let value = value.trim();
-    if value.len() != 20
-        || !value.ends_with('Z')
-        || value.get(4..5)? != "-"
-        || value.get(7..8)? != "-"
-        || value.get(10..11)? != "T"
-        || value.get(13..14)? != ":"
-        || value.get(16..17)? != ":"
-    {
-        return None;
-    }
-    let year = value.get(0..4)?.parse::<i64>().ok()?;
-    let month = value.get(5..7)?.parse::<u32>().ok()?;
-    let day = value.get(8..10)?.parse::<u32>().ok()?;
-    let hour = value.get(11..13)?.parse::<u32>().ok()?;
-    let minute = value.get(14..16)?.parse::<u32>().ok()?;
-    let second = value.get(17..19)?.parse::<u32>().ok()?;
-    if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 59
-    {
-        return None;
-    }
-    let days = days_from_civil(year, month, day);
-    Some(
-        days.saturating_mul(86_400)
-            .saturating_add(i64::from(hour) * 3_600)
-            .saturating_add(i64::from(minute) * 60)
-            .saturating_add(i64::from(second)),
-    )
-}
-
-fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let month = i64::from(month);
-    let day = i64::from(day);
-    let year = year - i64::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_prime = month + if month > 2 { -3 } else { 9 };
-    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
 }
 
 fn running_daemon_job_for_s3_transfer(
