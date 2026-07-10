@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.16 - 2026-07-10
+
+- Render daemon-provided source-read, SSD-write, and aggregate HDD-write
+  phase rates explicitly in the embedded ingest TUI.
+
 ## 0.69.15 - 2026-07-10
 
 - Add deterministic metadata fan-out coverage proving multiple physical-disk

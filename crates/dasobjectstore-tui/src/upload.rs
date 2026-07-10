@@ -331,7 +331,7 @@ where
 }
 
 fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'static>> {
-    vec![
+    let mut lines = vec![
         Line::from(format!("Job: {}", event.job_id)),
         Line::from(format!("Stage: {}", stage_label(&event.stage))),
         Line::from(format!(
@@ -379,7 +379,16 @@ fn detail_lines(event: &DaemonIngestProgressEvent, speed: &str) -> Vec<Line<'sta
             "Message: {}",
             event.message.clone().unwrap_or_else(|| "none".to_string())
         )),
-    ]
+    ];
+    if let Some(telemetry) = event.telemetry {
+        lines.push(Line::from(format!(
+            "Phase rates: source {}    SSD {}    HDD aggregate {}",
+            format_rate_label(telemetry.throughput.source_read_bytes_per_second),
+            format_rate_label(telemetry.throughput.ssd_write_bytes_per_second),
+            format_rate_label(telemetry.throughput.aggregate_hdd_write_bytes_per_second),
+        )));
+    }
+    lines
 }
 
 fn queue_lines(event: &DaemonIngestProgressEvent) -> Vec<Line<'static>> {
@@ -708,6 +717,7 @@ mod tests {
         assert!(details.contains("Data: 5.0 GiB/2.0 TiB"));
         assert!(details.contains("Work: 5.0 GiB/4.0 TiB"));
         assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
+        assert!(details.contains("Phase rates: source 0 B/s    SSD 0 B/s    HDD aggregate 0 B/s"));
         let queues = format!("{:?}", super::queue_lines(&event));
         assert!(queues.contains(
             "queues scan 0 source 7 SSD 0 HDD 2 verify 0; workers source 0 SSD 1 HDD 2 finalize 0; completed 1"
