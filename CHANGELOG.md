@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.70.0 - 2026-07-10
+
+- Add daemon-owned `store verify` health checks with optional in-flight payload
+  hashing, missing/orphan payload detection, size/hash mismatch reporting, and
+  duplicate placement findings.
+- Add guarded `store deduplicate` checksum scanning that records verified hashes
+  and removes only duplicate metadata rows after explicit confirmation; payload
+  files are never deleted automatically.
+- Allow `store contents STORE/PREFIX` targets and label directory/file entries
+  explicitly in text and JSON output.
+
 ## 0.69.75 - 2026-07-10
 
 - Wire `store repair` through the daemon request-family dispatcher so the

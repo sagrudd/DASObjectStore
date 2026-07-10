@@ -9,9 +9,9 @@ use crate::cli::{
     PerformanceFileSelection, PerformanceReportArgs, PerformanceScenarioSelection,
     PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
     ServiceCommand, ServiceRenderComposeArgs, StoreAdoptArgs, StoreCommand, StoreContentsArgs,
-    StoreCreateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs,
-    StoreListArgs, StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs, SubobjectArgs,
-    SubobjectCreateArgs,
+    StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
+    StoreIngestPolicyArgs, StoreListArgs, StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs,
+    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod command_handlers;
 mod disk_lockdown;
@@ -79,7 +79,8 @@ use self::store_read::{
     run_store_contents, run_store_defaults, run_store_list, run_store_s3_upload, run_store_validate,
 };
 use self::store_write::{
-    run_store_adopt, run_store_create, run_store_ingest_policy, run_store_repair,
+    run_store_adopt, run_store_create, run_store_deduplicate, run_store_ingest_policy,
+    run_store_repair, run_store_verify,
 };
 use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
@@ -99,11 +100,13 @@ use dasobjectstore_daemon::{
     DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
-    ObjectPutRequest as DaemonObjectPutRequest, StoreDeleteCommandReport,
+    ObjectPutRequest as DaemonObjectPutRequest,
+    StoreDeduplicateRequest as DaemonStoreDeduplicateRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
-    UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
+    StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
@@ -307,6 +310,8 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Drain(args)) => run_store_drain(args, writer),
             Some(StoreCommand::Delete(args)) => run_store_delete(args, writer),
             Some(StoreCommand::Repair(args)) => run_store_repair(args, writer),
+            Some(StoreCommand::Verify(args)) => run_store_verify(args, writer),
+            Some(StoreCommand::Deduplicate(args)) => run_store_deduplicate(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
             Some(StoreCommand::IngestPolicy(args)) => run_store_ingest_policy(args, writer),

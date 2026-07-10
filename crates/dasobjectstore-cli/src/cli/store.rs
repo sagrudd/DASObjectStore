@@ -3,6 +3,7 @@ use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::StoreClass;
 use dasobjectstore_object_service::RemoteS3AuthAuthority;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct StoreArgs {
@@ -30,6 +31,10 @@ pub(crate) enum StoreCommand {
     Delete(StoreDeleteArgs),
     /// Verify and, with explicit confirmation, rebuild live metadata from landed payloads.
     Repair(StoreRepairArgs),
+    /// Check live metadata and managed payload health without mutating state.
+    Verify(StoreVerifyArgs),
+    /// Find checksum-identical placement rows; apply only removes duplicate metadata rows.
+    Deduplicate(StoreDeduplicateArgs),
     /// Emit the built-in JSON policy defaults for a store class.
     Defaults(StoreDefaultsArgs),
     /// List system-managed object stores.
@@ -57,6 +62,58 @@ pub(crate) struct StoreRepairArgs {
     json: bool,
 }
 impl StoreRepairArgs {
+    pub(crate) fn store_id(&self) -> Option<&StoreId> {
+        self.store_id.as_ref()
+    }
+    pub(crate) fn apply(&self) -> bool {
+        self.apply
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreVerifyArgs {
+    /// Limit the scan to one ObjectStore; omit to inspect all registered stores.
+    store_id: Option<StoreId>,
+    /// Hash every landed payload and compare it with metadata.
+    #[arg(long)]
+    hash: bool,
+    /// Emit the verification report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+impl StoreVerifyArgs {
+    pub(crate) fn store_id(&self) -> Option<&StoreId> {
+        self.store_id.as_ref()
+    }
+    pub(crate) fn hash(&self) -> bool {
+        self.hash
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreDeduplicateArgs {
+    /// Limit the scan to one ObjectStore; omit to inspect all registered stores.
+    store_id: Option<StoreId>,
+    /// Remove duplicate metadata rows after recording verified hashes.
+    #[arg(long)]
+    apply: bool,
+    /// Required with --apply: "confirm store deduplicate".
+    #[arg(long, default_value = "")]
+    confirm: String,
+    /// Emit the deduplication report as JSON.
+    #[arg(long)]
+    json: bool,
+}
+impl StoreDeduplicateArgs {
     pub(crate) fn store_id(&self) -> Option<&StoreId> {
         self.store_id.as_ref()
     }
@@ -122,8 +179,8 @@ impl StoreIngestMode {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct StoreContentsArgs {
-    /// Store identifier whose contents should be inspected.
-    store_id: StoreId,
+    /// Store identifier, optionally followed by a slash-delimited folder/file prefix.
+    target: StoreContentsTarget,
     /// Render aggregate folder sizes, similar to du -h -d <n>.
     #[arg(long)]
     du: bool,
@@ -142,6 +199,32 @@ pub(crate) struct StoreContentsArgs {
     /// Advanced override for the live SQLite metadata path.
     #[arg(long, hide = true)]
     live_sqlite_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StoreContentsTarget {
+    store_id: StoreId,
+    prefix: Option<String>,
+}
+
+impl FromStr for StoreContentsTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let value = value.trim_matches('/');
+        let (store, prefix) = value
+            .split_once('/')
+            .map_or((value, None), |(store, prefix)| {
+                (store, Some(prefix.trim_matches('/').to_string()))
+            });
+        if store.is_empty() {
+            return Err("store target must include a store identifier".to_string());
+        }
+        Ok(Self {
+            store_id: StoreId::new(store).map_err(|error| error.to_string())?,
+            prefix: prefix.filter(|prefix| !prefix.is_empty()),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -430,7 +513,10 @@ impl StoreValidateArgs {
 }
 impl StoreContentsArgs {
     pub(crate) fn store_id(&self) -> &StoreId {
-        &self.store_id
+        &self.target.store_id
+    }
+    pub(crate) fn prefix(&self) -> Option<&str> {
+        self.target.prefix.as_deref()
     }
     pub(crate) fn du(&self) -> bool {
         self.du
@@ -530,6 +616,25 @@ mod tests {
             };
             assert!(matches!(args.command(), Some(StoreCommand::Contents(_))));
         }
+    }
+
+    #[test]
+    fn parses_store_contents_folder_target() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "contents",
+            "xenognostikon/PRJEB33511",
+        ])
+        .expect("parse contents target");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("store command");
+        };
+        let Some(StoreCommand::Contents(args)) = args.command() else {
+            panic!("contents command");
+        };
+        assert_eq!(args.store_id().as_str(), "xenognostikon");
+        assert_eq!(args.prefix(), Some("PRJEB33511"));
     }
 
     #[test]

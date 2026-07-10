@@ -14,6 +14,7 @@ mod hash;
 pub mod ingest;
 pub mod initialize;
 pub mod inspect;
+pub mod integrity;
 pub mod local_object_store;
 pub mod manifest;
 pub mod markers;
@@ -78,6 +79,11 @@ pub use initialize::{
     METADATA_DIR_NAME, SNAPSHOT_DIR_NAME,
 };
 pub use inspect::{inspect_pool_metadata, PoolInspectError, PoolInspectSummary};
+pub use integrity::{
+    deduplicate_live_metadata, verify_live_metadata, DeduplicateLiveMetadataError,
+    DeduplicateLiveMetadataReport, DeduplicateLiveMetadataRequest, VerifyLiveMetadataError,
+    VerifyLiveMetadataReport, VerifyLiveMetadataRequest,
+};
 pub use local_object_store::{
     existing_object_payload_candidate_paths, object_payload_path,
     put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,

@@ -308,6 +308,13 @@ list until every temporary size-budget exception has been removed.
 - [x] Add `dasobjectstore store repair` with read-only inspection by default and
   explicit daemon-authorized metadata rebuild, timestamped backup, atomic
   replacement, size-selected partial-duplicate reporting, and tests.
+- [x] Add daemon-owned `dasobjectstore store verify` health checks with optional
+  payload hashing, missing/orphan detection, mismatch reporting, and tests.
+- [x] Add guarded checksum-based `dasobjectstore store deduplicate`; only
+  duplicate metadata rows are removable after confirmation and payload files
+  are preserved.
+- [x] Support `store contents STORE/PREFIX` folder/file targets with explicit
+  directory/file rendering and scoped path output.
 
 ## Milestone 7: HDD Placement and Copy Verification
 

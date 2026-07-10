@@ -250,3 +250,93 @@ pub(super) fn run_store_repair(
     }
     Ok(())
 }
+
+pub(super) fn run_store_verify(
+    args: &StoreVerifyArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+    let response = client.store_verify(DaemonStoreVerifyRequest {
+        store_id: args.store_id().cloned(),
+        hash_payloads: args.hash(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        let report = response.report;
+        writeln!(writer, "ObjectStore verification")?;
+        writeln!(writer, "Metadata: {}", report.metadata_path)?;
+        writeln!(writer, "Healthy: {}", report.healthy)?;
+        writeln!(writer, "Objects: {}", report.objects_scanned)?;
+        writeln!(writer, "Placements: {}", report.placements_scanned)?;
+        writeln!(writer, "Payloads checked: {}", report.payloads_checked)?;
+        writeln!(writer, "Missing payloads: {}", report.missing_payloads)?;
+        writeln!(writer, "Orphan payloads: {}", report.orphan_payloads)?;
+        writeln!(writer, "Size mismatches: {}", report.size_mismatches)?;
+        writeln!(writer, "Hash mismatches: {}", report.hash_mismatches)?;
+        writeln!(
+            writer,
+            "Unverified placements: {}",
+            report.unverified_placements
+        )?;
+        writeln!(
+            writer,
+            "Duplicate content groups: {}",
+            report.duplicate_content_groups
+        )?;
+        writeln!(
+            writer,
+            "Duplicate placement rows: {}",
+            report.duplicate_placement_rows
+        )?;
+        writeln!(writer, "I/O errors: {}", report.io_errors)?;
+        for finding in report.findings {
+            writeln!(writer, "- {finding}")?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn run_store_deduplicate(
+    args: &StoreDeduplicateArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path.clone()));
+    let response = client.store_deduplicate(DaemonStoreDeduplicateRequest {
+        store_id: args.store_id().cloned(),
+        dry_run: !args.apply(),
+        confirmation: args.confirm().to_string(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        let report = response.report;
+        writeln!(writer, "ObjectStore deduplication")?;
+        writeln!(writer, "Metadata: {}", report.metadata_path)?;
+        writeln!(writer, "Dry run: {}", report.dry_run)?;
+        writeln!(writer, "Payloads hashed: {}", report.payloads_hashed)?;
+        writeln!(writer, "Hash errors: {}", report.hash_errors)?;
+        writeln!(
+            writer,
+            "Duplicate content groups: {}",
+            report.duplicate_content_groups
+        )?;
+        writeln!(
+            writer,
+            "Duplicate placement rows: {}",
+            report.duplicate_placement_rows
+        )?;
+        writeln!(
+            writer,
+            "Metadata rows removed: {}",
+            report.metadata_rows_removed
+        )?;
+        writeln!(writer, "Hashes recorded: {}", report.hashes_recorded)?;
+        writeln!(writer, "Warning: {}", report.warning)?;
+    }
+    Ok(())
+}

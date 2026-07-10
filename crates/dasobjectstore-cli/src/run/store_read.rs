@@ -12,6 +12,9 @@ pub(super) fn run_store_contents(
     let live_sqlite_path =
         resolve_store_live_sqlite_path(args.store_id(), args.live_sqlite_path(), None)?;
     let mut request = StoreContentsRequest::new(live_sqlite_path, args.store_id().clone());
+    if let Some(prefix) = args.prefix() {
+        request = request.with_prefix(prefix);
+    }
     if let Some(filter) = args.filter() {
         request = request.with_filter(filter);
     }
@@ -43,6 +46,9 @@ fn write_store_contents_du(
     if let Some(filter) = &snapshot.filter {
         writeln!(writer, "Filter: {filter}")?;
     }
+    if let Some(prefix) = &snapshot.prefix {
+        writeln!(writer, "Path: {prefix}")?;
+    }
     writeln!(writer, "Objects: {}", snapshot.objects.len())?;
     writeln!(
         writer,
@@ -50,8 +56,14 @@ fn write_store_contents_du(
         format_bytes(snapshot.total_size_bytes() as f64)
     )?;
     writeln!(writer, "Mode: du depth={depth}")?;
+    let single_file = snapshot.objects.len() == 1 && snapshot.objects[0].path.is_empty();
     for (path, size_bytes) in store_contents_du_entries(&snapshot.objects, depth) {
-        writeln!(writer, "{}\t{path}", format_bytes(size_bytes as f64))?;
+        let kind = if single_file { "FILE" } else { "DIR" };
+        writeln!(
+            writer,
+            "[{kind}]\t{}\t{path}",
+            format_bytes(size_bytes as f64)
+        )?;
     }
     Ok(())
 }
@@ -71,6 +83,9 @@ fn write_store_contents_tree(
     if let Some(filter) = &snapshot.filter {
         writeln!(writer, "Filter: {filter}")?;
     }
+    if let Some(prefix) = &snapshot.prefix {
+        writeln!(writer, "Path: {prefix}")?;
+    }
     writeln!(writer, "Objects: {}", snapshot.objects.len())?;
     writeln!(
         writer,
@@ -79,7 +94,11 @@ fn write_store_contents_tree(
     )?;
     writeln!(writer, "Mode: tree depth={depth}")?;
     let tree = StoreContentsTreeNode::from_objects(&snapshot.objects);
-    writeln!(writer, ". {}", format_bytes(tree.size_bytes as f64))?;
+    if tree.children.is_empty() && tree.file_size_bytes.is_some() {
+        writeln!(writer, "[FILE] . {}", format_bytes(tree.size_bytes as f64))?;
+    } else {
+        writeln!(writer, "[DIR] . {}", format_bytes(tree.size_bytes as f64))?;
+    }
     write_store_contents_tree_children(&tree, 1, depth, writer)
 }
 
@@ -145,13 +164,13 @@ fn write_store_contents_tree_children(
         if child.children.is_empty() {
             writeln!(
                 writer,
-                "{indent}- {name} {}",
+                "{indent}[FILE] {name} {}",
                 format_bytes(child.size_bytes as f64)
             )?;
         } else {
             writeln!(
                 writer,
-                "{indent}- {name}/ {}",
+                "{indent}[DIR] {name}/ {}",
                 format_bytes(child.size_bytes as f64)
             )?;
             write_store_contents_tree_children(child, current_depth + 1, max_depth, writer)?;

@@ -30,8 +30,9 @@ use crate::api::{
     RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
+    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
@@ -142,6 +143,26 @@ where
         match self.send(DaemonApiRequest::StoreRepair(request))? {
             DaemonApiResponse::StoreRepair(response) => Ok(response),
             response => Err(unexpected("store_repair", response)),
+        }
+    }
+
+    pub fn store_verify(
+        &self,
+        request: StoreVerifyRequest,
+    ) -> Result<StoreVerifyResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::StoreVerify(request))? {
+            DaemonApiResponse::StoreVerify(response) => Ok(response),
+            response => Err(unexpected("store_verify", response)),
+        }
+    }
+
+    pub fn store_deduplicate(
+        &self,
+        request: StoreDeduplicateRequest,
+    ) -> Result<StoreDeduplicateResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::StoreDeduplicate(request))? {
+            DaemonApiResponse::StoreDeduplicate(response) => Ok(response),
+            response => Err(unexpected("store_deduplicate", response)),
         }
     }
 
@@ -491,6 +512,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::StoreDelete(_) => "store_delete",
+        DaemonApiResponse::StoreVerify(_) => "store_verify",
+        DaemonApiResponse::StoreDeduplicate(_) => "store_deduplicate",
         DaemonApiResponse::StoreRepair(_) => "store_repair",
         DaemonApiResponse::ObjectPut(_) => "object_put",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",

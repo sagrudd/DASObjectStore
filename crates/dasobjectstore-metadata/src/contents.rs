@@ -10,6 +10,7 @@ pub struct StoreContentsRequest {
     pub live_sqlite_path: PathBuf,
     pub store_id: StoreId,
     pub filter: Option<String>,
+    pub prefix: Option<String>,
 }
 
 impl StoreContentsRequest {
@@ -18,11 +19,17 @@ impl StoreContentsRequest {
             live_sqlite_path: live_sqlite_path.into(),
             store_id,
             filter: None,
+            prefix: None,
         }
     }
 
     pub fn with_filter(mut self, filter: impl Into<String>) -> Self {
         self.filter = Some(filter.into());
+        self
+    }
+
+    pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = Some(prefix.into().trim_matches('/').to_string());
         self
     }
 }
@@ -32,6 +39,7 @@ pub struct StoreContentsSnapshot {
     pub live_sqlite_path: PathBuf,
     pub store_id: StoreId,
     pub filter: Option<String>,
+    pub prefix: Option<String>,
     pub objects: Vec<StoreContentsObject>,
 }
 
@@ -48,6 +56,7 @@ impl StoreContentsSnapshot {
 pub struct StoreContentsObject {
     pub object_id: String,
     pub path: String,
+    pub kind: String,
     pub object_type: String,
     pub state: String,
     pub size_bytes: u64,
@@ -69,6 +78,7 @@ pub fn read_store_contents(
             live_sqlite_path: request.live_sqlite_path.clone(),
             store_id: request.store_id.clone(),
             filter: request.filter.clone(),
+            prefix: request.prefix.clone(),
             objects: Vec::new(),
         });
     }
@@ -84,6 +94,13 @@ pub fn read_store_contents(
     while let Some(row) = rows.next()? {
         let object_id = row.get::<_, String>(0)?;
         let path = relative_object_path(&request.store_id, &object_id);
+        if request
+            .prefix
+            .as_ref()
+            .is_some_and(|prefix| path != *prefix && !path.starts_with(&format!("{prefix}/")))
+        {
+            continue;
+        }
         if filter
             .as_ref()
             .is_some_and(|regex| !regex.is_match(&path) && !regex.is_match(&object_id))
@@ -91,9 +108,19 @@ pub fn read_store_contents(
             continue;
         }
         let size_bytes = checked_size_bytes(row.get::<_, i64>(3)?)?;
+        let display_path = request.prefix.as_ref().map_or_else(
+            || path.clone(),
+            |prefix| {
+                path.strip_prefix(prefix)
+                    .unwrap_or(&path)
+                    .trim_matches('/')
+                    .to_string()
+            },
+        );
         objects.push(StoreContentsObject {
             object_id,
-            path,
+            path: display_path,
+            kind: "file".to_string(),
             object_type: row.get(1)?,
             state: row.get(2)?,
             size_bytes,
@@ -105,6 +132,7 @@ pub fn read_store_contents(
         live_sqlite_path: request.live_sqlite_path.clone(),
         store_id: request.store_id.clone(),
         filter: request.filter.clone(),
+        prefix: request.prefix.clone(),
         objects,
     })
 }
@@ -266,6 +294,40 @@ mod tests {
 
         assert_eq!(snapshot.objects.len(), 1);
         assert_eq!(snapshot.objects[0].path, "raw/sample.pod5");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn scopes_contents_to_a_folder_prefix_and_rebases_paths() {
+        let root = temp_root("contents-prefix");
+        let live_sqlite_path = create_live_sqlite(&root);
+        insert_object(
+            &live_sqlite_path,
+            "zymo_fecal_2025.05/PRJEB33511/sample-one.pod5",
+            128,
+            "pod5",
+        );
+        insert_object(
+            &live_sqlite_path,
+            "zymo_fecal_2025.05/PRJNA1011899/sample-two.pod5",
+            256,
+            "pod5",
+        );
+
+        let snapshot = read_store_contents(
+            &StoreContentsRequest::new(
+                &live_sqlite_path,
+                StoreId::new("zymo_fecal_2025.05").expect("store id"),
+            )
+            .with_prefix("PRJEB33511"),
+        )
+        .expect("contents read");
+
+        assert_eq!(snapshot.objects.len(), 1);
+        assert_eq!(snapshot.objects[0].path, "sample-one.pod5");
+        assert_eq!(snapshot.objects[0].kind, "file");
+        assert_eq!(snapshot.total_size_bytes(), 128);
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

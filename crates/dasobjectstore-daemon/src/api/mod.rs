@@ -15,8 +15,10 @@ mod object_store;
 mod remote_easyconnect;
 mod service;
 mod storage_mutation;
+mod store_deduplicate;
 mod store_policy;
 mod store_repair;
+mod store_verify;
 mod stores;
 
 pub use appliance_telemetry::{
@@ -133,6 +135,10 @@ pub use storage_mutation::{
     StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError, STORE_DELETE_CONFIRMATION,
     STORE_DRAIN_CONFIRMATION,
 };
+pub use store_deduplicate::{
+    StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
+    StoreDeduplicateValidationError, STORE_DEDUPLICATE_CONFIRMATION,
+};
 pub use store_policy::{
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
     UpdateObjectStoreIngestPolicyValidationError, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -141,6 +147,7 @@ pub use store_repair::{
     StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairValidationError,
     STORE_REPAIR_CONFIRMATION,
 };
+pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 
 use serde::{Deserialize, Serialize};
@@ -154,6 +161,8 @@ pub enum DaemonApiRequest {
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
     StoreDelete(StoreDeleteRequest),
+    StoreVerify(StoreVerifyRequest),
+    StoreDeduplicate(StoreDeduplicateRequest),
     StoreRepair(StoreRepairRequest),
     ObjectPut(ObjectPutRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
@@ -201,6 +210,13 @@ impl DaemonApiRequest {
                     .validate()
                     .map_err(|_| DaemonRequestValidationError::ConfirmationMismatch {
                         expected: STORE_REPAIR_CONFIRMATION,
+                    })
+            }
+            Self::StoreDeduplicate(request) => {
+                request
+                    .validate()
+                    .map_err(|_| DaemonRequestValidationError::ConfirmationMismatch {
+                        expected: STORE_DEDUPLICATE_CONFIRMATION,
                     })
             }
             Self::ObjectPut(request) => request.validate().map_err(object_put_validation_error),
@@ -253,6 +269,7 @@ impl DaemonApiRequest {
                 .map_err(remote_easyconnect_validation_error),
             Self::HealthSummary(_)
             | Self::StoreInventory(_)
+            | Self::StoreVerify(_)
             | Self::IngestJobStatus(_)
             | Self::JobList(_)
             | Self::JobStatus(_)
@@ -273,6 +290,8 @@ pub enum DaemonApiResponse {
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     StoreDelete(StoreDeleteResponse),
+    StoreVerify(StoreVerifyResponse),
+    StoreDeduplicate(StoreDeduplicateResponse),
     StoreRepair(StoreRepairResponse),
     ObjectPut(ObjectPutResponse),
     IngestQueueDrain(IngestQueueDrainResponse),

@@ -18,6 +18,18 @@ The default view is a size summary similar to ``du -h -d 1``:
 
    dasobjectstore store contents zymo_fecal_2025.05
 
+Scope directly to a folder or file by appending its relative path to the
+store target. Paths in the scoped report are rebased beneath that target:
+
+.. code-block:: console
+
+   dasobjectstore store contents xenognostikon/PRJEB33511
+   dasobjectstore store contents xenognostikon/PRJEB33511 --tree -d 2
+
+Text output labels entries explicitly as ``[DIR]`` or ``[FILE]``. JSON output
+also includes ``kind: "file"`` for each object entry; aggregate directory
+entries are represented by the text ``du`` view.
+
 Use ``--depth`` or ``-d`` to control aggregation depth:
 
 .. code-block:: console

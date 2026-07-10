@@ -35,3 +35,29 @@ has completed.
 
 If a repair reports partial duplicates, keep the source media and the payload
 files intact and investigate the corresponding ingest job before retrying.
+
+Verification and checksum cleanup
+---------------------------------
+
+Use the read-only health check to find missing payloads, orphan payloads,
+size/hash mismatches, and duplicate placement rows:
+
+.. code-block:: console
+
+   dasobjectstore store verify xenognostikon
+   dasobjectstore store verify xenognostikon --hash --json
+
+``--hash`` reads each landed payload and compares its SHA-256 checksum with
+metadata. To record those checksums and remove only checksum-identical
+placement rows on the same disk, run a dry run first and then confirm the
+explicit metadata-only cleanup:
+
+.. code-block:: console
+
+   dasobjectstore store deduplicate xenognostikon --json
+   dasobjectstore store deduplicate xenognostikon --apply \
+     --confirm "confirm store deduplicate"
+
+Deduplication never deletes payload files. Any removed metadata row is therefore
+reported as an orphan on the next verification until an operator separately
+reviews the physical file.

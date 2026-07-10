@@ -67,6 +67,20 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::StoreVerify(request) => match handler.store_verify_for_actor(request) {
+            Ok(response) => Ok(DaemonApiResponse::StoreVerify(response)),
+            Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                code, message,
+            ))),
+        },
+        DaemonApiRequest::StoreDeduplicate(request) => {
+            match handler.store_deduplicate_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::StoreDeduplicate(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::ObjectPut(request) => {
             match handler.object_put_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::ObjectPut(response)),
@@ -419,24 +433,7 @@ where
                 ));
             }
         }
-        let definitions =
-            dasobjectstore_object_service::read_store_registry(&self.store_registry_path)
-                .map_err(|error| ("store_repair_failed", error.to_string()))?;
-        let store_definitions = definitions
-            .into_iter()
-            .map(|definition| {
-                let class = definition.policy.class.name().to_string();
-                let policy_json = serde_json::to_string(&definition.policy)
-                    .map_err(|error| ("store_repair_failed", error.to_string()))?;
-                Ok(dasobjectstore_metadata::RecoveryStoreDefinition {
-                    store_id: definition.store_id,
-                    class,
-                    policy_json,
-                })
-            })
-            .collect::<Result<Vec<_>, (&'static str, String)>>()?;
-        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
-            .map_err(|error| ("store_repair_failed", error.to_string()))?;
+        let (store_definitions, disk_roots) = self.recovery_inputs("store_repair_failed")?;
         let report = dasobjectstore_metadata::recover_live_metadata(
             &dasobjectstore_metadata::RecoverLiveMetadataRequest {
                 live_sqlite_path: self.live_sqlite_path.clone(),
@@ -463,6 +460,121 @@ where
                 warning: report.warning,
             },
         })
+    }
+
+    fn store_verify_for_actor(
+        &self,
+        request: StoreVerifyRequest,
+    ) -> Result<StoreVerifyResponse, (&'static str, String)> {
+        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
+            .map_err(|error| ("store_verify_failed", error.to_string()))?;
+        let report = dasobjectstore_metadata::verify_live_metadata(
+            &dasobjectstore_metadata::VerifyLiveMetadataRequest {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                disk_roots,
+                store_id: request.store_id.map(|id| id.as_str().to_string()),
+                hash_payloads: request.hash_payloads,
+            },
+        )
+        .map_err(|error| ("store_verify_failed", error.to_string()))?;
+        Ok(StoreVerifyResponse {
+            report: StoreVerifyReport {
+                metadata_path: report.metadata_path.display().to_string(),
+                stores_scanned: report.stores_scanned,
+                objects_scanned: report.objects_scanned,
+                placements_scanned: report.placements_scanned,
+                payloads_checked: report.payloads_checked,
+                payload_bytes_checked: report.payload_bytes_checked,
+                missing_payloads: report.missing_payloads,
+                orphan_payloads: report.orphan_payloads,
+                size_mismatches: report.size_mismatches,
+                hash_mismatches: report.hash_mismatches,
+                unverified_placements: report.unverified_placements,
+                duplicate_content_groups: report.duplicate_content_groups,
+                duplicate_placement_rows: report.duplicate_placement_rows,
+                io_errors: report.io_errors,
+                healthy: report.healthy,
+                findings: report.findings,
+            },
+        })
+    }
+
+    fn store_deduplicate_for_actor(
+        &self,
+        request: StoreDeduplicateRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<StoreDeduplicateResponse, (&'static str, String)> {
+        if !request.dry_run {
+            let Some(actor) = actor else {
+                return Err((
+                    "administrator_authentication_required",
+                    "store deduplicate requires an authenticated local administrator".to_string(),
+                ));
+            };
+            if !actor.is_administrator() {
+                return Err((
+                    "administrator_authorization_required",
+                    "store deduplicate requires root, sudo, or dasobjectstore-admin membership"
+                        .to_string(),
+                ));
+            }
+        }
+        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
+            .map_err(|error| ("store_deduplicate_failed", error.to_string()))?;
+        let report = dasobjectstore_metadata::deduplicate_live_metadata(
+            &dasobjectstore_metadata::DeduplicateLiveMetadataRequest {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                disk_roots,
+                store_id: request.store_id.map(|id| id.as_str().to_string()),
+                dry_run: request.dry_run,
+                recorded_at_utc: self.clock.now_utc(),
+            },
+        )
+        .map_err(|error| ("store_deduplicate_failed", error.to_string()))?;
+        Ok(StoreDeduplicateResponse {
+            report: StoreDeduplicateReport {
+                metadata_path: report.metadata_path.display().to_string(),
+                dry_run: report.dry_run,
+                payloads_hashed: report.payloads_hashed,
+                hash_errors: report.hash_errors,
+                duplicate_content_groups: report.duplicate_content_groups,
+                duplicate_placement_rows: report.duplicate_placement_rows,
+                metadata_rows_removed: report.metadata_rows_removed,
+                hashes_recorded: report.hashes_recorded,
+                warning: report.warning,
+            },
+        })
+    }
+
+    fn recovery_inputs(
+        &self,
+        error_code: &'static str,
+    ) -> Result<
+        (
+            Vec<dasobjectstore_metadata::RecoveryStoreDefinition>,
+            Vec<dasobjectstore_metadata::DiskCopyRoot>,
+        ),
+        (&'static str, String),
+    > {
+        let definitions =
+            dasobjectstore_object_service::read_store_registry(&self.store_registry_path)
+                .map_err(|error| (error_code, error.to_string()))?;
+        let store_definitions = definitions
+            .into_iter()
+            .map(|definition| {
+                let class = definition.policy.class.name().to_string();
+                let policy_json = serde_json::to_string(&definition.policy)
+                    .map_err(|error| (error_code, error.to_string()))?;
+                Ok(dasobjectstore_metadata::RecoveryStoreDefinition {
+                    store_id: definition.store_id,
+                    class,
+                    policy_json,
+                })
+            })
+            .collect::<Result<Vec<_>, (&'static str, String)>>()?;
+        let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
+            .map_err(|error| (error_code, error.to_string()))?;
+        Ok((store_definitions, disk_roots))
     }
 
     fn object_put_for_actor(
