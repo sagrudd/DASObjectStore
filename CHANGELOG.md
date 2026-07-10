@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.59 - 2026-07-10
+
+- Extract Store create/adopt runtime handlers into a dedicated CLI write
+  module while preserving validation and registry behavior.
+
 ## 0.69.58 - 2026-07-10
 
 - Extract SubObject CLI runtime handlers and registry report helpers into a

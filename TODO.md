@@ -96,6 +96,9 @@ list until every temporary size-budget exception has been removed.
     top-level runner.
   - [x] Extract SubObject create/list/search runtime handlers and report
     helpers into `crates/dasobjectstore-cli/src/run/subobject.rs`.
+  - [x] Extract Store create/adopt runtime handlers into
+    `crates/dasobjectstore-cli/src/run/store_write.rs`, retaining shared
+    validation and registry helpers behind narrow calls.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
