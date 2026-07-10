@@ -159,6 +159,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract standalone route composition into
     `crates/dasobjectstore-gui-api/src/auth_router.rs`, leaving handlers and
     validation logic behind a narrow routing façade.
+  - [x] Extract GUI daemon-client submission adapters into
+    `crates/dasobjectstore-gui-api/src/auth_clients.rs`, consolidating
+    unavailable-daemon and bad-gateway error mapping.
   - [x] Extract the shared authentication/admin request and response DTOs into
     `crates/dasobjectstore-gui-api/src/auth_contracts.rs` without changing JSON
     shapes or route behavior.

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.65 - 2026-07-10
+
+- Extract GUI authentication daemon-client submission adapters into
+  `auth_clients.rs` and consolidate their unavailable-client error mapping.
+
 ## 0.69.64 - 2026-07-10
 
 - Extract standalone GUI API route composition into `auth_router.rs`, keeping
