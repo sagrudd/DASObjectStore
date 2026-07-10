@@ -63,6 +63,7 @@ fn run_authenticate(
         args.host_or_ip(),
         args.https_port(),
         args.ca_cert(),
+        args.tls_server_name(),
         &username,
         &password,
         args.object_store(),

@@ -98,7 +98,8 @@ returns a single-store, eight-hour Garage context:
 .. code-block:: console
 
    dasobjectstore-remote authenticate 192.168.1.192 porkchop \
-     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem --json
+     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem \
+     --tls-server-name localhost --json
 
 The JSON output contains the path-style S3 endpoint, ``garage`` region,
 derived bucket, temporary credentials, expiry, and renewal metadata. Secrets
@@ -106,6 +107,10 @@ are emitted only with explicit ``--json``; normal output is redacted. The
 password is never stored, sent to Garage, or included in process arguments.
 The client verifies HTTPS certificates using the system trust store or the
 explicit PEM passed with ``--ca-cert``; it has no insecure TLS bypass.
+The packaged development certificate is commonly self-signed for ``localhost``
+and therefore requires both the certificate file and
+``--tls-server-name localhost`` when connecting by IP. Production deployments
+should use a CA-issued certificate whose DNS name matches the appliance host.
 
 The server-side easyconnect contract is defined as stable daemon/API DTOs for
 the following operations:

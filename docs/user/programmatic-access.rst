@@ -20,7 +20,8 @@ password in shell history or a credentials file:
 .. code-block:: console
 
    dasobjectstore-remote authenticate 192.168.1.192 porkchop \
-     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem --json
+     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem \
+     --tls-server-name localhost --json
 
 The command prompts for the password with terminal echo disabled and sends it
 only over verified HTTPS to the standalone appliance API. The response is a

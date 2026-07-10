@@ -104,6 +104,9 @@ pub struct AuthenticateArgs {
     /// PEM CA certificate used to verify the appliance HTTPS certificate.
     #[arg(long)]
     ca_cert: Option<PathBuf>,
+    /// TLS certificate name when the appliance certificate is not issued to its IP.
+    #[arg(long)]
+    tls_server_name: Option<String>,
     /// Requested session lifetime; defaults to the appliance policy (8 hours).
     #[arg(long)]
     session_lifetime_seconds: Option<u64>,
@@ -127,6 +130,9 @@ impl AuthenticateArgs {
     }
     pub fn ca_cert(&self) -> Option<&Path> {
         self.ca_cert.as_deref()
+    }
+    pub fn tls_server_name(&self) -> Option<&str> {
+        self.tls_server_name.as_deref()
     }
     pub fn session_lifetime_seconds(&self) -> Option<u64> {
         self.session_lifetime_seconds

@@ -5,6 +5,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
+use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::time::Duration;
 
@@ -134,6 +135,7 @@ pub fn authenticate(
     host: &str,
     https_port: u16,
     ca_cert: Option<&Path>,
+    tls_server_name: Option<&str>,
     username: &str,
     password: &str,
     object_store: &str,
@@ -157,6 +159,30 @@ pub fn authenticate(
     }
 
     let mut builder = Client::builder().timeout(Duration::from_secs(20));
+    let request_host = tls_server_name.unwrap_or(&host);
+    if let Some(tls_server_name) = tls_server_name {
+        if tls_server_name.trim().is_empty()
+            || tls_server_name.contains('/')
+            || tls_server_name.contains('@')
+            || tls_server_name.contains(' ')
+        {
+            return Err(RemoteAuthenticateError::InvalidHost(
+                "TLS server name must be a DNS name, not a URL or credential".to_string(),
+            ));
+        }
+        let socket = format!("{host}:{https_port}")
+            .to_socket_addrs()
+            .map_err(|error| {
+                RemoteAuthenticateError::Http(format!("resolve appliance host: {error}"))
+            })?
+            .next()
+            .ok_or_else(|| {
+                RemoteAuthenticateError::Http(
+                    "resolve appliance host returned no address".to_string(),
+                )
+            })?;
+        builder = builder.resolve(tls_server_name, socket);
+    }
     if let Some(ca_cert) = ca_cert {
         let certificate = reqwest::Certificate::from_pem(&fs::read(ca_cert)?).map_err(|error| {
             RemoteAuthenticateError::Http(format!("read CA certificate: {error}"))
@@ -166,8 +192,9 @@ pub fn authenticate(
     let client = builder
         .build()
         .map_err(|error| RemoteAuthenticateError::Http(format!("build HTTPS client: {error}")))?;
-    let url =
-        format!("https://{host}:{https_port}/products/dasobjectstore/api/v1/remote/authenticate");
+    let url = format!(
+        "https://{request_host}:{https_port}/products/dasobjectstore/api/v1/remote/authenticate"
+    );
     let response = client
         .post(url)
         .json(&RemoteAuthenticateRequest {
@@ -177,9 +204,7 @@ pub fn authenticate(
             requested_session_lifetime_seconds,
         })
         .send()
-        .map_err(|error| {
-            RemoteAuthenticateError::Http(format!("HTTPS authentication request failed: {error}"))
-        })?;
+        .map_err(|error| RemoteAuthenticateError::Http(request_error_message(error)))?;
     let status = response.status();
     if !status.is_success() {
         let message = response
@@ -241,6 +266,14 @@ fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
 fn redact(value: &str) -> String {
     let prefix = value.chars().take(4).collect::<String>();
     format!("{prefix}...redacted")
+}
+
+fn request_error_message(error: reqwest::Error) -> String {
+    let debug = format!("{error:?}").to_ascii_lowercase();
+    if debug.contains("certificate") || debug.contains("tls") {
+        return "HTTPS authentication failed during certificate verification; pass --ca-cert with the appliance certificate and --tls-server-name matching its certificate (the packaged appliance certificate commonly uses localhost)".to_string();
+    }
+    format!("HTTPS authentication request failed: {error}")
 }
 
 fn absolute_renew_url(host: &str, https_port: u16, path: &str) -> String {
