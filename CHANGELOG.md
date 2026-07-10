@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.47 - 2026-07-10
+
+- Isolate remote-upload transfer execution and daemon job lifecycle handling
+  behind a dedicated runtime module.
+
 ## 0.69.46 - 2026-07-10
 
 - Extract GUI API authentication and administration contracts into a dedicated

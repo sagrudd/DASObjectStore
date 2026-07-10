@@ -92,7 +92,7 @@ list until every temporary size-budget exception has been removed.
   disk retirement, and other managed mutations still performed by the CLI.
   Do not redirect a CLI command to an acceptance-only daemon request unless the
   daemon actually performs and reports the requested operation.
-- [ ] Split remote-upload runtime into admission, transfer/progress, and
+- [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.
   - [x] Extract cancellation cleanup planning, safe managed-path removal,
@@ -104,6 +104,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract transfer progress reporting, telemetry enrichment, short-window
     S3 rate calculation, and progress messages into
     `crates/dasobjectstore-daemon/src/runtime/remote_upload/progress.rs`.
+  - [x] Extract the admission-gated transfer worker, typed byte-transfer
+    adapter, daemon job lifecycle events, and failure cleanup orchestration
+    into `crates/dasobjectstore-daemon/src/runtime/remote_upload/transfer.rs`.
 - [ ] Split GUI API authentication routes into router/auth, contracts, daemon
   clients, local-group administration, enclosure administration, and reporting
   modules; consolidate repeated confirmation and client-error adapters.
