@@ -18,11 +18,11 @@ use crate::api::{
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, StoreDeleteCommandReport, StoreDeleteRequest,
-    StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse, StoreInventoryItem,
-    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
+    StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -35,20 +35,19 @@ use crate::runtime::{
     default_ssd_root, provision_garage_store_registry, query_object_browser_metadata,
     read_object_browser_metadata, remote_easyconnect_pairing_store_path,
     remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
-    resolve_object_folder_download_with_hdd_root, session_credentials_from_store_credentials,
-    submit_ingest_files_to_local_store_with_progress, upsert_endpoint_inventory_record,
-    AdminJobRegistry, ApplianceTelemetrySampleSet, DaemonIngestFilesRuntimeError,
-    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
-    FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
-    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
-    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    resolve_object_folder_download_with_hdd_root, submit_ingest_files_to_local_store_with_progress,
+    upsert_endpoint_inventory_record, AdminJobRegistry, ApplianceTelemetrySampleSet,
+    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
+    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -59,10 +58,9 @@ use dasobjectstore_metadata::{
 };
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
-    delete_store_definition, delete_subobjects_for_store, generate_per_store_credentials,
-    portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
+    delete_store_definition, delete_subobjects_for_store, portable_store_registry_path,
+    portable_subobject_registry_path, read_managed_credential_registry, read_store_registry,
     read_subobject_registry, upsert_store_definition, ObjectServiceError, ObjectServiceProviderId,
-    StoreCredentialRequest, SystemCredentialEntropy,
 };
 use std::fmt::{self, Display};
 use std::fs;
@@ -84,6 +82,7 @@ pub struct DaemonRequestHandler<S, C> {
     appliance_telemetry_state_path: PathBuf,
     remote_easyconnect_pairing_store_path: PathBuf,
     remote_easyconnect_session_store_path: PathBuf,
+    credential_registry_path: PathBuf,
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
 }
 
@@ -110,6 +109,8 @@ where
             remote_easyconnect_session_store_path: remote_easyconnect_session_store_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            credential_registry_path:
+                dasobjectstore_object_service::default_garage_credential_registry_path(),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
         }
     }
@@ -136,6 +137,8 @@ where
             remote_easyconnect_session_store_path: remote_easyconnect_session_store_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            credential_registry_path:
+                dasobjectstore_object_service::default_garage_credential_registry_path(),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
         }
     }
@@ -172,6 +175,11 @@ where
 
     pub fn with_remote_easyconnect_pairing_store_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.remote_easyconnect_pairing_store_path = path.into();
+        self
+    }
+
+    pub fn with_credential_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.credential_registry_path = path.into();
         self
     }
 
@@ -1353,7 +1361,9 @@ mod tests {
     use dasobjectstore_core::store::{ExportPolicy, IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
-        read_store_registry, ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
+        read_store_registry, write_managed_credential_registry, ManagedCredentialRegistry,
+        ManagedStoreCredentialRecord, ObjectServiceProviderId, ServiceState,
+        StoreServiceDefinition,
     };
     use rusqlite::{params, Connection};
     use std::cell::RefCell;
@@ -3078,12 +3088,33 @@ mod tests {
         let root = temp_root("remote-easyconnect-pairing-exchange");
         let pairing_store_path = remote_easyconnect_pairing_store_path(&root);
         let session_store_path = remote_easyconnect_session_store_path(&root);
+        let credential_registry_path = root.join("garage-credentials.json");
+        write_managed_credential_registry(
+            &credential_registry_path,
+            &ManagedCredentialRegistry {
+                format_version: 1,
+                updated_at_utc: "2026-07-09T16:20:00Z".to_string(),
+                credentials: vec![ManagedStoreCredentialRecord {
+                    store_id: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    bucket_name: "dos-zymo-fecal-2025-05".to_string(),
+                    credential_reference: "garage-ref-zymo".to_string(),
+                    access_key_id: "DOSMANAGEDKEY".to_string(),
+                    secret_access_key: "managed-secret".to_string(),
+                    issued_at_utc: "2026-07-09T16:20:00Z".to_string(),
+                    rotated_at_utc: None,
+                    revision: 1,
+                }],
+                audit: Vec::new(),
+            },
+        )
+        .expect("credential registry written");
         let handler = DaemonRequestHandler::new(
             FakeService::default(),
             FixedDaemonClock::new("2026-07-09T16:20:00Z"),
         )
         .with_remote_easyconnect_pairing_store_path(&pairing_store_path)
-        .with_remote_easyconnect_session_store_path(&session_store_path);
+        .with_remote_easyconnect_session_store_path(&session_store_path)
+        .with_credential_registry_path(&credential_registry_path);
 
         let create = handler
             .handle(DaemonApiRequest::RemoteEasyconnectCreatePairing(
@@ -3135,12 +3166,11 @@ mod tests {
 
         assert_eq!(exchange.session.issued_at_utc, "2026-07-09T16:20:00Z");
         assert_eq!(exchange.session.expires_at_utc, "2026-07-10T00:20:00Z");
-        assert!(exchange
-            .session
-            .credentials
-            .access_key_id
-            .starts_with("DOS"));
-        assert!(!exchange.session.credentials.secret_access_key.is_empty());
+        assert_eq!(exchange.session.credentials.access_key_id, "DOSMANAGEDKEY");
+        assert_eq!(
+            exchange.session.credentials.secret_access_key,
+            "managed-secret"
+        );
         assert_eq!(exchange.object_stores[0].object_store, "zymo_fecal_2025.05");
         let stored = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path)
             .get(&exchange.session.session_id)

@@ -14,6 +14,23 @@ names, reuse a provider administrator key, or copy the daemon's managed
 credential registry. A store-specific grant is restricted by the appliance's
 read/write policy and can be rotated without changing application code.
 
+For direct workstation automation, authenticate one store without placing a
+password in shell history or a credentials file:
+
+.. code-block:: console
+
+   dasobjectstore-remote authenticate 192.168.1.192 porkchop \
+     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem --json
+
+The command prompts for the password with terminal echo disabled and sends it
+only over verified HTTPS to the standalone appliance API. The response is a
+store-scoped JSON connection context with an eight-hour session, Garage
+endpoint/region/path-style settings, derived bucket, temporary S3 credentials,
+expiry, and renewal metadata. Do not log or persist the JSON unless the
+calling process has an explicit secret-storage policy. Read-only grants are
+not issued by this command until Garage read-only credential provisioning is
+available; this prevents a managed read/write key from being escalated.
+
 For a configured AWS CLI profile, the remote client can list stores or render
 an upload plan without exposing secret values:
 

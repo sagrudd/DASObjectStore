@@ -1,4 +1,5 @@
 use dasobjectstore_daemon::RemoteEasyconnectAuthProvider;
+use dasobjectstore_daemon::RemoteEasyconnectSession;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -13,6 +14,29 @@ pub struct LoginRequest {
     pub username: String,
     pub password: String,
     pub session_ttl_seconds: Option<i64>,
+}
+
+/// Password-authenticated remote ObjectStore access request.
+///
+/// The password is accepted only for the duration of the request and is never
+/// persisted. The daemon returns a store-scoped temporary S3 session.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteAuthenticateRequest {
+    pub username: String,
+    pub password: String,
+    pub object_store: String,
+    pub requested_session_lifetime_seconds: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteAuthenticateResponse {
+    pub schema_version: String,
+    pub endpoint_port: u16,
+    pub region: String,
+    pub addressing_style: String,
+    pub object_store: String,
+    pub bucket: String,
+    pub session: RemoteEasyconnectSession,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

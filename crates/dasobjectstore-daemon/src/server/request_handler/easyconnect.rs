@@ -243,22 +243,32 @@ where
                 message: "approved pairing did not contain object store grants".to_string(),
             }
         })?;
-        let credential = generate_per_store_credentials(
-            &[StoreCredentialRequest {
-                store_id: StoreId::new(&first_grant.object_store).map_err(|error| {
-                    RemoteEasyconnectExchangeDispatchError::InvalidRequest {
-                        message: error.to_string(),
-                    }
-                })?,
-                bucket_name: first_grant.bucket.clone(),
-            }],
-            &mut SystemCredentialEntropy,
-        )
-        .map_err(RemoteEasyconnectExchangeDispatchError::ObjectService)?
-        .into_iter()
-        .next()
-        .expect("one credential request yields one credential");
-        let credentials = session_credentials_from_store_credentials(credential);
+        if !first_grant.can_write {
+            return Err(RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                message: "remote S3 sessions require a writable ObjectStore grant until Garage read-only credential provisioning is available".to_string(),
+            });
+        }
+        let registry =
+            read_managed_credential_registry(&self.credential_registry_path, exchanged_at_utc)
+                .map_err(RemoteEasyconnectExchangeDispatchError::ObjectService)?;
+        let managed = registry
+            .credentials
+            .iter()
+            .find(|record| {
+                record.store_id.as_str() == first_grant.object_store
+                    && record.bucket_name == first_grant.bucket
+            })
+            .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                message: format!(
+                    "ObjectStore {} has no provisioned Garage credential; run service provision before requesting remote access",
+                    first_grant.object_store
+                ),
+            })?;
+        let credentials = RemoteEasyconnectSessionCredentials {
+            access_key_id: managed.access_key_id.clone(),
+            secret_access_key: managed.secret_access_key.clone(),
+            session_token: None,
+        };
         let session_id = stable_easyconnect_id("session", &pairing.pairing_id, exchanged_at_utc);
         let renewal_token = rotated_easyconnect_renewal_token(&session_id, exchanged_at_utc);
         let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(

@@ -91,9 +91,21 @@ The command resolves the standalone Web application URL using HTTPS port
 client receives a one-time pairing result on its loopback callback listener. The
 exchange code is treated as secret-bearing material and is not printed.
 
-Server-side session exchange is the next implementation stage. Until that API
-is available, successful output states that the browser-approved callback was
-received and that session exchange is not yet implemented in the build.
+For non-browser automation, use the password-authenticated ObjectStore
+connection command. It prompts without echo, uses the appliance HTTPS API, and
+returns a single-store, eight-hour Garage context:
+
+.. code-block:: console
+
+   dasobjectstore-remote authenticate 192.168.1.192 porkchop \
+     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem --json
+
+The JSON output contains the path-style S3 endpoint, ``garage`` region,
+derived bucket, temporary credentials, expiry, and renewal metadata. Secrets
+are emitted only with explicit ``--json``; normal output is redacted. The
+password is never stored, sent to Garage, or included in process arguments.
+The client verifies HTTPS certificates using the system trust store or the
+explicit PEM passed with ``--ca-cert``; it has no insecure TLS bypass.
 
 The server-side easyconnect contract is defined as stable daemon/API DTOs for
 the following operations:
@@ -122,10 +134,12 @@ pasted into terminal commands or support tickets.
 The accessible ObjectStore list is filtered by the daemon before a remote
 session is issued. A remote user can only see ObjectStores that the same
 authenticated local account may read through public-read, reader-group,
-writer-group, or configured administrator-group policy. Upload permission is
-stricter: the store must be writable and the account must satisfy the daemon
-writer authorization policy, usually by membership in the ObjectStore writer
-group. Public-read access never grants upload rights by itself.
+writer-group, or configured administrator-group policy. The currently issued
+Garage session uses a provisioned managed read/write key, so the account must
+also satisfy the daemon writer authorization policy, usually by membership in
+the ObjectStore writer group. Public-read or reader-group access alone does not
+receive an S3 session until Garage read-only credential provisioning is
+available.
 
 Remote upload sessions default to eight hours. The appliance advertises that
 default in discovery and the remote client treats renewal as an explicit

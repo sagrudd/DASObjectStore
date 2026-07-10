@@ -1,9 +1,10 @@
 use crate::auth::{
     request_s3_credentials, RemoteAuthAuthority, RemoteAuthError, RemoteS3Credentials,
 };
+use crate::authenticate::{authenticate, RemoteAuthenticateError, RemoteConnectionContext};
 use crate::cli::{
-    ConfigCommand, EasyconnectArgs, RemoteCli, RemoteCommand, StoreListArgs, StoresCommand,
-    UploadArgs,
+    AuthenticateArgs, ConfigCommand, EasyconnectArgs, RemoteCli, RemoteCommand, StoreListArgs,
+    StoresCommand, UploadArgs,
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
@@ -33,6 +34,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
+        RemoteCommand::Authenticate(args) => run_authenticate(args, writer),
         RemoteCommand::Easyconnect(args) => run_easyconnect(args, writer),
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
@@ -43,6 +45,46 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         },
         RemoteCommand::Upload(args) => run_upload(cli, args, writer),
     }
+}
+
+fn run_authenticate(
+    args: &AuthenticateArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let username = args
+        .username()
+        .map(ToOwned::to_owned)
+        .or_else(|| std::env::var("USER").ok())
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting("username is required; pass --username".to_string())
+        })?;
+    let password = rpassword::prompt_password("DASObjectStore password: ")?;
+    let context = authenticate(
+        args.host_or_ip(),
+        args.https_port(),
+        args.ca_cert(),
+        &username,
+        &password,
+        args.object_store(),
+        args.session_lifetime_seconds(),
+    )?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &context)?;
+        writer.write_all(b"\n")?;
+    } else {
+        write_redacted_connection_context(&context, writer)?;
+    }
+    Ok(())
+}
+
+fn write_redacted_connection_context(
+    context: &RemoteConnectionContext,
+    writer: &mut impl Write,
+) -> Result<(), std::io::Error> {
+    serde_json::to_writer_pretty(&mut *writer, &context.redacted())?;
+    writer.write_all(b"\n")?;
+    writeln!(writer, "Credentials are redacted; rerun with --json only when a process must consume the temporary S3 context.")?;
+    Ok(())
 }
 
 fn run_easyconnect(args: &EasyconnectArgs, writer: &mut impl Write) -> Result<(), RemoteRunError> {
@@ -721,6 +763,7 @@ pub enum RemoteRunError {
     Easyconnect(RemoteEasyconnectContractError),
     EasyconnectPairing(RemoteEasyconnectPairingError),
     Auth(RemoteAuthError),
+    Authenticate(RemoteAuthenticateError),
     S3(RemoteS3Error),
     Daemon(DaemonClientError),
     Clock(String),
@@ -736,6 +779,7 @@ impl fmt::Display for RemoteRunError {
             Self::Easyconnect(error) => write!(formatter, "{error}"),
             Self::EasyconnectPairing(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
+            Self::Authenticate(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
             Self::Daemon(error) => write!(formatter, "{error}"),
             Self::Clock(error) => write!(formatter, "{error}"),
@@ -779,6 +823,12 @@ impl From<RemoteEasyconnectPairingError> for RemoteRunError {
 impl From<RemoteAuthError> for RemoteRunError {
     fn from(error: RemoteAuthError) -> Self {
         Self::Auth(error)
+    }
+}
+
+impl From<RemoteAuthenticateError> for RemoteRunError {
+    fn from(error: RemoteAuthenticateError) -> Self {
+        Self::Authenticate(error)
     }
 }
 

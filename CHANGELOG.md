@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.71 - 2026-07-10
+
+- Add password-authenticated remote ObjectStore access with verified HTTPS,
+  store-scoped eight-hour Garage connection contexts, explicit JSON secret
+  output, and persisted-credential validation.
+
 ## 0.69.70 - 2026-07-10
 
 - Add `store objects` and `store list-contents` aliases for the ObjectStore

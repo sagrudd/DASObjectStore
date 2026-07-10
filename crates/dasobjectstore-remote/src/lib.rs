@@ -1,6 +1,7 @@
 //! Remote DASObjectStore upload client.
 
 pub mod auth;
+pub mod authenticate;
 pub mod cli;
 pub mod config;
 pub mod easyconnect;

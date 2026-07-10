@@ -51,15 +51,18 @@ use dasobjectstore_daemon::{
     CreateLocalGroupResponse as DaemonCreateLocalGroupResponse,
     CreateObjectStoreRequest as DaemonCreateObjectStoreRequest,
     CreateObjectStoreResponse as DaemonCreateObjectStoreResponse, DaemonClient,
-    DaemonEndpointBinding, DaemonEndpointBindingReadiness, DaemonEndpointKind,
-    DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
-    DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminCommand,
-    DaemonRuntimeConfig, PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
+    DaemonEndpointBinding, DaemonEndpointKind, DaemonEndpointValidation,
+    DaemonEndpointValidationState, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
+    DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+    DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminCommand, DaemonRuntimeConfig,
+    PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
-    PrepareEnclosureResponse as DaemonPrepareEnclosureResponse, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
+    PrepareEnclosureResponse as DaemonPrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -482,6 +485,137 @@ async fn login(
         .create_session_for_authenticated_local_user(&request.username, request.session_ttl_seconds)
         .map(Json)
         .map_err(auth_route_error)
+}
+
+/// Authenticate a remote user and issue one daemon-owned, store-scoped S3
+/// session. The password is used only for this request and never crosses the
+/// daemon boundary or gets persisted in the remote-client configuration.
+async fn remote_authenticate(
+    State(state): State<StandaloneAuthRouteState>,
+    Json(request): Json<RemoteAuthenticateRequest>,
+) -> Result<Json<RemoteAuthenticateResponse>, (StatusCode, Json<AuthRouteError>)> {
+    validate_remote_authenticate_request(&request)?;
+    state
+        .local_password_authenticator
+        .authenticate(&request.username, &request.password)
+        .map_err(local_password_auth_route_error)?;
+
+    let current_user = discover_local_user(&request.username).map_err(|error| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "local_user_discovery_failed",
+            error.to_string(),
+        )
+    })?;
+    let workspace = crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
+        current_user.username.clone(),
+        current_user.groups.clone(),
+        current_user.sudo_administrator,
+    );
+    let store = workspace
+        .stores
+        .iter()
+        .find(|store| store.store_id == request.object_store)
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::FORBIDDEN,
+                "object_store_not_authorized",
+                "the authenticated user has no remote access to the requested ObjectStore",
+            )
+        })?;
+    if !store.upload_allowed {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "object_store_write_authorization_required",
+            "remote S3 sessions currently require a writable ObjectStore grant",
+        ));
+    }
+
+    let grant = RemoteEasyconnectObjectStoreGrant {
+        object_store: store.store_id.clone(),
+        bucket: store.bucket.clone(),
+        can_read: true,
+        can_write: true,
+        writer_group: store.writer_group.clone(),
+        object_type: store.object_type.clone(),
+    };
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(
+        DaemonRuntimeConfig::default_packaged().socket_path,
+    ));
+    let created = client
+        .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
+            client_name: "dasobjectstore-remote authenticate".to_string(),
+            callback_url: "https://127.0.0.1/api/v1/remote/authenticate/callback".to_string(),
+            requested_object_store: Some(request.object_store.clone()),
+            requested_session_lifetime_seconds: request.requested_session_lifetime_seconds,
+            client_request_id: None,
+        })
+        .map_err(remote_auth_daemon_error)?;
+    let approved = client
+        .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
+            pairing_id: created.pairing_id.clone(),
+            approved_actor: current_user.username,
+            auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            allowed_object_stores: vec![grant],
+            approval_expires_at_utc: created.expires_at_utc,
+        })
+        .map_err(remote_auth_daemon_error)?;
+    let exchanged = client
+        .remote_easyconnect_exchange_pairing(RemoteEasyconnectExchangePairingRequest {
+            pairing_id: approved.pairing_id,
+            exchange_code: approved.exchange_code,
+            client_request_id: None,
+        })
+        .map_err(remote_auth_daemon_error)?;
+
+    Ok(Json(RemoteAuthenticateResponse {
+        schema_version: "dasobjectstore.remote_authenticate.v1".to_string(),
+        endpoint_port: 3900,
+        region: "garage".to_string(),
+        addressing_style: "path".to_string(),
+        object_store: request.object_store,
+        bucket: store.bucket.clone(),
+        session: exchanged.session,
+    }))
+}
+
+fn validate_remote_authenticate_request(
+    request: &RemoteAuthenticateRequest,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    for (field, value) in [
+        ("username", request.username.as_str()),
+        ("password", request.password.as_str()),
+        ("object_store", request.object_store.as_str()),
+    ] {
+        if value.trim().is_empty() {
+            return Err(route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_remote_authenticate_request",
+                format!("{field} must not be blank"),
+            ));
+        }
+    }
+    if request
+        .requested_session_lifetime_seconds
+        .is_some_and(|seconds| !(60..=86_400).contains(&seconds))
+    {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_remote_authenticate_request",
+            "requested session lifetime must be between 60 and 86400 seconds",
+        ));
+    }
+    Ok(())
+}
+
+fn remote_auth_daemon_error(
+    error: dasobjectstore_daemon::DaemonClientError,
+) -> (StatusCode, Json<AuthRouteError>) {
+    route_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "remote_session_unavailable",
+        error.to_string(),
+    )
 }
 
 async fn logout(
@@ -1362,14 +1496,14 @@ mod tests {
         standalone_enclosure_admin_router_with_state, standalone_reporting_router_with_state,
         standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
         CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointBindingReadiness,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState,
         DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
         EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
         EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
         LocalUserAuthorityProvider, LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
         PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
         StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
         StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
         StandaloneAdminJobSummary, StandaloneAuthRouteState,
@@ -1397,6 +1531,7 @@ mod tests {
     use dasobjectstore_core::store::{
         CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass, StorePolicy,
     };
+    use dasobjectstore_daemon::DaemonEndpointBindingReadiness;
     use dasobjectstore_object_service::StoreServiceDefinition;
     use serde::de::DeserializeOwned;
     use std::fs;
@@ -1460,6 +1595,36 @@ mod tests {
         .await;
         assert!(logout.disconnected);
 
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn remote_authenticate_rejects_invalid_request_before_authentication() {
+        let root = temp_root("remote-authenticate-validation");
+        let state = StandaloneAuthRouteState {
+            auth_store: LocalAuthStore::new(&root),
+            local_password_authenticator: Arc::new(FixedPasswordAuthenticator {
+                accepted_credentials: vec![("user".to_string(), "secret".to_string())],
+            }),
+        };
+        let response = post_json_response(
+            standalone_auth_router_with_state(state),
+            "/api/v1/remote/authenticate",
+            &RemoteAuthenticateRequest {
+                username: " ".to_string(),
+                password: "secret".to_string(),
+                object_store: "zymo".to_string(),
+                requested_session_lifetime_seconds: Some(30),
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("response body");
+        let error: crate::AuthRouteError = serde_json::from_slice(&bytes).expect("error JSON");
+        assert_eq!(error.code, "invalid_remote_authenticate_request");
         cleanup(&root);
     }
 

@@ -77,6 +77,8 @@ impl RemoteCli {
 
 #[derive(Debug, Subcommand)]
 pub enum RemoteCommand {
+    /// Authenticate to one appliance ObjectStore and emit an 8-hour S3 context.
+    Authenticate(AuthenticateArgs),
     /// Define the browser-approved easyconnect pairing flow for a DAS appliance.
     Easyconnect(EasyconnectArgs),
     /// Configure this remote client.
@@ -85,6 +87,53 @@ pub enum RemoteCommand {
     Stores(StoresArgs),
     /// Upload a file or folder to an accessible object store.
     Upload(UploadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AuthenticateArgs {
+    /// DAS appliance host name or IP address, without a URL path.
+    host_or_ip: String,
+    /// ObjectStore identifier to authorize.
+    object_store: String,
+    /// HTTPS port for the standalone DASObjectStore Web API.
+    #[arg(long, default_value_t = crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    /// Username; defaults to the current local username.
+    #[arg(long)]
+    username: Option<String>,
+    /// PEM CA certificate used to verify the appliance HTTPS certificate.
+    #[arg(long)]
+    ca_cert: Option<PathBuf>,
+    /// Requested session lifetime; defaults to the appliance policy (8 hours).
+    #[arg(long)]
+    session_lifetime_seconds: Option<u64>,
+    /// Emit the full connection context, including temporary S3 credentials.
+    #[arg(long)]
+    json: bool,
+}
+
+impl AuthenticateArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn object_store(&self) -> &str {
+        &self.object_store
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
+    }
+    pub fn ca_cert(&self) -> Option<&Path> {
+        self.ca_cert.as_deref()
+    }
+    pub fn session_lifetime_seconds(&self) -> Option<u64> {
+        self.session_lifetime_seconds
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Args)]
@@ -350,6 +399,33 @@ mod tests {
         assert_eq!(args.timeout_seconds(), 10);
         assert!(!args.no_browser());
         assert!(!args.contract());
+        assert!(args.json());
+    }
+
+    #[test]
+    fn parses_authenticate_command() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "authenticate",
+            "192.168.1.192",
+            "porkchop",
+            "--username",
+            "stephen",
+            "--ca-cert",
+            "/etc/dasobjectstore/ca.pem",
+            "--json",
+        ])
+        .expect("authenticate parses");
+        let RemoteCommand::Authenticate(args) = cli.command() else {
+            panic!("expected authenticate command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.192");
+        assert_eq!(args.object_store(), "porkchop");
+        assert_eq!(args.username(), Some("stephen"));
+        assert_eq!(
+            args.ca_cert().and_then(|path| path.to_str()),
+            Some("/etc/dasobjectstore/ca.pem")
+        );
         assert!(args.json());
     }
 

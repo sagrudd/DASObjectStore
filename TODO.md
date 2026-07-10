@@ -174,6 +174,10 @@ list until every temporary size-budget exception has been removed.
 - [x] Move object-service Docker status/bind parsing into one shared
   inspection module used by both CLI and GUI API, with one bounded timeout
   policy and parser regressions beside the shared implementation.
+- [x] Add password-authenticated `dasobjectstore-remote authenticate HOST
+  OBJECTSTORE` over verified HTTPS, with daemon-owned eight-hour scoped Garage
+  sessions, redacted default output, explicit JSON connection context, and
+  persisted-credential validation.
 - [ ] Split global Web CSS by base primitives and feature-owned styles, and
   split screenshot regression runner, fixture server, assertions, and
   per-workspace fixtures into dedicated modules.

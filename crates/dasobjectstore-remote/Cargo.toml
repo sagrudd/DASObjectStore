@@ -17,5 +17,6 @@ clap.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
 rpassword.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
