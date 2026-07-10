@@ -27,8 +27,9 @@ The MVP assumes:
   read/export workflows.
 * A DAS pool has one mandatory SSD ingest device and one or more HDD capacity
   members.
-* Remote S3/API and Web writes are SSD-first. Server-local CLI direct-import
-  bypasses SSD staging and lands directly onto managed HDDs.
+* Remote S3/API, Web, and USB-mounted source disks are SSD-first. Server-local
+  CLI direct-import lands directly onto managed HDDs only when the store policy
+  permits it.
 * Store metadata is mirrored to the DAS SSD when a known SSD root is present so
   the DAS can be moved between hosts.
 

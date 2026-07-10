@@ -1078,9 +1078,6 @@ fn landing_mode_for_ingest(
     policy: &StorePolicy,
     origin: DaemonIngressOrigin,
 ) -> DaemonIngressLandingMode {
-    if origin == DaemonIngressOrigin::LocalServerDirectImport {
-        return DaemonIngressLandingMode::DirectToHddWhenPolicyAllows;
-    }
     match (origin.landing_mode(), policy.ingest_mode) {
         (DaemonIngressLandingMode::DirectToHddWhenPolicyAllows, IngestMode::DirectToHdd) => {
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
@@ -2049,13 +2046,21 @@ mod tests {
     }
 
     #[test]
-    fn direct_policy_only_bypasses_ssd_for_local_server_origin() {
+    fn direct_policy_only_bypasses_ssd_for_local_server_origins() {
         let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
         policy.ingest_mode = IngestMode::DirectToHdd;
 
         assert_eq!(
             landing_mode_for_ingest(&policy, DaemonIngressOrigin::LocalServer),
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+        );
+        assert_eq!(
+            landing_mode_for_ingest(&policy, DaemonIngressOrigin::LocalServerDirectImport),
+            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+        );
+        assert_eq!(
+            landing_mode_for_ingest(&policy, DaemonIngressOrigin::UsbMountedDisk),
+            DaemonIngressLandingMode::SsdFirst
         );
         assert_eq!(
             landing_mode_for_ingest(&policy, DaemonIngressOrigin::RemoteS3),
@@ -2072,7 +2077,7 @@ mod tests {
                 &ssd_first_policy,
                 DaemonIngressOrigin::LocalServerDirectImport
             ),
-            DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
+            DaemonIngressLandingMode::SsdFirst
         );
     }
 

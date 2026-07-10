@@ -83,7 +83,7 @@ argument parsing and submits an ingest job request containing:
 * the logical object type assigned to the imported files;
 * an optional copy-count override;
 * an optional HDD settlement worker override;
-* the ingress origin, which the normal local CLI sets to ``local_server``;
+* the ingress origin, which the mounted-disk CLI sets to ``usb_mounted_disk``;
 * the existing-object conflict policy;
 * whether the request is a dry run.
 
@@ -95,11 +95,12 @@ runs, followed by the final daemon job submission summary.
 
 Ingress-origin rules are deliberately simple:
 
-* ``local_server`` is used for normal ``dasobjectstore ingest files`` jobs
-  submitted from the DAS appliance host. If the target store policy permits
-  direct HDD ingest, the daemon writes to selected HDDs while calculating the
-  source checksum in flight. If the policy does not permit direct HDD ingest,
-  the job stages through SSD first.
+* ``usb_mounted_disk`` is used for normal ``dasobjectstore ingest files`` jobs.
+  Removable or externally mounted source disks always stage through SSD first,
+  even if the target store permits direct HDD ingest.
+* ``local_server`` and ``local_server_direct_import`` identify source data on
+  the DAS server itself. They may use direct HDD ingest only when the target
+  store policy explicitly permits it; otherwise they stage through SSD first.
 * ``remote_s3`` is used for paired ``dasobjectstore-remote`` uploads and raw
   S3-compatible remote upload plans. These uploads always stage through the
   selected ObjectStore SSD before daemon-owned HDD settlement.
@@ -120,12 +121,14 @@ SSD, ``ssd-flush`` means the staged payload is being synced, and
 ``checksum-manifest-capture`` means the staged payload is being hashed before
 HDD placement.
 
-When ingest is running on the DAS server itself and the store policy permits
-``DirectToHdd``, the daemon uses ``direct_to_hdd_when_policy_allows`` landing
-mode. In that mode it reads the local source only while copying, calculates its
-checksum in flight, and writes directly to daemon-selected HDD targets without
-creating an SSD payload. This policy is for reproducible or externally
-recoverable datasets; protected generated or critical stores remain SSD-first.
+When ``dasobjectstore ingest direct-import`` is used for data already on the
+DAS server and the store policy permits ``DirectToHdd``, the daemon uses
+``direct_to_hdd_when_policy_allows`` landing mode. In that mode it reads the
+local source only while copying, calculates its checksum in flight, and writes
+directly to daemon-selected HDD targets without creating an SSD payload. The
+same command stages through SSD when the policy does not permit direct ingest.
+This policy is for reproducible or externally recoverable datasets; protected
+generated or critical stores remain SSD-first.
 
 By default, the daemon derives HDD settlement fan-out from the managed HDDs in
 the target DAS: ``max(managed_hdd_count - 2, 2)``, capped at the available HDD

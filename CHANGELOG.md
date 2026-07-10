@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.3 - 2026-07-10
+
+- Classify mounted-disk ingest as USB SSD-first and require the target store's
+  direct-to-HDD policy for every server-local direct-import request.
+
 ## 0.69.2 - 2026-07-10
 
 - Coalesce daemon ingest progress by a 1 MiB or 100 ms cadence before it reaches

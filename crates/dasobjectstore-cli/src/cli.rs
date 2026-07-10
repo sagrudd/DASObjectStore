@@ -1012,7 +1012,7 @@ impl IngestArgs {
 
 #[derive(Debug, Eq, PartialEq, Subcommand)]
 pub(crate) enum IngestCommand {
-    /// Import a directory tree of files into a store through SSD ingest.
+    /// Import a directory tree from a mounted disk through SSD-first ingest.
     Files(IngestFilesArgs),
     /// Report SSD ingest capacity and pressure state.
     Status(IngestStatusArgs),
@@ -1020,7 +1020,7 @@ pub(crate) enum IngestCommand {
     Queue(IngestQueueArgs),
     /// Cancel active queued ingest jobs for a store.
     DrainQueue(IngestDrainQueueArgs),
-    /// Import a directory tree of files into a store directly to HDD, bypassing SSD ingest.
+    /// Request a policy-gated direct-to-HDD import from the DAS server.
     DirectImport(IngestDirectImportArgs),
 }
 

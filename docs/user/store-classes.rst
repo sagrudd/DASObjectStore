@@ -61,9 +61,10 @@ Class Summary
 Important Defaults
 ------------------
 
-Remote S3/API and Web uploads are SSD-first. Server-local CLI imports may use
-``dasobjectstore ingest direct-import`` to bypass SSD staging and land directly
-onto managed HDDs.
+Remote S3/API, Web, and USB-mounted sources are SSD-first. Server-local CLI
+imports may use ``dasobjectstore ingest direct-import`` to land directly onto
+managed HDDs only when the store policy permits it; otherwise the daemon stages
+the import through SSD first.
 
 Protected classes are ``generated_data``, ``critical_metadata``, and
 ``export_bundle``. Protected classes cannot use direct-to-HDD ingest, immediate

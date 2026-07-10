@@ -549,6 +549,7 @@ mod tests {
             DaemonIngressLandingMode::DirectToHddWhenPolicyAllows
         );
         for origin in [
+            DaemonIngressOrigin::UsbMountedDisk,
             DaemonIngressOrigin::RemoteS3,
             DaemonIngressOrigin::WebUpload,
             DaemonIngressOrigin::Synoptikon,
@@ -567,6 +568,10 @@ mod tests {
             serde_json::to_value(DaemonIngressOrigin::LocalServerDirectImport)
                 .expect("origin serializes"),
             "local_server_direct_import"
+        );
+        assert_eq!(
+            serde_json::to_value(DaemonIngressOrigin::UsbMountedDisk).expect("origin serializes"),
+            "usb_mounted_disk"
         );
         assert_eq!(
             serde_json::to_value(DaemonIngressOrigin::RemoteS3).expect("origin serializes"),

@@ -9,6 +9,7 @@ pub enum IngressOrigin {
     #[default]
     LocalServer,
     LocalServerDirectImport,
+    UsbMountedDisk,
     RemoteS3,
     WebUpload,
     Synoptikon,
@@ -21,9 +22,11 @@ impl IngressOrigin {
             Self::LocalServer | Self::LocalServerDirectImport => {
                 IngressLandingMode::DirectToHddWhenPolicyAllows
             }
-            Self::RemoteS3 | Self::WebUpload | Self::Synoptikon | Self::Mneion => {
-                IngressLandingMode::SsdFirst
-            }
+            Self::UsbMountedDisk
+            | Self::RemoteS3
+            | Self::WebUpload
+            | Self::Synoptikon
+            | Self::Mneion => IngressLandingMode::SsdFirst,
         }
     }
 
@@ -37,6 +40,7 @@ impl Display for IngressOrigin {
         formatter.write_str(match self {
             Self::LocalServer => "local_server",
             Self::LocalServerDirectImport => "local_server_direct_import",
+            Self::UsbMountedDisk => "usb_mounted_disk",
             Self::RemoteS3 => "remote_s3",
             Self::WebUpload => "web_upload",
             Self::Synoptikon => "synoptikon",
@@ -77,6 +81,7 @@ mod tests {
         );
 
         for origin in [
+            IngressOrigin::UsbMountedDisk,
             IngressOrigin::RemoteS3,
             IngressOrigin::WebUpload,
             IngressOrigin::Synoptikon,
@@ -96,6 +101,10 @@ mod tests {
             serde_json::to_value(IngressOrigin::LocalServerDirectImport)
                 .expect("origin serializes"),
             serde_json::json!("local_server_direct_import")
+        );
+        assert_eq!(
+            serde_json::to_value(IngressOrigin::UsbMountedDisk).expect("origin serializes"),
+            serde_json::json!("usb_mounted_disk")
         );
         assert_eq!(
             serde_json::to_value(IngressOrigin::RemoteS3).expect("origin serializes"),
