@@ -33,6 +33,7 @@ const SSD_FLUSH_QUEUE_CAPACITY: usize = 2;
 
 mod endpoint;
 mod environment;
+mod progress;
 mod scheduling;
 
 use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
@@ -73,7 +74,10 @@ pub fn submit_ingest_files_to_local_store_with_progress(
     progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
     let executor = LocalFileIngestExecutor::from_environment();
-    executor.submit(request, accepted_at_utc, progress)
+    let mut progress = progress::IngestProgressCoalescer::new(progress);
+    let response = executor.submit(request, accepted_at_utc, |event| progress.publish(event))?;
+    progress.flush()?;
+    Ok(response)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

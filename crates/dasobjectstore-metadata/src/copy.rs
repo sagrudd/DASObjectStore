@@ -1,10 +1,13 @@
 use crate::hash::{copy_and_hash_with_controlled_progress, hash_file_sha256, SHA256_ALGORITHM};
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
+use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc};
+use std::thread;
 
 pub const HDD_COPY_CONTENT_HASH_ALGORITHM: &str = SHA256_ALGORITHM;
 
@@ -162,6 +165,228 @@ pub fn write_hdd_copy_with_inline_hash_with_controlled_progress(
     report
 }
 
+/// Copies one source stream to distinct HDD destinations concurrently.
+///
+/// The source is opened and read once. Each bounded writer queue provides
+/// backpressure from its physical disk, while each writer calculates a local
+/// checksum and `fsync`s its temporary payload before reporting completion.
+pub fn write_hdd_copies_with_inline_hash_fanout_with_controlled_progress(
+    requests: &[HddInlineHashCopyRequest],
+    mut progress: impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+) -> Result<Vec<HddCopyReport>, HddCopyError> {
+    let source_path = validate_fanout_requests(requests)?;
+    let mut source = File::open(source_path)?;
+    write_hdd_copies_from_reader_with_controlled_progress(
+        &mut source,
+        requests,
+        |disk_id, copy, bytes| progress(disk_id, copy, bytes),
+    )
+}
+
+fn write_hdd_copies_from_reader_with_controlled_progress(
+    source: &mut impl io::Read,
+    requests: &[HddInlineHashCopyRequest],
+    mut progress: impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+) -> Result<Vec<HddCopyReport>, HddCopyError> {
+    validate_fanout_requests(requests)?;
+    let mut destinations = Vec::with_capacity(requests.len());
+    let prepared = (|| -> Result<(), HddCopyError> {
+        for request in requests {
+            if let Some(parent) = request.destination_path.parent() {
+                create_private_dir_all(parent)?;
+                restrict_object_tree_dirs(parent)?;
+            }
+            destinations.push(create_private_file(&request.destination_path)?);
+        }
+        Ok(())
+    })();
+    if let Err(error) = prepared {
+        cleanup_fanout_destinations(requests);
+        return Err(error);
+    }
+
+    let result = write_hdd_copies_to_open_destinations(
+        source,
+        requests,
+        destinations,
+        |disk_id, copy, bytes| progress(disk_id, copy, bytes),
+    );
+    if result.is_err() {
+        cleanup_fanout_destinations(requests);
+    }
+    result
+}
+
+fn write_hdd_copies_to_open_destinations(
+    source: &mut impl io::Read,
+    requests: &[HddInlineHashCopyRequest],
+    destinations: Vec<File>,
+    mut progress: impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+) -> Result<Vec<HddCopyReport>, HddCopyError> {
+    const FANOUT_QUEUE_CAPACITY: usize = 2;
+
+    let (write_progress_tx, write_progress_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+    let mut senders = Vec::with_capacity(requests.len());
+    let mut workers = Vec::with_capacity(requests.len());
+
+    for (index, (request, destination)) in requests.iter().cloned().zip(destinations).enumerate() {
+        let (sender, receiver) = mpsc::sync_channel(FANOUT_QUEUE_CAPACITY);
+        let write_progress_tx = write_progress_tx.clone();
+        let result_tx = result_tx.clone();
+        workers.push(thread::spawn(move || {
+            let result =
+                write_fanout_destination(request, destination, receiver, |bytes_written| {
+                    write_progress_tx
+                        .send((index, bytes_written))
+                        .map_err(|_| HddCopyError::Cancelled)
+                });
+            let _ = result_tx.send(result);
+        }));
+        senders.push(sender);
+    }
+    drop(write_progress_tx);
+    drop(result_tx);
+
+    let mut source_hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let copy_result = (|| -> Result<(), HddCopyError> {
+        loop {
+            let read = source.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            source_hasher.update(&buffer[..read]);
+            let chunk: Arc<[u8]> = Arc::from(&buffer[..read]);
+            for sender in &senders {
+                sender
+                    .send(Arc::clone(&chunk))
+                    .map_err(|_| HddCopyError::Cancelled)?;
+            }
+            drain_fanout_progress(&write_progress_rx, requests, &mut progress)?;
+        }
+        Ok(())
+    })();
+    drop(senders);
+
+    let mut reports = Vec::with_capacity(requests.len());
+    let mut first_error = copy_result.err();
+    let mut results_received = 0;
+    while results_received < requests.len() {
+        if first_error.is_none() {
+            if let Err(error) = drain_fanout_progress(&write_progress_rx, requests, &mut progress) {
+                first_error = Some(error);
+            }
+        }
+        match result_rx.recv() {
+            Ok(Ok(report)) => {
+                reports.push(report);
+                results_received += 1;
+            }
+            Ok(Err(error)) => {
+                first_error.get_or_insert(error);
+                results_received += 1;
+            }
+            Err(_) => {
+                first_error.get_or_insert(HddCopyError::Cancelled);
+                break;
+            }
+        }
+    }
+    for worker in workers {
+        worker.join().map_err(|_| {
+            HddCopyError::Io(io::Error::other("HDD fan-out writer thread panicked"))
+        })?;
+    }
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    drain_fanout_progress(&write_progress_rx, requests, &mut progress)?;
+
+    let source_hash = encode_hash(source_hasher.finalize());
+    for report in &reports {
+        if report.content_hash != source_hash {
+            return Err(HddCopyError::HashMismatch {
+                expected: source_hash,
+                actual: report.content_hash.clone(),
+            });
+        }
+    }
+    reports.sort_by_key(|report| report.copy_number);
+    Ok(reports)
+}
+
+fn write_fanout_destination(
+    request: HddInlineHashCopyRequest,
+    mut destination: File,
+    receiver: mpsc::Receiver<Arc<[u8]>>,
+    mut progress: impl FnMut(u64) -> Result<(), HddCopyError>,
+) -> Result<HddCopyReport, HddCopyError> {
+    let mut hasher = Sha256::new();
+    let mut bytes_written = 0_u64;
+    for chunk in receiver {
+        destination.write_all(&chunk)?;
+        hasher.update(&chunk);
+        bytes_written = bytes_written.saturating_add(chunk.len() as u64);
+        progress(bytes_written)?;
+    }
+    destination.sync_all()?;
+
+    Ok(HddCopyReport {
+        object_id: request.object_id,
+        disk_id: request.disk_id,
+        copy_number: request.copy_number,
+        destination_path: request.destination_path,
+        bytes_written,
+        content_hash_algorithm: HDD_COPY_CONTENT_HASH_ALGORITHM.to_string(),
+        content_hash: encode_hash(hasher.finalize()),
+    })
+}
+
+fn validate_fanout_requests(requests: &[HddInlineHashCopyRequest]) -> Result<&Path, HddCopyError> {
+    let Some(first) = requests.first() else {
+        return Err(HddCopyError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "HDD fan-out requires at least one destination",
+        )));
+    };
+    if requests
+        .iter()
+        .any(|request| request.source_path != first.source_path)
+    {
+        return Err(HddCopyError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "HDD fan-out destinations must share one source path",
+        )));
+    }
+    Ok(&first.source_path)
+}
+
+fn drain_fanout_progress(
+    receiver: &mpsc::Receiver<(usize, u64)>,
+    requests: &[HddInlineHashCopyRequest],
+    progress: &mut impl FnMut(&DiskId, u8, u64) -> Result<(), HddCopyError>,
+) -> Result<(), HddCopyError> {
+    while let Ok((index, bytes_written)) = receiver.try_recv() {
+        let request = &requests[index];
+        progress(&request.disk_id, request.copy_number, bytes_written)?;
+    }
+    Ok(())
+}
+
+fn cleanup_fanout_destinations(requests: &[HddInlineHashCopyRequest]) {
+    for request in requests {
+        let _ = fs::remove_file(&request.destination_path);
+    }
+}
+
+fn encode_hash(hash: impl AsRef<[u8]>) -> String {
+    hash.as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn write_verified_hdd_copy_inner(
     request: &HddCopyRequest,
     mut progress: impl FnMut(u64) -> Result<(), HddCopyError>,
@@ -265,14 +490,16 @@ pub fn verify_hdd_copy_hash(
 #[cfg(test)]
 mod tests {
     use super::{
-        write_verified_hdd_copy, write_verified_hdd_copy_with_controlled_progress, HddCopyError,
-        HddCopyRequest,
+        write_hdd_copies_from_reader_with_controlled_progress, write_verified_hdd_copy,
+        write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest,
+        HddInlineHashCopyRequest,
     };
     use crate::hash::hash_file_sha256;
     #[cfg(unix)]
     use crate::secure_fs::{PRIVATE_DIR_MODE, PRIVATE_FILE_MODE};
     use dasobjectstore_core::ids::{DiskId, ObjectId};
     use std::fs;
+    use std::io::{Cursor, Read};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -350,6 +577,86 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn direct_fanout_reads_the_source_once_and_writes_each_target() {
+        let root = temp_root("direct-fanout-single-read");
+        let payload = vec![0x5a_u8; 192 * 1024];
+        let object_id = ObjectId::new("object-a").expect("object id");
+        let source_path = root.join("source.bin");
+        let requests = [
+            HddInlineHashCopyRequest::new(
+                object_id.clone(),
+                DiskId::new("disk-a").expect("disk id"),
+                1,
+                &source_path,
+                root.join("disk-a/payload.tmp"),
+            ),
+            HddInlineHashCopyRequest::new(
+                object_id.clone(),
+                DiskId::new("disk-b").expect("disk id"),
+                2,
+                &source_path,
+                root.join("disk-b/payload.tmp"),
+            ),
+            HddInlineHashCopyRequest::new(
+                object_id,
+                DiskId::new("disk-c").expect("disk id"),
+                3,
+                &source_path,
+                root.join("disk-c/payload.tmp"),
+            ),
+        ];
+        let mut source = CountingReader::new(payload.clone());
+        let mut active_targets = Vec::new();
+
+        let reports = write_hdd_copies_from_reader_with_controlled_progress(
+            &mut source,
+            &requests,
+            |disk_id, copy_number, _| {
+                active_targets.push((disk_id.as_str().to_string(), copy_number));
+                Ok(())
+            },
+        )
+        .expect("fan-out copy succeeds");
+
+        assert_eq!(source.bytes_read, payload.len());
+        assert_eq!(reports.len(), 3);
+        for request in &requests {
+            assert_eq!(
+                fs::read(&request.destination_path).expect("target payload"),
+                payload
+            );
+            assert!(active_targets
+                .iter()
+                .any(|(disk_id, copy_number)| disk_id == request.disk_id.as_str()
+                    && *copy_number == request.copy_number));
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    struct CountingReader {
+        inner: Cursor<Vec<u8>>,
+        bytes_read: usize,
+    }
+
+    impl CountingReader {
+        fn new(bytes: Vec<u8>) -> Self {
+            Self {
+                inner: Cursor::new(bytes),
+                bytes_read: 0,
+            }
+        }
+    }
+
+    impl Read for CountingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let read = self.inner.read(buffer)?;
+            self.bytes_read += read;
+            Ok(read)
+        }
     }
 
     fn request(

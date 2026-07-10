@@ -1,5 +1,5 @@
 use crate::copy::{
-    write_hdd_copy_with_inline_hash_with_controlled_progress,
+    write_hdd_copies_with_inline_hash_fanout_with_controlled_progress,
     write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest,
     HddInlineHashCopyRequest,
 };
@@ -299,8 +299,7 @@ fn write_direct_requested_copies(
     request: &DirectObjectPutRequest,
     progress: &mut impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
 ) -> Result<Vec<ObjectPutPlacementReport>, ObjectPutError> {
-    let mut expected_hash = None::<String>;
-    request
+    let copy_requests = request
         .disk_roots
         .iter()
         .take(request.copy_count as usize)
@@ -309,51 +308,45 @@ fn write_direct_requested_copies(
             let copy_number = (index + 1) as u8;
             let temporary_path =
                 direct_object_copy_temporary_path(disk_root, &request.object_id, copy_number);
-            let mut copy_report = write_hdd_copy_with_inline_hash_with_controlled_progress(
-                &HddInlineHashCopyRequest::new(
-                    request.object_id.clone(),
-                    disk_root.disk_id.clone(),
-                    copy_number,
-                    &request.source_path,
-                    &temporary_path,
-                ),
-                |bytes_written| {
-                    progress(ObjectPutProgress {
-                        object_id: request.object_id.clone(),
-                        stage: ObjectPutProgressStage::HddCopy {
-                            disk_id: disk_root.disk_id.as_str().to_string(),
-                            copy_number,
-                        },
-                        bytes_written,
-                    })
-                    .map_err(object_put_error_to_hdd_copy_error)
-                },
-            )?;
-            if let Some(expected_hash) = &expected_hash {
-                if &copy_report.content_hash != expected_hash {
-                    return Err(ObjectPutError::Copy(HddCopyError::HashMismatch {
-                        expected: expected_hash.clone(),
-                        actual: copy_report.content_hash,
-                    }));
-                }
-            } else {
-                expected_hash = Some(copy_report.content_hash.clone());
-            }
-
-            let final_path =
-                object_copy_path(disk_root, &request.object_id, &copy_report.content_hash);
-            move_direct_copy_into_place(&temporary_path, &final_path)?;
-            copy_report.destination_path = final_path;
-
-            Ok(ObjectPutPlacementReport {
-                disk_id: copy_report.disk_id.as_str().to_string(),
+            HddInlineHashCopyRequest::new(
+                request.object_id.clone(),
+                disk_root.disk_id.clone(),
                 copy_number,
-                destination_path: copy_report.destination_path,
-                bytes_written: copy_report.bytes_written,
-                content_hash: copy_report.content_hash,
-            })
+                &request.source_path,
+                temporary_path,
+            )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let mut copy_reports = write_hdd_copies_with_inline_hash_fanout_with_controlled_progress(
+        &copy_requests,
+        |disk_id, copy_number, bytes_written| {
+            progress(ObjectPutProgress {
+                object_id: request.object_id.clone(),
+                stage: ObjectPutProgressStage::HddCopy {
+                    disk_id: disk_id.as_str().to_string(),
+                    copy_number,
+                },
+                bytes_written,
+            })
+            .map_err(object_put_error_to_hdd_copy_error)
+        },
+    )?;
+
+    let mut placements = Vec::with_capacity(copy_reports.len());
+    for copy_report in &mut copy_reports {
+        let disk_root = &request.disk_roots[(copy_report.copy_number - 1) as usize];
+        let final_path = object_copy_path(disk_root, &request.object_id, &copy_report.content_hash);
+        move_direct_copy_into_place(&copy_report.destination_path, &final_path)?;
+        copy_report.destination_path = final_path;
+        placements.push(ObjectPutPlacementReport {
+            disk_id: copy_report.disk_id.as_str().to_string(),
+            copy_number: copy_report.copy_number,
+            destination_path: copy_report.destination_path.clone(),
+            bytes_written: copy_report.bytes_written,
+            content_hash: copy_report.content_hash.clone(),
+        });
+    }
+    Ok(placements)
 }
 
 pub fn object_payload_path(
@@ -728,6 +721,52 @@ mod tests {
         assert!(progress_events
             .iter()
             .any(|event| matches!(event.stage, super::ObjectPutProgressStage::HddCopy { .. })));
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn direct_hdd_put_fans_out_to_three_distinct_disks() {
+        let root = temp_root("object-put-direct-hdd-fanout");
+        let source_path = root.join("source.fastq.gz");
+        let payload = vec![0x5a_u8; 192 * 1024];
+        fs::create_dir_all(&root).expect("create temp root");
+        fs::write(&source_path, &payload).expect("write source");
+        let request = DirectObjectPutRequest::new(
+            ObjectId::new("object-a").expect("object id"),
+            &source_path,
+            vec![
+                DiskCopyRoot::new(DiskId::new("disk-a").expect("disk id"), root.join("disk-a")),
+                DiskCopyRoot::new(DiskId::new("disk-b").expect("disk id"), root.join("disk-b")),
+                DiskCopyRoot::new(DiskId::new("disk-c").expect("disk id"), root.join("disk-c")),
+            ],
+            3,
+        );
+        let mut active_targets = Vec::new();
+
+        let report = put_object_direct_to_hdd_with_controlled_progress(request, |progress| {
+            if let super::ObjectPutProgressStage::HddCopy {
+                disk_id,
+                copy_number,
+            } = progress.stage
+            {
+                active_targets.push((disk_id, copy_number));
+            }
+            Ok(())
+        })
+        .expect("direct HDD fan-out succeeds");
+
+        assert_eq!(report.placements.len(), 3);
+        for placement in &report.placements {
+            assert_eq!(
+                fs::read(&placement.destination_path).expect("read placement"),
+                payload
+            );
+            assert!(active_targets
+                .iter()
+                .any(|(disk_id, copy_number)| disk_id == &placement.disk_id
+                    && *copy_number == placement.copy_number));
+        }
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
