@@ -79,6 +79,9 @@ list until every temporary size-budget exception has been removed.
     parsing, and status rendering into
     `crates/dasobjectstore-cli/src/run/runtime_status.rs`; preserve the CLI
     status output and keep published-bind parser regressions beside the module.
+  - [x] Extract service provisioning, Compose lifecycle, and service-status
+    handlers into `crates/dasobjectstore-cli/src/run/service.rs`; keep the
+    top-level runner limited to dispatch and shared error handling.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
