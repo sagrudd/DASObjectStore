@@ -646,7 +646,7 @@ mod tests {
             dry_run: false,
         };
 
-        let event = DaemonIngestProgressEvent {
+        let mut event = DaemonIngestProgressEvent {
             job_id: IngestJobId::new("ingest-files-1").expect("job id"),
             endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
             stage: DaemonIngestStage::HddCopy {
@@ -672,7 +672,7 @@ mod tests {
                 },
                 workers: DaemonIngestWorkerTelemetry {
                     ssd_stage: DaemonIngestWorkerActivity { active: 1, idle: 0 },
-                    hdd_write: DaemonIngestWorkerActivity { active: 1, idle: 0 },
+                    hdd_write: DaemonIngestWorkerActivity { active: 2, idle: 0 },
                     ..DaemonIngestWorkerTelemetry::default()
                 },
                 ..DaemonIngestTelemetry::default()
@@ -695,6 +695,10 @@ mod tests {
             resource_policy: None,
             message: Some("copying".to_string()),
         };
+        let mut second_target = event.active_hdd_transfers[0].clone();
+        second_target.disk_id = DiskId::new("qnap-1058").expect("disk id");
+        second_target.copy_number = 2;
+        event.active_hdd_transfers.push(second_target);
         let speed = super::speed_label(
             Some(180 * 1024 * 1024),
             Some(&event),
@@ -706,17 +710,18 @@ mod tests {
         assert!(details.contains("Rate: current 180.0 MiB/s, avg 512.0 MiB/s"));
         let queues = format!("{:?}", super::queue_lines(&event));
         assert!(queues.contains(
-            "queues scan 0 source 7 SSD 0 HDD 2 verify 0; workers source 0 SSD 1 HDD 1 finalize 0; completed 1"
+            "queues scan 0 source 7 SSD 0 HDD 2 verify 0; workers source 0 SSD 1 HDD 2 finalize 0; completed 1"
         ));
         assert!(queues.contains("SSD pressure: high - source ingress may pause"));
         assert!(queues.contains("SSD settling: active"));
         assert!(queues.contains("HDD migration: 512.0 MiB/2.0 GiB"));
-        assert!(queues.contains("HDD workers: active 1, idle 0"));
+        assert!(queues.contains("HDD workers: active 2, idle 0"));
         assert!(speed.contains("current 180.0 MiB/s, avg 512.0 MiB/s"));
         let landing = format!("{:?}", super::active_hdd_landing_lines(&event));
         assert!(landing.contains(
             "file 2/9 copy 1 -> qnap-1057: 512.0 MiB/2.0 GiB @ 128.0 MiB/s raw/read-2.pod5"
         ));
+        assert!(landing.contains("copy 2 -> qnap-1058"));
         let mut fsync_transfer = event.active_hdd_transfers[0].clone();
         fsync_transfer.phase = DaemonIngestHddTransferPhase::Fsync;
         fsync_transfer.bytes_per_second = 0;

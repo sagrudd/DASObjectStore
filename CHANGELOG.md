@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.14 - 2026-07-10
+
+- Add multi-target TUI regression coverage for simultaneous HDD assignments,
+  copy numbers, and non-zero per-disk rates while retaining existing one-read,
+  no-preflight-hash, and ingress-policy tests.
+
 ## 0.69.13 - 2026-07-10
 
 - Populate ingest worker telemetry for source reads, SSD staging, HDD writing,

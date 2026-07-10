@@ -314,7 +314,8 @@ list until every temporary size-budget exception has been removed.
 - [x] Replace lifetime-average per-HDD rates with short-window sampled rates and retain both current and completed-copy summaries. A full-size transfer waiting in `fsync` must display zero current write rate plus its finalization state, not an apparently active 54 MiB/s average.
 - [x] Decouple daemon progress/socket reporting from the I/O hot path with byte/time coalescing that preserves phase and target-assignment transitions; the embedded TUI retains the latest snapshot and redraws byte-only updates at a bounded cadence.
 - [ ] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. Do not show a generic `checksum-manifest-capture` phase while a preflight source read is occurring without clearly identifying it as an explicit conflict check.
-- [ ] Add regression and performance tests for: no pre-copy hash on normal direct ingress; a single source read fan-outs to concurrent HDD writes; Remote/Web/S3 remain SSD-first; and TUI progress contains all active disk assignments and non-zero per-disk rates.
+- [x] Add TUI regression coverage for multiple active disk assignments and non-zero per-disk rates.
+- [ ] Add regression and performance coverage proving no pre-copy hash on normal direct ingress, one source read fan-out to concurrent HDD writes, and Remote/Web/S3 SSD-first executor routing. Broader appliance soak/SLO acceptance remains tracked under Web availability.
 
 ### Local source classification and direct-HDD operator intent
 
