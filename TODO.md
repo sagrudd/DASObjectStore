@@ -107,6 +107,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Route force disk retirement through a typed daemon request with
     daemon-side administrator authorization, policy allowance, confirmation,
     timestamp, and risk-gated state transition.
+- [x] Extract read-only `store contents` and `store validate` handlers into
+  `crates/dasobjectstore-cli/src/run/store_read.rs`, keeping the runner focused
+  on dispatch and shared error handling.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

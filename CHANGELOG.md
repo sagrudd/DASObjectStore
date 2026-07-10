@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.53 - 2026-07-10
+
+- Extract read-only CLI store inspection and policy-validation handlers into a
+  dedicated runner module.
+
 ## 0.69.52 - 2026-07-10
 
 - Route force disk retirement through a typed daemon-owned request with
