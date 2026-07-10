@@ -22,6 +22,44 @@ planning are tracked under Milestones 21 and 22.
 - Keep persistent metadata, CLI behavior, and compatibility-impacting changes
   documented before merging implementation.
 
+## Architecture Remediation Backlog
+
+Status: partially completed in commits `aa4d3463` and `7c56b146`. Keep this
+list until every temporary size-budget exception has been removed.
+
+- [x] Split the Web workspace root into page, view-model, shared-component, and
+  test modules; retain a small routing façade and shared state-message renderer.
+- [x] Split daemon request dispatch into service/admin, storage/telemetry, and
+  EasyConnect request-family handlers.
+- [x] Centralize UTC parsing/formatting in `dasobjectstore-core` and remove the
+  duplicated calendar implementations from daemon, GUI API, and remote client.
+- [x] Split daemon ingest runtime endpoint discovery, managed-device
+  environment, and HDD scheduling from the execution façade.
+- [x] Split GUI dashboard object-service discovery and telemetry projection
+  from the home-dashboard assembly façade.
+- [x] Add CI enforcement for a 1,000 production-line module budget, with a
+  reviewed temporary baseline exception list.
+- [ ] Replace temporary size-budget exceptions by splitting the CLI runner and
+  CLI argument contracts into command-family modules; keep dispatcher-only
+  roots and move tests beside their owning modules.
+- [ ] Complete the daemon ownership boundary: add daemon request contracts and
+  runtime operations for store drain/delete, ingest queue drain, object put,
+  disk retirement, and other managed mutations still performed by the CLI.
+  Do not redirect a CLI command to an acceptance-only daemon request unless the
+  daemon actually performs and reports the requested operation.
+- [ ] Split remote-upload runtime into admission, transfer/progress, and
+  cancellation-cleanup modules; keep shared concurrency/backpressure policy
+  single-sourced with normal ingest.
+- [ ] Split GUI API authentication routes into router/auth, contracts, daemon
+  clients, local-group administration, enclosure administration, and reporting
+  modules; consolidate repeated confirmation and client-error adapters.
+- [ ] Move object-service Docker status/bind parsing into one shared
+  inspection module used by both CLI and GUI API, with a single timeout policy
+  and injected command runner for tests.
+- [ ] Split global Web CSS by base primitives and feature-owned styles, and
+  split screenshot regression runner, fixture server, assertions, and
+  per-workspace fixtures into dedicated modules.
+
 ## Milestone 12: Managed Daemon and Client Boundary
 
 ### Ingress correctness and live operator telemetry follow-up
