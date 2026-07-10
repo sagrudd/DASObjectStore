@@ -137,9 +137,7 @@ where
                 self.runner
                     .run_with_display_args("docker", &raw_args, &redacted_args)
             {
-                if command.kind == GarageProvisioningCommandKind::CreateBucket
-                    && is_existing_bucket_error(&error)
-                {
+                if is_idempotent_provisioning_conflict(command.kind, &error) {
                     continue;
                 }
                 return Err(error);
@@ -163,13 +161,20 @@ where
     }
 }
 
-fn is_existing_bucket_error(error: &DaemonServiceRuntimeError) -> bool {
-    matches!(
-        error,
-        DaemonServiceRuntimeError::CommandFailed { stderr, .. }
-            if stderr.contains("BucketAlreadyExists")
-                || stderr.contains("bucket already exists")
-    )
+fn is_idempotent_provisioning_conflict(
+    command_kind: GarageProvisioningCommandKind,
+    error: &DaemonServiceRuntimeError,
+) -> bool {
+    let DaemonServiceRuntimeError::CommandFailed { stderr, .. } = error else {
+        return false;
+    };
+    match command_kind {
+        GarageProvisioningCommandKind::ImportKey => stderr.contains("KeyAlreadyExists"),
+        GarageProvisioningCommandKind::CreateBucket => {
+            stderr.contains("BucketAlreadyExists") || stderr.contains("bucket already exists")
+        }
+        GarageProvisioningCommandKind::AllowBucket => false,
+    }
 }
 
 pub trait ServiceCommandRunner {
@@ -682,6 +687,14 @@ impl ServiceCommandRunner for FakeRunner {
                 stderr: "Error: CreateBucket returned BucketAlreadyExists (409)".to_string(),
             });
         }
+        if self.bucket_already_exists && args.iter().any(|arg| arg == "import") {
+            return Err(DaemonServiceRuntimeError::CommandFailed {
+                program: program.to_string(),
+                args: display_args.to_vec(),
+                status: "exit status: 1".to_string(),
+                stderr: "Error: ImportKey returned KeyAlreadyExists (409)".to_string(),
+            });
+        }
         Ok(self.output.borrow().clone())
     }
 }
@@ -816,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn provision_buckets_treats_existing_bucket_as_idempotent() {
+    fn provision_buckets_treats_existing_key_and_bucket_as_idempotent() {
         let credentials = credentials();
         let runner = super::FakeRunner::bucket_already_exists();
         let controller = GarageServiceController::new(config(), runner);
