@@ -62,17 +62,14 @@ pub(super) fn run_disk_force_retire(
     args: &DiskForceRetireArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let report = force_retire_disk(
-        args.live_sqlite_path(),
-        args.disk_id(),
-        args.recorded_at_utc().to_string(),
-        RiskPolicy {
-            allow_force_retire: args.allow_force_retire(),
-            ..RiskPolicy::default()
-        },
-        &ActionConfirmation::new(args.confirm()),
-    )?;
-    write_disk_force_retirement_report(&report, writer)?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.disk_force_retire(DaemonDiskForceRetireRequest {
+        disk_id: args.disk_id().to_string(),
+        allow_force_retire: args.allow_force_retire(),
+        confirmation_marker: args.confirm().to_string(),
+    })?;
+    write_disk_force_retirement_report(&response.report, writer)?;
     Ok(())
 }
 

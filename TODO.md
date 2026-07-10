@@ -104,6 +104,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Route normal disk retirement through a typed daemon request so the
     daemon owns the live metadata path, timestamp, authorization, and state
     transition report.
+  - [x] Route force disk retirement through a typed daemon request with
+    daemon-side administrator authorization, policy allowance, confirmation,
+    timestamp, and risk-gated state transition.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

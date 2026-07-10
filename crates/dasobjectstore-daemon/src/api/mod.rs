@@ -26,7 +26,10 @@ pub use appliance_telemetry::{
     ApplianceTelemetrySessionSummary, ApplianceTelemetryState, ApplianceTelemetryWindow,
     ApplianceTelemetryWindowAvailability,
 };
-pub use disk_mutation::{DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError};
+pub use disk_mutation::{
+    DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError,
+    FORCE_DISK_RETIRE_CONFIRMATION,
+};
 pub use enclosure::{
     PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
     PrepareEnclosureResponse, PrepareEnclosureValidationError, ENCLOSURE_PREPARE_CONFIRMATION,
@@ -138,6 +141,7 @@ use serde::{Deserialize, Serialize};
 pub enum DaemonApiRequest {
     HealthSummary(DaemonHealthSummaryRequest),
     DiskRetire(DiskRetireRequest),
+    DiskForceRetire(DiskForceRetireRequest),
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
@@ -174,6 +178,9 @@ impl DaemonApiRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         match self {
             Self::DiskRetire(request) => request.validate().map_err(disk_retire_validation_error),
+            Self::DiskForceRetire(request) => {
+                request.validate().map_err(disk_retire_validation_error)
+            }
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
             Self::IngestQueueDrain(request) => request
@@ -241,6 +248,7 @@ impl DaemonApiRequest {
 pub enum DaemonApiResponse {
     HealthSummary(DaemonHealthSummaryResponse),
     DiskRetire(DiskRetireResponse),
+    DiskForceRetire(DiskRetireResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
@@ -504,6 +512,11 @@ fn disk_retire_validation_error(err: DiskRetireValidationError) -> DaemonRequest
     match err {
         DiskRetireValidationError::BlankDiskId => {
             DaemonRequestValidationError::BlankField { field: "disk_id" }
+        }
+        DiskRetireValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: FORCE_DISK_RETIRE_CONFIRMATION,
+            }
         }
     }
 }

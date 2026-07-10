@@ -60,12 +60,6 @@ impl DiskDrainArgs {
 pub(crate) struct DiskForceRetireArgs {
     /// Disk identifier to force retire.
     disk_id: DiskId,
-    /// Path to live.sqlite for the pool.
-    #[arg(long)]
-    live_sqlite_path: PathBuf,
-    /// Timestamp to record in metadata.
-    #[arg(long)]
-    recorded_at_utc: String,
     /// Policy allowance for force retire.
     #[arg(long)]
     allow_force_retire: bool,
@@ -77,14 +71,6 @@ pub(crate) struct DiskForceRetireArgs {
 impl DiskForceRetireArgs {
     pub(crate) fn disk_id(&self) -> &DiskId {
         &self.disk_id
-    }
-
-    pub(crate) fn live_sqlite_path(&self) -> &Path {
-        &self.live_sqlite_path
-    }
-
-    pub(crate) fn recorded_at_utc(&self) -> &str {
-        &self.recorded_at_utc
     }
 
     pub(crate) fn allow_force_retire(&self) -> bool {
@@ -332,10 +318,6 @@ mod tests {
             "disk",
             "force-retire",
             "disk-a",
-            "--live-sqlite-path",
-            "/tmp/live.sqlite",
-            "--recorded-at-utc",
-            "2026-01-02T00:00:00Z",
             "--allow-force-retire",
             "--confirm",
             "confirm force retire",
@@ -348,11 +330,6 @@ mod tests {
         match args.command() {
             DiskCommand::ForceRetire(force_retire) => {
                 assert_eq!(force_retire.disk_id().as_str(), "disk-a");
-                assert_eq!(
-                    force_retire.live_sqlite_path(),
-                    Path::new("/tmp/live.sqlite")
-                );
-                assert_eq!(force_retire.recorded_at_utc(), "2026-01-02T00:00:00Z");
                 assert!(force_retire.allow_force_retire());
                 assert_eq!(force_retire.confirm(), "confirm force retire");
             }

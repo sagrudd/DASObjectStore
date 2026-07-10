@@ -79,6 +79,7 @@ use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
     DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
+    DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     StoreDrainRequest as DaemonStoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
@@ -86,8 +87,8 @@ use dasobjectstore_daemon::{
     DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_metadata::{
-    attach_clean_pool_read_only, delete_store, export_settled_object, force_retire_disk,
-    import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
+    attach_clean_pool_read_only, delete_store, export_settled_object, import_dirty_pool_read_only,
+    inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
     put_object_ssd_first_with_progress, read_disk_drain_plan, read_disk_replacement_plan,
     read_ingest_queue_for_store, read_object_inspect, read_store_contents, DestagePriorityPolicy,
     DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
@@ -9601,78 +9602,6 @@ mod tests {
     }
 
     #[test]
-    fn disk_force_retire_requires_policy_allowance() {
-        let root = temp_root("disk-force-retire-denied");
-        fs::create_dir_all(&root).expect("create temp root");
-        let live_sqlite_path = root.join("live.sqlite");
-        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
-        connection
-            .execute_batch(LIVE_SCHEMA_SQL)
-            .expect("schema applies");
-        insert_store(&connection);
-        insert_disk(&connection, "disk-a", "Healthy");
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "disk",
-            "force-retire",
-            "disk-a",
-            "--live-sqlite-path",
-            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
-            "--recorded-at-utc",
-            "2026-01-02T00:00:00Z",
-            "--confirm",
-            "confirm force retire",
-        ])
-        .expect("disk force-retire parses");
-        let mut output = Vec::new();
-
-        let err = run(&cli, &mut output).expect_err("risk policy blocks force retire");
-
-        assert!(matches!(err, CliError::DiskRetirement(_)));
-        assert_eq!(disk_state(&connection, "disk-a"), "Healthy");
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
-    }
-
-    #[test]
-    fn disk_force_retire_marks_disk_retired_after_risk_confirmation() {
-        let root = temp_root("disk-force-retire");
-        fs::create_dir_all(&root).expect("create temp root");
-        let live_sqlite_path = root.join("live.sqlite");
-        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
-        connection
-            .execute_batch(LIVE_SCHEMA_SQL)
-            .expect("schema applies");
-        insert_store(&connection);
-        insert_disk(&connection, "disk-a", "Healthy");
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "disk",
-            "force-retire",
-            "disk-a",
-            "--live-sqlite-path",
-            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
-            "--recorded-at-utc",
-            "2026-01-02T00:00:00Z",
-            "--allow-force-retire",
-            "--confirm",
-            "confirm force retire",
-        ])
-        .expect("disk force-retire parses");
-        let mut output = Vec::new();
-
-        run(&cli, &mut output).expect("disk force-retire runs");
-
-        let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("Disk force-retired: disk-a"));
-        assert!(output.contains("Previous state: Healthy"));
-        assert!(output.contains("Next state: Retired"));
-        assert_eq!(disk_state(&connection, "disk-a"), "Retired");
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
-    }
-
-    #[test]
     fn disk_drain_writes_pretty_plan() {
         let root = temp_root("disk-drain-pretty");
         let live_sqlite_path = create_live_sqlite_with_object(&root);
@@ -11832,16 +11761,6 @@ mod tests {
                 (disk_id, state, "2026-01-01T00:00:00Z"),
             )
             .expect("disk inserts");
-    }
-
-    fn disk_state(connection: &Connection, disk_id: &str) -> String {
-        connection
-            .query_row(
-                "SELECT state FROM disks WHERE disk_id = ?1",
-                [disk_id],
-                |row| row.get(0),
-            )
-            .expect("disk state")
     }
 
     fn create_live_sqlite_with_object(root: &Path) -> PathBuf {

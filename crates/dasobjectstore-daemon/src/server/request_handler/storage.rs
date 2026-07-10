@@ -23,6 +23,14 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::DiskForceRetire(request) => {
+            match handler.disk_force_retire_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::DiskForceRetire(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::StoreInventory(request) => {
             match handler.store_inventory_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::StoreInventory(response)),
@@ -297,6 +305,46 @@ where
             self.clock.now_utc(),
         )
         .map_err(|error| ("disk_retirement_failed", error.to_string()))?;
+        Ok(DiskRetireResponse { report })
+    }
+
+    fn disk_force_retire_for_actor(
+        &self,
+        request: DiskForceRetireRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<DiskRetireResponse, (&'static str, String)> {
+        let Some(actor) = actor else {
+            return Err((
+                "administrator_authentication_required",
+                "disk force-retirement requires an authenticated local administrator".to_string(),
+            ));
+        };
+        if !actor.is_administrator() {
+            return Err((
+                "administrator_authorization_required",
+                "disk force-retirement requires root, sudo, or dasobjectstore-admin membership"
+                    .to_string(),
+            ));
+        }
+        if !request.allow_force_retire {
+            return Err((
+                "force_disk_retire_not_allowed",
+                "disk force-retirement requires policy allowance".to_string(),
+            ));
+        }
+        let disk_id = dasobjectstore_core::ids::DiskId::new(request.disk_id.clone())
+            .map_err(|error| ("invalid_disk_id", error.to_string()))?;
+        let report = dasobjectstore_metadata::force_retire_disk(
+            &self.live_sqlite_path,
+            &disk_id,
+            self.clock.now_utc(),
+            dasobjectstore_core::risk::RiskPolicy {
+                allow_force_retire: true,
+                ..Default::default()
+            },
+            &dasobjectstore_core::risk::ActionConfirmation::new(&request.confirmation_marker),
+        )
+        .map_err(|error| ("disk_force_retirement_failed", error.to_string()))?;
         Ok(DiskRetireResponse { report })
     }
 
