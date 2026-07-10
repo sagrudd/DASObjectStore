@@ -6,6 +6,10 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.62 - 2026-07-10
+
+- Extract CLI platform probe dispatch into a dedicated read-only probe module.
+
 ## 0.69.61 - 2026-07-10
 
 - Extract CLI health output-mode dispatch into a dedicated health runner

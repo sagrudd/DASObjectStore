@@ -104,6 +104,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract health output-mode dispatch into
     `crates/dasobjectstore-cli/src/run/health.rs`, leaving platform health
     projection helpers shared and testable.
+  - [x] Extract read-only platform probe dispatch into
+    `crates/dasobjectstore-cli/src/run/probe.rs`, keeping probe acquisition and
+    presentation behind a small command handler.
   - [ ] Continue extracting the large CLI runner before removing the CLI size
     exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and

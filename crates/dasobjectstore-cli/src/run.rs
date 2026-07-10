@@ -19,6 +19,7 @@ mod health;
 mod output;
 mod performance_plan;
 mod performance_report;
+mod probe;
 mod runtime_status;
 mod service;
 mod storage_lifecycle;
@@ -27,6 +28,7 @@ mod store_write;
 mod subobject;
 
 use self::performance_plan::*;
+use self::probe::run_probe;
 
 use self::command_handlers::{
     probe_current_platform, run_mnemosyne_export, run_mnemosyne_validate_nas_nfs_endpoint,
@@ -4089,24 +4091,6 @@ fn friendly_file_order(value: &str) -> String {
         "time_desc" => "Newest first".to_string(),
         other => humanize_report_token(other),
     }
-}
-
-fn run_probe(args: &ProbeArgs, writer: &mut impl Write) -> Result<(), CliError> {
-    if args.json() && args.pretty() {
-        return Err(CliError::UnsupportedProbeFormat);
-    }
-
-    let mut report = probe_current_platform()?;
-    report.enclosures = group_enclosures(&report.disks);
-
-    if args.json() {
-        serde_json::to_writer(&mut *writer, &report)?;
-        writer.write_all(b"\n")?;
-    } else {
-        write_pretty_report(&report, writer)?;
-    }
-
-    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
