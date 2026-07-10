@@ -1036,6 +1036,39 @@ list until every temporary size-budget exception has been removed.
   - [ ] Tie disk IO samples to the future physical enclosure/bay registry so
     per-enclosure IO grouping uses authoritative hardware association.
     Blocked until the physical enclosure/bay registry is implemented.
+
+### Live Disk IO and throughput-card production follow-up
+
+- [ ] Verify the packaged daemon telemetry loop is running on the appliance,
+  writes samples at its configured cadence, and uses the active managed-HDD
+  root rather than a development/default path; expose its last successful
+  collection time and failure reason to operators.
+- [ ] Resolve every managed HDD mount to the block device actually represented
+  in `/proc/diskstats`, including partitions, device-mapper/LVM paths, MD RAID,
+  USB bridge names, and stable `/dev/disk/by-*` aliases; do not depend only on
+  a marker's basename when it cannot match the kernel counter name.
+- [ ] Validate managed-HDD device markers during enclosure preparation and
+  telemetry collection. Emit a per-disk diagnostic when the marker has no
+  usable block-device mapping, the device is absent from `/proc/diskstats`, or
+  counter access is denied.
+- [ ] Model first-sample warm-up separately from unavailable telemetry: retain
+  the first counter snapshot, show that rates will be available after the next
+  cadence, and never present a zero or missing rate as a confirmed idle disk.
+- [ ] Propagate structured per-disk IO missing reasons, sample age, mapped
+  device name, and collection status through the daemon and Home API so the
+  Disk IO card identifies the affected disk and corrective action instead of
+  only stating that telemetry is unavailable.
+- [ ] Make the Home throughput chart explicitly distinguish retained Disk IO
+  samples, legacy throughput-file fallback, no observed IO, and telemetry
+  collection failure. Preserve chart gaps and show a linked diagnostic rather
+  than silently rendering an empty graph.
+- [ ] Add appliance integration coverage using managed marker, mount, sysfs,
+  and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
+  paths; assert first-sample warm-up, later non-zero rates, unavailable-device
+  diagnostics, Disk IO card values, and throughput-chart points.
+- [ ] Add an operator runbook for restoring Home telemetry: verify daemon loop
+  health, marker/device mapping, `/proc/diskstats` visibility, sample state
+  ownership, and the distinction between an idle disk and unavailable data.
 - [x] Add active-user/session telemetry for local Web sessions and remote-agent
   sessions, including total active sessions, distinct logged-in users, and
   administrator/non-administrator counts where policy permits exposure.
