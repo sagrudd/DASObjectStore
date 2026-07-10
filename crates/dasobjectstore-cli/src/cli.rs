@@ -1593,7 +1593,7 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs, IngestCommand,
+        Cli, Command, DiskCommand, DiskPrepareFilesystem, IngestArgs,
         MnemosyneCommand, ObjectCommand, PerformanceFileOrder, PerformanceFileSelection,
         PerformanceScenarioSelection, PoolCommand, ProbeArgs, ServiceCommand, StatusArgs,
         StoreArgs, StoreCommand, StoreIngestMode, StoreS3UploadAuth, SubobjectCommand,
@@ -1601,7 +1601,6 @@ mod tests {
     use clap::Parser;
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::StoreClass;
-    use dasobjectstore_daemon::DaemonIngestConflictPolicy;
     use std::path::Path;
 
     #[test]
@@ -2357,120 +2356,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_ingest_status() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "status",
-            "--ssd-root",
-            "/tmp/pool-ssd",
-            "--high-watermark-percent",
-            "80",
-            "--critical-watermark-percent",
-            "90",
-            "--minimum-free-bytes",
-            "1024",
-        ])
-        .expect("ingest status parses");
-
-        let Some(Command::Ingest(args)) = cli.command() else {
-            panic!("expected ingest command");
-        };
-        match args.command() {
-            Some(IngestCommand::Status(status)) => {
-                assert_eq!(status.ssd_root(), Path::new("/tmp/pool-ssd"));
-                assert_eq!(status.high_watermark_percent(), 80);
-                assert_eq!(status.critical_watermark_percent(), 90);
-                assert_eq!(status.minimum_free_bytes(), 1024);
-            }
-            _ => panic!("expected status command"),
-        }
-    }
-
-    #[test]
-    fn parses_ingest_files() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "files",
-            "zymo_fecal_2025.05",
-            "--source",
-            "/mnt/external/zymo",
-            "--object-type",
-            "pod5",
-            "--ssd-root",
-            "/srv/dasobjectstore/ssd",
-            "--copies",
-            "1",
-            "--hdd-workers",
-            "5",
-            "--lazy",
-            "--tui",
-            "--dry-run",
-        ])
-        .expect("ingest files parses");
-
-        let Some(Command::Ingest(args)) = cli.command() else {
-            panic!("expected ingest command");
-        };
-        match args.command() {
-            Some(IngestCommand::Files(files)) => {
-                assert_eq!(files.endpoint().as_str(), "zymo_fecal_2025.05");
-                assert_eq!(files.source(), Path::new("/mnt/external/zymo"));
-                assert_eq!(files.object_type(), ObjectType::Pod5);
-                assert_eq!(files.ssd_root(), Some(Path::new("/srv/dasobjectstore/ssd")));
-                assert_eq!(files.copies(), Some(1));
-                assert_eq!(files.hdd_workers(), Some(5));
-                assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
-                assert!(files.tui());
-                assert!(files.dry_run());
-            }
-            _ => panic!("expected files command"),
-        }
-    }
-
-    #[test]
-    fn defaults_ingest_files_conflict_policy_to_force() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "files",
-            "zymo_fecal_2025.05",
-            "--source",
-            "/mnt/external/zymo",
-        ])
-        .expect("ingest files parses");
-
-        let Some(Command::Ingest(args)) = cli.command() else {
-            panic!("expected ingest command");
-        };
-        match args.command() {
-            Some(IngestCommand::Files(files)) => {
-                assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Force);
-                assert_eq!(files.object_type(), ObjectType::Naive);
-            }
-            _ => panic!("expected files command"),
-        }
-    }
-
-    #[test]
-    fn rejects_ambiguous_ingest_files_conflict_policies() {
-        let err = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "files",
-            "zymo_fecal_2025.05",
-            "--source",
-            "/mnt/external/zymo",
-            "--lazy",
-            "--force",
-        ])
-        .expect_err("conflicting conflict policies rejected");
-
-        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
-    }
-
-    #[test]
     fn parses_subobject_create_under_store() {
         let cli = Cli::try_parse_from([
             "dasobjectstore",
@@ -2492,103 +2377,6 @@ mod tests {
                 assert_eq!(create.parent(), None);
             }
             _ => panic!("expected create command"),
-        }
-    }
-
-    #[test]
-    fn parses_ingest_queue_json() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "queue",
-            "generated-data",
-            "--json",
-        ])
-        .expect("ingest queue parses");
-
-        let Some(Command::Ingest(args)) = cli.command() else {
-            panic!("expected ingest command");
-        };
-        match args.command() {
-            Some(IngestCommand::Queue(queue)) => {
-                assert_eq!(queue.store_id().as_str(), "generated-data");
-                assert_eq!(queue.live_sqlite_path(), None);
-                assert!(queue.json());
-            }
-            _ => panic!("expected queue command"),
-        }
-    }
-
-    #[test]
-    fn parses_ingest_drain_queue() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "drain-queue",
-            "generated-data",
-            "--dry-run",
-            "--allow-ingest-queue-drain",
-            "--confirm",
-            "confirm ingest queue drain",
-            "--json",
-        ])
-        .expect("ingest drain-queue parses");
-
-        let Some(Command::Ingest(args)) = cli.command() else {
-            panic!("expected ingest command");
-        };
-        match args.command() {
-            Some(IngestCommand::DrainQueue(drain)) => {
-                assert_eq!(drain.store_id().as_str(), "generated-data");
-                assert_eq!(drain.live_sqlite_path(), None);
-                assert!(drain.dry_run());
-                assert!(drain.allow_ingest_queue_drain());
-                assert_eq!(drain.confirm(), "confirm ingest queue drain");
-                assert!(drain.json());
-            }
-            _ => panic!("expected drain-queue command"),
-        }
-    }
-
-    #[test]
-    fn parses_ingest_direct_import() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "ingest",
-            "direct-import",
-            "zymo_fecal_2025.05",
-            "--source",
-            "/home/stephen/zymo_fecal_2025.05",
-            "--object-type",
-            "pod5",
-            "--copies",
-            "2",
-            "--hdd-workers",
-            "5",
-            "--lazy",
-            "--tui",
-            "--dry-run",
-        ])
-        .expect("ingest direct-import parses");
-
-        let Some(Command::Ingest(args)) = cli.command() else {
-            panic!("expected ingest command");
-        };
-        match args.command() {
-            Some(IngestCommand::DirectImport(import)) => {
-                assert_eq!(import.endpoint().as_str(), "zymo_fecal_2025.05");
-                assert_eq!(
-                    import.source(),
-                    Path::new("/home/stephen/zymo_fecal_2025.05")
-                );
-                assert_eq!(import.object_type(), ObjectType::Pod5);
-                assert_eq!(import.copies(), Some(2));
-                assert_eq!(import.hdd_workers(), Some(5));
-                assert_eq!(import.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
-                assert!(import.tui());
-                assert!(import.dry_run());
-            }
-            _ => panic!("expected direct-import command"),
         }
     }
 

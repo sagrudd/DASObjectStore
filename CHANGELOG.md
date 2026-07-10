@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.31 - 2026-07-10
+
+- Move ingest parser regression tests beside the extracted CLI ingest command
+  family, leaving root CLI tests focused on dispatcher behavior.
+
 ## 0.69.30 - 2026-07-10
 
 - Complete extraction of the ingest status, queue, drain, and direct-import
