@@ -314,6 +314,16 @@ list until every temporary size-budget exception has been removed.
 - [ ] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. Do not show a generic `checksum-manifest-capture` phase while a preflight source read is occurring without clearly identifying it as an explicit conflict check.
 - [ ] Add regression and performance tests for: no pre-copy hash on normal direct ingress; a single source read fan-outs to concurrent HDD writes; Remote/Web/S3 remain SSD-first; and TUI progress contains all active disk assignments and non-zero per-disk rates.
 
+### Local source classification and direct-HDD operator intent
+
+- [ ] Replace the normal `ingest files` client's hard-coded `UsbMountedDisk` origin with daemon-owned source classification. The submitted path is only a hint: the daemon must verify mount and device topology, distinguishing local server NVMe/SATA paths from USB/removable, NFS/SMB/FUSE, and other remote sources. Unknown or unverifiable sources must remain SSD-first.
+- [ ] Add a daemon-owned, auditable store-policy status and update workflow for `ingest_mode`, including the policy and action-time confirmation required to select `DirectToHdd`. Do not require operators to edit registry files or silently change an existing store from `SsdFirst`.
+- [ ] Make normal local-folder ingest eligible for direct-to-HDD only when the daemon has classified the source as server-local, the selected store policy is `DirectToHdd`, and the operator has requested the policy-allowed route. USB/removable, Web, Remote S3, NFS/SMB/FUSE, and ambiguous sources must not be promoted by a client-provided origin value.
+- [ ] Add an ingest preflight/plan event and CLI/TUI rendering that states the verified source mount/device, classified origin, store `ingest_mode`, selected landing mode, and the exact reason SSD staging was selected. Emit it before reading source bytes.
+- [ ] Add focused route-selection tests covering a server-local `/home` path direct to HDD when policy and operator intent allow it; `SsdFirst` policy overriding that path; and USB/removable, NFS/SMB/FUSE, and unknown paths remaining SSD-first. Include a regression proving ordinary `ingest files` no longer serializes every path as USB.
+- [ ] Add an appliance performance acceptance run using a server-local NVMe source and a policy-approved direct-HDD store. Verify that no SSD ingest stage is entered, a bounded one-read fan-out uses distinct HDDs, and the preflight/TUI route explanation matches the daemon decision.
+- [ ] Document the supported operator workflow for inspecting a store's ingest policy, requesting a policy-allowed direct local ingest, and interpreting an SSD-first fallback. Keep external/removable-source staging and data-loss safeguards explicit.
+
 - [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
   daemon configuration type, and unit tests for default runtime paths.
 - [x] Define the daemon API contract for health summary, store inventory,
