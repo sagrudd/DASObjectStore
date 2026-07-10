@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.66 - 2026-07-10
+
+- Extract GUI daemon response projections and stable administration/job labels
+  into `auth_reporting.rs`.
+
 ## 0.69.65 - 2026-07-10
 
 - Extract GUI authentication daemon-client submission adapters into
