@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 service="$repo_root/packaging/linux/systemd/dasobjectstored.service"
 web_service="$repo_root/packaging/linux/systemd/dasobjectstore-server.service"
+source_access_service="$repo_root/packaging/linux/systemd/dasobjectstore-source-access.service"
+source_access_path="$repo_root/packaging/linux/systemd/dasobjectstore-source-access.path"
+source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
 tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
 daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
@@ -36,6 +40,10 @@ require_text() {
 
 require_file "$service"
 require_file "$web_service"
+require_file "$source_access_service"
+require_file "$source_access_path"
+require_file "$source_access_helper"
+require_file "$mount_policy_helper"
 require_file "$sysusers"
 require_file "$tmpfiles"
 require_file "$daemon_config"
@@ -60,6 +68,12 @@ require_text "$web_service" "Group=dasobjectstore"
 require_text "$web_service" "NoNewPrivileges=false"
 require_text "$web_service" "ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls"
 require_text "$web_service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /opt/dasobjectstore"
+require_text "$source_access_service" "ExecStart=/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+require_text "$source_access_path" "PathChanged=/run/media"
+require_text "$source_access_path" "PathChanged=/media"
+require_text "$source_access_helper" 'setfacl -m "u:${service_user}:--x" "$path"'
+require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_EXFAT_DEFAULTS'
+require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_NTFS_DEFAULTS'
 
 require_text "$sysusers" "u dasobjectstore"
 require_text "$sysusers" "g dasobjectstore"
@@ -87,6 +101,9 @@ require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/telemetry 075
 require_text "$postinst" 'ensure_container_runtime_access'
 require_text "$postinst" 'admin_group="dasobjectstore-admin"'
 require_text "$postinst" 'ensure_web_admin_peer_membership'
+require_text "$postinst" 'dasobjectstore-source-access.path'
+require_text "$postinst" 'start dasobjectstore-source-access.service'
+require_text "$postinst" 'configure-external-mount-policy'
 require_text "$postinst" 'usermod -aG "$admin_group" "$service_user"'
 require_text "$postinst" 'usermod -aG docker "$service_user"'
 require_text "$postinst" 'restart dasobjectstore-server.service'
@@ -111,14 +128,21 @@ require_text "$build_deb" 'target/release/dasobjectstore-local-auth-helper'
 require_text "$build_deb" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-server.service'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-source-access.service'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-source-access.path'
 require_text "$build_deb" 'opt/dasobjectstore/config.json'
 require_text "$build_deb" 'opt/dasobjectstore/web'
 require_text "$build_deb" 'etc/pam.d/dasobjectstore'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-external-mount-traversal'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_deb" 'DEBIAN/postinst'
-require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_rpm" 'Requires:       udisks2'
+require_text "$build_rpm" '/usr/libexec/dasobjectstore/configure-external-mount-policy'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-source-access.path'
 require_text "$build_deb" 'X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx'
 require_text "$build_deb" 'X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker'
 require_text "$build_deb" 'sudo apt-get install clang libclang-dev libpam0g-dev'

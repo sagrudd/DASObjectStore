@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch external source mount roots for DASObjectStore
+
+[Path]
+PathChanged=/run/media
+PathChanged=/media
+Unit=dasobjectstore-source-access.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Prepare read-only traversal for DASObjectStore external source mounts
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/dasobjectstore/prepare-external-mount-traversal

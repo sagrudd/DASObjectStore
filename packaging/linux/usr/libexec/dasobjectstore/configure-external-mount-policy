@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+service_group="dasobjectstore"
+rule_path="/etc/udev/rules.d/99-dasobjectstore-external-mounts.rules"
+group_id="$(getent group "$service_group" | awk -F: 'NR == 1 { print $3 }')"
+
+if [[ ! "$group_id" =~ ^[0-9]+$ ]]; then
+  printf 'DASObjectStore: cannot determine numeric gid for %s; skipping external mount policy.\n' "$service_group" >&2
+  exit 0
+fi
+
+install -d -m 0755 /etc/udev/rules.d
+temporary_rule="$(mktemp)"
+trap 'rm -f "$temporary_rule"' EXIT
+
+cat >"$temporary_rule" <<RULE
+# Managed by DASObjectStore. External non-POSIX filesystems are mounted with
+# read-only access for the dasobjectstore service group. The caller remains
+# the owner; this only adds group read/traverse access for daemon ingestion.
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="vfat", ENV{UDISKS_MOUNT_OPTIONS_VFAT_DEFAULTS}="uid=\$UID,gid=$group_id,dmask=0037,fmask=0137"
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="vfat", ENV{UDISKS_MOUNT_OPTIONS_VFAT_ALLOW}="uid=\$UID,gid=$group_id,dmask,fmask,umask,flush,utf8,shortname,codepage,iocharset,usefree,showexec"
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="exfat", ENV{UDISKS_MOUNT_OPTIONS_EXFAT_DEFAULTS}="uid=\$UID,gid=$group_id,dmask=0037,fmask=0137,iocharset=utf8,errors=remount-ro"
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="exfat", ENV{UDISKS_MOUNT_OPTIONS_EXFAT_ALLOW}="uid=\$UID,gid=$group_id,dmask,fmask,umask,iocharset,errors"
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="ntfs", ENV{UDISKS_MOUNT_OPTIONS_NTFS_DEFAULTS}="uid=\$UID,gid=$group_id,dmask=0037,fmask=0137"
+SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_FS_TYPE}=="ntfs", ENV{UDISKS_MOUNT_OPTIONS_NTFS_ALLOW}="uid=\$UID,gid=$group_id,dmask,fmask,umask,windows_names,locale,norecover,ignore_case,big_writes"
+RULE
+
+install -m 0644 "$temporary_rule" "$rule_path"
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload-rules || true
+fi

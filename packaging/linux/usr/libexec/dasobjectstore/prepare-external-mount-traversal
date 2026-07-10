@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+service_user="dasobjectstore"
+
+grant_traversal() {
+  local path="$1"
+  [[ -d "$path" ]] || return 0
+  if ! setfacl -m "u:${service_user}:--x" "$path"; then
+    printf 'DASObjectStore: cannot grant traversal on %s; the mount may not support POSIX ACLs.\n' "$path" >&2
+  fi
+}
+
+for root in /run/media /media; do
+  [[ -d "$root" ]] || continue
+  while IFS= read -r -d '' user_root; do
+    grant_traversal "$user_root"
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -print0)
+done

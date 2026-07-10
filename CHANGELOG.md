@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.42 - 2026-07-10
+
+- Package external-source access for Debian/RPM installations with managed
+  udisks mount permissions and automatic read-only traversal preparation.
+
 ## 0.69.41 - 2026-07-10
 
 - Extract performance report, JSON artifact, chart, and PDF rendering helpers

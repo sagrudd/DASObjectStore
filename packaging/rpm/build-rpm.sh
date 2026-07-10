@@ -68,6 +68,10 @@ install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$payload_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
+  "$payload_root/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-mount-policy" \
+  "$payload_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
@@ -80,6 +84,10 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstored.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-server.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-server.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-source-access.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.path" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-source-access.path"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
@@ -113,6 +121,7 @@ Requires:       docker-buildx-plugin
 Requires:       pam
 # Prosopikon native dependency marker: $prosopikon_pam_marker
 Requires:       systemd
+Requires:       udisks2
 Requires(post): coreutils
 Requires(post): findutils
 Requires(post): shadow-utils
@@ -207,12 +216,17 @@ for root in "\$managed_root/ssd" "\$managed_root"/hdd/*; do
   find "\$root" -path "\$root/lost+found" -prune -o -type f -exec chmod 0640 {} +
 done
 
+if [ -x /usr/libexec/dasobjectstore/configure-external-mount-policy ]; then
+  /usr/libexec/dasobjectstore/configure-external-mount-policy || true
+fi
+
 if command -v systemd-tmpfiles >/dev/null 2>&1; then
   systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf || true
 fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable --now dasobjectstored.service dasobjectstore-server.service || true
+  systemctl enable --now dasobjectstored.service dasobjectstore-server.service dasobjectstore-source-access.path || true
+  systemctl start dasobjectstore-source-access.service || true
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi
 
@@ -242,8 +256,12 @@ fi
 /usr/bin/dasobjectstore-remote
 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
+/usr/libexec/dasobjectstore/prepare-external-mount-traversal
+/usr/libexec/dasobjectstore/configure-external-mount-policy
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/systemd/system/dasobjectstore-server.service
+/usr/lib/systemd/system/dasobjectstore-source-access.service
+/usr/lib/systemd/system/dasobjectstore-source-access.path
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
 %doc /usr/share/doc/dasobjectstore/README.md

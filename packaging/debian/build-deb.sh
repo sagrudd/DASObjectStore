@@ -63,6 +63,10 @@ install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
   "$build_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$build_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
+  "$build_root/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-mount-policy" \
+  "$build_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
@@ -74,6 +78,10 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$build_root/lib/systemd/system/dasobjectstored.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-server.service" \
   "$build_root/lib/systemd/system/dasobjectstore-server.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.service" \
+  "$build_root/lib/systemd/system/dasobjectstore-source-access.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.path" \
+  "$build_root/lib/systemd/system/dasobjectstore-source-access.path"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$build_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
@@ -88,7 +96,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx
 X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker
 Suggests: awscli

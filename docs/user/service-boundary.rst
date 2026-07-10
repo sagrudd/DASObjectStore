@@ -117,6 +117,22 @@ preventing writes through the service sandbox. This is an interim packaging
 policy for local daemon ingest; storage mutation remains daemon-owned and
 limited to the managed runtime, state, log, and ``/srv/dasobjectstore`` paths.
 
+Debian and RPM packages also enable
+``dasobjectstore-source-access.path``. Its root-owned helper watches the
+standard udisks mount roots (``/run/media`` and ``/media``) and grants the
+daemon only execute/traverse access to newly created per-user mount roots. It
+does not grant source write access and does not recursively change files on an
+external volume. Filesystems without POSIX ACL support must still be mounted
+with service-readable ``uid``, ``gid``, and ``mode`` options; the ingest CLI
+reports that condition explicitly.
+
+When ``udisks2`` is installed, the package also regenerates
+``/etc/udev/rules.d/99-dasobjectstore-external-mounts.rules`` with the numeric
+``dasobjectstore`` group ID. FAT, exFAT, and NTFS mounts then receive a
+read-only group view (``dmask=0037,fmask=0137``) at mount time. Existing mounts
+must be unmounted and mounted again before the policy takes effect; fstab
+mounts remain administrator-owned and are not overridden.
+
 The service sandbox does not override normal Unix permissions. The source tree
 must be readable and searchable by the ``dasobjectstore`` service user, or by a
 group/ACL that grants that service identity access. Prefer granting read-only

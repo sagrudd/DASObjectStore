@@ -146,9 +146,14 @@ if [[ -d "$managed_root/hdd" ]]; then
   done
 fi
 
+if [[ -x /usr/libexec/dasobjectstore/configure-external-mount-policy ]]; then
+  /usr/libexec/dasobjectstore/configure-external-mount-policy || true
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable --now dasobjectstored.service dasobjectstore-server.service || true
+  systemctl enable --now dasobjectstored.service dasobjectstore-server.service dasobjectstore-source-access.path || true
+  systemctl start dasobjectstore-source-access.service || true
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi
 

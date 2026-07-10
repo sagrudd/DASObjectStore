@@ -105,7 +105,14 @@ passwordless sudo. If that retry fails with ``Operation not permitted``, the
 mount likely does not support POSIX ACLs; remount it with service-readable
 ``uid``, ``gid``, and ``mode`` options (or pre-grant ``dasobjectstore``
 read/traverse access) before retrying. The CLI never grants daemon write access
-to the source.
+to the source. Packaged Debian/RPM installs also run a root-owned watcher for
+``/run/media`` and ``/media`` that prepares per-user mount-root traversal
+automatically, so the manual ACL commands are only a recovery path for an
+already-running installation or a non-standard mount root.
+When ``udisks2`` is available, the package also installs a udev mount policy so
+FAT, exFAT, and NTFS volumes are mounted with a read-only
+``dasobjectstore`` group view; unmount and remount an already attached volume
+after package installation.
 
 DASObjectStore discovers prepared HDD members under the managed mount root and
 chooses placements for each object. Operators must not choose individual disks
