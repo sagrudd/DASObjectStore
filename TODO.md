@@ -315,7 +315,8 @@ list until every temporary size-budget exception has been removed.
 - [x] Decouple daemon progress/socket reporting from the I/O hot path with byte/time coalescing that preserves phase and target-assignment transitions; the embedded TUI retains the latest snapshot and redraws byte-only updates at a bounded cadence.
 - [ ] Update the embedded TUI to render all active HDD targets, copy numbers, source and destination throughput, and pipeline queue depths. Do not show a generic `checksum-manifest-capture` phase while a preflight source read is occurring without clearly identifying it as an explicit conflict check.
 - [x] Add TUI regression coverage for multiple active disk assignments and non-zero per-disk rates.
-- [ ] Add regression and performance coverage proving no pre-copy hash on normal direct ingress, one source read fan-out to concurrent HDD writes, and Remote/Web/S3 SSD-first executor routing. Broader appliance soak/SLO acceptance remains tracked under Web availability.
+- [x] Add deterministic fan-out overlap coverage proving one source reader feeds at least two concurrent physical-disk writers while preserving per-target outputs.
+- [ ] Add regression and performance coverage proving no pre-copy hash on normal direct ingress and Remote/Web/S3 SSD-first executor routing. Broader appliance soak/SLO acceptance remains tracked under Web availability.
 
 ### Local source classification and direct-HDD operator intent
 

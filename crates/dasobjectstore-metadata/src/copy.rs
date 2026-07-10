@@ -6,11 +6,18 @@ use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Instant;
 
 pub const HDD_COPY_CONTENT_HASH_ALGORITHM: &str = SHA256_ALGORITHM;
+
+#[cfg(test)]
+static ACTIVE_FANOUT_WRITERS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static MAX_ACTIVE_FANOUT_WRITERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HddCopyRequest {
@@ -250,6 +257,8 @@ fn write_hdd_copies_to_open_destinations(
         let write_progress_tx = write_progress_tx.clone();
         let result_tx = result_tx.clone();
         workers.push(thread::spawn(move || {
+            #[cfg(test)]
+            let _probe = FanoutWriterProbe::new();
             let result = write_fanout_destination(request, destination, receiver, |progress| {
                 write_progress_tx
                     .send((index, progress))
@@ -403,6 +412,26 @@ fn cleanup_fanout_destinations(requests: &[HddInlineHashCopyRequest]) {
     }
 }
 
+#[cfg(test)]
+struct FanoutWriterProbe;
+
+#[cfg(test)]
+impl FanoutWriterProbe {
+    fn new() -> Self {
+        let active = ACTIVE_FANOUT_WRITERS.fetch_add(1, Ordering::SeqCst) + 1;
+        MAX_ACTIVE_FANOUT_WRITERS.fetch_max(active, Ordering::SeqCst);
+        thread::sleep(std::time::Duration::from_millis(10));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for FanoutWriterProbe {
+    fn drop(&mut self) {
+        ACTIVE_FANOUT_WRITERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 fn encode_hash(hash: impl AsRef<[u8]>) -> String {
     hash.as_ref()
         .iter()
@@ -515,7 +544,7 @@ mod tests {
     use super::{
         write_hdd_copies_from_reader_with_controlled_progress, write_verified_hdd_copy,
         write_verified_hdd_copy_with_controlled_progress, HddCopyError, HddCopyRequest,
-        HddInlineHashCopyRequest,
+        HddInlineHashCopyRequest, MAX_ACTIVE_FANOUT_WRITERS,
     };
     use crate::hash::hash_file_sha256;
     #[cfg(unix)]
@@ -526,6 +555,7 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::sync::atomic::Ordering;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -633,6 +663,7 @@ mod tests {
         ];
         let mut source = CountingReader::new(payload.clone());
         let mut active_targets = Vec::new();
+        MAX_ACTIVE_FANOUT_WRITERS.store(0, Ordering::SeqCst);
 
         let reports = write_hdd_copies_from_reader_with_controlled_progress(
             &mut source,
@@ -645,6 +676,10 @@ mod tests {
         .expect("fan-out copy succeeds");
 
         assert_eq!(source.bytes_read, payload.len());
+        assert!(
+            MAX_ACTIVE_FANOUT_WRITERS.load(Ordering::SeqCst) >= 2,
+            "fan-out must overlap at least two physical-disk writers"
+        );
         assert_eq!(reports.len(), 3);
         for request in &requests {
             assert_eq!(
