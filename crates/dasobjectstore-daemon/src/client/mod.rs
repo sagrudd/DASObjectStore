@@ -17,20 +17,21 @@ use crate::api::{
     DaemonJobCancelResponse, DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest,
     DaemonJobStatusResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-    DaemonServiceStatusResponse, IngestJobStatusRequest, IngestJobStatusResponse,
-    IngestQueueDrainRequest, IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse,
-    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
-    ObjectFolderDownloadResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    DaemonServiceStatusResponse, DiskRetireRequest, DiskRetireResponse, IngestJobStatusRequest,
+    IngestJobStatusResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
+    ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
+    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureRequest,
+    PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse,
 };
@@ -90,6 +91,16 @@ where
         match self.send(DaemonApiRequest::StoreInventory(request))? {
             DaemonApiResponse::StoreInventory(response) => Ok(response),
             response => Err(unexpected("store_inventory", response)),
+        }
+    }
+
+    pub fn disk_retire(
+        &self,
+        request: DiskRetireRequest,
+    ) -> Result<DiskRetireResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::DiskRetire(request))? {
+            DaemonApiResponse::DiskRetire(response) => Ok(response),
+            response => Err(unexpected("disk_retire", response)),
         }
     }
 
@@ -434,6 +445,7 @@ fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClie
 fn response_name(response: &DaemonApiResponse) -> &'static str {
     match response {
         DaemonApiResponse::HealthSummary(_) => "health_summary",
+        DaemonApiResponse::DiskRetire(_) => "disk_retire",
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",

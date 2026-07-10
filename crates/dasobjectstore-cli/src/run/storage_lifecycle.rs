@@ -49,12 +49,12 @@ pub(super) fn run_disk_retire(
     args: &DiskRetireArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let report = request_disk_retirement(
-        args.live_sqlite_path(),
-        args.disk_id(),
-        args.recorded_at_utc().to_string(),
-    )?;
-    write_disk_retirement_report(&report, writer)?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.disk_retire(DaemonDiskRetireRequest {
+        disk_id: args.disk_id().to_string(),
+    })?;
+    write_disk_retirement_report(&response.report, writer)?;
     Ok(())
 }
 

@@ -101,6 +101,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Route ingest queue drain through a typed daemon request so daemon-owned
     metadata paths, authorization, timestamps, and cancellation reporting are
     used instead of CLI-side SQLite mutation.
+  - [x] Route normal disk retirement through a typed daemon request so the
+    daemon owns the live metadata path, timestamp, authorization, and state
+    transition report.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

@@ -1,6 +1,7 @@
 //! Transport-neutral daemon API contracts.
 
 mod appliance_telemetry;
+mod disk_mutation;
 mod enclosure;
 mod endpoint;
 mod health;
@@ -25,6 +26,7 @@ pub use appliance_telemetry::{
     ApplianceTelemetrySessionSummary, ApplianceTelemetryState, ApplianceTelemetryWindow,
     ApplianceTelemetryWindowAvailability,
 };
+pub use disk_mutation::{DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError};
 pub use enclosure::{
     PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
     PrepareEnclosureResponse, PrepareEnclosureValidationError, ENCLOSURE_PREPARE_CONFIRMATION,
@@ -135,6 +137,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case", tag = "command", content = "payload")]
 pub enum DaemonApiRequest {
     HealthSummary(DaemonHealthSummaryRequest),
+    DiskRetire(DiskRetireRequest),
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
@@ -170,6 +173,7 @@ pub enum DaemonApiRequest {
 impl DaemonApiRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         match self {
+            Self::DiskRetire(request) => request.validate().map_err(disk_retire_validation_error),
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
             Self::IngestQueueDrain(request) => request
@@ -236,6 +240,7 @@ impl DaemonApiRequest {
 #[serde(rename_all = "snake_case", tag = "kind", content = "payload")]
 pub enum DaemonApiResponse {
     HealthSummary(DaemonHealthSummaryResponse),
+    DiskRetire(DiskRetireResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
@@ -491,6 +496,14 @@ fn store_drain_validation_error(err: StoreDrainValidationError) -> DaemonRequest
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: STORE_DRAIN_CONFIRMATION,
             }
+        }
+    }
+}
+
+fn disk_retire_validation_error(err: DiskRetireValidationError) -> DaemonRequestValidationError {
+    match err {
+        DiskRetireValidationError::BlankDiskId => {
+            DaemonRequestValidationError::BlankField { field: "disk_id" }
         }
     }
 }

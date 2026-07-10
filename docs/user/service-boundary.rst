@@ -113,6 +113,10 @@ sends the store, reason, dry-run, allowance, and confirmation fields to the
 daemon; the daemon selects its live metadata path, authorizes the administrator,
 updates queue state, and returns the cancellation report.
 
+Normal ``dasobjectstore disk retire`` requests follow the same boundary: the
+daemon authenticates the administrator, selects the live metadata database,
+records its current timestamp, and returns the state-transition report.
+
 The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
 user or group, package configuration stops and asks the operator to repair the

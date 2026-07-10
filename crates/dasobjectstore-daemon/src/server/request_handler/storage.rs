@@ -15,6 +15,14 @@ where
     C: DaemonClock,
 {
     match request {
+        DaemonApiRequest::DiskRetire(request) => {
+            match handler.disk_retire_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::DiskRetire(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::StoreInventory(request) => {
             match handler.store_inventory_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::StoreInventory(response)),
@@ -261,6 +269,35 @@ where
             })
             .map_err(|error| ("store_drain_failed", error.to_string()))?;
         Ok(StoreDrainResponse { report })
+    }
+
+    fn disk_retire_for_actor(
+        &self,
+        request: DiskRetireRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<DiskRetireResponse, (&'static str, String)> {
+        let Some(actor) = actor else {
+            return Err((
+                "administrator_authentication_required",
+                "disk retirement requires an authenticated local administrator".to_string(),
+            ));
+        };
+        if !actor.is_administrator() {
+            return Err((
+                "administrator_authorization_required",
+                "disk retirement requires root, sudo, or dasobjectstore-admin membership"
+                    .to_string(),
+            ));
+        }
+        let disk_id = dasobjectstore_core::ids::DiskId::new(request.disk_id.clone())
+            .map_err(|error| ("invalid_disk_id", error.to_string()))?;
+        let report = dasobjectstore_metadata::request_disk_retirement(
+            &self.live_sqlite_path,
+            &disk_id,
+            self.clock.now_utc(),
+        )
+        .map_err(|error| ("disk_retirement_failed", error.to_string()))?;
+        Ok(DiskRetireResponse { report })
     }
 
     fn ingest_queue_drain_for_actor(

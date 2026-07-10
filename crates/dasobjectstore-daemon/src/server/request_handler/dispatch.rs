@@ -33,6 +33,7 @@ where
         | DaemonApiRequest::JobStatus(_)
         | DaemonApiRequest::CancelJob(_)) => service::request(handler, service_request),
         storage_request @ (DaemonApiRequest::StoreInventory(_)
+        | DaemonApiRequest::DiskRetire(_)
         | DaemonApiRequest::StoreDrain(_)
         | DaemonApiRequest::IngestQueueDrain(_)
         | DaemonApiRequest::ApplianceTelemetry(_)

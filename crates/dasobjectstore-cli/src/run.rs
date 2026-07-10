@@ -79,6 +79,7 @@ use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
     DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
     DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
+    DiskRetireRequest as DaemonDiskRetireRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     StoreDrainRequest as DaemonStoreDrainRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
@@ -88,10 +89,10 @@ use dasobjectstore_metadata::{
     attach_clean_pool_read_only, delete_store, export_settled_object, force_retire_disk,
     import_dirty_pool_read_only, inspect_pool_metadata, measure_ssd_capacity, put_object_ssd_first,
     put_object_ssd_first_with_progress, read_disk_drain_plan, read_disk_replacement_plan,
-    read_ingest_queue_for_store, read_object_inspect, read_store_contents, request_disk_retirement,
-    DestagePriorityPolicy, DiskCopyRoot, DiskDrainError, DiskRetirementError,
-    IngestQueueDrainError, IngestQueueDrainReport, IngestQueueReadError, IngestQueueSnapshot,
-    ObjectExportError, ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
+    read_ingest_queue_for_store, read_object_inspect, read_store_contents, DestagePriorityPolicy,
+    DiskCopyRoot, DiskDrainError, DiskRetirementError, IngestQueueDrainError,
+    IngestQueueDrainReport, IngestQueueReadError, IngestQueueSnapshot, ObjectExportError,
+    ObjectExportRequest, ObjectInspectError, ObjectPutError, ObjectPutProgress,
     ObjectPutProgressStage, ObjectPutRequest, PoolInspectError, ReadOnlyAttachError,
     ReadOnlyAttachOptions, SsdCapacityMeasurementError, SsdCapacityPolicy, SsdCapacityPolicyError,
     StoreCleanupError, StoreContentsObject, StoreContentsReadError, StoreContentsRequest,
@@ -9595,41 +9596,6 @@ mod tests {
         assert!(output.contains("Disks: 1"));
         assert!(output.contains("Planned action: read-only recovery import"));
         assert!(!root.join("recovered").exists());
-
-        fs::remove_dir_all(root).expect("cleanup temp root");
-    }
-
-    #[test]
-    fn disk_retire_marks_disk_draining() {
-        let root = temp_root("disk-retire");
-        fs::create_dir_all(&root).expect("create temp root");
-        let live_sqlite_path = root.join("live.sqlite");
-        let connection = Connection::open(&live_sqlite_path).expect("open live sqlite");
-        connection
-            .execute_batch(LIVE_SCHEMA_SQL)
-            .expect("schema applies");
-        insert_store(&connection);
-        insert_disk(&connection, "disk-a", "Healthy");
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "disk",
-            "retire",
-            "disk-a",
-            "--live-sqlite-path",
-            live_sqlite_path.to_str().expect("utf8 live sqlite path"),
-            "--recorded-at-utc",
-            "2026-01-02T00:00:00Z",
-        ])
-        .expect("disk retire parses");
-        let mut output = Vec::new();
-
-        run(&cli, &mut output).expect("disk retire runs");
-
-        let output = String::from_utf8(output).expect("utf8 output");
-        assert!(output.contains("Disk retirement requested: disk-a"));
-        assert!(output.contains("Previous state: Healthy"));
-        assert!(output.contains("Next state: Draining"));
-        assert_eq!(disk_state(&connection, "disk-a"), "Draining");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

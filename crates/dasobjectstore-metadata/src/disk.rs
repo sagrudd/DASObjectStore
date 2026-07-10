@@ -4,10 +4,11 @@ use dasobjectstore_core::risk::{
     ActionConfirmation, RiskGate, RiskGateError, RiskPolicy, RiskyOperation,
 };
 use rusqlite::{Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DiskRetirementReport {
     pub disk_id: DiskId,
     pub live_sqlite_path: PathBuf,

@@ -263,25 +263,11 @@ impl DiskReplaceArgs {
 pub(crate) struct DiskRetireArgs {
     /// Disk identifier to retire.
     disk_id: DiskId,
-    /// Path to live.sqlite for the pool.
-    #[arg(long)]
-    live_sqlite_path: PathBuf,
-    /// Timestamp to record in metadata.
-    #[arg(long)]
-    recorded_at_utc: String,
 }
 
 impl DiskRetireArgs {
     pub(crate) fn disk_id(&self) -> &DiskId {
         &self.disk_id
-    }
-
-    pub(crate) fn live_sqlite_path(&self) -> &Path {
-        &self.live_sqlite_path
-    }
-
-    pub(crate) fn recorded_at_utc(&self) -> &str {
-        &self.recorded_at_utc
     }
 }
 
@@ -320,17 +306,8 @@ mod tests {
 
     #[test]
     fn parses_disk_retire() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "disk",
-            "retire",
-            "disk-a",
-            "--live-sqlite-path",
-            "/tmp/live.sqlite",
-            "--recorded-at-utc",
-            "2026-01-02T00:00:00Z",
-        ])
-        .expect("disk retire parses");
+        let cli = Cli::try_parse_from(["dasobjectstore", "disk", "retire", "disk-a"])
+            .expect("disk retire parses");
 
         let Some(Command::Disk(args)) = cli.command() else {
             panic!("expected disk command");
@@ -344,8 +321,6 @@ mod tests {
             DiskCommand::Replace(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
                 assert_eq!(retire.disk_id().as_str(), "disk-a");
-                assert_eq!(retire.live_sqlite_path(), Path::new("/tmp/live.sqlite"));
-                assert_eq!(retire.recorded_at_utc(), "2026-01-02T00:00:00Z");
             }
         }
     }

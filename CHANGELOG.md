@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.51 - 2026-07-10
+
+- Route normal disk retirement through a typed daemon-owned request with
+  administrator authorization and daemon-selected metadata/timestamp state.
+
 ## 0.69.50 - 2026-07-10
 
 - Route ingest queue drain through a typed daemon-owned request with explicit
