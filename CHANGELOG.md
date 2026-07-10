@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.34 - 2026-07-10
+
+- Extract Service CLI argument contracts and colocate Docker Compose parser
+  regressions in the command-family module.
+
 ## 0.69.33 - 2026-07-10
 
 - Extract Object CLI argument contracts and colocate their parser regressions

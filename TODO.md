@@ -53,6 +53,9 @@ list until every temporary size-budget exception has been removed.
     `crates/dasobjectstore-cli/src/cli/subobject.rs`.
   - [x] Extract the Object argument contracts and parser regressions into
     `crates/dasobjectstore-cli/src/cli/object.rs`.
+  - [x] Extract the Service argument contracts and parser regressions into
+    `crates/dasobjectstore-cli/src/cli/service.rs`, preserving Docker Compose
+    defaults and help text.
   - [ ] Continue extracting the remaining object, service, store, disk, pool,
     and runner command families before removing the CLI size exception.
 - [ ] Complete the daemon ownership boundary: add daemon request contracts and
