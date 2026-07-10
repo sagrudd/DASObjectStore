@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.69.75 - 2026-07-10
+
+- Wire `store repair` through the daemon request-family dispatcher so the
+  released CLI command reaches the storage handler.
+
 ## 0.69.74 - 2026-07-10
 
 - Persist completed ingest placements and inline checksums to live metadata.

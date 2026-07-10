@@ -37,6 +37,7 @@ where
         | DaemonApiRequest::DiskForceRetire(_)
         | DaemonApiRequest::StoreDrain(_)
         | DaemonApiRequest::StoreDelete(_)
+        | DaemonApiRequest::StoreRepair(_)
         | DaemonApiRequest::ObjectPut(_)
         | DaemonApiRequest::IngestQueueDrain(_)
         | DaemonApiRequest::ApplianceTelemetry(_)
