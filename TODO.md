@@ -475,7 +475,7 @@ list until every temporary size-budget exception has been removed.
 - [x] Add executor route-plan regression coverage proving Remote/Web/USB external origins select SSD-first under a direct-capable store policy.
 - [x] Add full-pipeline coverage proving external-origin SSD-first behavior through staged settlement under a direct-capable policy.
 - [x] Add deterministic performance coverage for no pre-copy hash on normal direct ingress and bounded high-frequency progress delivery; existing fan-out and staged external fixtures cover byte-path correctness.
-- [ ] Add appliance sustained external-origin throughput and direct-ingest no-precopy soak acceptance. Broader performance/soak acceptance remains tracked under Web availability.
+- [ ] Add appliance sustained external-origin throughput and direct-ingest no-precopy soak acceptance. Broader performance/soak acceptance remains tracked under Web availability. Blocked on 2026-07-11 while an existing 25 GiB appliance performance-test uses real source data; do not overlap this generated-data ``codex`` acceptance run with it.
 
 ### Local source classification and direct-HDD operator intent
 
