@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.2 - 2026-07-11
+
+- Persist terminal success and failure records for Garage reconciliation repair
+  jobs, and mark nonterminal jobs interrupted after daemon restart.
+
 ## 0.71.1 - 2026-07-10
 
 - Stream daemon reconciliation phase events to ``store repair --reconcile-s3``
