@@ -51,6 +51,14 @@ pub trait RemoteEasyconnectPairedSessionStore: Send + Sync {
         actor: &DaemonLocalActor,
         now_utc: &str,
     ) -> Result<RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectPairedSessionStoreError>;
+
+    fn authorize_completion(
+        &self,
+        session_id: &str,
+        renewal_token: &str,
+        object_store: &str,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectPairedSessionStoreError>;
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -260,6 +268,59 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
                 expected_actor: session.approved_actor.clone(),
                 actual_actor: actor_name,
             });
+        }
+        let Some(grant) = session
+            .object_stores
+            .iter()
+            .find(|grant| grant.object_store == object_store)
+        else {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::ObjectStoreNotGranted {
+                    session_id: session_id.to_string(),
+                    object_store: object_store.to_string(),
+                },
+            );
+        };
+        if !grant.can_write {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::ObjectStoreNotWritable {
+                    session_id: session_id.to_string(),
+                    object_store: object_store.to_string(),
+                    writer_group: grant.writer_group.clone(),
+                },
+            );
+        }
+        Ok(grant.clone())
+    }
+
+    fn authorize_completion(
+        &self,
+        session_id: &str,
+        renewal_token: &str,
+        object_store: &str,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectPairedSessionStoreError> {
+        require_non_blank("session_id", session_id)?;
+        require_non_blank("renewal_token", renewal_token)?;
+        require_non_blank("object_store", object_store)?;
+        require_non_blank("now_utc", now_utc)?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        let store = read_store(&self.path)?;
+        let Some(session) = store.session(session_id) else {
+            return Err(RemoteEasyconnectPairedSessionStoreError::SessionNotFound {
+                session_id: session_id.to_string(),
+            });
+        };
+        ensure_session_usable(session, now_utc)?;
+        if session.renewal_token != renewal_token {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::RenewalTokenMismatch {
+                    session_id: session_id.to_string(),
+                },
+            );
         }
         let Some(grant) = session
             .object_stores
@@ -666,6 +727,49 @@ mod tests {
         assert!(matches!(
             expired.expect_err("expired session rejected"),
             RemoteEasyconnectPairedSessionStoreError::SessionExpired { .. }
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn completion_authorization_requires_the_paired_session_secret_and_write_grant() {
+        let root = temp_root("completion-authorize");
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            remote_easyconnect_session_store_path(&root),
+        );
+        store.upsert(session("session-1")).expect("session stored");
+
+        let grant = store
+            .authorize_completion(
+                "session-1",
+                "renewal-token-1",
+                "zymo_fecal_2025.05",
+                "2026-07-09T16:30:00Z",
+            )
+            .expect("completion authorized");
+        assert!(grant.can_write);
+
+        let wrong_secret = store.authorize_completion(
+            "session-1",
+            "wrong-token",
+            "zymo_fecal_2025.05",
+            "2026-07-09T16:30:00Z",
+        );
+        assert!(matches!(
+            wrong_secret.expect_err("wrong completion secret rejected"),
+            RemoteEasyconnectPairedSessionStoreError::RenewalTokenMismatch { .. }
+        ));
+
+        let read_only = store.authorize_completion(
+            "session-1",
+            "renewal-token-1",
+            "ena",
+            "2026-07-09T16:30:00Z",
+        );
+        assert!(matches!(
+            read_only.expect_err("read-only completion rejected"),
+            RemoteEasyconnectPairedSessionStoreError::ObjectStoreNotWritable { .. }
         ));
 
         cleanup(&root);
