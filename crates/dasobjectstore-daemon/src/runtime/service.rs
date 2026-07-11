@@ -11,7 +11,7 @@ use crate::api::{
     DaemonServiceStatusDetail, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
     StoreRepairS3Reconciliation, SubmitIngestFilesRequest,
 };
-use crate::runtime::submit_ingest_files_to_local_store;
+use crate::runtime::submit_ingest_files_to_local_store_with_progress;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_object_service::{
@@ -174,6 +174,10 @@ where
         prefix: Option<String>,
         dry_run: bool,
         accepted_at_utc: &str,
+        emit_progress: &mut dyn FnMut(
+            crate::api::DaemonIngestProgressEvent,
+        )
+            -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
         self.config.validate()?;
         let definitions = read_store_registry(default_store_registry_path())?;
@@ -261,7 +265,7 @@ where
                 ("AWS_DEFAULT_REGION".to_string(), "garage".to_string()),
             ],
         )?;
-        let ingest = submit_ingest_files_to_local_store(
+        let ingest = submit_ingest_files_to_local_store_with_progress(
             SubmitIngestFilesRequest {
                 endpoint: store_id,
                 source_path: staging_path.clone(),
@@ -274,6 +278,7 @@ where
                 client_request_id: Some(format!("garage-reconcile-{accepted_at_utc}")),
             },
             accepted_at_utc,
+            emit_progress,
         )
         .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
             operation: format!("S3 reconciliation ingest failed: {error}"),

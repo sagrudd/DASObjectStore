@@ -992,7 +992,9 @@ list until every temporary size-budget exception has been removed.
   terminal job state and final CLI response. Stream daemon progress/log events
   for Garage download, SSD staging, HDD settlement, metadata repair, failure,
   cancellation, and daemon restart recovery so operators never need `Ctrl-C`
-  to escape an apparently completed recovery.
+  to escape an apparently completed recovery. Reconciliation now forwards the
+  normal coalesced SSD/HDD ingest events to the initiating CLI; durable job
+  state, Garage transfer progress, cancellation, and restart recovery remain.
 - [ ] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition

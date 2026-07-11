@@ -719,6 +719,9 @@ pub trait DaemonServiceOrchestrator {
         _prefix: Option<String>,
         _dry_run: bool,
         _accepted_at_utc: &str,
+        _emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
         Err(DaemonServiceRuntimeError::UnsupportedOperation {
             operation: "S3 reconciliation requires an object-service command runner".to_string(),
@@ -1098,6 +1101,9 @@ where
         prefix: Option<String>,
         dry_run: bool,
         accepted_at_utc: &str,
+        emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
         GarageServiceController::reconcile_store_s3(
             self,
@@ -1105,6 +1111,7 @@ where
             prefix,
             dry_run,
             accepted_at_utc,
+            emit_progress,
         )
     }
 

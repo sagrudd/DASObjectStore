@@ -487,6 +487,7 @@ where
                         request.s3_prefix.clone(),
                         request.dry_run,
                         &self.clock.now_utc(),
+                        emit_progress,
                     )
                     .map_err(|error| {
                         ("store_repair_s3_reconciliation_failed", error.to_string())
