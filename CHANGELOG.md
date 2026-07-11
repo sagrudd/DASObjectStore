@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.3 - 2026-07-11
+
+- Complete scoped Garage reconciliation without replacing the live metadata
+  index after normal SSD-first ingest has already registered recovered objects.
+  The repair job now reaches a durable successful terminal state while existing
+  catalogue rows are preserved.
+
 ## 0.71.2 - 2026-07-11
 
 - Persist terminal success and failure records for Garage reconciliation repair

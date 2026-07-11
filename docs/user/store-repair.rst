@@ -52,9 +52,12 @@ Without ``--apply`` the command only reports the private SSD staging location
 and does not contact Garage.  The command uses the daemon's provisioned
 credentials; do not copy access keys into a shell command.  It never creates
 catalogue rows solely from a bucket listing and it never deletes bucket data.
-Payload files are never moved or deleted. Export/protection should remain
-disabled for recovered entries until a subsequent hash-verification workflow
-has completed.
+Payload files are never moved or deleted. On a successful apply, normal ingest
+registers the recovered objects atomically; the daemon deliberately does not
+run a filtered live-index rebuild afterwards, because that rebuild could
+replace unrelated catalogue state. Export/protection should remain disabled
+for recovered entries until a subsequent hash-verification workflow has
+completed.
 
 If a repair reports partial duplicates, keep the source media and the payload
 files intact and investigate the corresponding ingest job before retrying.

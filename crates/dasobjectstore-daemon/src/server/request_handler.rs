@@ -1378,11 +1378,11 @@ mod tests {
         RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
         RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
         RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-        UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
-        UpsertEndpointInventoryResponse, DIRECT_TO_HDD_POLICY_CONFIRMATION,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
@@ -2040,6 +2040,101 @@ mod tests {
                 job: DaemonJobSummary {
                     kind: DaemonJobKind::EndpointValidation,
                     state: DaemonJobState::Complete,
+                    ..
+                }
+            })
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn records_complete_reconciliation_job_without_rebuilding_live_metadata() {
+        let root = temp_root("reconcile-repair-complete");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "codex", Some("daswriters"));
+        let live_sqlite = create_live_sqlite(&root, "codex");
+        insert_browser_object(&live_sqlite, "codex/existing.bin", "Protected", true);
+        let hdd_root = root.join("hdd");
+        let disk_root = hdd_root.join("qnap-1057");
+        write_hdd_marker(&disk_root, "qnap-1057");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let service = FakeService::default();
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            service,
+            FixedDaemonClock::new("2026-07-11T06:20:00Z"),
+            registry,
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path)
+        .with_live_sqlite_path(live_sqlite.clone())
+        .with_hdd_root_path(hdd_root);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let mut progress_events = Vec::new();
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::StoreRepair(StoreRepairRequest {
+                    store_id: Some(StoreId::new("codex").expect("store id")),
+                    dry_run: false,
+                    confirmation: crate::api::STORE_REPAIR_CONFIRMATION.to_string(),
+                    reconcile_s3: true,
+                    s3_prefix: Some("incoming".to_string()),
+                }),
+                Some(&actor),
+                |event| {
+                    progress_events.push(event);
+                    Ok(())
+                },
+            )
+            .expect("reconciliation repair handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::StoreRepair(response)
+                if response.s3_reconciliation.as_ref().is_some_and(|reconciliation|
+                    reconciliation.bucket_name == "dos-codex"
+                        && reconciliation.prefix.as_deref() == Some("incoming")
+                        && !reconciliation.dry_run)
+        ));
+        assert_eq!(progress_events.len(), 2);
+        let connection = Connection::open(&live_sqlite).expect("live metadata opens");
+        let retained_objects: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM objects WHERE object_id = 'codex/existing.bin'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("existing object query");
+        assert_eq!(retained_objects, 1);
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .reconciliation_calls
+                .borrow()
+                .as_slice(),
+            &[(
+                "codex".to_string(),
+                Some("incoming".to_string()),
+                false,
+                "2026-07-11T06:20:00Z".to_string(),
+            )]
+        );
+
+        let response = handler
+            .handle(DaemonApiRequest::JobStatus(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("store-repair-s3-codex-2026-07-11t06-20-00z")
+                    .expect("repair job id"),
+            }))
+            .expect("repair job status handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::JobStatus(DaemonJobStatusResponse {
+                job: DaemonJobSummary {
+                    kind: DaemonJobKind::Repair,
+                    state: DaemonJobState::Complete,
+                    failure_message: None,
                     ..
                 }
             })
@@ -3657,15 +3752,16 @@ mod tests {
         verified_placement: bool,
     ) {
         let connection = Connection::open(live_sqlite_path).expect("open live sqlite");
+        let store_id = object_id.split('/').next().expect("object store id");
         connection
             .execute(
                 "INSERT INTO objects (
                     object_id, store_id, object_type, state, size_bytes, content_hash,
                     created_at_utc, updated_at_utc
                  )
-                 VALUES (?1, 'ena', 'fastq', ?2, 128, 'hash-a',
+                 VALUES (?1, ?2, 'fastq', ?3, 128, 'hash-a',
                     '2026-07-09T00:00:00Z', '2026-07-09T00:01:00Z')",
-                params![object_id, state],
+                params![object_id, store_id, state],
             )
             .expect("object inserts");
         connection
@@ -3714,6 +3810,7 @@ mod tests {
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
         remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize)>>,
+        reconciliation_calls: RefCell<Vec<(String, Option<String>, bool, String)>>,
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
@@ -3815,6 +3912,33 @@ mod tests {
                 final_event: crate::api::DaemonJobEvent::Complete(job),
                 runtime_after: Default::default(),
                 cleanup_report: None,
+            })
+        }
+
+        fn reconcile_store_s3(
+            &self,
+            store_id: StoreId,
+            prefix: Option<String>,
+            dry_run: bool,
+            accepted_at_utc: &str,
+            _emit_progress: &mut dyn FnMut(
+                crate::api::DaemonIngestProgressEvent,
+            )
+                -> Result<(), DaemonIngestFilesRuntimeError>,
+        ) -> Result<crate::api::StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
+            self.reconciliation_calls.borrow_mut().push((
+                store_id.as_str().to_string(),
+                prefix.clone(),
+                dry_run,
+                accepted_at_utc.to_string(),
+            ));
+            Ok(crate::api::StoreRepairS3Reconciliation {
+                bucket_name: format!("dos-{}", store_id.as_str()),
+                prefix,
+                staging_path: "/srv/dasobjectstore/ssd/.dasobjectstore/remote-s3-reconcile/codex"
+                    .to_string(),
+                ingest_job_id: Some("ingest-reconcile-codex".to_string()),
+                dry_run,
             })
         }
 

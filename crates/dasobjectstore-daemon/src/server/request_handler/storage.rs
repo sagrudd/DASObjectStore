@@ -88,6 +88,24 @@ fn reconciliation_job_summary(
     })
 }
 
+fn reconciliation_registration_report(
+    live_sqlite_path: &std::path::Path,
+) -> dasobjectstore_metadata::RecoverLiveMetadataReport {
+    dasobjectstore_metadata::RecoverLiveMetadataReport {
+        metadata_path: live_sqlite_path.to_path_buf(),
+        backup_path: None,
+        dry_run: false,
+        stores_scanned: 1,
+        payload_files: 0,
+        objects_recovered: 0,
+        placements_recovered: 0,
+        payload_bytes: 0,
+        partial_duplicates_omitted: 0,
+        hashes_verified: false,
+        warning: "Garage reconciliation registered recovered objects through normal SSD-first ingest; no destructive live-metadata rebuild was needed.".to_string(),
+    }
+}
+
 /// Handles storage inventory, telemetry, ingest, and object browser requests.
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
@@ -572,18 +590,26 @@ where
             )
             .map_err(|error| ("store_repair_progress_failed", error.to_string()))?;
             }
-            let (store_definitions, disk_roots) = self.recovery_inputs("store_repair_failed")?;
-            let report = dasobjectstore_metadata::recover_live_metadata(
-                &dasobjectstore_metadata::RecoverLiveMetadataRequest {
-                    live_sqlite_path: self.live_sqlite_path.clone(),
-                    store_definitions,
-                    disk_roots,
-                    store_id: request.store_id.clone(),
-                    dry_run: request.dry_run,
-                    recorded_at_utc: self.clock.now_utc(),
-                },
-            )
-            .map_err(|error| ("store_repair_failed", error.to_string()))?;
+            let report = if request.reconcile_s3 && !request.dry_run {
+                // Reconciliation uses normal ingest, which commits verified object and
+                // placement metadata atomically. A filtered live-index rebuild would
+                // discard unrelated state and is intentionally unsupported.
+                reconciliation_registration_report(&self.live_sqlite_path)
+            } else {
+                let (store_definitions, disk_roots) =
+                    self.recovery_inputs("store_repair_failed")?;
+                dasobjectstore_metadata::recover_live_metadata(
+                    &dasobjectstore_metadata::RecoverLiveMetadataRequest {
+                        live_sqlite_path: self.live_sqlite_path.clone(),
+                        store_definitions,
+                        disk_roots,
+                        store_id: request.store_id.clone(),
+                        dry_run: request.dry_run,
+                        recorded_at_utc: self.clock.now_utc(),
+                    },
+                )
+                .map_err(|error| ("store_repair_failed", error.to_string()))?
+            };
             let response = StoreRepairResponse {
                 report: StoreRepairReport {
                     metadata_path: report.metadata_path.display().to_string(),
