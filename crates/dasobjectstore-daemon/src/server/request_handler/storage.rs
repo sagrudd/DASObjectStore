@@ -37,6 +37,57 @@ fn emit_reconciliation_progress(
     })
 }
 
+fn reconciliation_job_summary(
+    request: &StoreRepairRequest,
+    accepted_at_utc: &str,
+    actor: Option<String>,
+    state: crate::api::DaemonJobState,
+    message: impl Into<String>,
+) -> Result<crate::api::DaemonJobSummary, String> {
+    let store_id = request
+        .store_id
+        .as_ref()
+        .expect("validated reconciliation store");
+    let timestamp = accepted_at_utc
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let job_id = crate::api::DaemonJobId::new(format!(
+        "store-repair-s3-{}-{}",
+        store_id.as_str(),
+        timestamp.trim_matches('-').to_ascii_lowercase()
+    ))
+    .map_err(|error| error.to_string())?;
+    let terminal = matches!(state, crate::api::DaemonJobState::Complete);
+    Ok(crate::api::DaemonJobSummary {
+        job_id,
+        kind: crate::api::DaemonJobKind::Repair,
+        state,
+        progress: crate::api::DaemonJobProgress {
+            stage: if terminal {
+                "complete".to_string()
+            } else {
+                "reconciliation".to_string()
+            },
+            work_bytes_done: u64::from(terminal),
+            work_bytes_total: 1,
+            work_units_done: u64::from(terminal),
+            work_units_total: 1,
+            message: Some(message.into()),
+        },
+        submitted_at_utc: accepted_at_utc.to_string(),
+        updated_at_utc: accepted_at_utc.to_string(),
+        actor,
+        failure_message: None,
+    })
+}
+
 /// Handles storage inventory, telemetry, ingest, and object browser requests.
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
@@ -469,6 +520,22 @@ where
                 ));
             }
         }
+        let reconciliation_job = if request.reconcile_s3 {
+            let accepted_at_utc = self.clock.now_utc();
+            let job = reconciliation_job_summary(
+                &request,
+                &accepted_at_utc,
+                actor.map(DaemonLocalActor::display_name),
+                crate::api::DaemonJobState::Running,
+                "Garage reconciliation started",
+            )
+            .map_err(|error| ("store_repair_job_id_failed", error))?;
+            self.record_admin_job(job.clone())
+                .map_err(|error| ("store_repair_job_registry_failed", error.to_string()))?;
+            Some((job.job_id, accepted_at_utc))
+        } else {
+            None
+        };
         let s3_reconciliation = if request.reconcile_s3 {
             emit_reconciliation_progress(
                 emit_progress,
@@ -510,13 +577,13 @@ where
                 live_sqlite_path: self.live_sqlite_path.clone(),
                 store_definitions,
                 disk_roots,
-                store_id: request.store_id,
+                store_id: request.store_id.clone(),
                 dry_run: request.dry_run,
                 recorded_at_utc: self.clock.now_utc(),
             },
         )
         .map_err(|error| ("store_repair_failed", error.to_string()))?;
-        Ok(StoreRepairResponse {
+        let response = StoreRepairResponse {
             report: StoreRepairReport {
                 metadata_path: report.metadata_path.display().to_string(),
                 backup_path: report.backup_path.map(|path| path.display().to_string()),
@@ -531,7 +598,22 @@ where
                 warning: report.warning,
             },
             s3_reconciliation,
-        })
+        };
+        if let Some((job_id, accepted_at_utc)) = reconciliation_job {
+            let mut job = reconciliation_job_summary(
+                &request,
+                &accepted_at_utc,
+                actor.map(DaemonLocalActor::display_name),
+                crate::api::DaemonJobState::Complete,
+                "Garage reconciliation and metadata repair completed",
+            )
+            .map_err(|error| ("store_repair_job_id_failed", error))?;
+            job.job_id = job_id;
+            job.updated_at_utc = self.clock.now_utc();
+            self.record_admin_job(job)
+                .map_err(|error| ("store_repair_job_registry_failed", error.to_string()))?;
+        }
+        Ok(response)
     }
 
     fn store_verify_for_actor(
