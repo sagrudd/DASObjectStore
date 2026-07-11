@@ -536,84 +536,101 @@ where
         } else {
             None
         };
-        let s3_reconciliation = if request.reconcile_s3 {
-            emit_reconciliation_progress(
-                emit_progress,
-                &request,
-                "starting Garage download into private SSD staging",
-            )
-            .map_err(|error| ("store_repair_progress_failed", error.to_string()))?;
-            let store_id = request
-                .store_id
-                .clone()
-                .expect("validated reconciliation store id");
-            Some(
-                self.service_orchestrator
-                    .reconcile_store_s3(
-                        store_id,
-                        request.s3_prefix.clone(),
-                        request.dry_run,
-                        &self.clock.now_utc(),
-                        emit_progress,
-                    )
-                    .map_err(|error| {
-                        ("store_repair_s3_reconciliation_failed", error.to_string())
-                    })?,
-            )
-        } else {
-            None
-        };
-        if s3_reconciliation.is_some() {
-            emit_reconciliation_progress(
+        let result = (|| {
+            let s3_reconciliation = if request.reconcile_s3 {
+                emit_reconciliation_progress(
+                    emit_progress,
+                    &request,
+                    "starting Garage download into private SSD staging",
+                )
+                .map_err(|error| ("store_repair_progress_failed", error.to_string()))?;
+                let store_id = request
+                    .store_id
+                    .clone()
+                    .expect("validated reconciliation store id");
+                Some(
+                    self.service_orchestrator
+                        .reconcile_store_s3(
+                            store_id,
+                            request.s3_prefix.clone(),
+                            request.dry_run,
+                            &self.clock.now_utc(),
+                            emit_progress,
+                        )
+                        .map_err(|error| {
+                            ("store_repair_s3_reconciliation_failed", error.to_string())
+                        })?,
+                )
+            } else {
+                None
+            };
+            if s3_reconciliation.is_some() {
+                emit_reconciliation_progress(
                 emit_progress,
                 &request,
                 "Garage download finished; SSD-to-HDD ingest and metadata registration completed",
             )
             .map_err(|error| ("store_repair_progress_failed", error.to_string()))?;
-        }
-        let (store_definitions, disk_roots) = self.recovery_inputs("store_repair_failed")?;
-        let report = dasobjectstore_metadata::recover_live_metadata(
-            &dasobjectstore_metadata::RecoverLiveMetadataRequest {
-                live_sqlite_path: self.live_sqlite_path.clone(),
-                store_definitions,
-                disk_roots,
-                store_id: request.store_id.clone(),
-                dry_run: request.dry_run,
-                recorded_at_utc: self.clock.now_utc(),
-            },
-        )
-        .map_err(|error| ("store_repair_failed", error.to_string()))?;
-        let response = StoreRepairResponse {
-            report: StoreRepairReport {
-                metadata_path: report.metadata_path.display().to_string(),
-                backup_path: report.backup_path.map(|path| path.display().to_string()),
-                dry_run: report.dry_run,
-                stores_scanned: report.stores_scanned,
-                payload_files: report.payload_files,
-                objects_recovered: report.objects_recovered,
-                placements_recovered: report.placements_recovered,
-                payload_bytes: report.payload_bytes,
-                partial_duplicates_omitted: report.partial_duplicates_omitted,
-                hashes_verified: report.hashes_verified,
-                warning: report.warning,
-            },
-            s3_reconciliation,
-        };
-        if let Some((job_id, accepted_at_utc)) = reconciliation_job {
-            let mut job = reconciliation_job_summary(
-                &request,
-                &accepted_at_utc,
-                actor.map(DaemonLocalActor::display_name),
-                crate::api::DaemonJobState::Complete,
-                "Garage reconciliation and metadata repair completed",
+            }
+            let (store_definitions, disk_roots) = self.recovery_inputs("store_repair_failed")?;
+            let report = dasobjectstore_metadata::recover_live_metadata(
+                &dasobjectstore_metadata::RecoverLiveMetadataRequest {
+                    live_sqlite_path: self.live_sqlite_path.clone(),
+                    store_definitions,
+                    disk_roots,
+                    store_id: request.store_id.clone(),
+                    dry_run: request.dry_run,
+                    recorded_at_utc: self.clock.now_utc(),
+                },
             )
-            .map_err(|error| ("store_repair_job_id_failed", error))?;
-            job.job_id = job_id;
-            job.updated_at_utc = self.clock.now_utc();
-            self.record_admin_job(job)
-                .map_err(|error| ("store_repair_job_registry_failed", error.to_string()))?;
-        }
-        Ok(response)
+            .map_err(|error| ("store_repair_failed", error.to_string()))?;
+            let response = StoreRepairResponse {
+                report: StoreRepairReport {
+                    metadata_path: report.metadata_path.display().to_string(),
+                    backup_path: report.backup_path.map(|path| path.display().to_string()),
+                    dry_run: report.dry_run,
+                    stores_scanned: report.stores_scanned,
+                    payload_files: report.payload_files,
+                    objects_recovered: report.objects_recovered,
+                    placements_recovered: report.placements_recovered,
+                    payload_bytes: report.payload_bytes,
+                    partial_duplicates_omitted: report.partial_duplicates_omitted,
+                    hashes_verified: report.hashes_verified,
+                    warning: report.warning,
+                },
+                s3_reconciliation,
+            };
+            Ok(response)
+        })();
+        let Some((job_id, accepted_at_utc)) = reconciliation_job else {
+            return result;
+        };
+        let (state, message, failure_message) = match &result {
+            Ok(_) => (
+                crate::api::DaemonJobState::Complete,
+                "Garage reconciliation and metadata repair completed".to_string(),
+                None,
+            ),
+            Err((_, error)) => (
+                crate::api::DaemonJobState::Failed,
+                format!("Garage reconciliation failed: {error}"),
+                Some(error.clone()),
+            ),
+        };
+        let mut job = reconciliation_job_summary(
+            &request,
+            &accepted_at_utc,
+            actor.map(DaemonLocalActor::display_name),
+            state,
+            message,
+        )
+        .map_err(|error| ("store_repair_job_id_failed", error))?;
+        job.job_id = job_id;
+        job.updated_at_utc = self.clock.now_utc();
+        job.failure_message = failure_message;
+        self.record_admin_job(job)
+            .map_err(|error| ("store_repair_job_registry_failed", error.to_string()))?;
+        result
     }
 
     fn store_verify_for_actor(
