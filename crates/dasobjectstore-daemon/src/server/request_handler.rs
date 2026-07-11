@@ -2098,7 +2098,12 @@ mod tests {
                         && reconciliation.prefix.as_deref() == Some("incoming")
                         && !reconciliation.dry_run)
         ));
-        assert_eq!(progress_events.len(), 2);
+        assert_eq!(progress_events.len(), 3);
+        assert!(progress_events.iter().any(|event| {
+            event.job_id.as_str() == "ingest-reconcile-codex"
+                && event.pipeline_stage == Some(crate::api::DaemonIngestPipelineStage::SsdStage)
+                && event.message.as_deref() == Some("RemoteS3 SSD staging in progress")
+        }));
         let connection = Connection::open(&live_sqlite).expect("live metadata opens");
         let retained_objects: u64 = connection
             .query_row(
@@ -3921,10 +3926,9 @@ mod tests {
             prefix: Option<String>,
             dry_run: bool,
             accepted_at_utc: &str,
-            _emit_progress: &mut dyn FnMut(
+            emit_progress: &mut dyn FnMut(
                 crate::api::DaemonIngestProgressEvent,
-            )
-                -> Result<(), DaemonIngestFilesRuntimeError>,
+            ) -> Result<(), DaemonIngestFilesRuntimeError>,
         ) -> Result<crate::api::StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
             self.reconciliation_calls.borrow_mut().push((
                 store_id.as_str().to_string(),
@@ -3932,6 +3936,29 @@ mod tests {
                 dry_run,
                 accepted_at_utc.to_string(),
             ));
+            emit_progress(crate::api::DaemonIngestProgressEvent {
+                job_id: IngestJobId::new("ingest-reconcile-codex").expect("job id"),
+                endpoint: store_id.clone(),
+                stage: crate::api::DaemonIngestStage::SsdIngest,
+                pipeline_stage: Some(crate::api::DaemonIngestPipelineStage::SsdStage),
+                work_bytes_done: 4,
+                work_bytes_total: Some(4),
+                source_bytes_done: Some(4),
+                source_bytes_total: Some(4),
+                stage_bytes_done: Some(4),
+                stage_bytes_total: Some(4),
+                files_done: 1,
+                files_total: Some(1),
+                current_object_id: None,
+                ssd_pressure: None,
+                telemetry: None,
+                active_hdd_transfers: Vec::new(),
+                resource_policy: None,
+                message: Some("RemoteS3 SSD staging in progress".to_string()),
+            })
+            .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: error.to_string(),
+            })?;
             Ok(crate::api::StoreRepairS3Reconciliation {
                 bucket_name: format!("dos-{}", store_id.as_str()),
                 prefix,
