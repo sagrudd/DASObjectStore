@@ -55,6 +55,22 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - Build Linux packages on the DAS host when working from a non-Linux
   development machine, then install the generated Debian package with `dpkg`
   and restart `dasobjectstored`.
+- Coding agents are authorized to compile on the DAS host, install the
+  resulting DASObjectStore package, and restart `dasobjectstored` for
+  validation.
+- Coding agents may create and use a dedicated `CODEX` ObjectStore for
+  automated stress and ingress tests using randomly generated data only. Keep
+  all such test data below 1 TiB total, never use user/project data, and clean
+  it up only through documented, explicitly confirmed management commands.
+
+## Definition of Done
+
+- A TODO item is complete only when its implementation is committed and pushed,
+  relevant local tests pass, user/operator documentation and TODO status are
+  updated, and the change is ready for validation with real-world data.
+- Feature work is expected to reduce the approved TODO backlog each cycle;
+  work one dependency-ordered task at a time and do not move on while a
+  locally actionable gap in that task remains.
 
 ## Versioning
 
