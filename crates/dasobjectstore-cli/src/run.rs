@@ -6818,6 +6818,95 @@ mod tests {
     }
 
     #[test]
+    fn performance_ssd_residency_batches_isolate_payload_larger_than_safe_budget() {
+        let workload = PerformanceWorkload {
+            kind: PerformanceWorkloadKind::Generated,
+            source_path: None,
+            source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
+            file_order: PerformanceFileOrder::Fifo,
+            discovered_file_count: 3,
+            discovered_total_bytes: 20,
+            payloads: vec![
+                PerformancePayload {
+                    file_index: 0,
+                    relative_path: PathBuf::from("small-before.bin"),
+                    source_path: None,
+                    size_bytes: 4,
+                    modified_unix_nanos: 0,
+                },
+                PerformancePayload {
+                    file_index: 1,
+                    relative_path: PathBuf::from("large.bin"),
+                    source_path: None,
+                    size_bytes: 12,
+                    modified_unix_nanos: 0,
+                },
+                PerformancePayload {
+                    file_index: 2,
+                    relative_path: PathBuf::from("small-after.bin"),
+                    source_path: None,
+                    size_bytes: 4,
+                    modified_unix_nanos: 0,
+                },
+            ],
+        };
+
+        let batches = plan_ssd_residency_batches(
+            &workload,
+            PerformanceSsdResidencyBudget {
+                safe_bytes: 8,
+                available_bytes: 16,
+            },
+        )
+        .expect("payload within available capacity is admitted");
+
+        let batch_indexes = batches
+            .iter()
+            .map(|batch| {
+                batch
+                    .iter()
+                    .map(|payload| payload.file_index)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(batch_indexes, vec![vec![0], vec![1], vec![2]]);
+    }
+
+    #[test]
+    fn performance_ssd_residency_batches_reject_payload_larger_than_available_capacity() {
+        let workload = PerformanceWorkload {
+            kind: PerformanceWorkloadKind::Generated,
+            source_path: None,
+            source_cap_bytes: None,
+            file_selection: PerformanceFileSelection::Random,
+            file_order: PerformanceFileOrder::Fifo,
+            discovered_file_count: 1,
+            discovered_total_bytes: 17,
+            payloads: vec![PerformancePayload {
+                file_index: 0,
+                relative_path: PathBuf::from("too-large.bin"),
+                source_path: None,
+                size_bytes: 17,
+                modified_unix_nanos: 0,
+            }],
+        };
+
+        let error = plan_ssd_residency_batches(
+            &workload,
+            PerformanceSsdResidencyBudget {
+                safe_bytes: 8,
+                available_bytes: 16,
+            },
+        )
+        .expect_err("payload beyond available capacity must be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("larger than available SSD space"));
+    }
+
+    #[test]
     fn performance_disk_scheduler_uses_idle_highest_fractional_free_disk() {
         let disk_a = DiskId::new("disk-a").expect("disk id");
         let disk_b = DiskId::new("disk-b").expect("disk id");
