@@ -1,10 +1,10 @@
 use dasobjectstore_daemon::{
-    admin_job_registry_path, appliance_telemetry_state_path, ApplianceTelemetryLoop,
-    ApplianceTelemetryLoopConfig, ApplianceTelemetrySink, ApplianceTelemetrySource,
-    DaemonRequestHandler, DaemonRuntimeConfig, FileBackedAdminJobRegistry,
-    FileBackedApplianceTelemetrySink, GarageServiceController, GarageServiceRuntimeConfig,
-    LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
-    UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
+    admin_job_registry_path, appliance_telemetry_state_path, AdminJobRegistry,
+    ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetrySink,
+    ApplianceTelemetrySource, DaemonRequestHandler, DaemonRuntimeConfig,
+    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink, GarageServiceController,
+    GarageServiceRuntimeConfig, LinuxProcTelemetryCollector, SystemDaemonClock,
+    SystemServiceCommandRunner, UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
 use std::env;
@@ -45,6 +45,12 @@ fn run() -> Result<(), String> {
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
         &config.state_dir,
     )));
+    let interrupted = admin_job_registry
+        .mark_interrupted_at_startup(&current_utc_timestamp())
+        .map_err(|error| error.to_string())?;
+    if interrupted > 0 {
+        eprintln!("marked {interrupted} interrupted daemon job(s) failed after restart");
+    }
     let handler = DaemonRequestHandler::new_with_admin_job_registry(
         garage,
         SystemDaemonClock,

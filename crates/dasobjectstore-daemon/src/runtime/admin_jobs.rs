@@ -31,6 +31,11 @@ pub trait AdminJobRegistry: Send + Sync {
         request: DaemonJobCancelRequest,
         cancelled_at_utc: &str,
     ) -> Result<DaemonJobCancelResponse, DaemonServiceRuntimeError>;
+
+    fn mark_interrupted_at_startup(
+        &self,
+        interrupted_at_utc: &str,
+    ) -> Result<usize, DaemonServiceRuntimeError>;
 }
 
 pub fn admin_job_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
@@ -125,6 +130,35 @@ impl AdminJobRegistry for FileBackedAdminJobRegistry {
         };
         write_registry(&self.path, &registry)?;
         Ok(response)
+    }
+
+    fn mark_interrupted_at_startup(
+        &self,
+        interrupted_at_utc: &str,
+    ) -> Result<usize, DaemonServiceRuntimeError> {
+        let _guard = self.lock.lock().expect("admin job registry lock poisoned");
+        let mut registry = read_registry(&self.path)?;
+        let mut interrupted = 0;
+        for job in &mut registry.jobs {
+            if matches!(
+                job.state,
+                DaemonJobState::Queued | DaemonJobState::Running | DaemonJobState::Waiting
+            ) {
+                job.state = DaemonJobState::Failed;
+                job.updated_at_utc = interrupted_at_utc.to_string();
+                job.progress.stage = "interrupted".to_string();
+                let message =
+                    "interrupted because dasobjectstored restarted; inspect and rerun safely"
+                        .to_string();
+                job.progress.message = Some(message.clone());
+                job.failure_message = Some(message);
+                interrupted += 1;
+            }
+        }
+        if interrupted > 0 {
+            write_registry(&self.path, &registry)?;
+        }
+        Ok(interrupted)
     }
 }
 
@@ -326,6 +360,51 @@ mod tests {
         assert!(!response.accepted);
         assert_eq!(response.state, DaemonJobState::Complete);
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn startup_marks_only_nonterminal_jobs_interrupted() {
+        let root = temp_root("startup-interruption");
+        let path = admin_job_registry_path(&root);
+        let registry = FileBackedAdminJobRegistry::new(&path);
+        registry
+            .record(job("running", DaemonJobState::Running))
+            .expect("recorded");
+        registry
+            .record(job("complete", DaemonJobState::Complete))
+            .expect("recorded");
+
+        assert_eq!(
+            registry
+                .mark_interrupted_at_startup("2026-07-09T00:00:00Z")
+                .expect("recovered"),
+            1
+        );
+        let running = registry
+            .status(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("running").expect("job"),
+            })
+            .expect("status");
+        assert_eq!(running.job.state, DaemonJobState::Failed);
+        assert_eq!(running.job.progress.stage, "interrupted");
+        assert!(running
+            .job
+            .failure_message
+            .unwrap_or_default()
+            .contains("restarted"));
+        let complete = registry
+            .status(DaemonJobStatusRequest {
+                job_id: DaemonJobId::new("complete").expect("job"),
+            })
+            .expect("status");
+        assert_eq!(complete.job.state, DaemonJobState::Complete);
+        assert_eq!(
+            registry
+                .mark_interrupted_at_startup("2026-07-09T00:01:00Z")
+                .expect("idempotent"),
+            0
+        );
         cleanup(&root);
     }
 
