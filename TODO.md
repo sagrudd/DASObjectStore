@@ -980,7 +980,12 @@ list until every temporary size-budget exception has been removed.
   name, path, or search value.
 - [ ] Make daemon-owned upload completion atomically register each object path,
   size, checksum, lifecycle state, and readable managed/provider location in
-  the ObjectBrowser catalogue before reporting the upload as complete.
+  the ObjectBrowser catalogue before reporting the upload as complete. Blocked
+  on a public API security decision: the remote client has a paired-session
+  renewal token but no defined HTTPS completion endpoint or approved bearer
+  authorization scheme for declaring a provider upload complete. The daemon
+  now has tested paired-session completion authorization; resume once the
+  public endpoint/authentication contract is approved.
 - [~] Add a guarded, resumable reconciliation operation for already-uploaded
   S3/object-service keys missing from the ObjectBrowser catalogue; report
   collisions, malformed keys, and inaccessible objects without silently
