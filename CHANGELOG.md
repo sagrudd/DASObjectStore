@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.18 - 2026-07-12
+
+- Add atomic parent/child SubObject capacity reservations and commits while
+  preserving the standalone store ledger contract.
+
 ## 0.72.17 - 2026-07-12
 
 - Add a typed logical object-version capacity charge so deduplicated versions

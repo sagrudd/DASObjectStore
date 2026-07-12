@@ -206,6 +206,9 @@ completion.
     commit, preventing logical-used/accounted-size drift during adoption.
 - [ ] Add optional SubObject budgets whose reservations atomically update both
   child and parent allocations.
+  - [x] Add a core hierarchical SubObject capacity ledger with atomic
+    parent/child reservation, commit, and release behavior; daemon registry
+    persistence and transport wiring remain open.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
   - [x] Add transport-neutral daemon capacity admission request/decision DTOs

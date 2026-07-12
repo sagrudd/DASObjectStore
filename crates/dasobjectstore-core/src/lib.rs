@@ -18,6 +18,7 @@ pub mod remote_upload;
 pub mod repair;
 pub mod risk;
 pub mod store;
+pub mod subobject_capacity;
 pub mod utc;
 
 pub use backend::{
@@ -36,6 +37,7 @@ pub use manifest::{
 pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;
 pub use store::LogicalObjectVersionCharge;
+pub use subobject_capacity::{SubObjectCapacityError, SubObjectCapacityLedger};
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
