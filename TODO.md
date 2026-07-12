@@ -227,8 +227,12 @@ completion.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.
-- [ ] Add concurrency, crash/restart, multipart expiry, quota-change, dedupe, and
-  full-filesystem tests before enabling new profile writes.
+- [~] Add concurrency, crash/restart, multipart expiry, quota-change, dedupe,
+  and full-filesystem tests before enabling new profile writes.
+  - [x] Add a concurrent reservation regression using the transactional core
+    ledger; eight workers contend for a bounded quota and cannot overbook it.
+    Crash/restart persistence, multipart expiry, dedupe, and full-filesystem
+    fixtures remain open.
 
 ### Gate 3: Bounded folder profile
 

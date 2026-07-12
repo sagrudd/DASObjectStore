@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.22 - 2026-07-12
+
+- Add concurrent capacity-reservation regression coverage proving the
+  transactional ledger cannot overbook a bounded logical quota.
+
 ## 0.72.21 - 2026-07-12
 
 - Add an atomic daemon capacity evaluate-and-reserve helper keyed by client

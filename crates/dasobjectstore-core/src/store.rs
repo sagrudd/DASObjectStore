@@ -978,6 +978,35 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_reservations_never_overbook_logical_capacity() {
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let ledger = Arc::new(Mutex::new(
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(100, 0), 0)
+                .expect("capacity policy is valid"),
+        ));
+        let workers = (0..8)
+            .map(|index| {
+                let ledger = Arc::clone(&ledger);
+                thread::spawn(move || {
+                    let mut ledger = ledger.lock().expect("ledger lock is not poisoned");
+                    ledger.reserve(format!("concurrent-{index}"), 30).is_ok()
+                })
+            })
+            .collect::<Vec<_>>();
+        let successes = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("reservation worker joins"))
+            .filter(|success| *success)
+            .count();
+        let ledger = ledger.lock().expect("ledger lock is not poisoned");
+        assert_eq!(successes, 3);
+        assert_eq!(ledger.reserved_bytes(), 90);
+        assert!(ledger.used_bytes() + ledger.reserved_bytes() <= 100);
+    }
+
+    #[test]
     fn unbounded_capacity_has_no_pressure_state_and_large_values_are_safe() {
         let unbounded = super::CapacityReservationLedger::new(CapacityPolicy::default(), 0)
             .expect("legacy policy is valid");
