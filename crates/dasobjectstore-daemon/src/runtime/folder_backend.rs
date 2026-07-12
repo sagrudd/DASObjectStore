@@ -40,6 +40,11 @@ impl FolderBackend {
                 "folder backend requires a folder manifest".to_string(),
             ));
         }
+        if capacity.logical_limit_bytes.is_none() {
+            return Err(BackendError::InvalidRequest(
+                "folder backend requires a finite logical capacity limit".to_string(),
+            ));
+        }
         let root = root.into();
         if !root.is_absolute() {
             return Err(BackendError::InvalidRequest(
@@ -411,6 +416,14 @@ mod tests {
             .stage("upload-2", &unsafe_key, &mut Cursor::new(b"x".to_vec()))
             .is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_rejects_legacy_unbounded_capacity() {
+        let root = unique_root();
+        let error = FolderBackend::open(&root, manifest(), CapacityPolicy::default(), 0)
+            .expect_err("folder backend must be bounded");
+        assert!(format!("{error:?}").contains("finite logical capacity"));
     }
 
     fn manifest() -> ObjectStoreManifest {

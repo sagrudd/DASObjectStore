@@ -165,6 +165,9 @@ completion.
 
 - [ ] Implement system-service and programmatic create/adopt for one explicitly
   bounded directory, including idempotent DEB/RPM provisioning hooks.
+  - [x] Enforce a finite logical capacity limit when opening a folder backend;
+    idempotent directory/namespace creation is covered locally, while package
+    hooks and explicit adopt/reconcile semantics remain open.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.

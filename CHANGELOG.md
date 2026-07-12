@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.83 - 2026-07-12
+
+- Require finite logical capacity when opening a folder backend, preventing
+  unbounded new folder stores while preserving legacy appliance defaults.
+
 ## 0.71.82 - 2026-07-12
 
 - Add a bounded folder backend that hashes in flight, fsyncs and atomically
