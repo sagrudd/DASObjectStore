@@ -63,12 +63,16 @@ completion.
   Historical checklists now cross-reference the active campaign gates; hardware
   acceptance, public upload authentication, and future design-language work
   remain explicitly open rather than being presented as delivered.
-- [ ] Finish daemon-owned remote upload completion so provider success is not
+- [~] Finish daemon-owned remote upload completion so provider success is not
   reported before SSD-first ingest, checksum, placement, and catalogue commit.
   Resolve and document the public paired-session completion authentication
-  contract before exposing the endpoint.
-- [ ] Finish resumable/cancellable reconciliation with per-key manifests,
+  contract before exposing the endpoint. Internal admission, transfer,
+  cancellation, and progress modules are delivered; catalogue completion and
+  public paired-session authorization remain open.
+- [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
+  Local manifest/checkpoint planning and cancellation are delivered; stable
+  provider rediscovery, byte-range restart, and appliance acceptance remain.
   - [x] Add a versioned provider-independent per-key manifest/resume planner
     with safe key normalization, collision/malformed-key outcomes, atomic
     durable in-progress checkpoints and restart-planner tests; stable manifest
@@ -84,9 +88,11 @@ completion.
     leaves the durable in-progress manifest available for later rediscovery.
   - [ ] Complete appliance/provider soak acceptance (blocked while the
     DASServer, Garage appliance, and deployment credentials are unavailable).
-- [ ] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
+- [~] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
-  during blocked or saturated ingest.
+  during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, and
+  strict cancellation are delivered; async HTTP bridging and appliance soak
+  acceptance remain.
 - [ ] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
   appliance acceptance gaps without fabricating continuity.
 - [x] Remove temporary production module-size exceptions through owned,
