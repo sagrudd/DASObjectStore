@@ -183,6 +183,10 @@ completion.
   ``.dasobjectstore`` namespace.
 - [ ] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,
   unsafe keys, unsupported names, and files changed during import.
+  - [x] Harden `FolderBackend` namespace/parent traversal against symlink
+    escapes and reject non-regular entries during enumeration; unsafe key and
+    symlink regression tests pass on macOS. Hard-link/file-change adoption
+    checks remain part of the inspection/reconciliation gate.
 - [ ] Add read-only inspection followed by resumable adoption/reconciliation;
   report unmanaged drift without silently accepting it as authoritative.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,

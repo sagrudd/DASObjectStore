@@ -56,8 +56,9 @@ impl FolderBackend {
         let namespace = root.join(NAMESPACE);
         let objects_root = namespace.join(OBJECTS_DIR);
         let staging_root = namespace.join(STAGING_DIR);
-        fs::create_dir_all(&objects_root).map_err(io_error)?;
-        fs::create_dir_all(&staging_root).map_err(io_error)?;
+        ensure_directory(&namespace)?;
+        ensure_directory(&objects_root)?;
+        ensure_directory(&staging_root)?;
         Ok(Self {
             root,
             objects_root,
@@ -201,7 +202,7 @@ impl ObjectStoreBackend for FolderBackend {
         let parent = destination.parent().ok_or_else(|| {
             BackendError::InvalidRequest("object destination has no parent".to_string())
         })?;
-        fs::create_dir_all(parent).map_err(io_error)?;
+        ensure_safe_parent(&self.objects_root, parent)?;
         fs::rename(&temporary_path, &destination).map_err(io_error)?;
         sync_directory(parent)?;
         self.ledger
@@ -259,9 +260,20 @@ fn enumerate_files(
     for entry in fs::read_dir(directory).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
         let path = entry.path();
-        if path.is_dir() {
+        let file_type = entry.file_type().map_err(io_error)?;
+        if file_type.is_symlink() {
+            return Err(BackendError::InvalidRequest(
+                "folder backend encountered a symlink entry".to_string(),
+            ));
+        }
+        if file_type.is_dir() {
             enumerate_files(root, &path, prefix, records)?;
             continue;
+        }
+        if !file_type.is_file() {
+            return Err(BackendError::InvalidRequest(
+                "folder backend encountered a non-regular file".to_string(),
+            ));
         }
         let relative = path
             .strip_prefix(root)
@@ -329,6 +341,38 @@ fn sync_directory(path: &Path) -> Result<(), BackendError> {
         .map_err(io_error)?
         .sync_all()
         .map_err(io_error)
+}
+
+fn ensure_directory(path: &Path) -> Result<(), BackendError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err(BackendError::InvalidRequest(format!(
+                "folder backend namespace cannot be a symlink: {}",
+                path.display()
+            )))
+        }
+        Ok(metadata) if !metadata.is_dir() => Err(BackendError::InvalidRequest(format!(
+            "folder backend namespace is not a directory: {}",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(io_error)
+        }
+        Err(error) => Err(io_error(error)),
+    }
+}
+
+fn ensure_safe_parent(root: &Path, parent: &Path) -> Result<(), BackendError> {
+    let relative = parent.strip_prefix(root).map_err(|_| {
+        BackendError::InvalidRequest("object parent escaped backend root".to_string())
+    })?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        ensure_directory(&current)?;
+    }
+    Ok(())
 }
 
 fn io_error(error: std::io::Error) -> BackendError {
@@ -416,6 +460,32 @@ mod tests {
             .stage("upload-2", &unsafe_key, &mut Cursor::new(b"x".to_vec()))
             .is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_backend_rejects_symlink_escape() {
+        let root = unique_root();
+        let outside = root.with_extension("outside");
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        fs::create_dir_all(&outside).expect("outside directory creates");
+        std::os::unix::fs::symlink(&outside, root.join(".dasobjectstore/objects/escape"))
+            .expect("symlink creates");
+        backend
+            .reserve("upload-link", 1)
+            .expect("reserves capacity");
+        let key = BackendObjectKey {
+            object_id: "escape/file.txt".to_string(),
+            version: 1,
+        };
+        let staged = backend
+            .stage("upload-link", &key, &mut Cursor::new(b"x".to_vec()))
+            .expect("stages outside destination safely");
+        assert!(backend.finalize(staged).is_err());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]
