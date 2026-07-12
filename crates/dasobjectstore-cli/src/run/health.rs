@@ -146,7 +146,7 @@ pub(super) fn run_health(args: &HealthArgs, writer: &mut impl Write) -> Result<(
     }
 
     if args.connections() {
-        let report = super::read_current_platform_connection_status()?;
+        let report = super::connection_status::read_current_platform_connection_status()?;
         write_host_connection_status(&report, writer)?;
     } else if args.json() {
         let report = read_current_platform_health()?;

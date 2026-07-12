@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.28 - 2026-07-12
+
+- Extract host connection-status assessment, probe projection, preferred-path
+  selection, and operator recommendations into the CLI connection module while
+  preserving Thunderbolt preference and USB fallback guidance.
+
 ## 0.71.27 - 2026-07-12
 
 - Move platform health collection, disk scoring, and OS-specific adapters into

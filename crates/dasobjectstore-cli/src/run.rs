@@ -14,6 +14,7 @@ use crate::cli::{
     StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod command_handlers;
+mod connection_status;
 mod disk_lockdown;
 mod disk_prepare;
 mod health;
@@ -326,173 +327,6 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct HostConnectionStatus {
-    platform: HostPlatform,
-    disks: Vec<DiskConnectionStatus>,
-    warnings: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct DiskConnectionStatus {
-    device_path: Option<String>,
-    model_hint: Option<String>,
-    size_bytes: Option<u64>,
-    transport: Transport,
-    direct_attached_hint: Option<bool>,
-    removable_hint: Option<bool>,
-    enclosure_topology_path: Option<String>,
-    assessment: ConnectionAssessment,
-    warnings: Vec<String>,
-    recommendation: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectionAssessment {
-    Good,
-    Warning,
-    Unknown,
-}
-
-impl ConnectionAssessment {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Good => "good",
-            Self::Warning => "warning",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-impl DiskConnectionStatus {
-    fn from_observed(disk: &ObservedDisk, preferred: Option<&PreferredConnectionPath>) -> Self {
-        let mut warnings = Vec::new();
-        let assessment = match disk.transport {
-            Transport::Usb => {
-                warnings.push(
-                    "USB-attached DAS detected; this probe cannot verify negotiated USB link speed. Use a fast USB-C, USB 3.x, USB4, or Thunderbolt path because slow USB links will reduce ingest, destage, and object-service performance."
-                        .to_string(),
-                );
-                ConnectionAssessment::Warning
-            }
-            Transport::Thunderbolt | Transport::Sata | Transport::Nvme => {
-                ConnectionAssessment::Good
-            }
-            Transport::Unknown => {
-                warnings.push(
-                    "Disk transport is unknown; verify the DAS is not connected through a slow USB hub or fallback cable."
-                        .to_string(),
-                );
-                ConnectionAssessment::Unknown
-            }
-        };
-        let recommendation = connection_recommendation(disk, assessment, preferred);
-
-        Self {
-            device_path: disk.device_path.clone(),
-            model_hint: disk.model_hint.clone(),
-            size_bytes: disk.size_bytes,
-            transport: disk.transport,
-            direct_attached_hint: disk.direct_attached_hint,
-            removable_hint: disk.removable_hint,
-            enclosure_topology_path: disk.enclosure_topology_path.clone(),
-            assessment,
-            warnings,
-            recommendation,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct PreferredConnectionPath {
-    device_path: Option<String>,
-    transport: Transport,
-    enclosure_topology_path: Option<String>,
-}
-
-fn read_current_platform_connection_status() -> Result<HostConnectionStatus, CliError> {
-    let mut probe = probe_current_platform()?;
-    probe.enclosures = group_enclosures(&probe.disks);
-
-    Ok(connection_status_from_probe(&probe))
-}
-
-fn connection_status_from_probe(probe: &ProbeReport) -> HostConnectionStatus {
-    let preferred = preferred_connection_path(&probe.disks);
-    let disks: Vec<DiskConnectionStatus> = probe
-        .disks
-        .iter()
-        .map(|disk| DiskConnectionStatus::from_observed(disk, preferred.as_ref()))
-        .collect();
-    let warnings: Vec<String> = probe
-        .warnings
-        .iter()
-        .map(|warning| format!("{}: {}", warning.code, warning.message))
-        .collect();
-
-    HostConnectionStatus {
-        platform: probe.platform.clone(),
-        disks,
-        warnings,
-    }
-}
-
-fn preferred_connection_path(disks: &[ObservedDisk]) -> Option<PreferredConnectionPath> {
-    disks
-        .iter()
-        .find(|disk| disk.transport == Transport::Thunderbolt)
-        .map(|disk| PreferredConnectionPath {
-            device_path: disk.device_path.clone(),
-            transport: disk.transport,
-            enclosure_topology_path: disk.enclosure_topology_path.clone(),
-        })
-}
-
-fn connection_recommendation(
-    disk: &ObservedDisk,
-    assessment: ConnectionAssessment,
-    preferred: Option<&PreferredConnectionPath>,
-) -> Option<String> {
-    if assessment == ConnectionAssessment::Good {
-        return None;
-    }
-
-    if let Some(preferred) = preferred {
-        if disk.device_path != preferred.device_path {
-            return Some(format!(
-                "Prefer the observed {} path used by {}{} for DAS workloads.",
-                transport_label(preferred.transport),
-                preferred
-                    .device_path
-                    .as_deref()
-                    .unwrap_or("<unknown device>"),
-                topology_suffix(preferred.enclosure_topology_path.as_deref())
-            ));
-        }
-    }
-
-    Some(
-        "No faster attached DAS path is visible in this probe; move the DAS directly to a host USB-C, USB4, or Thunderbolt port and avoid hubs or fallback cables."
-            .to_string(),
-    )
-}
-
-fn transport_label(transport: Transport) -> &'static str {
-    match transport {
-        Transport::Usb => "USB",
-        Transport::Thunderbolt => "Thunderbolt",
-        Transport::Sata => "SATA",
-        Transport::Nvme => "NVMe",
-        Transport::Unknown => "unknown",
-    }
-}
-
-fn topology_suffix(topology: Option<&str>) -> String {
-    topology
-        .map(|value| format!(" at topology {value}"))
-        .unwrap_or_default()
 }
 
 fn upsert_portable_store_definition(
@@ -1849,6 +1683,7 @@ impl From<ProbeError> for CliError {
 
 #[cfg(test)]
 mod tests {
+    use super::connection_status::{connection_status_from_probe, ConnectionAssessment};
     use super::performance_execution::{
         try_submit_pending_ssd_pipeline_jobs, ActiveHddWrite, ActiveHddWriteMap, SsdPipelineJob,
     };
@@ -1856,11 +1691,10 @@ mod tests {
     use super::{
         active_hdd_landing_lines, benchmark_direct_hdd, benchmark_ssd_only,
         benchmark_ssd_pipeline_with_options, benchmark_ssd_stage_then_drain, collect_ingest_files,
-        connection_status_from_probe, current_user_group_names,
-        materialize_generated_performance_workload, measure_copy_with_progress,
-        measure_copy_with_split_progress, measure_ssd_stage_payload_with_progress,
-        parse_binary_size, performance_report_metadata_json,
-        performance_report_metadata_json_from_artifact,
+        current_user_group_names, materialize_generated_performance_workload,
+        measure_copy_with_progress, measure_copy_with_split_progress,
+        measure_ssd_stage_payload_with_progress, parse_binary_size,
+        performance_report_metadata_json, performance_report_metadata_json_from_artifact,
         performance_report_qr_payload_from_artifact, performance_sync_all_calls,
         plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
         render_performance_report, render_performance_report_from_json_artifact,
@@ -1868,8 +1702,8 @@ mod tests {
         source_performance_workload, throughput, update_file_read_measurements_from_disk_results,
         validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
         write_health_summary, write_health_verbose, write_host_connection_status,
-        write_pretty_report, zero_measurement, CliError, ConnectionAssessment, DiskHealthSummary,
-        HealthReport, ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
+        write_pretty_report, zero_measurement, CliError, DiskHealthSummary, HealthReport,
+        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
         PerformanceCopyProgressPhase, PerformanceDiskResult, PerformanceFileResult,
         PerformanceIoSample, PerformanceMeasurement, PerformancePayload, PerformanceRecommendation,
         PerformanceReport, PerformanceScenarioKind, PerformanceScenarioResult,

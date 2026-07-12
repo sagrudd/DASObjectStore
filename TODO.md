@@ -241,6 +241,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the small Object, Service, Mnemosyne, Pool-marker, and probe
     runtime handlers into `crates/dasobjectstore-cli/src/run/command_handlers.rs`;
     preserve the dispatcher and platform cfg behavior.
+  - [x] Extract connection-status models, probe projection, preferred-path
+    selection, and operator recommendations into
+    `crates/dasobjectstore-cli/src/run/connection_status.rs`; preserve
+    Thunderbolt preference, topology context, and USB fallback guidance.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.
