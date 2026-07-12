@@ -171,6 +171,7 @@ pub enum ApplianceTelemetryMissingReason {
     DeviceMissing,
     CounterReset,
     DaemonStartup,
+    FirstSampleWarmup,
     SampleTimeout,
     NotConfigured,
     Unknown,

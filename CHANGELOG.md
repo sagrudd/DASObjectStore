@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.65 - 2026-07-12
+
+- Distinguish first-sample disk-IO warm-up from daemon-startup or unavailable
+  telemetry so operators do not mistake an expected initial gap for an idle or
+  failed disk.
+
 ## 0.71.64 - 2026-07-12
 
 - Harden the Web daemon bridge circuit state against stale completions and

@@ -123,6 +123,13 @@ fn cpu_memory_telemetry_serialize_with_schema_field_names() {
 }
 
 #[test]
+fn first_disk_io_sample_warmup_reason_uses_public_schema_name() {
+    let encoded = serde_json::to_value(ApplianceTelemetryMissingReason::FirstSampleWarmup)
+        .expect("warmup reason serializes");
+    assert_eq!(encoded, "first_sample_warmup");
+}
+
+#[test]
 fn disk_capacity_telemetry_reads_managed_hdd_root_markers() {
     let root = temp_root("appliance-telemetry-hdd-capacity");
     let hdd_root = root.join("hdd");
@@ -476,7 +483,7 @@ fn proc_collector_retains_diskstats_for_cadence_aware_disk_io_rates() {
     assert_eq!(first.disk_io[0].disk_id, "qnap-a");
     assert_eq!(
         first.disk_io[0].missing_reason,
-        Some(ApplianceTelemetryMissingReason::DaemonStartup)
+        Some(ApplianceTelemetryMissingReason::FirstSampleWarmup)
     );
 
     assert_eq!(second.disk_io.len(), 1);

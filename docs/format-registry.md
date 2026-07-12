@@ -64,7 +64,9 @@ them as stable public contracts.
 
 Telemetry readers must preserve missing-data semantics. A `null` metric with a
 `missing_reason` or entry in `missing_data` is not zero and must not be
-interpolated silently in dashboards or reports.
+interpolated silently in dashboards or reports. The additive
+`first_sample_warmup` reason identifies the expected first per-disk IO gap;
+older readers should treat unknown reasons as unavailable rather than idle.
 
 ## Mnemosyne Adapter Formats
 

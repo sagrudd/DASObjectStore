@@ -654,7 +654,7 @@ fn disk_io_rates(
         return missing_disk_io_rates(ApplianceTelemetryMissingReason::DeviceMissing);
     };
     let Some(previous) = previous else {
-        return missing_disk_io_rates(ApplianceTelemetryMissingReason::DaemonStartup);
+        return missing_disk_io_rates(ApplianceTelemetryMissingReason::FirstSampleWarmup);
     };
     if elapsed_seconds == 0 || diskstats_counter_reset(current, previous) {
         return missing_disk_io_rates(ApplianceTelemetryMissingReason::CounterReset);

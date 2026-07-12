@@ -400,6 +400,7 @@
         "device_missing",
         "counter_reset",
         "daemon_startup",
+        "first_sample_warmup",
         "sample_timeout",
         "not_configured",
         "unknown",
