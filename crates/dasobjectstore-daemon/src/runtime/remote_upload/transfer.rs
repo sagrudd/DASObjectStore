@@ -17,6 +17,44 @@ pub struct RemoteUploadS3TransferWorker<'a> {
     registry: &'a dyn AdminJobRegistry,
 }
 
+/// The daemon-owned handoff that must succeed before a remote provider upload
+/// is reported as complete. Implementations may commit a manifest/catalogue
+/// transaction, but this boundary deliberately does not prescribe storage.
+pub trait RemoteUploadCompletionCommit {
+    fn commit(
+        &self,
+        record: &RemoteUploadCompletionRecord,
+    ) -> Result<(), RemoteUploadCompletionCommitError>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCompletionRecord {
+    pub job_id: String,
+    pub object_store: String,
+    pub source_bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCompletionCommitError {
+    message: String,
+}
+
+impl RemoteUploadCompletionCommitError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for RemoteUploadCompletionCommitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RemoteUploadCompletionCommitError {}
+
 impl<'a> RemoteUploadS3TransferWorker<'a> {
     pub fn new(gate: Arc<RemoteUploadAdmissionGate>, registry: &'a dyn AdminJobRegistry) -> Self {
         Self { gate, registry }
@@ -41,6 +79,22 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         self.run_with_progress(request, |progress| transfer.transfer(progress))
     }
 
+    /// Run a transfer and require the daemon-owned completion handoff before
+    /// publishing a completed job event. A handoff failure is a transfer
+    /// failure from the caller's perspective, so existing cleanup hooks and
+    /// reservation release behavior remain in force.
+    pub fn run_with_completion<E>(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        completion: &dyn RemoteUploadCompletionCommit,
+        transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+    where
+        E: fmt::Display,
+    {
+        self.run_with_progress_inner(request, None, Some(completion), transfer)
+    }
+
     pub fn run_with_cleanup_on_failure<E>(
         &self,
         request: RemoteUploadS3TransferWorkerRequest,
@@ -51,7 +105,12 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
     where
         E: fmt::Display,
     {
-        self.run_with_progress_inner(request, Some((cleanup_plan, cleanup_worker)), transfer)
+        self.run_with_progress_inner(
+            request,
+            Some((cleanup_plan, cleanup_worker)),
+            None,
+            transfer,
+        )
     }
 
     pub fn run_with_progress<E>(
@@ -62,7 +121,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
     where
         E: fmt::Display,
     {
-        self.run_with_progress_inner(request, None, transfer)
+        self.run_with_progress_inner(request, None, None, transfer)
     }
 
     fn run_with_progress_inner<E>(
@@ -72,6 +131,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             RemoteUploadCancellationCleanupPlan,
             &dyn RemoteUploadCancellationCleanupWorker,
         )>,
+        completion: Option<&dyn RemoteUploadCompletionCommit>,
         transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
     ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
     where
@@ -135,7 +195,21 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             actor.clone(),
         )?;
 
-        let transfer_result = transfer(&mut progress_reporter);
+        let transfer_result = transfer(&mut progress_reporter).map_err(|error| error.to_string());
+        let transfer_result = transfer_result.and_then(|()| {
+            completion
+                .map(|completion| {
+                    completion
+                        .commit(&RemoteUploadCompletionRecord {
+                            job_id: job.job_id.clone(),
+                            object_store: job.object_store.clone(),
+                            source_bytes: job.source_bytes,
+                        })
+                        .map_err(|error| error.to_string())
+                })
+                .transpose()
+                .map(|_| ())
+        });
         let progress_events = progress_reporter.into_events();
         drop(permit);
 
@@ -145,9 +219,7 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                 let cleanup_report = cleanup_on_failure
                     .map(|(plan, worker)| run_remote_upload_cancellation_cleanup(plan, worker));
                 (
-                    RemoteUploadS3TransferJobOutcome::Failed {
-                        error: error.to_string(),
-                    },
+                    RemoteUploadS3TransferJobOutcome::Failed { error },
                     cleanup_report,
                 )
             }

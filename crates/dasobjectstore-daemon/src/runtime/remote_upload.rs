@@ -249,9 +249,10 @@ mod tests {
         RemoteUploadCancellationCleanupError, RemoteUploadCancellationCleanupPlan,
         RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupRuntime,
         RemoteUploadCancellationCleanupRuntimeConfig, RemoteUploadCancellationCleanupScope,
-        RemoteUploadCancellationCleanupWorker, RemoteUploadMultipartAbortConfig,
-        RemoteUploadProgressTelemetry, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
-        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadCancellationCleanupWorker, RemoteUploadCompletionCommit,
+        RemoteUploadCompletionCommitError, RemoteUploadCompletionRecord,
+        RemoteUploadMultipartAbortConfig, RemoteUploadProgressTelemetry, RemoteUploadQueueDepths,
+        RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
         RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
         RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
         RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
@@ -712,6 +713,69 @@ mod tests {
             .expect("final status");
         assert_eq!(status.job.state, DaemonJobState::Complete);
         assert_eq!(status.job.progress.stage, "remote_s3_transfer_complete");
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn completion_commit_gate_runs_before_completed_event() {
+        let root = temp_root("remote-upload-completion-commit");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let completion = RecordingCompletionCommit::default();
+
+        let report = worker
+            .run_with_completion(
+                worker_request("remote-upload-job-completion"),
+                &completion,
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("completion commit succeeds");
+
+        let DaemonJobEvent::Complete(final_job) = report.final_event else {
+            panic!("expected completed event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Complete);
+        assert_eq!(completion.records.borrow().len(), 1);
+        assert_eq!(
+            completion.records.borrow()[0].job_id,
+            "remote-upload-job-completion"
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn completion_commit_failure_keeps_job_failed_and_releases_capacity() {
+        let root = temp_root("remote-upload-completion-failure");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let completion = RecordingCompletionCommit {
+            fail: true,
+            ..RecordingCompletionCommit::default()
+        };
+
+        let report = worker
+            .run_with_completion(
+                worker_request("remote-upload-job-completion-failure"),
+                &completion,
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("worker reports completion failure");
+
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed event");
+        };
+        assert_eq!(final_job.state, DaemonJobState::Failed);
+        assert_eq!(
+            final_job.failure_message.as_deref(),
+            Some("catalogue commit failed")
+        );
+        assert_eq!(completion.records.borrow().len(), 1);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
 
         cleanup(&root);
     }
@@ -1830,6 +1894,28 @@ mod tests {
             Err(RemoteUploadS3ByteTransferError::new(
                 "object service rejected part",
             ))
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingCompletionCommit {
+        records: std::cell::RefCell<Vec<RemoteUploadCompletionRecord>>,
+        fail: bool,
+    }
+
+    impl RemoteUploadCompletionCommit for RecordingCompletionCommit {
+        fn commit(
+            &self,
+            record: &RemoteUploadCompletionRecord,
+        ) -> Result<(), RemoteUploadCompletionCommitError> {
+            self.records.borrow_mut().push(record.clone());
+            if self.fail {
+                Err(RemoteUploadCompletionCommitError::new(
+                    "catalogue commit failed",
+                ))
+            } else {
+                Ok(())
+            }
         }
     }
 

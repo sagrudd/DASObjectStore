@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.26 - 2026-07-12
+
+- Gate remote-upload completion on a daemon-owned manifest/catalogue handoff,
+  preserving failed state and permit release when that handoff rejects.
+
 ## 0.72.25 - 2026-07-12
 
 - Extend the migration worker to guarded dedicated-SSD drive destinations

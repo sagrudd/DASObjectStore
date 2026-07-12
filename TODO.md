@@ -86,6 +86,10 @@ completion.
   - [x] Add explicit administrator cancellation tokens for an active
     reconciliation job; cancellation is checked between provider transfers and
     leaves the durable in-progress manifest available for later rediscovery.
+  - [x] Add a provider-independent completion-commit gate to the daemon remote
+    upload worker; a successful provider transfer is not reported complete when
+    the injected manifest/catalogue handoff fails. Concrete catalogue wiring
+    and public paired-session authorization remain open.
   - [ ] Complete appliance/provider soak acceptance (blocked while the
     DASServer, Garage appliance, and deployment credentials are unavailable).
 - [~] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
