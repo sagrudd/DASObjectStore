@@ -873,6 +873,10 @@ Current delivery note: the offline collector matrix now covers direct SATA,
 partition, stable USB alias, device-mapper alias, and missing-device fixtures,
 including warm-up and non-zero rate transitions. Authoritative enclosure
 topology and packaged-loop verification remain appliance-dependent.
+The operator recovery runbook is now published in the user guide; it keeps
+Home/API as the normal inspection surface, documents read-only state and
+marker evidence, and separates idle, warm-up, missing-device, and stale-state
+diagnostics from the remaining appliance acceptance gate.
 
 ## Milestone 24: Mnemosyne Design Language Alignment (Active Historical Work)
 

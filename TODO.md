@@ -1970,9 +1970,12 @@ list until every temporary size-budget exception has been removed.
     mappings. It asserts warm-up, mapped names, non-zero second-sample rates,
     and explicit `device_missing`; authoritative enclosure topology and live
     packaged-loop acceptance remain blocked.
-- [ ] Add an operator runbook for restoring Home telemetry: verify daemon loop
+- [x] Add an operator runbook for restoring Home telemetry: verify daemon loop
   health, marker/device mapping, `/proc/diskstats` visibility, sample state
   ownership, and the distinction between an idle disk and unavailable data.
+  The macOS-safe guide is `docs/user/telemetry-troubleshooting.rst`; packaged
+  daemon-loop and authoritative enclosure-topology acceptance remain blocked
+  on appliance access.
 - [x] Add active-user/session telemetry for local Web sessions and remote-agent
   sessions, including total active sessions, distinct logged-in users, and
   administrator/non-administrator counts where policy permits exposure.

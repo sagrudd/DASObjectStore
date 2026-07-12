@@ -11,6 +11,7 @@ stabilized in the current MVP.
    service-boundary
    standalone-auth
    web-interface
+   telemetry-troubleshooting
    store-classes
    storage-profiles
    metadata-compatibility

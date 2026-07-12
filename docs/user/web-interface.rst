@@ -285,6 +285,8 @@ USB ``by-id`` aliases, device-mapper ``by-path`` aliases, and an absent device;
 it verifies first-sample warm-up, subsequent non-zero rates, mapped device
 identity, and explicit ``device_missing`` diagnostics without requiring a live
 appliance.
+For the operator recovery sequence when Home is stale, warming up, or
+unavailable, see :doc:`telemetry-troubleshooting`.
 
 The Home page refreshes its selected-window telemetry payload every 30 seconds
 while the page is open. The throughput telemetry chart uses a stable SVG view

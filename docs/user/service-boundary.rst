@@ -46,6 +46,8 @@ and writes the current JSON state under:
 The telemetry directory is daemon-owned state; operators and Web/API readers
 should treat the JSON file as read-only and use supported interfaces as they are
 added.
+For a decision tree covering warm-up, missing-device reasons, marker/device
+mapping, and safe evidence collection, see :doc:`telemetry-troubleshooting`.
 Authenticated daemon API callers can request appliance telemetry through the
 ``appliance_telemetry`` command. The response contains current CPU, memory,
 capacity, session, and per-disk IO summaries, bounded time-series windows for
