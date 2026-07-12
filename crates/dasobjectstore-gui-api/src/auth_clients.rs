@@ -79,7 +79,7 @@ pub(super) async fn submit_create_object_store_request(
         .map_err(admin_daemon_bridge_error)
 }
 
-pub(super) fn submit_update_object_store_ingest_policy_request(
+pub(super) async fn submit_update_object_store_ingest_policy_request(
     state: &StandaloneEnclosureAdminRouteState,
     request: DaemonUpdateObjectStoreIngestPolicyRequest,
 ) -> Result<StandaloneObjectStoreIngestPolicyResponse, (StatusCode, Json<AuthRouteError>)> {
@@ -89,15 +89,17 @@ pub(super) fn submit_update_object_store_ingest_policy_request(
             "daemon ObjectStore administration contract is not available",
         )
     })?;
-    client
-        .submit_update_object_store_ingest_policy(request)
-        .map_err(|err| {
-            route_error(
-                StatusCode::BAD_GATEWAY,
-                "daemon_objectstore_ingest_policy_failed",
-                err.message,
-            )
+    let client = Arc::clone(client);
+    state
+        .daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_update_object_store_ingest_policy(request)
+                .map_err(|err| err.message)
         })
+        .await
+        .map_err(admin_daemon_bridge_error)
 }
 
 pub(super) async fn submit_endpoint_inventory_upsert_request(

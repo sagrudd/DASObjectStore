@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.57 - 2026-07-12
+
+- Route Web ObjectStore ingest-policy updates through the bounded daemon bridge
+  while preserving daemon-owned validation and direct-HDD confirmation gates.
+
 ## 0.71.56 - 2026-07-12
 
 - Route Web endpoint-inventory upsert through the bounded daemon bridge while
