@@ -1,6 +1,7 @@
 //! Core domain types for DASObjectStore.
 
 pub mod config;
+pub mod deployment;
 pub mod file_export;
 pub mod health;
 pub mod ids;
@@ -19,6 +20,7 @@ pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,
     DEFAULT_STANDALONE_HTTPS_PORT,
 };
+pub use deployment::{DeploymentProfile, HostMode};
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -103,9 +103,11 @@ completion.
 
 ### Gate 1: Profile, backend, manifest, and compatibility contracts
 
-- [ ] Add compatibility-sensitive domain types for ``folder``, ``drive``, and
+- [x] Add compatibility-sensitive domain types for ``folder``, ``drive``, and
   ``appliance`` deployment profiles; keep host mode orthogonal as per-user,
-  system, or integrated authority.
+  system, or integrated authority. The additive `DeploymentProfile` and
+  `HostMode` enums use stable snake-case wire names and are not yet persisted
+  into existing store metadata.
 - [ ] Decide and document profile creation/adoption semantics, including whether
   one folder root maps exactly to one ObjectStore and how existing data drifts.
 - [ ] Define a capability-based backend contract for validation, reservation,

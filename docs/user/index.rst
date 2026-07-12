@@ -12,6 +12,7 @@ stabilized in the current MVP.
    standalone-auth
    web-interface
    store-classes
+   storage-profiles
    nas-endpoints
    disk-preparation
    object-stores
