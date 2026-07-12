@@ -431,7 +431,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        std::env::temp_dir().join(format!(
+        let parent = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        parent.join(format!(
             "dasobjectstore-folder-backend-{}-{now}",
             std::process::id()
         ))

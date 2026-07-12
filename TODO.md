@@ -173,6 +173,9 @@ completion.
     directory sync, atomic rename, capacity reservation commit, and focused
     read/verify/enumerate/remove tests; catalogue transaction wiring remains
     open.
+  - [x] Run the folder backend regression against the dedicated generated-data
+    root `/Users/stephen/.dasobjectstore-codex-validation` on macOS; the test
+    removes only its uniquely named child after completion.
 - [ ] Preserve user-visible hierarchy while reserving and protecting the
   ``.dasobjectstore`` namespace.
 - [ ] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,
