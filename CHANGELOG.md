@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.93 - 2026-07-12
+
+- Validate folder object fd/path identity and stable size while hashing, and
+  keep staged reservations recoverable when finalization detects tampering.
+
 ## 0.71.92 - 2026-07-12
 
 - Reject hard-linked folder import sources and classify hard-linked user files

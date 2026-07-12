@@ -8,7 +8,7 @@ use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
 use dasobjectstore_core::store::{CapacityPolicy, CapacityReservationLedger};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -186,8 +186,9 @@ impl FolderBackend {
         key: BackendObjectKey,
         path: &Path,
         checksum: String,
+        size_bytes: u64,
     ) -> Result<BackendObjectRecord, BackendError> {
-        record_for_path(&self.root, key, path, checksum)
+        record_for_path(&self.root, key, path, checksum, size_bytes)
     }
 
     fn discard_staged(&mut self, staged: &BackendObjectRecord, reservation_id: &str) {
@@ -241,7 +242,9 @@ impl ObjectStoreBackend for FolderBackend {
             }
             file.sync_all().map_err(io_error)?;
             let checksum = format!("sha256:{:x}", hasher.finalize());
-            let record = self.record_for_path(key.clone(), &temporary_path, checksum)?;
+            let size_bytes = file.metadata().map_err(io_error)?.len();
+            let record =
+                self.record_for_path(key.clone(), &temporary_path, checksum, size_bytes)?;
             self.staged_reservations
                 .insert(temporary_path.clone(), reservation_id.to_string());
             Ok(record)
@@ -259,13 +262,20 @@ impl ObjectStoreBackend for FolderBackend {
         let temporary_path = self.root.join(&staged.location);
         let reservation_id = self
             .staged_reservations
-            .remove(&temporary_path)
+            .get(&temporary_path)
+            .cloned()
             .ok_or_else(|| {
                 BackendError::InvalidRequest("unknown staged folder object".to_string())
             })?;
         if !temporary_path.starts_with(&self.staging_root) {
             return Err(BackendError::InvalidRequest(
                 "staged object is outside the private staging directory".to_string(),
+            ));
+        }
+        let (checksum, size_bytes) = hash_stable_file(&temporary_path)?;
+        if checksum != staged.checksum || size_bytes != staged.size_bytes {
+            return Err(BackendError::InvalidRequest(
+                "staged folder object changed before finalization".to_string(),
             ));
         }
         let destination = self.object_path(&staged.key)?;
@@ -280,10 +290,11 @@ impl ObjectStoreBackend for FolderBackend {
         ensure_safe_parent(&self.objects_root, parent)?;
         fs::rename(&temporary_path, &destination).map_err(io_error)?;
         sync_directory(parent)?;
+        self.staged_reservations.remove(&temporary_path);
         self.ledger
             .commit(&reservation_id)
             .map_err(|error| BackendError::InvalidRequest(format!("capacity commit: {error:?}")))?;
-        self.record_for_path(staged.key, &destination, staged.checksum)
+        self.record_for_path(staged.key, &destination, staged.checksum, size_bytes)
     }
 
     fn read(&self, key: &BackendObjectKey) -> Result<Box<dyn Read + Send>, BackendError> {
@@ -306,9 +317,8 @@ impl ObjectStoreBackend for FolderBackend {
 
     fn verify(&self, key: &BackendObjectKey) -> Result<BackendObjectRecord, BackendError> {
         let path = self.object_path(key)?;
-        let mut file = File::open(&path).map_err(io_error)?;
-        let checksum = hash_reader(&mut file)?;
-        self.record_for_path(key.clone(), &path, checksum)
+        let (checksum, size_bytes) = hash_stable_file(&path)?;
+        self.record_for_path(key.clone(), &path, checksum, size_bytes)
     }
 
     fn health(&self) -> Result<BackendHealth, BackendError> {
@@ -370,9 +380,14 @@ fn enumerate_files(
             object_id,
             version: 1,
         };
-        let mut file = File::open(&path).map_err(io_error)?;
-        let checksum = hash_reader(&mut file)?;
-        records.push(record_for_path(location_root, key, &path, checksum)?);
+        let (checksum, size_bytes) = hash_stable_file(&path)?;
+        records.push(record_for_path(
+            location_root,
+            key,
+            &path,
+            checksum,
+            size_bytes,
+        )?);
     }
     Ok(())
 }
@@ -382,8 +397,8 @@ fn record_for_path(
     key: BackendObjectKey,
     path: &Path,
     checksum: String,
+    size_bytes: u64,
 ) -> Result<BackendObjectRecord, BackendError> {
-    let size_bytes = fs::metadata(path).map_err(io_error)?.len();
     let location = path
         .strip_prefix(root)
         .map_err(|_| BackendError::InvalidRequest("backend path escaped root".to_string()))?
@@ -395,6 +410,87 @@ fn record_for_path(
         checksum,
         location,
     })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FileSnapshot {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    links: u64,
+}
+
+fn snapshot(metadata: &Metadata) -> FileSnapshot {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        FileSnapshot {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            links: metadata.nlink(),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        FileSnapshot {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        }
+    }
+}
+
+fn hash_stable_file(path: &Path) -> Result<(String, u64), BackendError> {
+    let mut file = File::open(path).map_err(io_error)?;
+    let before = file.metadata().map_err(io_error)?;
+    if !before.is_file() {
+        return Err(BackendError::InvalidRequest(
+            "folder backend requires regular files".to_string(),
+        ));
+    }
+    let before_snapshot = snapshot(&before);
+    #[cfg(unix)]
+    if before_snapshot.links != 1 {
+        return Err(BackendError::InvalidRequest(
+            "folder backend encountered a hard-linked object".to_string(),
+        ));
+    }
+    let (checksum, bytes_read) = hash_reader_count(&mut file)?;
+    let after_snapshot = snapshot(&file.metadata().map_err(io_error)?);
+    if before_snapshot != after_snapshot || bytes_read != before_snapshot.len {
+        return Err(BackendError::InvalidRequest(
+            "folder backend file changed during verification".to_string(),
+        ));
+    }
+    let path_metadata = fs::symlink_metadata(path).map_err(io_error)?;
+    if path_metadata.file_type().is_symlink()
+        || !same_file(&before_snapshot, &snapshot(&path_metadata))
+    {
+        return Err(BackendError::InvalidRequest(
+            "folder backend file was replaced during verification".to_string(),
+        ));
+    }
+    Ok((checksum, before_snapshot.len))
+}
+
+fn same_file(left: &FileSnapshot, right: &FileSnapshot) -> bool {
+    #[cfg(unix)]
+    {
+        left.device == right.device
+            && left.inode == right.inode
+            && left.links == right.links
+            && left.len == right.len
+            && left.modified == right.modified
+    }
+    #[cfg(not(unix))]
+    {
+        left.len == right.len && left.modified == right.modified
+    }
 }
 
 fn inspect_user_tree(
@@ -428,16 +524,24 @@ fn inspect_user_tree(
 }
 
 fn hash_reader(reader: &mut dyn Read) -> Result<String, BackendError> {
+    Ok(hash_reader_count(reader)?.0)
+}
+
+fn hash_reader_count(reader: &mut dyn Read) -> Result<(String, u64), BackendError> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
+    let mut bytes_read = 0_u64;
     loop {
         let read = reader.read(&mut buffer).map_err(io_error)?;
         if read == 0 {
             break;
         }
+        bytes_read = bytes_read
+            .checked_add(read as u64)
+            .ok_or_else(|| BackendError::InvalidRequest("file size overflow".to_string()))?;
         hasher.update(&buffer[..read]);
     }
-    Ok(format!("sha256:{:x}", hasher.finalize()))
+    Ok((format!("sha256:{:x}", hasher.finalize()), bytes_read))
 }
 
 fn reject_ambiguous_source(path: &Path) -> Result<(), BackendError> {
@@ -686,6 +790,59 @@ mod tests {
             .expect("stable source stages");
         let finalized = backend.finalize(staged).expect("finalizes source");
         assert_eq!(finalized.size_bytes, 13);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_rejects_changed_staged_object_and_recovers_reservation() {
+        let root = unique_root();
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        let key = BackendObjectKey {
+            object_id: "changed/object.txt".to_string(),
+            version: 1,
+        };
+        backend
+            .reserve("changed-stage", 5)
+            .expect("reserves capacity");
+        let staged = backend
+            .stage("changed-stage", &key, &mut Cursor::new(b"hello".to_vec()))
+            .expect("stages object");
+        let staged_path = root.join(&staged.location);
+        fs::write(&staged_path, b"world").expect("tamper writes");
+        assert!(backend.finalize(staged.clone()).is_err());
+        assert_eq!(backend.capacity().reserved_bytes, 5);
+        fs::write(&staged_path, b"hello").expect("staged object restores");
+        backend
+            .finalize(staged)
+            .expect("recovered object finalizes");
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_backend_rejects_hard_linked_managed_object_verification() {
+        let root = unique_root();
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        let key = BackendObjectKey {
+            object_id: "managed/object.txt".to_string(),
+            version: 1,
+        };
+        backend
+            .reserve("managed-object", 5)
+            .expect("reserves capacity");
+        let staged = backend
+            .stage("managed-object", &key, &mut Cursor::new(b"hello".to_vec()))
+            .expect("stages object");
+        backend.finalize(staged).expect("finalizes object");
+        let path = root.join(".dasobjectstore/objects/managed/object.txt");
+        fs::hard_link(&path, root.join("managed-alias.txt")).expect("hard link creates");
+        assert!(backend.verify(&key).is_err());
+        assert!(backend.enumerate(None).is_err());
         let _ = fs::remove_dir_all(root);
     }
 

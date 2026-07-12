@@ -28,6 +28,9 @@ records retain the same nested, relative catalogue location as finalized
 objects, while the private namespace remains hidden from user-tree inspection.
 Hard-linked user files are reported as unsafe, and file-based adoption uses a
 post-copy checksum check so a changing source is not silently accepted.
+Managed-object enumeration and verification compare the open file identity and
+stable size/timestamps with the path after hashing; staged files are rechecked
+before rename and failed validation leaves the reservation recoverable.
 Catalogue registration and user-facing profile creation still require the
 subsequent daemon contract and explicit adoption workflow.
 
