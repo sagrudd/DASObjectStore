@@ -171,6 +171,89 @@ impl CapacityPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CapacityAdmissionInput {
+    pub requested_bytes: u64,
+    pub copy_count: u8,
+    pub used_bytes: u64,
+    pub reserved_bytes: u64,
+    pub backend_free_bytes: u64,
+    pub ssd_free_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CapacityAdmission {
+    pub logical_available_bytes: Option<u64>,
+    pub backend_available_bytes: u64,
+    pub ssd_available_bytes: u64,
+    pub required_backend_bytes: u64,
+    pub required_ssd_bytes: u64,
+}
+
+impl CapacityAdmission {
+    pub fn strictest_available_bytes(&self) -> Option<u64> {
+        let mut available = self.backend_available_bytes.min(self.ssd_available_bytes);
+        if let Some(logical) = self.logical_available_bytes {
+            available = available.min(logical);
+        }
+        Some(available)
+    }
+}
+
+pub fn evaluate_capacity_admission(
+    policy: &CapacityPolicy,
+    input: CapacityAdmissionInput,
+) -> Result<CapacityAdmission, CapacityAdmissionError> {
+    if input.copy_count == 0 {
+        return Err(CapacityAdmissionError::InvalidCopyCount);
+    }
+    let required_backend_bytes = input
+        .requested_bytes
+        .checked_mul(u64::from(input.copy_count))
+        .ok_or(CapacityAdmissionError::Overflow)?;
+    let logical_available_bytes = policy.logical_limit_bytes.map(|limit| {
+        limit
+            .saturating_sub(policy.backend_reserve_bytes)
+            .saturating_sub(input.used_bytes)
+            .saturating_sub(input.reserved_bytes)
+    });
+    let backend_available_bytes = input
+        .backend_free_bytes
+        .saturating_sub(policy.backend_reserve_bytes);
+    let admission = CapacityAdmission {
+        logical_available_bytes,
+        backend_available_bytes,
+        ssd_available_bytes: input.ssd_free_bytes,
+        required_backend_bytes,
+        required_ssd_bytes: input.requested_bytes,
+    };
+    if logical_available_bytes.is_some_and(|available| input.requested_bytes > available) {
+        return Err(CapacityAdmissionError::LogicalQuota {
+            available_bytes: logical_available_bytes.unwrap_or_default(),
+        });
+    }
+    if required_backend_bytes > backend_available_bytes {
+        return Err(CapacityAdmissionError::BackendReserve {
+            available_bytes: backend_available_bytes,
+        });
+    }
+    if input.requested_bytes > input.ssd_free_bytes {
+        return Err(CapacityAdmissionError::SsdStaging {
+            available_bytes: input.ssd_free_bytes,
+        });
+    }
+    Ok(admission)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CapacityAdmissionError {
+    InvalidCopyCount,
+    Overflow,
+    LogicalQuota { available_bytes: u64 },
+    BackendReserve { available_bytes: u64 },
+    SsdStaging { available_bytes: u64 },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapacityPolicyValidationError {
     InvalidLimitOrReserve,
     InvalidThresholds,
@@ -693,7 +776,8 @@ impl Display for StorePolicyValidationError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AcknowledgementPolicy, CapacityBehavior, CapacityLedgerError, CapacityPolicy,
+        evaluate_capacity_admission, AcknowledgementPolicy, CapacityAdmissionError,
+        CapacityAdmissionInput, CapacityBehavior, CapacityLedgerError, CapacityPolicy,
         EnclosurePlacement, EnclosurePlacementContext, ExportPolicy, IngestMode, MutabilityPolicy,
         PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass, StorePolicy,
         StorePolicyOverrides, StorePolicyValidationError,
@@ -731,6 +815,45 @@ mod tests {
         }
         .validation_error()
         .is_some());
+    }
+
+    #[test]
+    fn capacity_admission_uses_logical_backend_ssd_and_copy_constraints() {
+        let policy = CapacityPolicy::bounded(1_000, 100);
+        let admission = evaluate_capacity_admission(
+            &policy,
+            CapacityAdmissionInput {
+                requested_bytes: 200,
+                copy_count: 2,
+                used_bytes: 100,
+                reserved_bytes: 50,
+                backend_free_bytes: 1_000,
+                ssd_free_bytes: 500,
+            },
+        )
+        .expect("admission succeeds");
+        assert_eq!(admission.logical_available_bytes, Some(750));
+        assert_eq!(admission.backend_available_bytes, 900);
+        assert_eq!(admission.strictest_available_bytes(), Some(500));
+
+        let error = evaluate_capacity_admission(
+            &policy,
+            CapacityAdmissionInput {
+                requested_bytes: 600,
+                copy_count: 1,
+                used_bytes: 0,
+                reserved_bytes: 0,
+                backend_free_bytes: 2_000,
+                ssd_free_bytes: 500,
+            },
+        )
+        .expect_err("SSD staging rejects admission");
+        assert_eq!(
+            error,
+            CapacityAdmissionError::SsdStaging {
+                available_bytes: 500
+            }
+        );
     }
 
     #[test]

@@ -166,6 +166,9 @@ completion.
     tests; daemon/S3/multipart admission wiring remains open.
 - [ ] Admit against the strictest of logical quota, outstanding reservations,
   backend usable space after reserve, SSD staging, and copy amplification.
+  - [x] Add a pure core admission evaluator that reports logical/backend/SSD
+    availability and rejects the strictest failed constraint with copy
+    amplification; daemon/S3 call-site integration remains open.
 - [ ] Charge each logical object version at full logical size even when physical
   content is deduplicated; report physical staging/replication separately.
 - [ ] Define over-quota behavior: preserve reads, verified deletion, repair, and
