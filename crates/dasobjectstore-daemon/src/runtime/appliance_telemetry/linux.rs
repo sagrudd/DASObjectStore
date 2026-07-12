@@ -25,6 +25,7 @@ pub struct LinuxProcTelemetryCollector {
     web_auth_root: Option<PathBuf>,
     remote_session_path: Option<PathBuf>,
     local_group_path: Option<PathBuf>,
+    sys_root: Option<PathBuf>,
     previous_diskstats: Option<BTreeMap<String, LinuxDiskIoCounters>>,
 }
 
@@ -36,6 +37,7 @@ impl LinuxProcTelemetryCollector {
             web_auth_root: None,
             remote_session_path: None,
             local_group_path: None,
+            sys_root: None,
             previous_diskstats: None,
         }
     }
@@ -54,6 +56,11 @@ impl LinuxProcTelemetryCollector {
         self.web_auth_root = Some(web_auth_root.into());
         self.remote_session_path = Some(remote_session_path.into());
         self.local_group_path = Some(local_group_path.into());
+        self
+    }
+
+    pub fn with_sys_root(mut self, sys_root: impl Into<PathBuf>) -> Self {
+        self.sys_root = Some(sys_root.into());
         self
     }
 
@@ -88,11 +95,12 @@ impl LinuxProcTelemetryCollector {
                 let (enclosures, disks) = collect_linux_disk_capacity_telemetry(hdd_root)?;
                 let proc_diskstats = self.read_proc_file("diskstats")?;
                 let current_diskstats = parse_linux_diskstats(&proc_diskstats)?;
-                let disk_io = collect_linux_disk_io_telemetry(
+                let disk_io = collect_linux_disk_io_telemetry_with_sys_root(
                     hdd_root,
                     &current_diskstats,
                     self.previous_diskstats.as_ref(),
                     elapsed_seconds,
+                    self.sys_root.as_deref(),
                 )?;
                 self.previous_diskstats = Some(current_diskstats);
                 (enclosures, disks, disk_io)
@@ -398,11 +406,27 @@ pub fn collect_linux_disk_io_telemetry(
     previous_diskstats: Option<&BTreeMap<String, LinuxDiskIoCounters>>,
     elapsed_seconds: u64,
 ) -> Result<Vec<ApplianceDiskIoTelemetry>, ApplianceTelemetryCollectorError> {
+    collect_linux_disk_io_telemetry_with_sys_root(
+        hdd_root,
+        current_diskstats,
+        previous_diskstats,
+        elapsed_seconds,
+        None,
+    )
+}
+
+fn collect_linux_disk_io_telemetry_with_sys_root(
+    hdd_root: impl AsRef<Path>,
+    current_diskstats: &BTreeMap<String, LinuxDiskIoCounters>,
+    previous_diskstats: Option<&BTreeMap<String, LinuxDiskIoCounters>>,
+    elapsed_seconds: u64,
+    sys_root: Option<&Path>,
+) -> Result<Vec<ApplianceDiskIoTelemetry>, ApplianceTelemetryCollectorError> {
     let markers = managed_hdd_markers(hdd_root.as_ref())?;
     let mut telemetry = Vec::new();
 
     for marker in markers {
-        let device_name = marker.diskstats_device_name.clone();
+        let device_name = resolve_diskstats_device_name(&marker, current_diskstats, sys_root);
         let current = device_name
             .as_ref()
             .and_then(|name| current_diskstats.get(name));
@@ -558,6 +582,52 @@ fn marker_device_name(values: &BTreeMap<&str, &str>) -> Option<String> {
     optional_marker_value(values, "device")
         .and_then(|device| Path::new(&device).file_name().map(|name| name.to_owned()))
         .map(|name| name.to_string_lossy().to_string())
+}
+
+fn resolve_diskstats_device_name(
+    marker: &ManagedHddMarker,
+    current_diskstats: &BTreeMap<String, LinuxDiskIoCounters>,
+    sys_root: Option<&Path>,
+) -> Option<String> {
+    let mut candidates = Vec::new();
+    if let Some(name) = marker.diskstats_device_name.as_deref() {
+        candidates.push(name.to_string());
+    }
+    if let Some(device_path) = marker.device_path.as_deref() {
+        if let Some(name) = Path::new(device_path).file_name() {
+            candidates.push(name.to_string_lossy().to_string());
+        }
+    }
+
+    for candidate in &candidates {
+        if current_diskstats.contains_key(candidate) {
+            return Some(candidate.clone());
+        }
+    }
+
+    let Some(sys_root) = sys_root else {
+        return None;
+    };
+    for candidate in candidates {
+        for alias_root in [
+            sys_root.join("class/block"),
+            sys_root.join("dev/disk/by-id"),
+            sys_root.join("dev/disk/by-path"),
+        ] {
+            let alias = alias_root.join(&candidate);
+            let Ok(target) = fs::canonicalize(&alias) else {
+                continue;
+            };
+            let Some(name) = target.file_name() else {
+                continue;
+            };
+            let name = name.to_string_lossy().to_string();
+            if current_diskstats.contains_key(&name) {
+                return Some(name);
+            }
+        }
+    }
+    None
 }
 
 fn missing_reason_for_capacity_error(

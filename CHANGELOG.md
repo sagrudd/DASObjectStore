@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.66 - 2026-07-12
+
+- Resolve managed-HDD telemetry markers through fixtureable sysfs and stable
+  device aliases before reporting missing `/proc/diskstats` mappings.
+
 ## 0.71.65 - 2026-07-12
 
 - Distinguish first-sample disk-IO warm-up from daemon-startup or unavailable

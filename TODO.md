@@ -1622,6 +1622,10 @@ list until every temporary size-budget exception has been removed.
   in `/proc/diskstats`, including partitions, device-mapper/LVM paths, MD RAID,
   USB bridge names, and stable `/dev/disk/by-*` aliases; do not depend only on
   a marker's basename when it cannot match the kernel counter name.
+  - [x] Resolve explicit `diskstats_device` markers and stable `/dev/disk/by-*`
+    or `/dev/disk/by-path` aliases through a fixtureable sysfs root before
+    reporting `device_missing`; preserve the remaining partition/device-mapper/
+    MD/USB topology work as an open extension.
 - [ ] Validate managed-HDD device markers during enclosure preparation and
   telemetry collection. Emit a per-disk diagnostic when the marker has no
   usable block-device mapping, the device is absent from `/proc/diskstats`, or

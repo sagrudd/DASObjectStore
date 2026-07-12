@@ -498,6 +498,50 @@ fn proc_collector_retains_diskstats_for_cadence_aware_disk_io_rates() {
 }
 
 #[test]
+fn proc_collector_resolves_stable_device_alias_through_sysfs_fixture() {
+    let root = temp_root("appliance-telemetry-device-alias");
+    let proc_root = root.join("proc");
+    let hdd_root = root.join("hdd");
+    let sys_root = root.join("sys");
+    let disk_root = hdd_root.join("disk-a");
+    fs::create_dir_all(&proc_root).expect("proc fixture directory");
+    fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
+    fs::create_dir_all(sys_root.join("class/block/sda")).expect("sysfs block fixture");
+    fs::create_dir_all(sys_root.join("dev/disk/by-id")).expect("device alias fixture");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        "../../../class/block/sda",
+        sys_root.join("dev/disk/by-id/fixture-a"),
+    )
+    .expect("stable device alias symlink");
+    fs::write(proc_root.join("stat"), PROC_STAT_1).expect("stat fixture written");
+    fs::write(proc_root.join("loadavg"), "1.00 0.50 0.25 1/100 123\n")
+        .expect("loadavg fixture written");
+    fs::write(proc_root.join("meminfo"), PROC_MEMINFO).expect("meminfo fixture written");
+    fs::write(proc_root.join("diskstats"), PROC_DISKSTATS_1).expect("diskstats fixture written");
+    fs::write(
+        disk_root.join(".dasobjectstore/device.env"),
+        "role=hdd:qnap-a\nlabel=QNAP bay 1\ndevice=/dev/disk/by-id/fixture-a\nfilesystem=ext4\n",
+    )
+    .expect("device marker written");
+
+    let mut collector = LinuxProcTelemetryCollector::new(&proc_root)
+        .with_hdd_root(&hdd_root)
+        .with_sys_root(&sys_root);
+    let sample = collector
+        .collect(None, 6, "2026-07-09T18:00:00Z")
+        .expect("fixture telemetry collected");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(sample.disk_io.len(), 1);
+    assert_eq!(sample.disk_io[0].device_name.as_deref(), Some("sda"));
+    assert_eq!(
+        sample.disk_io[0].missing_reason,
+        Some(ApplianceTelemetryMissingReason::FirstSampleWarmup)
+    );
+}
+
+#[test]
 fn session_telemetry_counts_web_and_remote_agent_sessions() {
     let root = temp_root("appliance-telemetry-sessions");
     let auth_root = root.join("auth");

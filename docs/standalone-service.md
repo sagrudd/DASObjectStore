@@ -239,7 +239,10 @@ operation rate, await, and IO-time metrics. On Linux, the daemon retains the
 previous `/proc/diskstats` sample internally and calculates rates over the
 configured telemetry cadence. The first sample after daemon startup or counter
 reset reports an explicit missing reason rather than interpolating or inventing
-IO data.
+IO data; the first per-disk sample uses `first_sample_warmup` to distinguish the
+expected initial gap from a collector failure. Stable device aliases can be
+resolved through sysfs and `/dev/disk/by-*`/`by-path` targets before the daemon
+reports `device_missing`; unresolved topology remains an actionable diagnostic.
 Session telemetry is collected from the standalone Web auth registry and the
 remote easyconnect paired-session registry when those files exist. Active Web
 sessions, active remote-agent sessions, distinct logged-in users, and
