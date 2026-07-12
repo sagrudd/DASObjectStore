@@ -9,6 +9,7 @@ pub(super) fn drain_hdd_settlement_events(
     block: bool,
     live_sqlite_path: &Path,
     recorded_at_utc: &str,
+    capacity_reservations: &mut IngestCapacityReservations,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         let event = if block {
@@ -155,13 +156,14 @@ pub(super) fn drain_hdd_settlement_events(
                 ))?;
             }
             HddSettlementEvent::Settled { entry, report } => {
-                commit_object_put(live_sqlite_path, endpoint, &report, recorded_at_utc).map_err(
-                    |error| {
-                        DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                            "failed to commit completed object metadata: {error}"
-                        ))
-                    },
-                )?;
+                if let Err(error) =
+                    commit_object_put(live_sqlite_path, endpoint, &report, recorded_at_utc)
+                {
+                    return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                        "failed to commit completed object metadata: {error}"
+                    )));
+                }
+                capacity_reservations.commit(&entry)?;
                 state.hdd_active = state.hdd_active.saturating_sub(1);
                 state.completed_files = state.completed_files.saturating_add(1);
                 let active_hdd_transfers = state.active_hdd_transfer_records();

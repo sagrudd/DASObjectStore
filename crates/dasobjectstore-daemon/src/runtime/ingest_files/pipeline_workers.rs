@@ -181,6 +181,7 @@ pub(super) fn enqueue_ssd_flush_work(
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     live_sqlite_path: &Path,
     recorded_at_utc: &str,
+    capacity_reservations: &mut IngestCapacityReservations,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         match flush_tx.try_send(work) {
@@ -196,6 +197,7 @@ pub(super) fn enqueue_ssd_flush_work(
                     true,
                     live_sqlite_path,
                     recorded_at_utc,
+                    capacity_reservations,
                 )?;
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -217,6 +219,7 @@ pub(super) fn enqueue_hdd_settlement_work(
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     live_sqlite_path: &Path,
     recorded_at_utc: &str,
+    capacity_reservations: &mut IngestCapacityReservations,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         match settle_tx.try_send(work) {
@@ -232,6 +235,7 @@ pub(super) fn enqueue_hdd_settlement_work(
                     true,
                     live_sqlite_path,
                     recorded_at_utc,
+                    capacity_reservations,
                 )?;
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -253,6 +257,7 @@ pub(super) fn wait_for_ssd_admission(
     progress: &mut impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     live_sqlite_path: &Path,
     recorded_at_utc: &str,
+    capacity_reservations: &mut IngestCapacityReservations,
 ) -> Result<(), DaemonIngestFilesRuntimeError> {
     loop {
         state.ssd_pressure = read_daemon_ssd_pressure(ssd_root, capacity_policy)?;
@@ -300,6 +305,7 @@ pub(super) fn wait_for_ssd_admission(
                     true,
                     live_sqlite_path,
                     recorded_at_utc,
+                    capacity_reservations,
                 )?;
             }
         }

@@ -38,19 +38,19 @@ use crate::runtime::{
     default_ssd_root, provision_garage_store_registry, query_object_browser_metadata,
     read_object_browser_metadata, remote_easyconnect_pairing_store_path,
     remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
-    resolve_object_folder_download_with_hdd_root, submit_ingest_files_to_local_store_with_progress,
-    upsert_endpoint_inventory_record, AdminJobRegistry, ApplianceTelemetrySampleSet,
-    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
-    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
-    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
-    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
-    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
-    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
-    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
+    resolve_object_folder_download_with_hdd_root, upsert_endpoint_inventory_record,
+    AdminJobRegistry, ApplianceTelemetrySampleSet, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
+    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
+    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
+    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -861,7 +861,7 @@ where
             DaemonIngestProgressEvent,
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
-        submit_ingest_files_to_local_store_with_progress(request, accepted_at_utc, emit_progress)
+        self.submit_ingest_files_with_capacity_provider(request, accepted_at_utc, emit_progress)
     }
 }
 

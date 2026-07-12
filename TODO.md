@@ -236,8 +236,8 @@ completion.
     store policy from the registry, restores bounded ledgers, probes backend
     and SSD free space, atomically persists admitted reservations, and fails
     closed for missing bounded ledgers or probe/persistence errors; configured
-    copy counts remain daemon-authoritative. Ingest/S3/multipart completion
-    and stale-reservation expiry remain open.
+    copy counts remain daemon-authoritative. S3/multipart completion and
+    stale-reservation expiry remain open.
   - [x] Add explicit provider commit/release lifecycle operations with
     snapshot rollback when durable persistence fails; transfer workers still
     need to carry reservation IDs through their completion/failure paths.
@@ -247,6 +247,12 @@ completion.
     admission rejection is persisted as a failed daemon job and provider
     lifecycle failures remain fail-closed. Local ingest, multipart, catalogue
     accounting, and stale-reservation expiry remain separate follow-up work.
+  - [x] Wire local file ingest through the same daemon provider boundary: each
+    non-skipped file reserves its size with the verified ingress origin before
+    source/staging or direct-HDD work, commits after durable metadata settlement,
+    and releases outstanding reservations on failure. Dry runs and skipped
+    existing objects do not reserve; S3 reconciliation and multipart adapters
+    still need to pass the provider through their own orchestration paths.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.

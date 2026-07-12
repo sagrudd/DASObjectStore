@@ -72,8 +72,9 @@ pub use folder_backend::{
 pub use folder_paths::{folder_host_paths, FolderHostPathError, FolderHostPaths};
 pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
-    submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,
-    DaemonFileIngestSummary, DaemonIngestFilesRuntimeError,
+    submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_capacity_provider,
+    submit_ingest_files_to_local_store_with_progress, DaemonFileIngestSummary,
+    DaemonIngestFilesRuntimeError,
 };
 pub use local_admin::{
     LocalAdminCommandOutput, LocalAdminCommandPlan, LocalAdminCommandRunner,

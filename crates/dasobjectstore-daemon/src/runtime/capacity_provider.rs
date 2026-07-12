@@ -58,10 +58,30 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         requested_bytes: u64,
         reservation_id: &str,
     ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
-        let _ = (object_store, requested_bytes, reservation_id);
-        Err(unavailable(
-            "remote upload capacity provider is not configured",
-        ))
+        self.admit_ingest(
+            object_store,
+            requested_bytes,
+            1,
+            crate::api::DaemonIngressOrigin::RemoteS3,
+            reservation_id,
+        )
+    }
+
+    fn admit_ingest(
+        &self,
+        object_store: &str,
+        requested_bytes: u64,
+        copy_count: u8,
+        ingress_origin: crate::api::DaemonIngressOrigin,
+        reservation_id: &str,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        self.admit(CapacityAdmissionRequest {
+            store_id: object_store.to_string(),
+            requested_bytes,
+            copy_count,
+            ingress_origin,
+            client_request_id: Some(reservation_id.to_string()),
+        })
     }
 
     fn commit(
@@ -230,6 +250,7 @@ where
                 .get_mut(store_id.as_str())
                 .expect("ledger inserted before lookup")
         };
+        let before = ledger.snapshot();
         ledger
             .update_policy(definition.policy.capacity.clone())
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
@@ -260,9 +281,8 @@ where
             Err(error) => return Err(unavailable(format!("capacity admission failed: {error}"))),
         };
         if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-            if let Some(reservation_id) = request.client_request_id.as_deref() {
-                let _ = ledger.release(reservation_id);
-            }
+            *ledger = CapacityReservationLedger::from_snapshot(before)
+                .map_err(|restore| unavailable(format!("capacity rollback failed: {restore:?}")))?;
             return Err(unavailable(format!(
                 "capacity ledger persistence failed: {error}"
             )));
@@ -279,13 +299,13 @@ where
         let store_id = StoreId::new(object_store.to_string())
             .map_err(|error| unavailable(format!("invalid object store: {error}")))?;
         let copy_count = self.copies_for_store(&store_id)?;
-        self.admit(CapacityAdmissionRequest {
-            store_id: object_store.to_string(),
+        self.admit_ingest(
+            object_store,
             requested_bytes,
             copy_count,
-            ingress_origin: crate::api::DaemonIngressOrigin::RemoteS3,
-            client_request_id: Some(reservation_id.to_string()),
-        })
+            crate::api::DaemonIngressOrigin::RemoteS3,
+            reservation_id,
+        )
     }
 
     fn commit(

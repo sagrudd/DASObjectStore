@@ -5,6 +5,7 @@ use crate::api::{
     DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry, DaemonIngressLandingMode,
     DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
+use crate::runtime::capacity_provider::CapacityAdmissionProvider;
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{IngestMode, StorePolicy};
@@ -32,6 +33,7 @@ const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
 const SSD_FLUSH_QUEUE_CAPACITY: usize = 2;
 const HDD_WRITE_RATE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
 
+mod capacity;
 mod endpoint;
 mod environment;
 mod pipeline_events;
@@ -41,6 +43,7 @@ mod progress;
 mod scheduling;
 mod source_classification;
 
+use capacity::IngestCapacityReservations;
 use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
 #[cfg(test)]
 use environment::SSD_ROOT_ENV;
@@ -84,7 +87,12 @@ pub fn submit_ingest_files_to_local_store(
     request: SubmitIngestFilesRequest,
     accepted_at_utc: &str,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
-    submit_ingest_files_to_local_store_with_progress(request, accepted_at_utc, |_| Ok(()))
+    submit_ingest_files_to_local_store_with_capacity_provider(
+        request,
+        accepted_at_utc,
+        |_| Ok(()),
+        None,
+    )
 }
 
 pub fn submit_ingest_files_to_local_store_with_progress(
@@ -92,14 +100,29 @@ pub fn submit_ingest_files_to_local_store_with_progress(
     accepted_at_utc: &str,
     progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
+    submit_ingest_files_to_local_store_with_capacity_provider(
+        request,
+        accepted_at_utc,
+        progress,
+        None,
+    )
+}
+
+pub fn submit_ingest_files_to_local_store_with_capacity_provider(
+    request: SubmitIngestFilesRequest,
+    accepted_at_utc: &str,
+    progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
+) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
     let executor = LocalFileIngestExecutor::from_environment();
+    let executor = executor.with_capacity_admission_provider(capacity_provider);
     let mut progress = progress::IngestProgressCoalescer::new(progress);
     let response = executor.submit(request, accepted_at_utc, |event| progress.publish(event))?;
     progress.flush()?;
     Ok(response)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct LocalFileIngestExecutor {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
@@ -108,6 +131,7 @@ struct LocalFileIngestExecutor {
     subobject_registry_path: PathBuf,
     source_is_server_local: fn(&Path) -> bool,
     capacity_policy: SsdCapacityPolicy,
+    capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
 }
 
 impl LocalFileIngestExecutor {
@@ -120,7 +144,16 @@ impl LocalFileIngestExecutor {
             subobject_registry_path: default_subobject_registry_path(),
             source_is_server_local,
             capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: None,
         }
+    }
+
+    fn with_capacity_admission_provider(
+        mut self,
+        provider: Option<Arc<dyn CapacityAdmissionProvider>>,
+    ) -> Self {
+        self.capacity_provider = provider;
+        self
     }
 
     fn submit(
@@ -187,6 +220,10 @@ impl LocalFileIngestExecutor {
             object_type: request.object_type,
             dry_run: request.dry_run,
         };
+        let mut capacity_reservations = IngestCapacityReservations::new(
+            self.capacity_provider.clone(),
+            endpoint.store.store_id.clone(),
+        );
 
         progress(DaemonIngestProgressEvent {
             job_id: job_id.clone(),
@@ -271,6 +308,8 @@ impl LocalFileIngestExecutor {
                 source_bytes,
                 total_work_bytes,
                 accepted_at_utc,
+                &mut capacity_reservations,
+                ingress_origin,
                 progress,
             );
         }
@@ -309,6 +348,7 @@ impl LocalFileIngestExecutor {
             )? {
                 continue;
             }
+            capacity_reservations.admit(job_id, entry, copies, ingress_origin)?;
             wait_for_ssd_admission(
                 &self.ssd_root,
                 &capacity_policy,
@@ -319,6 +359,7 @@ impl LocalFileIngestExecutor {
                 &mut progress,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                &mut capacity_reservations,
             )?;
             let put_request = ObjectPutRequest::new(
                 entry.object_id.clone(),
@@ -353,6 +394,7 @@ impl LocalFileIngestExecutor {
                         false,
                         &self.live_sqlite_path,
                         accepted_at_utc,
+                        &mut capacity_reservations,
                     )
                     .map_err(|err| io::Error::other(err.to_string()))?;
                     state.apply_object_progress(entry, &object_progress);
@@ -390,6 +432,7 @@ impl LocalFileIngestExecutor {
                 &mut progress,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                &mut capacity_reservations,
             )?;
             drain_hdd_settlement_events(
                 &event_rx,
@@ -400,6 +443,7 @@ impl LocalFileIngestExecutor {
                 false,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                &mut capacity_reservations,
             )?;
         }
         drop(flush_tx);
@@ -413,6 +457,7 @@ impl LocalFileIngestExecutor {
                 true,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                &mut capacity_reservations,
             )?;
         }
         ssd_flush_worker.join().map_err(|_| {
@@ -430,6 +475,7 @@ impl LocalFileIngestExecutor {
                 true,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                &mut capacity_reservations,
             )?;
         }
         for hdd_worker in hdd_workers {
@@ -477,6 +523,8 @@ impl LocalFileIngestExecutor {
         source_bytes: u64,
         total_work_bytes: u64,
         accepted_at_utc: &str,
+        capacity_reservations: &mut IngestCapacityReservations,
+        ingress_origin: DaemonIngressOrigin,
         mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
         let mut state = PipelineProgressState::new(
@@ -513,9 +561,11 @@ impl LocalFileIngestExecutor {
                     false,
                     &self.live_sqlite_path,
                     accepted_at_utc,
+                    capacity_reservations,
                 )?;
                 continue;
             }
+            capacity_reservations.admit(job_id, entry, copies, ingress_origin)?;
             state.staged_files = state.staged_files.saturating_add(1);
             state.hdd_queued = state.hdd_queued.saturating_add(1);
             enqueue_hdd_settlement_work(
@@ -539,6 +589,7 @@ impl LocalFileIngestExecutor {
                 &mut progress,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                capacity_reservations,
             )?;
             progress(DaemonIngestProgressEvent {
                 job_id: job_id.clone(),
@@ -572,6 +623,7 @@ impl LocalFileIngestExecutor {
                 false,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                capacity_reservations,
             )?;
         }
         drop(settle_tx);
@@ -586,6 +638,7 @@ impl LocalFileIngestExecutor {
                 true,
                 &self.live_sqlite_path,
                 accepted_at_utc,
+                capacity_reservations,
             )?;
         }
         for hdd_worker in hdd_workers {
@@ -940,9 +993,11 @@ mod tests {
         SSD_ROOT_ENV,
     };
     use crate::api::{
+        CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
         DaemonIngestConflictPolicy, DaemonIngestHddTransferPhase, DaemonIngestPipelineStage,
         DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest,
     };
+    use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
@@ -954,7 +1009,74 @@ mod tests {
     use rusqlite::Connection;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct RecordingIngestCapacityProvider {
+        events: Mutex<Vec<String>>,
+    }
+
+    impl CapacityAdmissionProvider for RecordingIngestCapacityProvider {
+        fn admit(
+            &self,
+            request: CapacityAdmissionRequest,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            let _reservation_id = request.client_request_id.clone().expect("reservation id");
+            let requires_ssd_staging = request.requires_ssd_staging();
+            self.events.lock().expect("events lock").push(format!(
+                "admit:{}:{}:{}:{}",
+                request.store_id,
+                request.requested_bytes,
+                request.copy_count,
+                request.ingress_origin
+            ));
+            Ok(CapacityAdmissionResponse {
+                store_id: StoreId::new(request.store_id.clone()).expect("store id"),
+                decision: CapacityAdmissionDecision::Admitted,
+                reason: None,
+                requested_bytes: request.requested_bytes,
+                copy_count: request.copy_count,
+                requires_ssd_staging,
+                logical_limit_bytes: Some(1_000_000),
+                used_bytes: 0,
+                reserved_bytes: request.requested_bytes,
+                logical_available_bytes: Some(1_000_000),
+                backend_free_bytes: 2_000_000,
+                backend_available_bytes: 2_000_000,
+                ssd_available_bytes: requires_ssd_staging.then_some(2_000_000),
+                required_backend_bytes: request.requested_bytes * u64::from(request.copy_count),
+                required_ssd_bytes: request.requested_bytes,
+                copy_amplification_basis_points: u32::from(request.copy_count) * 10_000,
+                warning_threshold_basis_points: 8_000,
+                critical_threshold_basis_points: 9_500,
+                message: None,
+            })
+        }
+
+        fn commit(
+            &self,
+            store_id: &StoreId,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("commit:{store_id}:{reservation_id}"));
+            Ok(())
+        }
+
+        fn release(
+            &self,
+            store_id: &StoreId,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("release:{store_id}:{reservation_id}"));
+            Ok(())
+        }
+    }
 
     #[test]
     fn dry_run_discovers_files_without_copying_payloads() {
@@ -980,6 +1102,7 @@ mod tests {
             subobject_registry_path,
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1039,6 +1162,9 @@ mod tests {
         policy.ingest_mode = IngestMode::DirectToHdd;
         write_store_registry_with_policy(&registry_path, policy);
         fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+        let capacity_provider = std::sync::Arc::new(RecordingIngestCapacityProvider {
+            events: Mutex::new(Vec::new()),
+        });
 
         let executor = LocalFileIngestExecutor {
             ssd_root: ssd_root.clone(),
@@ -1048,6 +1174,7 @@ mod tests {
             subobject_registry_path,
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: Some(capacity_provider.clone()),
         };
 
         let mut progress_events = Vec::new();
@@ -1108,6 +1235,13 @@ mod tests {
             find_payloads(&hdd_root.join("disk-a").join("objects")),
             vec![b"reproducible reference".to_vec()]
         );
+        assert_eq!(
+            *capacity_provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:22:1:local_server",
+                "commit:zymo_fecal_2025.05:ingest-files-2026-07-09t13-02-22z/zymo_fecal_2025.05/reference.fa.zst"
+            ]
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -1143,6 +1277,7 @@ mod tests {
                 subobject_registry_path,
                 source_is_server_local: |_| false,
                 capacity_policy: SsdCapacityPolicy::new(99, 100, 0).expect("capacity policy"),
+                capacity_provider: None,
             };
             let mut events = Vec::new();
             executor
@@ -1239,6 +1374,7 @@ mod tests {
             subobject_registry_path,
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: None,
         };
         let mut progress_events = Vec::new();
         executor
@@ -1289,6 +1425,7 @@ mod tests {
             subobject_registry_path,
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1364,6 +1501,7 @@ mod tests {
             subobject_registry_path,
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: None,
         };
 
         let mut progress_events = Vec::new();

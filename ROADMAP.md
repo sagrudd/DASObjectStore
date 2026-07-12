@@ -914,6 +914,10 @@ now retains the job ID as the reservation ID, admits before invoking the typed
 byte-transfer adapter, and commits or releases after transfer and catalogue
 completion; rejection is persisted as a failed job. Local ingest, multipart,
 catalogue accounting, and stale-reservation expiry remain open.
+Local file ingest now uses the same provider boundary for each non-skipped
+object: admission occurs before source/staging or direct-HDD work, durable
+settlement commits the reservation, and failed jobs release outstanding IDs.
+S3 reconciliation and multipart paths still need explicit provider injection.
 
 ## Milestone 28: Folder ObjectStore Profile
 

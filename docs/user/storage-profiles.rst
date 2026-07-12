@@ -136,9 +136,14 @@ The daemon-owned remote S3 transfer worker now uses the remote job ID as that
 reservation ID: it admits before starting the byte-transfer adapter, then
 commits on successful transfer and catalogue completion or releases on any
 failure. Capacity rejection is recorded as a failed daemon job rather than
-silently running an unbounded transfer. Local ingest and multipart adapters
-still need to adopt the same lifecycle before bounded profiles are enabled
-for those paths.
+silently running an unbounded transfer. Multipart adapters still need to adopt
+the same lifecycle before bounded profiles are enabled for that path.
+Local file ingest now uses the same daemon provider boundary per non-skipped
+object: admission occurs before source/staging or direct-HDD work, durable
+settlement commits the reservation, and failures release outstanding IDs. Dry
+runs and skipped existing objects never reserve. S3 reconciliation and
+multipart adapters still need explicit provider injection before those paths
+are considered quota-complete.
 The core ledger has a concurrent reservation regression: simultaneous callers
 contending for a bounded quota cannot overbook logical capacity. Crash/restart
 reservation persistence, multipart expiry, dedupe accounting, and full-disk

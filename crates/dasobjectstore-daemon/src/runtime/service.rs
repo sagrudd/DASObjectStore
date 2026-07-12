@@ -1,17 +1,20 @@
 use super::capacity_provider::CapacityAdmissionProvider;
+use super::ingest_files::DaemonIngestFilesRuntimeError;
 use super::{
     admin_jobs::AdminJobRegistry,
+    ingest_files::submit_ingest_files_to_local_store_with_capacity_provider,
     remote_upload::{
         run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider,
         RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
         RemoteUploadS3TransferWorkerReport,
     },
 };
-use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
 use crate::api::{
-    DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusDetail,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, StoreRepairS3Reconciliation,
+    CapacityAdmissionRequest, CapacityAdmissionResponse, DaemonIngestProgressEvent, DaemonJobId,
+    DaemonRequestValidationError, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+    DaemonServiceOperation, DaemonServiceStatusDetail, DaemonServiceStatusRequest,
+    DaemonServiceStatusResponse, StoreRepairS3Reconciliation, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_object_service::{
@@ -120,6 +123,22 @@ where
                 operation: "capacity admission provider is not configured".to_string(),
             })?
             .admit(request)
+    }
+
+    pub fn submit_ingest_files_with_capacity_provider(
+        &self,
+        request: SubmitIngestFilesRequest,
+        accepted_at_utc: &str,
+        emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
+    ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
+        submit_ingest_files_to_local_store_with_capacity_provider(
+            request,
+            accepted_at_utc,
+            emit_progress,
+            self.capacity_admission_provider.clone(),
+        )
     }
 
     pub fn lifecycle(
