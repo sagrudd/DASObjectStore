@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.22 - 2026-07-12
+
+- Extract performance-test lifecycle setup, provenance, scenario execution,
+  and report assembly into a focused run module.
+
 ## 0.71.21 - 2026-07-12
 
 - Move performance report persistence and QR/PDF/metadata helpers into the

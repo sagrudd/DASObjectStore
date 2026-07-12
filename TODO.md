@@ -320,6 +320,9 @@ list until every temporary size-budget exception has been removed.
       helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
       preserve JSON validation, chart generation, authoritative policy output,
       and report rebuild contracts.
+    - [x] Extract performance-test lifecycle setup, provenance, scenario
+      execution, and report assembly into `crates/dasobjectstore-cli/src/run/performance_run.rs`;
+      preserve temporary-root cleanup and authoritative artifact behavior.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser
