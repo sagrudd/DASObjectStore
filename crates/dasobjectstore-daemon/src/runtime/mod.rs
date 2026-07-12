@@ -9,6 +9,7 @@ mod drive_backend;
 mod enclosure_prepare;
 mod endpoint_registry;
 mod folder_backend;
+mod folder_catalogue;
 mod folder_paths;
 mod ingest_files;
 mod local_admin;

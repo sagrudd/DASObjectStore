@@ -9,7 +9,8 @@ agreement before landing.
 ## 0.72.46 - 2026-07-12
 
 - Add explicit bounded-folder adoption execution with stable-source checks,
-  durable finalization, capacity settlement, and restart-safe checkpoints.
+  durable finalization, capacity settlement, restart-safe checkpoints, and a
+  private idempotent folder catalogue snapshot.
 
 ## 0.72.45 - 2026-07-12
 

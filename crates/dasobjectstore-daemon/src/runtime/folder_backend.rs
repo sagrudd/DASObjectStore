@@ -1,5 +1,6 @@
 //! Local bounded folder backend implementation.
 
+use super::folder_catalogue::FolderCatalogue;
 use super::reconciliation::{
     plan_reconciliation, ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
     ReconciliationObject, ReconciliationPlan,
@@ -26,6 +27,7 @@ pub struct FolderBackend {
     root: PathBuf,
     objects_root: PathBuf,
     staging_root: PathBuf,
+    catalogue: FolderCatalogue,
     manifest: ObjectStoreManifest,
     ledger: CapacityReservationLedger,
     staged_reservations: HashMap<PathBuf, String>,
@@ -88,6 +90,7 @@ impl FolderBackend {
         let namespace = root.join(NAMESPACE);
         let objects_root = namespace.join(OBJECTS_DIR);
         let staging_root = namespace.join(STAGING_DIR);
+        let catalogue_path = namespace.join("catalogue.json");
         ensure_private_directory(&namespace)?;
         ensure_private_directory(&objects_root)?;
         ensure_private_directory(&staging_root)?;
@@ -95,6 +98,7 @@ impl FolderBackend {
             root,
             objects_root,
             staging_root,
+            catalogue: FolderCatalogue::open(catalogue_path, manifest.store_id.as_str())?,
             manifest,
             ledger: CapacityReservationLedger::new(capacity, used_bytes).map_err(|error| {
                 BackendError::InvalidRequest(format!("capacity ledger: {error:?}"))
@@ -109,6 +113,10 @@ impl FolderBackend {
 
     pub fn manifest(&self) -> &ObjectStoreManifest {
         &self.manifest
+    }
+
+    pub fn catalogue_records(&self) -> Vec<BackendObjectRecord> {
+        self.catalogue.records()
     }
 
     /// Inspect user-visible hierarchy without adopting or mutating it.
@@ -234,7 +242,13 @@ impl FolderBackend {
             };
             let finalized = (|| {
                 self.reserve(&reservation_id, size_bytes)?;
-                let staged = self.stage_path(&reservation_id, &object_key, &source_path)?;
+                let staged = match self.stage_path(&reservation_id, &object_key, &source_path) {
+                    Ok(staged) => staged,
+                    Err(error) => {
+                        let _ = self.release_reservation(&reservation_id);
+                        return Err(error);
+                    }
+                };
                 match self.finalize(staged.clone()) {
                     Ok(finalized) => Ok(finalized),
                     Err(error) => {
@@ -256,6 +270,18 @@ impl FolderBackend {
                     return Err(error);
                 }
             };
+            self.catalogue
+                .commit_records([finalized.clone()])
+                .map_err(|error| {
+                    let _ = manifest.checkpoint(
+                        checkpoint_path,
+                        key,
+                        ReconciliationEntryState::Failed,
+                        Some(format!("catalogue commit failed: {error}")),
+                        size_bytes,
+                    );
+                    error
+                })?;
             manifest
                 .checkpoint(
                     checkpoint_path,
@@ -1123,6 +1149,7 @@ mod tests {
                 .len(),
             1
         );
+        assert_eq!(backend.catalogue_records(), records);
         assert!(matches!(
             resumed.entries["incoming/run/data.txt"].state,
             ReconciliationEntryState::Complete

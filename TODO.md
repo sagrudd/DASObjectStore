@@ -352,12 +352,17 @@ completion.
     through stable-source verification, private staging, checksum/finalization,
     and restart-safe manifest checkpoints. User files remain untouched and
     failed attempts are checkpointed without silently becoming authoritative;
-    catalogue transaction handoff remains a separate integration task.
+    catalogue transaction handoff remains a separate shared metadata task.
+  - [x] Add a versioned, private folder-profile catalogue snapshot with
+    idempotent conflict-checked commits and file/directory fsync+rename; folder
+    adoption commits the finalized record before its Complete checkpoint.
+    Shared SQLite/object-service catalogue integration remains open.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots
-    from `FolderBackend`; repair/lifecycle/S3 and catalogue integration remain
-    open.
+    from `FolderBackend`; folder-profile catalogue records now reload from the
+    private snapshot, while repair/lifecycle/S3 and shared catalogue
+    integration remain open.
 - [ ] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.
