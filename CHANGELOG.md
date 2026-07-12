@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.81 - 2026-07-12
+
+- Move Home telemetry chart styling into a feature-owned CSS sheet while
+  retaining shared global primitives and CSS contract coverage.
+
 ## 0.71.80 - 2026-07-12
 
 - Close the GUI authentication route decomposition milestone after verifying

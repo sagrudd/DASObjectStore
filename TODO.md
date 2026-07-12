@@ -512,6 +512,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Move screenshot viewport, role, and page matrices into the shared
     `tools/web-screenshot-fixtures.mjs` module so runner orchestration does not
     own fixture definitions.
+  - [x] Move Home telemetry chart and source/gap treatments into
+    `styles/home.css`, keeping the global sheet focused on shared primitives and
+    loading the feature sheet through Trunk and CSS contract tests.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 

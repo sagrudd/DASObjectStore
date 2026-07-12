@@ -18,6 +18,7 @@ fn workspace_component_source() -> String {
 fn web_styles_source() -> String {
     [
         include_str!("../../styles.css"),
+        include_str!("../../styles/home.css"),
         include_str!("../../styles/remote-upload.css"),
     ]
     .concat()
@@ -1905,6 +1906,7 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     assert!(css.contains(".dos-telemetry-source-daemon {"));
     assert!(css.contains(".dos-telemetry-source-unavailable {"));
     assert!(css.contains(".dos-chart-line.dos-telemetry-source-legacy {"));
+    assert!(css.contains(".dos-chart-gap-message {\n  fill: #56666d;"));
     assert!(css.contains(".dos-home-chart-frame {\n  height: 210px;\n  overflow: hidden;"));
     assert!(css.contains(
         ".dos-home-throughput-chart {\n  display: block;\n  width: 100%;\n  height: 210px;"

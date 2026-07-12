@@ -1,0 +1,101 @@
+.dos-home-chart-card {
+  min-height: 280px;
+  margin-top: 14px;
+}
+
+.dos-home-chart-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.dos-telemetry-source-daemon {
+  color: #0d5360;
+  background: #e3f1f3;
+}
+
+.dos-telemetry-source-legacy {
+  color: #76521c;
+  background: #fff2d5;
+}
+
+.dos-telemetry-source-fixture {
+  color: #4a477a;
+  background: #eeebff;
+}
+
+.dos-telemetry-source-unavailable {
+  color: #56666d;
+  background: #edf1f2;
+  border-style: dashed;
+}
+
+.dos-chart-message {
+  margin: 4px 0 0;
+  color: #56666d;
+  font-size: 0.8rem;
+}
+
+.dos-home-chart-frame {
+  height: 210px;
+  overflow: hidden;
+}
+
+.dos-home-throughput-chart {
+  display: block;
+  width: 100%;
+  height: 210px;
+}
+
+.dos-chart-axis {
+  stroke: #70828a;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.dos-chart-gridline {
+  stroke: #d8e1e4;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.dos-chart-line {
+  fill: none;
+  stroke: #0f6774;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.dos-chart-line.dos-telemetry-source-legacy {
+  stroke: #c58b2c;
+  stroke-dasharray: 7 4;
+}
+
+.dos-chart-line.dos-telemetry-source-fixture {
+  stroke: #7168a5;
+  stroke-dasharray: 3 4;
+}
+
+.dos-chart-line.dos-telemetry-source-unavailable {
+  stroke: #9ba9ad;
+  stroke-dasharray: 3 5;
+  opacity: 0.65;
+}
+
+.dos-chart-point {
+  fill: #ffffff;
+  stroke: #0f6774;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.dos-chart-label,
+.dos-chart-empty,
+.dos-chart-gap-message {
+  fill: #56666d;
+  font-size: 0.76rem;
+  font-weight: 680;
+}
