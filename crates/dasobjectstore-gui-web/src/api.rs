@@ -657,6 +657,23 @@ mod tests {
                 "read_ops_s": 10,
                 "write_ops_s": 20,
                 "busiest_disk_id": "qnap-1057",
+                "sample_timestamp_utc": "2026-07-08T08:00:00Z",
+                "sample_age_seconds": 0,
+                "per_disk": [{
+                    "disk_id": "qnap-1057",
+                    "label": "QNAP bay 1",
+                    "mount_path": "/srv/dasobjectstore/hdd/qnap-1057",
+                    "role": "hdd",
+                    "enclosure_id": "qnap-tl-d800c-01",
+                    "bay_label": "1",
+                    "device_path": "/dev/disk/by-id/qnap-1057",
+                    "device_name": "sda",
+                    "read_mib_s": 120,
+                    "write_mib_s": 240,
+                    "read_ops_s": 10,
+                    "write_ops_s": 20,
+                    "missing_reason": null
+                }],
                 "state": "nominal",
                 "message": null
             },
@@ -728,6 +745,11 @@ mod tests {
         assert_eq!(decoded.telemetry_window.options.len(), 4);
         assert_eq!(decoded.throughput_7d.avg_write_mib_s, 240);
         assert_eq!(decoded.disk_io.write_mib_s, 240);
+        assert_eq!(decoded.disk_io.sample_age_seconds, Some(0));
+        assert_eq!(
+            decoded.disk_io.per_disk[0].device_name.as_deref(),
+            Some("sda")
+        );
         assert_eq!(decoded.cpu_usage.usage_percent, Some(42));
         assert_eq!(decoded.active_users.distinct_logged_in_users, 2);
         assert!(decoded.object_service.remote_ready);

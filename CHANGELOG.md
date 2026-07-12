@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.68 - 2026-07-12
+
+- Add per-disk Home Disk IO rows with mapped identity, rates, missing reasons,
+  and deterministic sample age while preserving aggregate totals and legacy
+  response decoding.
+
 ## 0.71.67 - 2026-07-12
 
 - Propagate mapped disk identity, missing reasons, and sample timestamps through

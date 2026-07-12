@@ -490,8 +490,31 @@ pub struct DiskIoSummaryResponse {
     pub read_ops_s: u32,
     pub write_ops_s: u32,
     pub busiest_disk_id: Option<String>,
+    #[serde(default)]
+    pub sample_timestamp_utc: Option<String>,
+    #[serde(default)]
+    pub sample_age_seconds: Option<u64>,
+    #[serde(default)]
+    pub per_disk: Vec<DiskIoDeviceResponse>,
     pub state: String,
     pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct DiskIoDeviceResponse {
+    pub disk_id: String,
+    pub label: Option<String>,
+    pub mount_path: String,
+    pub role: String,
+    pub enclosure_id: Option<String>,
+    pub bay_label: Option<String>,
+    pub device_path: Option<String>,
+    pub device_name: Option<String>,
+    pub read_mib_s: Option<u32>,
+    pub write_mib_s: Option<u32>,
+    pub read_ops_s: Option<u32>,
+    pub write_ops_s: Option<u32>,
+    pub missing_reason: Option<String>,
 }
 
 impl Default for DiskIoSummaryResponse {
@@ -503,6 +526,9 @@ impl Default for DiskIoSummaryResponse {
             read_ops_s: 0,
             write_ops_s: 0,
             busiest_disk_id: None,
+            sample_timestamp_utc: None,
+            sample_age_seconds: None,
+            per_disk: Vec::new(),
             state: "unavailable".to_string(),
             message: Some("Disk IO telemetry is not available yet.".to_string()),
         }

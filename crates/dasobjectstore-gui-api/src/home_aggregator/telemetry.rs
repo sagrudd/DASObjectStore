@@ -3,7 +3,8 @@
 use super::{format_tib, mib_per_second, percent_basis_points, percent_u8};
 use crate::dashboard::{
     ActiveUsersSummaryView, CapacitySummaryView, CpuUsageSummaryView, DashboardWarning,
-    DiskIoSummaryView, MemoryStressStateView, MemoryStressView, TelemetryCardStateView,
+    DiskIoDeviceView, DiskIoSummaryView, MemoryStressStateView, MemoryStressView,
+    TelemetryCardStateView,
 };
 use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
 use dasobjectstore_daemon::{
@@ -124,6 +125,33 @@ pub(super) fn disk_io_summary(
             write_ops += value;
         }
     }
+    let per_disk = latest
+        .disk_io
+        .iter()
+        .map(|disk_io| DiskIoDeviceView {
+            disk_id: disk_io.disk_id.clone(),
+            label: disk_io.label.clone(),
+            mount_path: disk_io.mount_path.clone(),
+            role: disk_io.role.clone(),
+            enclosure_id: disk_io.enclosure_id.clone(),
+            bay_label: disk_io.bay_label.clone(),
+            device_path: disk_io.device_path.clone(),
+            device_name: disk_io.device_name.clone(),
+            read_mib_s: optional_mib(disk_io.read_bytes_per_second),
+            write_mib_s: optional_mib(disk_io.write_bytes_per_second),
+            read_ops_s: disk_io.read_operations_per_second.and_then(finite_u32),
+            write_ops_s: disk_io.write_operations_per_second.and_then(finite_u32),
+            missing_reason: disk_io
+                .missing_reason
+                .map(telemetry_missing_reason_label)
+                .map(str::to_string),
+        })
+        .collect::<Vec<_>>();
+    let sample_age_seconds =
+        parse_utc_timestamp_seconds(&sample_set.generated_at_utc).and_then(|generated| {
+            parse_utc_timestamp_seconds(&latest.timestamp_utc)
+                .map(|sample| generated.saturating_sub(sample) as u64)
+        });
     if saw_value {
         return Some(DiskIoSummaryView {
             available: true,
@@ -132,6 +160,9 @@ pub(super) fn disk_io_summary(
             read_ops_s: rounded_u32(read_ops),
             write_ops_s: rounded_u32(write_ops),
             busiest_disk_id: busiest_disk.map(|(id, _)| id),
+            sample_timestamp_utc: Some(latest.timestamp_utc.clone()),
+            sample_age_seconds,
+            per_disk: per_disk.clone(),
             state: if missing_diagnostics.is_empty() {
                 TelemetryCardStateView::Nominal
             } else {
@@ -163,8 +194,28 @@ pub(super) fn disk_io_summary(
                 telemetry_missing_reason_label(reason)
             ),
         };
-        Some(DiskIoSummaryView::unavailable(message))
+        Some(DiskIoSummaryView {
+            available: false,
+            read_mib_s: 0,
+            write_mib_s: 0,
+            read_ops_s: 0,
+            write_ops_s: 0,
+            busiest_disk_id: None,
+            sample_timestamp_utc: Some(latest.timestamp_utc.clone()),
+            sample_age_seconds,
+            per_disk: per_disk.clone(),
+            state: TelemetryCardStateView::Unavailable,
+            message: Some(message),
+        })
     })
+}
+
+fn optional_mib(value: Option<f64>) -> Option<u32> {
+    finite_nonnegative(value).map(|value| mib_per_second(value.round() as u64))
+}
+
+fn finite_u32(value: f64) -> Option<u32> {
+    finite_nonnegative(Some(value)).map(|value| rounded_u32(value))
 }
 
 fn telemetry_missing_reason_label(reason: ApplianceTelemetryMissingReason) -> &'static str {
@@ -353,5 +404,16 @@ mod tests {
         let message = summary.message.expect("diagnostic message");
         assert!(message.contains("hdd-a (device sda)"));
         assert!(message.contains("warming up"));
+        assert_eq!(
+            summary.sample_timestamp_utc.as_deref(),
+            Some("2026-07-09T18:00:00Z")
+        );
+        assert_eq!(summary.sample_age_seconds, Some(0));
+        assert_eq!(summary.per_disk.len(), 1);
+        assert_eq!(summary.per_disk[0].device_name.as_deref(), Some("sda"));
+        assert_eq!(
+            summary.per_disk[0].missing_reason.as_deref(),
+            Some("first sample warm-up")
+        );
     }
 }

@@ -264,6 +264,12 @@ JSON input at ``/var/lib/dasobjectstore/health/smart-warnings.json``; until
 those daemon writers are present, the dashboard reports explicit
 unavailable-source warnings rather than bootstrap fixture text.
 
+The Disk IO payload also retains the latest sample timestamp/age and per-disk
+identity, mapped device, rates, and missing reason. This lets an operator
+distinguish a single missing disk from a healthy aggregate; collection-quality
+and raw missing-data intervals remain available through the authenticated daemon
+telemetry contract.
+
 The Home page refreshes its selected-window telemetry payload every 30 seconds
 while the page is open. The throughput telemetry chart uses a stable SVG view
 box, fixed axes, bounded labels, and an explicit empty-sample state so updates

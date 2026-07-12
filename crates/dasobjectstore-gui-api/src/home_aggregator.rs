@@ -656,6 +656,9 @@ fn telemetry_disk_io_summary(
         read_ops_s: rounded_u32(read_ops),
         write_ops_s: rounded_u32(write_ops),
         busiest_disk_id: busiest_disk.map(|(disk_id, _)| disk_id),
+        sample_timestamp_utc: None,
+        sample_age_seconds: None,
+        per_disk: Vec::new(),
         state: TelemetryCardStateView::Nominal,
         message: None,
     })
