@@ -6,6 +6,7 @@
 
 use crate::deployment::{DeploymentProfile, HostMode};
 use crate::ids::StoreId;
+use crate::protection::ProtectionPolicy;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ pub struct ObjectStoreManifest {
     pub store_id: StoreId,
     pub deployment_profile: DeploymentProfile,
     pub host_mode: HostMode,
+    pub protection: ProtectionPolicy,
     pub backend: BackendReference,
 }
 
@@ -142,6 +144,7 @@ mod tests {
     use super::{BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION};
     use crate::deployment::{DeploymentProfile, HostMode};
     use crate::ids::StoreId;
+    use crate::protection::ProtectionPolicy;
     use std::path::PathBuf;
 
     #[test]
@@ -151,6 +154,7 @@ mod tests {
             store_id: StoreId::new("codex").expect("store id"),
             deployment_profile: DeploymentProfile::Folder,
             host_mode: HostMode::PerUser,
+            protection: ProtectionPolicy::LocalOnly,
             backend: BackendReference::Folder {
                 root_identity: "fsid:codex-root".to_string(),
             },
@@ -170,6 +174,7 @@ mod tests {
             store_id: StoreId::new("codex-drive").expect("store id"),
             deployment_profile: DeploymentProfile::Drive,
             host_mode: HostMode::System,
+            protection: ProtectionPolicy::Reproducible,
             backend: BackendReference::Drive {
                 filesystem_identity: "apfs:123".to_string(),
                 device_identity: Some("nvme:456".to_string()),
@@ -193,6 +198,7 @@ mod tests {
             store_id: StoreId::new("codex-appliance").expect("store id"),
             deployment_profile: DeploymentProfile::Appliance,
             host_mode: HostMode::Integrated,
+            protection: ProtectionPolicy::ApplianceProtected,
             backend: BackendReference::Folder {
                 root_identity: "fsid:legacy".to_string(),
             },

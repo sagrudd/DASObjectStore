@@ -3,8 +3,69 @@
 use crate::ids::DiskId;
 use crate::lifecycle::{ObjectState, ObjectStateTransitionError};
 use crate::store::{CapacityBehavior, StoreClass, StorePolicy};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
+use std::str::FromStr;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectionPolicy {
+    LocalOnly,
+    Reproducible,
+    ExternallyReplicated,
+    ApplianceProtected,
+}
+
+impl ProtectionPolicy {
+    pub const ALL: [Self; 4] = [
+        Self::LocalOnly,
+        Self::Reproducible,
+        Self::ExternallyReplicated,
+        Self::ApplianceProtected,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::LocalOnly => "local_only",
+            Self::Reproducible => "reproducible",
+            Self::ExternallyReplicated => "externally_replicated",
+            Self::ApplianceProtected => "appliance_protected",
+        }
+    }
+}
+
+impl Display for ProtectionPolicy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+impl FromStr for ProtectionPolicy {
+    type Err = ProtectionPolicyParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|policy| policy.name() == value)
+            .ok_or_else(|| ProtectionPolicyParseError {
+                value: value.to_string(),
+            })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtectionPolicyParseError {
+    value: String,
+}
+
+impl Display for ProtectionPolicyParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "unknown protection policy `{}`", self.value)
+    }
+}
+
+impl std::error::Error for ProtectionPolicyParseError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedCopy {
@@ -119,11 +180,21 @@ fn count_distinct_copy_disks(verified_copies: &[VerifiedCopy]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_object_protection, mark_redownload_required, ObjectProtectionError, VerifiedCopy,
+        evaluate_object_protection, mark_redownload_required, ObjectProtectionError,
+        ProtectionPolicy, VerifiedCopy,
     };
     use crate::ids::DiskId;
     use crate::lifecycle::ObjectState;
     use crate::store::{CapacityBehavior, StoreClass, StorePolicy};
+
+    #[test]
+    fn protection_policies_have_stable_names_and_round_trip() {
+        for policy in ProtectionPolicy::ALL {
+            let encoded = serde_json::to_string(&policy).expect("policy serializes");
+            assert_eq!(encoded.trim_matches('"'), policy.name());
+            assert_eq!(policy.name().parse::<ProtectionPolicy>(), Ok(policy));
+        }
+    }
 
     #[test]
     fn marks_object_protected_when_policy_required_copies_are_verified() {

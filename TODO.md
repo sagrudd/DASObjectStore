@@ -124,6 +124,9 @@ completion.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
+  - [x] Add the profile-independent `ProtectionPolicy` vocabulary and carry it
+    in the versioned portable ObjectStore manifest; physical profile selection
+    no longer implies protection semantics.
 - [ ] Document compatibility and migration rules before changing persistent
   metadata, public APIs, CLI behavior, or existing appliance pools.
 - [ ] Put existing appliance placement behind the backend contract with

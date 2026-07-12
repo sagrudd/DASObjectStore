@@ -32,3 +32,8 @@ filesystem/device identities plus an optional mount hint, and appliance
 manifests reference a pool. A path hint is never treated as the backend
 identity, and an explicit migration/adoption step is required before writing a
 manifest for an existing store.
+
+Protection is independent of the profile: manifests may require ``local_only``,
+``reproducible``, ``externally_replicated``, or ``appliance_protected`` policy.
+The physical backend does not silently choose a protection promise; product
+adapters must request and validate one explicitly.

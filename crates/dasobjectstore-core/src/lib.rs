@@ -23,6 +23,7 @@ pub use config::{
 };
 pub use deployment::{DeploymentProfile, HostMode};
 pub use manifest::{BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION};
+pub use protection::ProtectionPolicy;
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
