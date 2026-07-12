@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "axum",
  "axum-server",
@@ -707,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "serde",
  "serde_json",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "dasobjectstore-core",
  "dasobjectstore-metadata",
@@ -724,11 +724,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "axum",
  "bytes",
@@ -753,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "gloo-net",
  "gloo-timers",
@@ -770,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -783,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "dasobjectstore-core",
  "dasobjectstore-object-service",
@@ -794,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -803,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -813,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "clap",
  "dasobjectstore-core",
@@ -826,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.71.81"
+version = "0.71.82"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",

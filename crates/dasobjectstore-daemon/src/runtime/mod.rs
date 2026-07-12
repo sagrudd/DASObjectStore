@@ -5,6 +5,7 @@ mod appliance_telemetry;
 mod config;
 mod enclosure_prepare;
 mod endpoint_registry;
+mod folder_backend;
 mod ingest_files;
 mod local_admin;
 mod object_browser;
@@ -52,6 +53,7 @@ pub use endpoint_registry::{
     EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,
     ENDPOINT_REGISTRY_SCHEMA,
 };
+pub use folder_backend::FolderBackend;
 pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,

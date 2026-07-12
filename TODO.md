@@ -168,6 +168,11 @@ completion.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.
+  - [x] Add the macOS-safe `FolderBackend` staging/finalization path with
+    in-flight SHA-256, private same-filesystem temporary files, file and
+    directory sync, atomic rename, capacity reservation commit, and focused
+    read/verify/enumerate/remove tests; catalogue transaction wiring remains
+    open.
 - [ ] Preserve user-visible hierarchy while reserving and protecting the
   ``.dasobjectstore`` namespace.
 - [ ] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,

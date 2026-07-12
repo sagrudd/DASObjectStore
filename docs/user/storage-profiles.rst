@@ -20,6 +20,13 @@ quota reservations, or durable finalization. The folder profile must be size
 bounded, and all profiles will eventually expose the same logical capacity and
 admission semantics through CLI, Web, S3, and product adapters.
 
+The first local backend implementation is available to daemon-side tests as
+``FolderBackend``. It reserves logical bytes before staging, computes SHA-256
+while reading, writes only beneath the private ``.dasobjectstore`` namespace,
+syncs the file and destination directory, then renames atomically. Catalogue
+registration and user-facing profile creation still require the subsequent
+daemon contract and explicit adoption workflow.
+
 The shared policy contract now carries a logical limit, backend reserve, and
 warning/critical thresholds. Its reservation ledger admits bytes transactionally
 before an upload and commits or releases the reservation after durable
