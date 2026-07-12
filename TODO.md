@@ -309,6 +309,9 @@ list until every temporary size-budget exception has been removed.
       `crates/dasobjectstore-cli/src/run/performance_ssd_pipeline.rs`; preserve
       SSD residency admission, FIFO HDD drain, overlap, and distinct-disk
       redundancy regressions.
+    - [x] Extract the direct-HDD performance scenario into
+      `crates/dasobjectstore-cli/src/run/performance_direct_hdd.rs`; preserve
+      bounded placement, split read/write accounting, and live TUI coverage.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser

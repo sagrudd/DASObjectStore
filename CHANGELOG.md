@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.19 - 2026-07-12
+
+- Extract the direct-HDD performance scenario into a focused module while
+  preserving bounded placement, split timing, and live TUI accounting.
+
 ## 0.71.18 - 2026-07-12
 
 - Extract the overlapping SSD pipeline performance scenario into a focused
