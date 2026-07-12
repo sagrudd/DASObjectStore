@@ -955,6 +955,11 @@ list until every temporary size-budget exception has been removed.
 - [x] Keep Web administrator cancellation on a dedicated bounded priority
   bridge/circuit so routine query or mutation degradation cannot suppress the
   emergency cancellation path.
+- [x] Harden the shared bridge circuit state with generation/epoch-gated
+  closed/open/half-open transitions, single-probe recovery, stale-completion
+  protection, and transport-versus-domain error tests; object-browser socket
+  transport failures now contribute to degraded-circuit state without treating
+  daemon validation errors as outages.
 - [x] Bound performance-report PDF rebuilds to a separate two-worker
   `spawn_blocking` semaphore held until rendering completes; saturated requests
   return a typed `429` without running the renderer.

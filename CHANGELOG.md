@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.64 - 2026-07-12
+
+- Harden the Web daemon bridge circuit state against stale completions and
+  classify object-browser transport failures separately from daemon validation
+  errors while retaining single-probe recovery.
+
 ## 0.71.63 - 2026-07-12
 
 - Keep Web administrator cancellation on an independent bounded daemon bridge

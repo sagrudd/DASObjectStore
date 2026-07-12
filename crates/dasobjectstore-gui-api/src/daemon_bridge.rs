@@ -1,8 +1,5 @@
 use crate::object_browser_routes::StandaloneObjectBrowserClientError;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Mutex, OnceLock,
-};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
@@ -12,13 +9,33 @@ const DEFAULT_DEADLINE: Duration = Duration::from_secs(2);
 const CIRCUIT_FAILURE_THRESHOLD: usize = 3;
 const CIRCUIT_COOLDOWN: Duration = Duration::from_secs(5);
 
+#[derive(Clone, Copy, Debug)]
+enum CircuitMode {
+    Closed { failures: usize },
+    Open { until: Instant },
+    HalfOpen,
+}
+
+#[derive(Debug)]
+struct CircuitState {
+    epoch: u64,
+    next_request_id: u64,
+    last_failure_request_id: u64,
+    last_success_request_id: u64,
+    mode: CircuitMode,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RequestStamp {
+    epoch: u64,
+    request_id: u64,
+}
+
 #[derive(Clone)]
 pub(crate) struct DaemonBridge {
     permits: Arc<Semaphore>,
     deadline: Duration,
-    consecutive_failures: Arc<AtomicUsize>,
-    open_until: Arc<Mutex<Option<Instant>>>,
-    probe_in_flight: Arc<std::sync::atomic::AtomicBool>,
+    circuit: Arc<Mutex<CircuitState>>,
 }
 
 #[derive(Debug)]
@@ -35,9 +52,13 @@ impl DaemonBridge {
         Self {
             permits: Arc::new(Semaphore::new(DEFAULT_PERMITS)),
             deadline: DEFAULT_DEADLINE,
-            consecutive_failures: Arc::new(AtomicUsize::new(0)),
-            open_until: Arc::new(Mutex::new(None)),
-            probe_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            circuit: Arc::new(Mutex::new(CircuitState {
+                epoch: 0,
+                next_request_id: 0,
+                last_failure_request_id: 0,
+                last_success_request_id: 0,
+                mode: CircuitMode::Closed { failures: 0 },
+            })),
         }
     }
 
@@ -50,9 +71,13 @@ impl DaemonBridge {
         Self {
             permits: Arc::new(Semaphore::new(PRIORITY_PERMITS)),
             deadline: DEFAULT_DEADLINE,
-            consecutive_failures: Arc::new(AtomicUsize::new(0)),
-            open_until: Arc::new(Mutex::new(None)),
-            probe_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            circuit: Arc::new(Mutex::new(CircuitState {
+                epoch: 0,
+                next_request_id: 0,
+                last_failure_request_id: 0,
+                last_success_request_id: 0,
+                mode: CircuitMode::Closed { failures: 0 },
+            })),
         }
     }
 
@@ -66,9 +91,13 @@ impl DaemonBridge {
         Self {
             permits: Arc::new(Semaphore::new(capacity)),
             deadline,
-            consecutive_failures: Arc::new(AtomicUsize::new(0)),
-            open_until: Arc::new(Mutex::new(None)),
-            probe_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            circuit: Arc::new(Mutex::new(CircuitState {
+                epoch: 0,
+                next_request_id: 0,
+                last_failure_request_id: 0,
+                last_success_request_id: 0,
+                mode: CircuitMode::Closed { failures: 0 },
+            })),
         }
     }
 
@@ -77,9 +106,7 @@ impl DaemonBridge {
         T: Send + 'static,
         F: FnOnce() -> Result<T, StandaloneObjectBrowserClientError> + Send + 'static,
     {
-        if self.circuit_is_open() {
-            return Err(DaemonBridgeError::CircuitOpen);
-        }
+        let request = self.begin_request()?;
         let permit = self
             .permits
             .clone()
@@ -100,16 +127,23 @@ impl DaemonBridge {
         });
         match tokio::time::timeout(deadline, task).await {
             Ok(Ok(Ok(value))) => {
-                self.reset_circuit();
+                self.complete_success(request);
                 Ok(value)
             }
-            Ok(Ok(Err(error))) => Err(DaemonBridgeError::Client(error)),
+            Ok(Ok(Err(error))) => {
+                if error.code == "daemon_bridge_transport_failed" {
+                    self.record_failure(request);
+                } else {
+                    self.complete_non_connectivity(request);
+                }
+                Err(DaemonBridgeError::Client(error))
+            }
             Ok(Err(error)) => {
-                self.record_failure();
+                self.record_failure(request);
                 Err(DaemonBridgeError::Join(error.to_string()))
             }
             Err(_) => {
-                self.record_failure();
+                self.record_failure(request);
                 Err(DaemonBridgeError::Deadline)
             }
         }
@@ -124,52 +158,77 @@ impl DaemonBridge {
             .await
     }
 
-    fn circuit_is_open(&self) -> bool {
-        let mut open_until = self.open_until.lock().expect("daemon bridge circuit lock");
-        match *open_until {
-            Some(deadline) if Instant::now() < deadline => true,
-            Some(_) => {
-                if self
-                    .probe_in_flight
-                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                    .is_ok()
-                {
-                    *open_until = None;
-                    self.consecutive_failures.store(0, Ordering::Release);
-                    false
-                } else {
-                    true
-                }
+    fn begin_request(&self) -> Result<RequestStamp, DaemonBridgeError> {
+        let mut circuit = self.circuit.lock().expect("daemon bridge circuit lock");
+        circuit.next_request_id = circuit.next_request_id.wrapping_add(1);
+        let request_id = circuit.next_request_id;
+        match circuit.mode {
+            CircuitMode::Closed { .. } => Ok(RequestStamp {
+                epoch: circuit.epoch,
+                request_id,
+            }),
+            CircuitMode::Open { until } if Instant::now() >= until => {
+                circuit.epoch = circuit.epoch.wrapping_add(1);
+                circuit.mode = CircuitMode::HalfOpen;
+                Ok(RequestStamp {
+                    epoch: circuit.epoch,
+                    request_id,
+                })
             }
-            None => self.probe_in_flight.load(Ordering::Acquire),
+            CircuitMode::Open { .. } | CircuitMode::HalfOpen => Err(DaemonBridgeError::CircuitOpen),
         }
     }
 
-    fn record_failure(&self) {
-        self.probe_in_flight.store(false, Ordering::Release);
-        let failures = self.consecutive_failures.fetch_add(1, Ordering::AcqRel) + 1;
+    fn complete_success(&self, request: RequestStamp) {
+        let mut circuit = self.circuit.lock().expect("daemon bridge circuit lock");
+        if circuit.epoch == request.epoch && request.request_id >= circuit.last_failure_request_id {
+            circuit.last_success_request_id = request.request_id;
+            circuit.mode = CircuitMode::Closed { failures: 0 };
+        }
+    }
+
+    fn complete_non_connectivity(&self, request: RequestStamp) {
+        self.complete_success(request);
+    }
+
+    fn record_failure(&self, request: RequestStamp) {
+        let mut circuit = self.circuit.lock().expect("daemon bridge circuit lock");
+        if circuit.epoch != request.epoch
+            || request.request_id <= circuit.last_success_request_id
+            || request.request_id <= circuit.last_failure_request_id
+        {
+            return;
+        }
+        circuit.last_failure_request_id = request.request_id;
+        let failures = match circuit.mode {
+            CircuitMode::HalfOpen => CIRCUIT_FAILURE_THRESHOLD,
+            CircuitMode::Closed { failures } => failures + 1,
+            CircuitMode::Open { .. } => return,
+        };
         if failures >= CIRCUIT_FAILURE_THRESHOLD {
-            *self.open_until.lock().expect("daemon bridge circuit lock") =
-                Some(Instant::now() + CIRCUIT_COOLDOWN);
+            circuit.epoch = circuit.epoch.wrapping_add(1);
+            circuit.mode = CircuitMode::Open {
+                until: Instant::now() + CIRCUIT_COOLDOWN,
+            };
+        } else {
+            circuit.mode = CircuitMode::Closed { failures };
         }
-    }
-
-    fn reset_circuit(&self) {
-        self.consecutive_failures.store(0, Ordering::Release);
-        self.probe_in_flight.store(false, Ordering::Release);
-        *self.open_until.lock().expect("daemon bridge circuit lock") = None;
     }
 
     #[cfg(test)]
     fn force_cooldown_elapsed(&self) {
-        *self.open_until.lock().expect("daemon bridge circuit lock") =
-            Some(Instant::now() - Duration::from_millis(1));
+        let mut circuit = self.circuit.lock().expect("daemon bridge circuit lock");
+        circuit.mode = CircuitMode::Open {
+            until: Instant::now() - Duration::from_millis(1),
+        };
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{DaemonBridge, DaemonBridgeError};
+    use crate::object_browser_routes::StandaloneObjectBrowserClientError;
+    use axum::http::StatusCode;
     use std::time::Duration;
 
     #[tokio::test]
@@ -286,5 +345,89 @@ mod tests {
             Err(DaemonBridgeError::CircuitOpen)
         ));
         assert!(priority.call(|| Ok(())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn repeated_transport_failures_open_the_circuit() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(100));
+        for _ in 0..3 {
+            let result: Result<(), _> = bridge
+                .call(|| {
+                    Err(StandaloneObjectBrowserClientError {
+                        status: StatusCode::BAD_GATEWAY,
+                        code: "daemon_bridge_transport_failed".to_string(),
+                        message: "socket unavailable".to_string(),
+                    })
+                })
+                .await;
+            assert!(matches!(result, Err(DaemonBridgeError::Client(_))));
+        }
+        assert!(matches!(
+            bridge.call(|| Ok(())).await,
+            Err(DaemonBridgeError::CircuitOpen)
+        ));
+    }
+
+    #[tokio::test]
+    async fn domain_errors_do_not_open_the_circuit() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(100));
+        for _ in 0..3 {
+            let result: Result<(), _> = bridge
+                .call(|| {
+                    Err(StandaloneObjectBrowserClientError::bridge_failure(
+                        "daemon rejected request",
+                    ))
+                })
+                .await;
+            assert!(matches!(result, Err(DaemonBridgeError::Client(_))));
+        }
+        assert!(bridge.call(|| Ok(())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn failed_half_open_probe_reopens_the_circuit() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(100));
+        for _ in 0..3 {
+            let _: Result<(), _> = bridge
+                .call(|| {
+                    Err(StandaloneObjectBrowserClientError {
+                        status: StatusCode::BAD_GATEWAY,
+                        code: "daemon_bridge_transport_failed".to_string(),
+                        message: "socket unavailable".to_string(),
+                    })
+                })
+                .await;
+        }
+        bridge.force_cooldown_elapsed();
+        let result: Result<(), _> = bridge
+            .call(|| {
+                Err(StandaloneObjectBrowserClientError {
+                    status: StatusCode::BAD_GATEWAY,
+                    code: "daemon_bridge_transport_failed".to_string(),
+                    message: "socket unavailable".to_string(),
+                })
+            })
+            .await;
+        assert!(matches!(result, Err(DaemonBridgeError::Client(_))));
+        assert!(matches!(
+            bridge.call(|| Ok(())).await,
+            Err(DaemonBridgeError::CircuitOpen)
+        ));
+    }
+
+    #[test]
+    fn stale_success_cannot_close_a_newer_open_circuit() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(100));
+        let first = bridge.begin_request().expect("first request admitted");
+        bridge.record_failure(first);
+        let second = bridge.begin_request().expect("second request admitted");
+        bridge.record_failure(second);
+        let third = bridge.begin_request().expect("third request admitted");
+        bridge.record_failure(third);
+        bridge.complete_success(first);
+        assert!(matches!(
+            bridge.begin_request(),
+            Err(DaemonBridgeError::CircuitOpen)
+        ));
     }
 }

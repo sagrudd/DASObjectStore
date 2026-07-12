@@ -646,6 +646,11 @@ fn object_browser_client_error(err: DaemonClientError) -> StandaloneObjectBrowse
                 message,
             }
         }
+        DaemonClientError::Transport(_) => StandaloneObjectBrowserClientError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "daemon_bridge_transport_failed".to_string(),
+            message,
+        },
         _ => StandaloneObjectBrowserClientError {
             status: StatusCode::BAD_GATEWAY,
             code: "daemon_object_request_failed".to_string(),
