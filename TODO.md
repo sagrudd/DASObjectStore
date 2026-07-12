@@ -302,6 +302,9 @@ list until every temporary size-budget exception has been removed.
       `crates/dasobjectstore-cli/src/run/performance_ssd_only.rs`; preserve
       bounded SSD residency batching, write-before-readback ordering, and TUI
       log suppression regressions.
+    - [x] Extract the SSD stage-then-drain performance scenario into
+      `crates/dasobjectstore-cli/src/run/performance_ssd_stage_then_drain.rs`;
+      preserve bounded HDD fan-out, source-read accounting, and batch ordering.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser
