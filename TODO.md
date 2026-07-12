@@ -290,6 +290,9 @@ list until every temporary size-budget exception has been removed.
   - [ ] Extract the remaining performance execution engine (scenario runners,
     disk scheduler, copy primitives, and measurement helpers) before removing
     the CLI runner exception.
+    - [x] Extract performance copy/read primitives, sync-policy dispatch, and
+      progress measurement into `crates/dasobjectstore-cli/src/run/performance_io.rs`;
+      preserve staged settlement and final-sync accounting tests.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser

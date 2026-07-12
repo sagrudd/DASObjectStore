@@ -46,6 +46,11 @@ agreement before landing.
 - Extract ingest settlement event draining and progress projection into a
   focused daemon module while preserving metadata and telemetry ordering.
 
+## 0.71.13 - 2026-07-12
+
+- Extract CLI performance copy/read primitives and sync-policy dispatch into a
+  focused module while preserving staged settlement and final-sync accounting.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign
