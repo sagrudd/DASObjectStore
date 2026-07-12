@@ -287,8 +287,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract bounded asynchronous SSD settlement and queue-drain completion
     into `crates/dasobjectstore-cli/src/run/performance_settle.rs`; add coverage
     that `finish` drains every accepted settlement job.
-  - [ ] Extract the remaining performance execution engine (scenario runners
-    and execution orchestration) before removing the CLI runner exception.
+  - [x] Extract the performance execution engine (scenario runners, disk
+    scheduler, copy primitives, measurement helpers, orchestration, and
+    lifecycle) into focused modules; keep the CLI runner exception open only
+    for the remaining platform and ingest command families.
     - [x] Extract performance copy/read primitives, sync-policy dispatch, and
       progress measurement into `crates/dasobjectstore-cli/src/run/performance_io.rs`;
       preserve staged settlement and final-sync accounting tests.

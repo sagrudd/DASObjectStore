@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.23 - 2026-07-12
+
+- Mark the CLI performance execution-engine decomposition complete; remaining
+  runner size work is now isolated to platform and ingest command families.
+
 ## 0.71.22 - 2026-07-12
 
 - Extract performance-test lifecycle setup, provenance, scenario execution,
