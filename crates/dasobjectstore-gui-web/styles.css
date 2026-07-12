@@ -191,6 +191,202 @@ main[data-host] {
   border-top: 1px solid #e1e7ea;
 }
 
+.dos-inspector-drawer {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d9e0e3;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(30, 37, 43, 0.06);
+}
+
+.dos-inspector-drawer[data-open="false"] {
+  display: none;
+}
+
+.dos-inspector-drawer__header h2 {
+  margin: 0;
+  color: #182128;
+  font-size: 1rem;
+}
+
+.dos-inspector-drawer__sections {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.65fr) minmax(0, 1.35fr);
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.dos-inspector-drawer__sections dt {
+  color: #5d6a72;
+  font-size: 0.76rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.dos-inspector-drawer__sections dd {
+  min-width: 0;
+  margin: 0;
+  color: #303b43;
+  overflow-wrap: anywhere;
+}
+
+.dos-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--dos-status-info-fg);
+  background: var(--dos-status-info-bg);
+  font-size: 0.74rem;
+  font-weight: 720;
+}
+
+.dos-status-badge--good {
+  color: var(--dos-status-success-fg);
+  background: var(--dos-status-success-bg);
+}
+
+.dos-status-badge--warning {
+  color: var(--dos-status-warning-fg);
+  background: var(--dos-status-warning-bg);
+}
+
+.dos-status-badge--critical {
+  color: var(--dos-status-danger-fg);
+  background: var(--dos-status-danger-bg);
+}
+
+.dos-capacity-bar {
+  display: grid;
+  gap: 6px;
+}
+
+.dos-capacity-bar__label {
+  color: #303b43;
+  font-size: 0.82rem;
+  font-weight: 680;
+}
+
+.dos-capacity-bar__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2eaed;
+}
+
+.dos-capacity-bar__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--dos-interaction-primary);
+}
+
+.dos-segmented-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #cbd7dc;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.dos-segmented-control__option {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #44515a;
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dos-segmented-control__option[aria-pressed="true"] {
+  color: #0d5360;
+  background: #e3f1f3;
+}
+
+.dos-segmented-control__option:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dos-icon-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #c9d2d7;
+  border-radius: 6px;
+  color: #304049;
+  background: #ffffff;
+  font-size: 1rem;
+}
+
+.dos-icon-button--good {
+  color: var(--dos-status-success-fg);
+}
+
+.dos-icon-button--warning {
+  color: var(--dos-status-warning-fg);
+}
+
+.dos-icon-button--critical {
+  color: var(--dos-status-danger-fg);
+}
+
+.dos-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dos-risky-confirmation {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e1b6ad;
+  border-radius: 8px;
+  color: #5a2820;
+  background: #fff8f6;
+}
+
+.dos-risky-confirmation h2,
+.dos-risky-confirmation p {
+  margin: 0;
+}
+
+.dos-risky-confirmation header h2 {
+  font-size: 0.98rem;
+}
+
+.dos-risky-confirmation label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #6e352b;
+  font-size: 0.82rem;
+}
+
+.dos-risky-confirmation button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  background: var(--dos-status-danger-fg);
+  font-weight: 720;
+}
+
+.dos-risky-confirmation button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 h1,
 h2,
 p {
@@ -593,6 +789,45 @@ h2 {
 .dos-status-pill[data-state="unavailable"] {
   color: var(--dos-status-danger-fg);
   background: var(--dos-status-danger-bg);
+}
+
+.dos-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #d7e0e4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.dos-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  color: #33424b;
+  font-size: 0.84rem;
+}
+
+.dos-table th,
+.dos-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e6ecef;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dos-table th {
+  color: #5b6972;
+  font-size: 0.76rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.dos-table caption {
+  padding: 10px 12px;
+  color: #182128;
+  font-size: 0.9rem;
+  font-weight: 720;
+  text-align: left;
 }
 
 .dos-chip-row {
@@ -1239,6 +1474,19 @@ h2 {
   .dos-task-pane {
     width: 100vw;
     padding: 18px 14px;
+  }
+
+  .dos-inspector-drawer__sections {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .dos-segmented-control {
+    width: 100%;
+  }
+
+  .dos-segmented-control__option {
+    flex: 1 1 auto;
   }
 
   .dos-auth-brand,

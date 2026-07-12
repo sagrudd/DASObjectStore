@@ -34,6 +34,75 @@ fn activity_styles_source() -> &'static str {
     include_str!("../../styles/activity.css")
 }
 
+#[test]
+fn shared_web_primitives_cover_panes_tables_status_and_responsive_surfaces() {
+    let source = workspace_component_source();
+    let widgets = include_str!("../components/widgets.rs");
+    let css = web_styles_source();
+
+    for selector in [
+        ".dos-task-pane",
+        ".dos-product-footer",
+        ".dos-table-wrap",
+        ".dos-table",
+        ".dos-status-pill",
+        ".dos-status-badge",
+        ".dos-capacity-bar",
+        ".dos-segmented-control",
+        ".dos-icon-button",
+        ".dos-risky-confirmation",
+        ".dos-inspector-drawer",
+        "@media (max-width: 640px)",
+    ] {
+        assert!(
+            css.contains(selector),
+            "missing shared Web selector {selector}"
+        );
+    }
+    assert!(source.contains("dos-table-wrap"));
+    assert!(source.contains("dos-table dos-object-browser-table"));
+    for class in [
+        "dos-task-pane",
+        "dos-dense-table",
+        "dos-status-badge",
+        "dos-capacity-bar",
+        "dos-segmented-control",
+        "dos-icon-button",
+        "dos-risky-confirmation",
+        "dos-inspector-drawer",
+    ] {
+        assert!(
+            widgets.contains(class),
+            "missing shared widget class {class}"
+        );
+    }
+    assert!(widgets.contains("role=\"dialog\""));
+    assert!(widgets.contains("aria-modal=\"true\""));
+    assert!(widgets.contains("aria-valuenow"));
+    assert!(widgets.contains("aria-pressed"));
+    assert!(widgets.contains("onsubmit={Callback::from"));
+
+    let index = include_str!("../../index.html");
+    let base_link = index.find("styles.css").expect("base sheet registered");
+    for feature in [
+        "styles/remote-upload.css",
+        "styles/home.css",
+        "styles/object-browser.css",
+        "styles/activity.css",
+    ] {
+        let feature_link = index.find(feature).expect("feature sheet registered");
+        assert!(
+            feature_link < base_link,
+            "{feature} must precede shared styles"
+        );
+        assert_eq!(
+            index.matches(feature).count(),
+            1,
+            "{feature} registered once"
+        );
+    }
+}
+
 use super::{
     activity_category_summaries, activity_queue_summary, activity_task_progress_label,
     activity_workspace_api_path, admin_job_percent, admin_job_progress_text,
@@ -1227,8 +1296,9 @@ fn object_browser_component_contract_covers_placement_badges_and_no_overlap_css(
     assert!(source.contains("object_browser_download_disabled_reason"));
     assert!(source.contains("object_browser_file_download_available"));
 
-    assert!(css.contains(".dos-object-browser-table-wrap {\n  overflow-x: auto;"));
-    assert!(css.contains(".dos-object-browser-table {\n  width: 100%;\n  min-width: 1040px;"));
+    assert!(css.contains(".dos-table-wrap {\n  max-width: 100%;\n  overflow-x: auto;"));
+    assert!(css.contains(".dos-table {\n  width: 100%;\n  border-collapse: collapse;"));
+    assert!(css.contains(".dos-object-browser-table {\n  min-width: 1040px;"));
     assert!(css.contains(".dos-object-browser-table td:first-child span"));
     assert!(css.contains("text-overflow: ellipsis;"));
     assert!(css.contains(".dos-object-browser-placements {\n  display: flex;\n  flex-wrap: wrap;"));
@@ -1252,7 +1322,7 @@ fn object_browser_css_is_feature_owned_and_registered_before_base_styles() {
     for selector in [
         ".dos-object-browser-controls",
         ".dos-object-browser-folders",
-        ".dos-object-browser-table-wrap",
+        ".dos-object-browser-table",
         ".dos-object-browser-placement",
         ".dos-object-browser-download",
         "@media (max-width: 980px)",

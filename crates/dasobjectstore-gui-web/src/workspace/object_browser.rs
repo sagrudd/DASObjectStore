@@ -307,8 +307,8 @@ pub(super) fn render_object_browser_files(
         return render_object_browser_message("Files", "No files in this folder.");
     }
     html! {
-        <div class="dos-object-browser-table-wrap">
-            <table class="dos-object-browser-table">
+        <div class="dos-table-wrap dos-object-browser-table-wrap">
+            <table class="dos-table dos-object-browser-table">
                 <thead>
                     <tr>
                         <th>{ "Name" }</th>

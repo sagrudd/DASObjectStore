@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.53 - 2026-07-13
+
+- Consolidate Web table and reusable-widget styling into shared responsive
+  primitives with semantic source contracts and safe task-pane form handling.
+
 ## 0.72.52 - 2026-07-13
 
 - Keep bounded-folder catalogue visibility and logical usage coherent after

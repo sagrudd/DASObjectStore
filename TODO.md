@@ -2105,10 +2105,13 @@ non-destructive close, and restores focus to its trigger when closed.
   component now implements focus-on-open, trigger-focus restoration, Escape
   close, labelled form content, selected context, and footer actions; page
   migrations to it remain in the workflow tasks below.
-- [ ] Update the shared Web CSS and component tests so panes, footer, tables,
+- [x] Update the shared Web CSS and component tests so panes, footer, tables,
   status chips, and responsive layouts share primitives rather than adding
-  page-local variants. Keep the source split under the repository’s production
-  module-size budget.
+  page-local variants. Dense tables and Object Browser tables now use the
+  shared table wrapper/base, every reusable widget has owned status/capacity/
+  segmented/icon/risky/inspector styling, and host-safe source contracts pin
+  semantic attributes, form-submit prevention, stylesheet order, and mobile
+  breakpoints under the production module-size budget.
 
 ### 24.2 Local Access: users first, qualification and groups in one task flow
 

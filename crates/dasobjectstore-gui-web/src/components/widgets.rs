@@ -12,27 +12,29 @@ pub struct DenseTableProps {
 #[function_component(DenseTable)]
 pub fn dense_table(props: &DenseTableProps) -> Html {
     html! {
-        <table class="dos-dense-table">
-            <caption>{ props.caption.clone() }</caption>
-            <thead>
-                <tr>
-                    { for props.headers.iter().map(|header| html! { <th scope="col">{ header }</th> }) }
-                </tr>
-            </thead>
-            <tbody>
-                if props.rows.is_empty() {
+        <div class="dos-table-wrap">
+            <table class="dos-table dos-dense-table">
+                <caption>{ props.caption.clone() }</caption>
+                <thead>
                     <tr>
-                        <td colspan={props.headers.len().to_string()}>{ props.empty_label.clone() }</td>
+                        { for props.headers.iter().map(|header| html! { <th scope="col">{ header }</th> }) }
                     </tr>
-                } else {
-                    { for props.rows.iter().map(|row| html! {
+                </thead>
+                <tbody>
+                    if props.rows.is_empty() {
                         <tr>
-                            { for row.iter().map(|cell| html! { <td>{ cell }</td> }) }
+                            <td colspan={props.headers.len().to_string()}>{ props.empty_label.clone() }</td>
                         </tr>
-                    }) }
-                }
-            </tbody>
-        </table>
+                    } else {
+                        { for props.rows.iter().map(|row| html! {
+                            <tr>
+                                { for row.iter().map(|cell| html! { <td>{ cell }</td> }) }
+                            </tr>
+                        }) }
+                    }
+                </tbody>
+            </table>
+        </div>
     }
 }
 
@@ -145,7 +147,11 @@ pub fn task_pane(props: &TaskPaneProps) -> Html {
                 </div>
                 <button class="dos-task-pane__close" type="button" aria-label="Close task pane" onclick={on_close_button}>{ "Close" }</button>
             </header>
-            <form class="dos-task-pane__form" aria-label={props.title.clone()}>
+            <form
+                class="dos-task-pane__form"
+                aria-label={props.title.clone()}
+                onsubmit={Callback::from(|event: SubmitEvent| event.prevent_default())}
+            >
                 { for props.children.iter() }
             </form>
             <footer class="dos-task-pane__footer">

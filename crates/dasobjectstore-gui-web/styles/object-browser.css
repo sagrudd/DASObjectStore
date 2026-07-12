@@ -126,32 +126,8 @@
   cursor: not-allowed;
 }
 
-.dos-object-browser-table-wrap {
-  overflow-x: auto;
-  border: 1px solid #d7e0e4;
-  border-radius: 8px;
-}
-
 .dos-object-browser-table {
-  width: 100%;
   min-width: 1040px;
-  border-collapse: collapse;
-  background: #fff;
-}
-
-.dos-object-browser-table th,
-.dos-object-browser-table td {
-  border-bottom: 1px solid #e6ecef;
-  padding: 10px;
-  text-align: left;
-  vertical-align: top;
-}
-
-.dos-object-browser-table th {
-  color: #5b6972;
-  font-size: 0.76rem;
-  font-weight: 760;
-  text-transform: uppercase;
 }
 
 .dos-object-browser-table td:first-child {

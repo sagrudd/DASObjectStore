@@ -1053,6 +1053,19 @@ Future pages, dialogs that own a full operator route, and standalone error
 states should keep the shared footer visible unless they are embedded inside a
 host product that already supplies an equivalent Mnemosyne provenance footer.
 
+Shared panes, tables, and status primitives
+-------------------------------------------
+
+The console uses shared Web primitives for task panes, dense tables, status
+badges, capacity bars, segmented controls, icon buttons, inspector drawers,
+and risky-operation confirmations. These primitives keep keyboard focus,
+labels, disabled states, and responsive behavior consistent across workflows;
+page-owned styles should add only feature-specific layout or data treatment.
+Tables are wrapped in a shared horizontally scrollable surface so wide object
+metadata remains usable on small screens. Task-pane forms prevent accidental
+browser submission while callers own the daemon mutation and confirmation
+boundary.
+
 Screenshot regression coverage is available through:
 
 .. code-block:: console
