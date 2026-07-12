@@ -1,0 +1,160 @@
+//! Atomic persistence for daemon-owned capacity reservation ledgers.
+
+use dasobjectstore_core::store::{
+    CapacityLedgerError, CapacityReservationLedger, CapacityReservationLedgerSnapshot,
+};
+use std::fmt::{self, Display};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug)]
+pub enum CapacityLedgerPersistenceError {
+    Io { path: PathBuf, message: String },
+    Serialize { path: PathBuf, message: String },
+    Deserialize { path: PathBuf, message: String },
+    Ledger(CapacityLedgerError),
+}
+
+impl Display for CapacityLedgerPersistenceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, message } => write!(
+                formatter,
+                "capacity ledger I/O {}: {message}",
+                path.display()
+            ),
+            Self::Serialize { path, message } => write!(
+                formatter,
+                "capacity ledger serialization {}: {message}",
+                path.display()
+            ),
+            Self::Deserialize { path, message } => write!(
+                formatter,
+                "capacity ledger deserialization {}: {message}",
+                path.display()
+            ),
+            Self::Ledger(error) => write!(formatter, "capacity ledger validation: {error:?}"),
+        }
+    }
+}
+
+impl std::error::Error for CapacityLedgerPersistenceError {}
+
+pub fn save_capacity_ledger(
+    path: impl AsRef<Path>,
+    ledger: &CapacityReservationLedger,
+) -> Result<(), CapacityLedgerPersistenceError> {
+    let path = path.as_ref();
+    let parent = path
+        .parent()
+        .ok_or_else(|| CapacityLedgerPersistenceError::Io {
+            path: path.to_path_buf(),
+            message: "capacity ledger path has no parent".to_string(),
+        })?;
+    fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+    let snapshot = ledger.snapshot();
+    let bytes = serde_json::to_vec_pretty(&snapshot).map_err(|error| {
+        CapacityLedgerPersistenceError::Serialize {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
+    })?;
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("ledger"),
+        std::process::id()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| io_error(&temporary, error))?;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| io_error(&temporary, error))?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|error| io_error(path, error))?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| io_error(parent, error))
+}
+
+pub fn load_capacity_ledger(
+    path: impl AsRef<Path>,
+) -> Result<CapacityReservationLedger, CapacityLedgerPersistenceError> {
+    let path = path.as_ref();
+    let file = File::open(path).map_err(|error| io_error(path, error))?;
+    let snapshot: CapacityReservationLedgerSnapshot =
+        serde_json::from_reader(file).map_err(|error| {
+            CapacityLedgerPersistenceError::Deserialize {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            }
+        })?;
+    CapacityReservationLedger::from_snapshot(snapshot)
+        .map_err(CapacityLedgerPersistenceError::Ledger)
+}
+
+fn io_error(path: &Path, error: std::io::Error) -> CapacityLedgerPersistenceError {
+    CapacityLedgerPersistenceError::Io {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError};
+    use dasobjectstore_core::store::{CapacityPolicy, CapacityReservationLedger};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn root(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let parent = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("dasobjectstore-codex-validation"));
+        parent.join(format!(
+            "capacity-ledger-{label}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn persists_and_restores_ledger_atomically() {
+        let root = root("roundtrip");
+        let path = root.join("state/ledger.json");
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 10), 20)
+            .expect("policy valid");
+        ledger.reserve("upload-1", 100).expect("reservation fits");
+
+        save_capacity_ledger(&path, &ledger).expect("ledger saves");
+        let restored = load_capacity_ledger(&path).expect("ledger loads");
+
+        assert_eq!(restored.used_bytes(), 20);
+        assert_eq!(restored.reserved_bytes(), 100);
+        assert_eq!(restored.reservation_bytes("upload-1"), Some(100));
+        assert!(!root.join("state/.ledger.json.tmp").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_corrupt_snapshot_without_mutating_previous_state() {
+        let root = root("corrupt");
+        let path = root.join("ledger.json");
+        fs::create_dir_all(&root).expect("root creates");
+        fs::write(&path, b"not-json").expect("corrupt state writes");
+
+        let error = load_capacity_ledger(&path).expect_err("corrupt state rejects");
+        assert!(matches!(
+            error,
+            CapacityLedgerPersistenceError::Deserialize { .. }
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+}

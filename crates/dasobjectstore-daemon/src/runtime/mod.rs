@@ -2,6 +2,7 @@
 
 mod admin_jobs;
 mod appliance_telemetry;
+mod capacity_persistence;
 mod config;
 mod drive_backend;
 mod enclosure_prepare;
@@ -43,6 +44,9 @@ pub use appliance_telemetry::{
     APPLIANCE_TELEMETRY_SCHEMA_VERSION, DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT,
     DEFAULT_LOCAL_GROUP_PATH, DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH,
     DEFAULT_STANDALONE_AUTH_ROOT,
+};
+pub use capacity_persistence::{
+    load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError,
 };
 pub use config::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonTelemetryRuntimeConfig,

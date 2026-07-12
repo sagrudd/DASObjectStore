@@ -239,6 +239,9 @@ completion.
     contract that preserves used bytes and outstanding reservations across a
     restart boundary; daemon file persistence and stale-reservation expiry
     remain open.
+  - [x] Add daemon atomic JSON persistence around that snapshot contract with
+    file and directory ``fsync``/rename ordering plus corrupt-state rejection;
+    stale-reservation expiry and live-store registry wiring remain open.
     Crash/restart persistence, multipart expiry, dedupe, and full-filesystem
     fixtures remain open.
 
