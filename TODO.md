@@ -329,6 +329,9 @@ list until every temporary size-budget exception has been removed.
       enclosure checks, and SSD/HDD root policy into
       `crates/dasobjectstore-cli/src/run/managed_roots.rs`; preserve QNAP
       guard fixtures and environment overrides.
+    - [x] Move platform health collection, disk scoring, and Linux/macOS health
+      adapters into `crates/dasobjectstore-cli/src/run/health.rs`; preserve
+      output contracts and health projection behavior.
     - [x] Move performance report artifact persistence and QR/PDF/metadata
       helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
       preserve JSON validation, chart generation, authoritative policy output,

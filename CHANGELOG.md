@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.27 - 2026-07-12
+
+- Move platform health collection, disk scoring, and OS-specific adapters into
+  the CLI health module while preserving output contracts.
+
 ## 0.71.26 - 2026-07-12
 
 - Extract managed-DAS roots, marker validation, supported-enclosure checks, and

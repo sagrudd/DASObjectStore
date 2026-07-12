@@ -1,8 +1,7 @@
 use super::disk_lockdown::LockdownDasReport;
 use super::disk_prepare::PrepareDasReport;
-use super::{
-    CliError, DiskHealthSummary, HealthReport, HostConnectionStatus, StoreDeleteCommandReport,
-};
+use super::health::{DiskHealthSummary, HealthReport};
+use super::{CliError, HostConnectionStatus, StoreDeleteCommandReport};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
 use dasobjectstore_metadata::{
     DestagePriorityPolicy, DiskDrainAction, DiskDrainObjectSummary, DiskDrainPlanSummary,

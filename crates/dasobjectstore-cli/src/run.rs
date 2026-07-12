@@ -99,6 +99,8 @@ use self::disk_prepare::{
     PrepareFilesystem,
 };
 use self::health::run_health;
+#[cfg(test)]
+use self::health::{DiskHealthSummary, HealthReport};
 use self::ingest_client::{run_ingest_direct_import_with_client, run_ingest_files_with_client};
 use self::ingest_source_access::prepare_source_access_for_packaged_daemon;
 #[cfg(target_os = "linux")]
@@ -491,135 +493,6 @@ fn topology_suffix(topology: Option<&str>) -> String {
     topology
         .map(|value| format!(" at topology {value}"))
         .unwrap_or_default()
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct HealthReport {
-    platform: HostPlatform,
-    disks: Vec<DiskHealthSummary>,
-    warnings: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct DiskHealthSummary {
-    device_path: Option<String>,
-    model_hint: Option<String>,
-    serial_hint: Option<String>,
-    size_bytes: Option<u64>,
-    transport: Transport,
-    smart_passed: Option<bool>,
-    signals: HealthSignals,
-    score: HealthScore,
-    warnings: Vec<String>,
-}
-
-impl DiskHealthSummary {
-    fn from_observed(
-        observed: &ObservedDisk,
-        health_report: Result<DiskHealthReport, ProbeError>,
-    ) -> Self {
-        let mut warnings = Vec::new();
-        let mut health = None;
-
-        if observed.device_path.is_none() {
-            warnings.push("disk has no device path; SMART health was not queried".to_string());
-        }
-
-        match health_report {
-            Ok(report) => {
-                warnings.extend(report.warnings.clone());
-                health = Some(report);
-            }
-            Err(err) => warnings.push(err.to_string()),
-        }
-
-        let signals = health
-            .as_ref()
-            .map(|report| report.signals)
-            .unwrap_or_default();
-        let score = HealthScore::from_signals(&signals);
-
-        Self {
-            device_path: health
-                .as_ref()
-                .and_then(|report| report.device_path.clone())
-                .or_else(|| observed.device_path.clone()),
-            model_hint: health
-                .as_ref()
-                .and_then(|report| report.model_hint.clone())
-                .or_else(|| observed.model_hint.clone()),
-            serial_hint: health
-                .as_ref()
-                .and_then(|report| report.serial_hint.clone())
-                .or_else(|| observed.serial_hint.clone()),
-            size_bytes: observed.size_bytes,
-            transport: observed.transport,
-            smart_passed: health.as_ref().and_then(|report| report.smart_passed),
-            signals,
-            score,
-            warnings,
-        }
-    }
-}
-
-fn read_current_platform_health() -> Result<HealthReport, CliError> {
-    let mut probe = probe_current_platform()?;
-    probe.enclosures = group_enclosures(&probe.disks);
-
-    let runner = SystemCommandRunner;
-    let disks = probe
-        .disks
-        .iter()
-        .map(|disk| {
-            let health_report = disk
-                .device_path
-                .as_deref()
-                .map(|device_path| read_disk_health_for_current_platform(&runner, device_path))
-                .unwrap_or_else(|| {
-                    Err(ProbeError::ParseFailed {
-                        source: "health".to_string(),
-                        message: "disk has no device path".to_string(),
-                    })
-                });
-            DiskHealthSummary::from_observed(disk, health_report)
-        })
-        .collect();
-
-    Ok(HealthReport {
-        platform: probe.platform,
-        disks,
-        warnings: probe
-            .warnings
-            .into_iter()
-            .map(|warning| format!("{}: {}", warning.code, warning.message))
-            .collect(),
-    })
-}
-
-#[cfg(target_os = "linux")]
-fn read_disk_health_for_current_platform(
-    runner: &SystemCommandRunner,
-    device_path: &str,
-) -> Result<DiskHealthReport, ProbeError> {
-    read_smartctl_health(runner, device_path)
-}
-
-#[cfg(target_os = "macos")]
-fn read_disk_health_for_current_platform(
-    runner: &SystemCommandRunner,
-    device_path: &str,
-) -> Result<DiskHealthReport, ProbeError> {
-    read_diskutil_health(runner, device_path)
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn read_disk_health_for_current_platform(
-    _runner: &SystemCommandRunner,
-    _device_path: &str,
-) -> Result<DiskHealthReport, ProbeError> {
-    Err(ProbeError::UnsupportedPlatform {
-        platform: std::env::consts::OS.to_string(),
-    })
 }
 
 fn upsert_portable_store_definition(
