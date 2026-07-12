@@ -267,6 +267,9 @@ completion.
     delegating hardened folder hierarchy, checksum, durable-finalization, and
     bounded-capacity behavior; an injected runtime guard fails closed before
     filesystem I/O when mount/device state drifts.
+  - [x] Expose drive capacity and read-only user-tree inspection through the
+    guarded profile boundary; SMART/NVMe telemetry and daemon inventory remain
+    hardware-dependent.
 - [ ] Add Linux package, reboot/remount, device replacement, full-disk,
   corruption, and performance acceptance coverage.
 

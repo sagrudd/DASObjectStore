@@ -6,7 +6,7 @@
 //! unmounted or identity-drifted drive fails closed instead of writing through
 //! a stale mount directory.
 
-use super::folder_backend::FolderBackend;
+use super::folder_backend::{FolderBackend, FolderCapacitySnapshot, FolderInspectionReport};
 use dasobjectstore_core::backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
     ObjectStoreBackend,
@@ -75,6 +75,15 @@ impl DriveBackend {
 
     pub fn manifest(&self) -> &ObjectStoreManifest {
         &self.manifest
+    }
+
+    pub fn capacity(&self) -> FolderCapacitySnapshot {
+        self.folder.capacity()
+    }
+
+    pub fn inspect_user_tree(&self) -> Result<FolderInspectionReport, BackendError> {
+        self.guard()?;
+        self.folder.inspect_user_tree()
     }
 
     fn guard(&self) -> Result<(), BackendError> {
@@ -209,6 +218,7 @@ mod tests {
             .expect("stages object");
         let finalized = backend.finalize(staged).expect("finalizes object");
         assert_eq!(finalized.location, ".dasobjectstore/objects/nested/run.txt");
+        assert_eq!(backend.capacity().used_bytes, 5);
         let mut content = String::new();
         backend
             .read(&key)
@@ -217,6 +227,7 @@ mod tests {
             .expect("reads object");
         assert_eq!(content, "hello");
         backend.remove(&key).expect("removes object");
+        assert_eq!(backend.capacity().used_bytes, 0);
         let _ = fs::remove_dir_all(root);
     }
 

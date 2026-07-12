@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.0 - 2026-07-12
+
+- Expose guarded drive-profile capacity snapshots and read-only user-tree
+  inspection through the dedicated SSD backend boundary.
+
 ## 0.71.99 - 2026-07-12
 
 - Add a guarded drive backend that reuses hardened folder storage semantics
