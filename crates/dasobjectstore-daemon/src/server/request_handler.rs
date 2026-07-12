@@ -72,7 +72,6 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-
 mod dispatch;
 mod job_projection;
 mod orchestrator;
@@ -93,7 +92,6 @@ use self::request_helpers::{
     create_object_store_with_registry, resolve_authorization_store_id,
     rotated_easyconnect_renewal_token, stable_easyconnect_id,
 };
-
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
     clock: C,
@@ -109,7 +107,6 @@ pub struct DaemonRequestHandler<S, C> {
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
     cancelled_job_ids: Arc<Mutex<BTreeSet<String>>>,
 }
-
 impl<S, C> DaemonRequestHandler<S, C>
 where
     S: DaemonServiceOrchestrator,
@@ -139,7 +136,6 @@ where
             cancelled_job_ids: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
-
     pub fn new_with_admin_job_registry(
         service_orchestrator: S,
         clock: C,
@@ -168,7 +164,6 @@ where
             cancelled_job_ids: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
-
     pub fn with_registry_paths(
         mut self,
         store_registry_path: impl Into<PathBuf>,
@@ -178,7 +173,6 @@ where
         self.subobject_registry_path = subobject_registry_path.into();
         self
     }
-
     pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
         self.live_sqlite_path = live_sqlite_path.into();
         self
@@ -653,6 +647,12 @@ where
         GarageServiceController::lifecycle(self, request, accepted_at_utc)
     }
 
+    fn capacity_admission(
+        &self,
+        request: crate::api::CapacityAdmissionRequest,
+    ) -> Result<crate::api::CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::capacity_admission(self, request)
+    }
     fn prepare_enclosure(
         &self,
         request: PrepareEnclosureRequest,

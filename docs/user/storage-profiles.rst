@@ -121,6 +121,14 @@ contract over the normal Unix-socket boundary. It authorizes the store reader
 before consulting the orchestrator and returns ``capacity_admission_unavailable``
 until live ledger and filesystem probes are installed; it never treats a
 synthetic response as an admission.
+The packaged daemon now installs a registry-backed provider that owns these
+observations: it restores each bounded store's persisted ledger, probes mounted
+backend/SSD free space with ``statvfs``, and fsync-persists admitted
+reservations. A bounded store without an initialized ledger, an unavailable
+probe, or a failed persistence write remains unavailable rather than being
+admitted with guessed usage.
+The provider also requires the requested copy count to match the daemon's
+store policy; callers cannot reduce redundancy through the admission request.
 The core ledger has a concurrent reservation regression: simultaneous callers
 contending for a bounded quota cannot overbook logical capacity. Crash/restart
 reservation persistence, multipart expiry, dedupe accounting, and full-disk

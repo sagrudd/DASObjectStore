@@ -304,7 +304,11 @@ fn is_safe_store_id(value: &str) -> bool {
     let first = bytes[0];
     (first.is_ascii_lowercase() || first.is_ascii_digit())
         && bytes[1..].iter().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_' || *byte == b'-'
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || *byte == b'_'
+                || *byte == b'-'
+                || *byte == b'.'
         })
 }
 
@@ -343,6 +347,13 @@ mod tests {
         let encoded = serde_json::to_value(request).expect("request serializes");
         assert_eq!(encoded["ingress_origin"], "local_server_ssd_first");
         assert_eq!(encoded["client_request_id"], "request-1");
+    }
+
+    #[test]
+    fn accepts_legacy_store_ids_with_dotted_release_components() {
+        let mut request = request();
+        request.store_id = "zymo_fecal_2025.05".to_string();
+        request.validate().expect("dotted store id remains valid");
     }
 
     #[test]

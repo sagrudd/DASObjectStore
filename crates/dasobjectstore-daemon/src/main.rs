@@ -2,9 +2,10 @@ use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, AdminJobRegistry,
     ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetrySink,
     ApplianceTelemetrySource, DaemonRequestHandler, DaemonRuntimeConfig,
-    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink, GarageServiceController,
-    GarageServiceRuntimeConfig, LinuxProcTelemetryCollector, SystemDaemonClock,
-    SystemServiceCommandRunner, UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
+    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
+    FileBackedCapacityAdmissionProvider, GarageServiceController, GarageServiceRuntimeConfig,
+    LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
+    UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
 use std::env;
@@ -41,7 +42,10 @@ fn run() -> Result<(), String> {
     }
 
     let garage =
-        GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner);
+        GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner)
+            .with_capacity_admission_provider(Arc::new(
+                FileBackedCapacityAdmissionProvider::for_daemon(&config.state_dir),
+            ));
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
         &config.state_dir,
     )));

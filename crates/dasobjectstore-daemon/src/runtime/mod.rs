@@ -3,6 +3,7 @@
 mod admin_jobs;
 mod appliance_telemetry;
 mod capacity_persistence;
+mod capacity_provider;
 mod config;
 mod drive_backend;
 mod enclosure_prepare;
@@ -47,6 +48,10 @@ pub use appliance_telemetry::{
 };
 pub use capacity_persistence::{
     load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError,
+};
+pub use capacity_provider::{
+    CapacityAdmissionProvider, CapacitySpaceProbe, FileBackedCapacityAdmissionProvider,
+    StatvfsCapacitySpaceProbe,
 };
 pub use config::{
     DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonTelemetryRuntimeConfig,

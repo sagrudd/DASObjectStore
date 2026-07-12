@@ -232,6 +232,12 @@ completion.
     route with typed client plumbing, stable API errors, and fail-closed
     orchestration when live ledger/probe state is unavailable; live registry,
     filesystem probes, and ingest/S3/multipart reservation wiring remain open.
+  - [x] Add the daemon-owned file-backed capacity provider: it reads current
+    store policy from the registry, restores bounded ledgers, probes backend
+    and SSD free space, atomically persists admitted reservations, and fails
+    closed for missing bounded ledgers or probe/persistence errors; configured
+    copy counts remain daemon-authoritative. Ingest/S3/multipart completion
+    and stale-reservation expiry remain open.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.

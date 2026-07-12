@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.37 - 2026-07-12
+
+- Install a daemon-owned registry-backed capacity provider with persisted
+  reservations and backend/SSD filesystem probes; bounded stores fail closed
+  until their ledger is initialized, and daemon policy owns the copy count.
+
 ## 0.72.36 - 2026-07-12
 
 - Expose an authenticated, read-only capacity-admission daemon route with

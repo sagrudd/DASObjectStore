@@ -1,3 +1,4 @@
+use super::capacity_provider::CapacityAdmissionProvider;
 use super::{
     admin_jobs::AdminJobRegistry,
     remote_upload::{
@@ -5,6 +6,7 @@ use super::{
         RemoteUploadAdmissionGate, RemoteUploadS3TransferWorkerReport,
     },
 };
+use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
 use crate::api::{
     DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusDetail,
@@ -64,6 +66,7 @@ impl GarageServiceRuntimeConfig {
 pub struct GarageServiceController<R> {
     config: GarageServiceRuntimeConfig,
     runner: R,
+    capacity_admission_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
 }
 
 impl<R> GarageServiceController<R>
@@ -71,7 +74,19 @@ where
     R: ServiceCommandRunner,
 {
     pub fn new(config: GarageServiceRuntimeConfig, runner: R) -> Self {
-        Self { config, runner }
+        Self {
+            config,
+            runner,
+            capacity_admission_provider: None,
+        }
+    }
+
+    pub fn with_capacity_admission_provider(
+        mut self,
+        provider: Arc<dyn CapacityAdmissionProvider>,
+    ) -> Self {
+        self.capacity_admission_provider = Some(provider);
+        self
     }
 
     pub fn status(
@@ -92,6 +107,18 @@ where
             message: None,
             detail: request.include_detail.then(|| self.config.status_detail()),
         })
+    }
+
+    pub fn capacity_admission(
+        &self,
+        request: CapacityAdmissionRequest,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        self.capacity_admission_provider
+            .as_ref()
+            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "capacity admission provider is not configured".to_string(),
+            })?
+            .admit(request)
     }
 
     pub fn lifecycle(

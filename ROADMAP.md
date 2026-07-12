@@ -904,9 +904,10 @@ means backend-bounded; no concurrent ingress can overbook the same capacity;
 quota reduction never deletes data.
 
 Current delivery note: the authenticated read-only capacity-admission daemon
-route and typed client contract are now in place, but the route fails closed
-until live ledger, filesystem probes, and ingest/S3/multipart reservation
-orchestration are installed.
+route and typed client contract are in place, and the packaged daemon now
+injects a registry-backed provider with persisted ledgers and ``statvfs``
+probes. Ingest/S3/multipart reservation completion, catalogue accounting, and
+stale-reservation expiry remain open.
 
 ## Milestone 28: Folder ObjectStore Profile
 
