@@ -51,6 +51,11 @@ before an upload and commits or releases the reservation after durable
 finalization. Existing appliance policies remain explicitly unbounded until an
 operator performs a compatibility-aware capacity migration.
 
+Quota reductions never delete data. The core ledger can enter an explicit
+``over_quota`` pressure state while preserving reads and existing reservations;
+new reservations are rejected until usage is remediated. Deletion accounting
+and daemon/backend policy wiring remain part of the capacity integration gate.
+
 The daemon API now has a transport-neutral capacity admission contract. It
 returns an explicit admitted/rejected decision, stable rejection reason, quota
 and reservation observations, and optional SSD-staging observations for direct

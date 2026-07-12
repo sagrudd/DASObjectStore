@@ -173,6 +173,10 @@ completion.
   content is deduplicated; report physical staging/replication separately.
 - [ ] Define over-quota behavior: preserve reads, verified deletion, repair, and
   cleanup; reject new ingress; never delete data when a quota is lowered.
+  - [x] Add derived pressure states and atomic quota-policy updates to the core
+    ledger. Lowering a limit preserves usage and existing reservations, marks
+    the ledger ``over_quota``, and rejects only new reservations; deletion
+    accounting and daemon/backend wiring remain follow-up work.
 - [ ] Add optional SubObject budgets whose reservations atomically update both
   child and parent allocations.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,

@@ -279,6 +279,16 @@ pub struct CapacityReservationLedger {
     reservations: HashMap<String, u64>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapacityPressureState {
+    Unbounded,
+    Normal,
+    Warning,
+    Critical,
+    OverQuota,
+}
+
 impl CapacityReservationLedger {
     pub fn new(policy: CapacityPolicy, used_bytes: u64) -> Result<Self, CapacityLedgerError> {
         if let Some(error) = policy.validation_error() {
@@ -301,6 +311,36 @@ impl CapacityReservationLedger {
 
     pub fn policy(&self) -> &CapacityPolicy {
         &self.policy
+    }
+
+    /// Replace capacity policy without deleting data. Lowering a limit below
+    /// current usage is allowed so operators can remediate an over-quota store;
+    /// subsequent reservations remain rejected until usage falls below policy.
+    pub fn update_policy(&mut self, policy: CapacityPolicy) -> Result<(), CapacityLedgerError> {
+        if let Some(error) = policy.validation_error() {
+            return Err(CapacityLedgerError::InvalidPolicy(error));
+        }
+        self.policy = policy;
+        Ok(())
+    }
+
+    pub fn pressure_state(&self) -> CapacityPressureState {
+        let Some(limit) = self.policy.logical_limit_bytes else {
+            return CapacityPressureState::Unbounded;
+        };
+        let effective_limit = limit.saturating_sub(self.policy.backend_reserve_bytes);
+        let usage = self.used_bytes.saturating_add(self.reserved_bytes());
+        if usage > effective_limit {
+            return CapacityPressureState::OverQuota;
+        }
+        let basis_points = (u128::from(usage) * 10_000 / u128::from(effective_limit)) as u64;
+        if basis_points >= u64::from(self.policy.critical_threshold_basis_points) {
+            CapacityPressureState::Critical
+        } else if basis_points >= u64::from(self.policy.warning_threshold_basis_points) {
+            CapacityPressureState::Warning
+        } else {
+            CapacityPressureState::Normal
+        }
     }
 
     pub fn available_bytes(&self) -> Option<u64> {
@@ -778,9 +818,9 @@ mod tests {
     use super::{
         evaluate_capacity_admission, AcknowledgementPolicy, CapacityAdmissionError,
         CapacityAdmissionInput, CapacityBehavior, CapacityLedgerError, CapacityPolicy,
-        EnclosurePlacement, EnclosurePlacementContext, ExportPolicy, IngestMode, MutabilityPolicy,
-        PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass, StorePolicy,
-        StorePolicyOverrides, StorePolicyValidationError,
+        CapacityPressureState, EnclosurePlacement, EnclosurePlacementContext, ExportPolicy,
+        IngestMode, MutabilityPolicy, PoolPolicyDefaults, RepairPolicy, RetentionPolicy,
+        StoreClass, StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
     };
 
     #[test]
@@ -815,6 +855,58 @@ mod tests {
         }
         .validation_error()
         .is_some());
+    }
+
+    #[test]
+    fn quota_reduction_marks_over_quota_without_deleting_or_blocking_reads() {
+        let mut ledger =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 600)
+                .expect("capacity policy is valid");
+        assert_eq!(ledger.pressure_state(), CapacityPressureState::Normal);
+        ledger
+            .update_policy(CapacityPolicy::bounded(500, 100))
+            .expect("lower quota remains valid");
+        assert_eq!(ledger.used_bytes(), 600);
+        assert_eq!(ledger.pressure_state(), CapacityPressureState::OverQuota);
+        assert_eq!(
+            ledger.reserve("blocked", 1),
+            Err(CapacityLedgerError::InsufficientCapacity { available_bytes: 0 })
+        );
+    }
+
+    #[test]
+    fn capacity_pressure_uses_warning_and_critical_thresholds() {
+        let mut ledger =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 0)
+                .expect("capacity policy is valid");
+        ledger
+            .reserve("warning", 850)
+            .expect("warning reservation fits");
+        assert_eq!(ledger.pressure_state(), CapacityPressureState::Warning);
+        ledger.commit("warning").expect("warning commits");
+        ledger
+            .update_policy(CapacityPolicy {
+                logical_limit_bytes: Some(1_000),
+                backend_reserve_bytes: 0,
+                warning_threshold_basis_points: 8_000,
+                critical_threshold_basis_points: 8_500,
+            })
+            .expect("threshold update succeeds");
+        assert_eq!(ledger.pressure_state(), CapacityPressureState::Critical);
+    }
+
+    #[test]
+    fn unbounded_capacity_has_no_pressure_state_and_large_values_are_safe() {
+        let unbounded = super::CapacityReservationLedger::new(CapacityPolicy::default(), 0)
+            .expect("legacy policy is valid");
+        assert_eq!(unbounded.pressure_state(), CapacityPressureState::Unbounded);
+
+        let ledger = super::CapacityReservationLedger::new(
+            CapacityPolicy::bounded(u64::MAX, 0),
+            u64::MAX / 2,
+        )
+        .expect("large policy is valid");
+        assert_eq!(ledger.pressure_state(), CapacityPressureState::Normal);
     }
 
     #[test]
