@@ -9,7 +9,7 @@ fn daemon_unavailable(
     route_error(StatusCode::NOT_IMPLEMENTED, code, message)
 }
 
-pub(super) fn submit_local_group_admin_request(
+pub(super) async fn submit_local_group_admin_request(
     state: &StandaloneUsersGroupsRouteState,
     request: StandaloneLocalGroupAdminDaemonRequest,
 ) -> Result<StandaloneLocalGroupAdminResponse, (StatusCode, Json<AuthRouteError>)> {
@@ -19,9 +19,17 @@ pub(super) fn submit_local_group_admin_request(
             "daemon local group administration contract is not available",
         )
     })?;
-    let response = client
-        .submit_local_group_operation(request)
-        .map_err(|err| route_error(StatusCode::BAD_GATEWAY, "daemon_client_error", err.message))?;
+    let client = Arc::clone(client);
+    let response = state
+        .daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_local_group_operation(request)
+                .map_err(|err| err.message)
+        })
+        .await
+        .map_err(admin_daemon_bridge_error)?;
     if !response.accepted.dry_run {
         upsert_storage_group(&state.groups_registry_path, &response.group_name).map_err(|err| {
             route_error(

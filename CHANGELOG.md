@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.59 - 2026-07-12
+
+- Route Web local-group creation and membership assignment through the bounded
+  daemon bridge while preserving post-acceptance registry updates.
+
 ## 0.71.58 - 2026-07-12
 
 - Route Web enclosure-preparation submissions through the bounded daemon bridge

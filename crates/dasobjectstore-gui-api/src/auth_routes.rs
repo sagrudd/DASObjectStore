@@ -96,6 +96,7 @@ pub(crate) struct StandaloneUsersGroupsRouteState {
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
     local_group_admin_client: Option<Arc<dyn StandaloneLocalGroupAdminClient>>,
     groups_registry_path: PathBuf,
+    daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
 }
 
 #[derive(Clone)]
@@ -158,6 +159,7 @@ impl StandaloneUsersGroupsRouteState {
                 DaemonStandaloneLocalGroupAdminClient::default_packaged(),
             )),
             groups_registry_path: default_groups_registry_path(),
+            daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
         }
     }
 }
@@ -262,7 +264,9 @@ async fn create_local_group(
     let mut request = validate_create_local_group_request(request)?;
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
-    submit_local_group_admin_request(&state, request).map(Json)
+    submit_local_group_admin_request(&state, request)
+        .await
+        .map(Json)
 }
 
 async fn assign_local_user_to_group(
@@ -273,7 +277,9 @@ async fn assign_local_user_to_group(
     let mut request = validate_assign_local_user_to_group_request(request)?;
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
-    submit_local_group_admin_request(&state, request).map(Json)
+    submit_local_group_admin_request(&state, request)
+        .await
+        .map(Json)
 }
 
 async fn prepare_enclosure(
@@ -2511,6 +2517,7 @@ mod tests {
             local_group_admin_client: local_group_admin_client
                 .map(|client| client as Arc<dyn StandaloneLocalGroupAdminClient>),
             groups_registry_path,
+            daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
         }
     }
 

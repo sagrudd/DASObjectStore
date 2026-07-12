@@ -944,6 +944,9 @@ list until every temporary size-budget exception has been removed.
 - [x] Route Web enclosure-preparation submissions through the bounded bridge,
   preserving daemon-owned destructive-operation confirmation and existing-data
   acknowledgement gates.
+- [x] Route Web local-group creation and membership assignment through the
+  bounded bridge, keeping the daemon as mutation authority and updating the
+  local group registry only after accepted non-dry-run responses.
 - [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
