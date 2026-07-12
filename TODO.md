@@ -199,6 +199,9 @@ list until every temporary size-budget exception has been removed.
 - [x] Extract bounded SSD-flush/HDD-settlement workers and admission helpers
   into `runtime/ingest_files/pipeline_workers.rs`; preserve queue backpressure,
   cancellation, worker error messages, and SSD-pressure behavior.
+- [x] Extract ingest settlement event draining and progress projection into
+  `runtime/ingest_files/pipeline_events.rs`; preserve coalesced telemetry,
+  metadata commit ordering, and finalization progress states.
 - [x] Split GUI dashboard object-service discovery and telemetry projection
   from the home-dashboard assembly façade.
 - [x] Add CI enforcement for a 1,000 production-line module budget, with a

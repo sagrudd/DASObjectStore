@@ -41,6 +41,11 @@ agreement before landing.
   a focused daemon ingest module while preserving backpressure and cancellation
   behavior.
 
+## 0.71.12 - 2026-07-12
+
+- Extract ingest settlement event draining and progress projection into a
+  focused daemon module while preserving metadata and telemetry ordering.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign
