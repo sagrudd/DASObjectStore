@@ -212,6 +212,9 @@ completion.
     create/adopt orchestration remain open.
 - [ ] Reject the system root and already-claimed devices by default; support a
   documented administrator override for virtual or unusual SSD topology.
+  - [x] Reject missing drive device identity and `/` system-root mount hints in
+    the portable manifest validator; live mount/claim probing and override
+    authorization remain open.
 - [ ] Implement reserve, pressure, capacity, SMART/NVMe health, endurance,
   mount-loss, replacement, import/export, and read-only degraded behavior.
 - [ ] Reuse folder hierarchy/manifest/S3 semantics while making the single-

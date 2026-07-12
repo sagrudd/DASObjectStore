@@ -9,6 +9,7 @@ use crate::ids::StoreId;
 use crate::protection::ProtectionPolicy;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::path::Path;
 use std::path::PathBuf;
 
 pub const OBJECT_STORE_MANIFEST_SCHEMA_VERSION: u16 = 1;
@@ -84,11 +85,17 @@ impl BackendReference {
                 {
                     return Err(ObjectStoreManifestValidationError::BlankBackendIdentity);
                 }
+                if device_identity.is_none() {
+                    return Err(ObjectStoreManifestValidationError::MissingDeviceIdentity);
+                }
                 if mount_path_hint
                     .as_ref()
                     .is_some_and(|path| !path.is_absolute())
                 {
                     return Err(ObjectStoreManifestValidationError::RelativeMountHint);
+                }
+                if mount_path_hint.as_deref() == Some(Path::new("/")) {
+                    return Err(ObjectStoreManifestValidationError::SystemRootMount);
                 }
                 if *media != DriveMediaKind::Ssd {
                     return Err(ObjectStoreManifestValidationError::DriveMustBeSsd);
@@ -118,7 +125,9 @@ pub enum ObjectStoreManifestValidationError {
         schema_version: u16,
     },
     BlankBackendIdentity,
+    MissingDeviceIdentity,
     RelativeMountHint,
+    SystemRootMount,
     DriveMustBeSsd,
     ProfileBackendMismatch {
         profile: DeploymentProfile,
@@ -136,8 +145,14 @@ impl Display for ObjectStoreManifestValidationError {
                 )
             }
             Self::BlankBackendIdentity => formatter.write_str("backend identity must not be blank"),
+            Self::MissingDeviceIdentity => {
+                formatter.write_str("drive backend requires a stable device identity")
+            }
             Self::RelativeMountHint => {
                 formatter.write_str("drive mount_path_hint must be absolute")
+            }
+            Self::SystemRootMount => {
+                formatter.write_str("drive backend cannot target the system root")
             }
             Self::DriveMustBeSsd => {
                 formatter.write_str("drive backend must declare non-rotational SSD media")
@@ -240,5 +255,33 @@ mod tests {
             },
         };
         manifest.validate().expect("SSD drive manifest validates");
+    }
+
+    #[test]
+    fn drive_manifest_rejects_missing_device_identity_and_system_root() {
+        let mut manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex-drive-safety").expect("store id"),
+            deployment_profile: DeploymentProfile::Drive,
+            host_mode: HostMode::System,
+            protection: ProtectionPolicy::Reproducible,
+            backend: BackendReference::Drive {
+                filesystem_identity: "apfs:123".to_string(),
+                device_identity: None,
+                media: DriveMediaKind::Ssd,
+                mount_path_hint: Some(PathBuf::from("/Volumes/CODEX")),
+            },
+        };
+        assert!(manifest.validate().is_err());
+        if let BackendReference::Drive {
+            device_identity,
+            mount_path_hint,
+            ..
+        } = &mut manifest.backend
+        {
+            *device_identity = Some("disk:456".to_string());
+            *mount_path_hint = Some(PathBuf::from("/"));
+        }
+        assert!(manifest.validate().is_err());
     }
 }
