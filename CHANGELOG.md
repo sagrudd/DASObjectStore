@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.62 - 2026-07-12
+
+- Bound Web performance-report PDF rebuilds to a dedicated two-worker blocking
+  lane with typed overload responses so report rendering cannot exhaust Axum
+  or daemon bridge capacity.
+
 ## 0.71.61 - 2026-07-12
 
 - Add single-probe half-open semantics to the daemon bridge circuit breaker so

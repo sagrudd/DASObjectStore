@@ -82,6 +82,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
+
+const MAX_PERFORMANCE_REPORT_WORKERS: usize = 2;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -117,6 +120,7 @@ pub(crate) struct StandaloneEnclosureAdminRouteState {
 pub(crate) struct StandaloneReportingRouteState {
     auth_store: LocalAuthStore,
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
+    performance_report_workers: Arc<Semaphore>,
 }
 
 impl StandaloneEnclosureAdminRouteState {
@@ -137,6 +141,7 @@ impl StandaloneReportingRouteState {
         Self {
             auth_store,
             local_user_provider: Arc::new(SystemLocalUserAuthorityProvider),
+            performance_report_workers: Arc::new(Semaphore::new(MAX_PERFORMANCE_REPORT_WORKERS)),
         }
     }
 }
@@ -344,11 +349,35 @@ async fn rebuild_performance_report(
     let uploaded_filename = headers
         .get("x-dasobjectstore-filename")
         .and_then(|value| value.to_str().ok());
-    let report = crate::reporting::rebuild_performance_report_pdf_from_upload(
-        &body,
-        uploaded_filename,
-        &current_user.username,
-    )
+    let uploaded_filename = uploaded_filename.map(str::to_owned);
+    let username = current_user.username;
+    let permit = state
+        .performance_report_workers
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            route_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "performance_report_busy",
+                "performance report capacity is saturated; retry shortly",
+            )
+        })?;
+    let report = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        crate::reporting::rebuild_performance_report_pdf_from_upload(
+            &body,
+            uploaded_filename.as_deref(),
+            &username,
+        )
+    })
+    .await
+    .map_err(|error| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "performance_report_worker_failed",
+            error.to_string(),
+        )
+    })?
     .map_err(performance_report_rebuild_route_error)?;
 
     let mut response = Body::from(report.bytes).into_response();
@@ -557,7 +586,23 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::Semaphore;
     use tower::ServiceExt;
+
+    #[test]
+    fn performance_report_worker_capacity_is_bounded() {
+        assert_eq!(super::MAX_PERFORMANCE_REPORT_WORKERS, 2);
+        let workers = Semaphore::new(super::MAX_PERFORMANCE_REPORT_WORKERS);
+        let first = workers.try_acquire().expect("first worker permit");
+        let second = workers.try_acquire().expect("second worker permit");
+        assert!(workers.try_acquire().is_err());
+        drop(first);
+        drop(second);
+        assert_eq!(
+            workers.available_permits(),
+            super::MAX_PERFORMANCE_REPORT_WORKERS
+        );
+    }
 
     #[tokio::test]
     async fn standalone_auth_routes_complete_login_session_logout_flow() {
@@ -2542,6 +2587,9 @@ mod tests {
         StandaloneReportingRouteState {
             auth_store,
             local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
+            performance_report_workers: Arc::new(Semaphore::new(
+                super::MAX_PERFORMANCE_REPORT_WORKERS,
+            )),
         }
     }
 
