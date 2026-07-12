@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.27 - 2026-07-12
+
+- Add a read-only folder inspection bridge that emits resumable reconciliation
+  manifest entries without adopting user files or unsafe paths.
+
 ## 0.72.26 - 2026-07-12
 
 - Gate remote-upload completion on a daemon-owned manifest/catalogue handoff,

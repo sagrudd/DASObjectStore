@@ -283,6 +283,9 @@ completion.
   - [x] Add a read-only `FolderBackend::inspect_user_tree` report for unmanaged
     hierarchy and unsafe entries; no adoption or authority change occurs during
     inspection, and resumable reconciliation remains open.
+  - [x] Convert the read-only inspection into a resumable reconciliation plan
+    with manifest entries and normalized download actions; unsafe paths remain
+    report-only and no user file is adopted or mutated.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

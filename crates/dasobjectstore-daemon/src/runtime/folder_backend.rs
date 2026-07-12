@@ -1,5 +1,8 @@
 //! Local bounded folder backend implementation.
 
+use super::reconciliation::{
+    plan_reconciliation, ReconciliationManifest, ReconciliationObject, ReconciliationPlan,
+};
 use dasobjectstore_core::backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
     ObjectStoreBackend,
@@ -31,6 +34,13 @@ pub struct FolderBackend {
 pub struct FolderInspectionReport {
     pub unmanaged_paths: Vec<String>,
     pub unsafe_paths: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FolderReconciliationPlan {
+    pub inspection: FolderInspectionReport,
+    pub manifest: ReconciliationManifest,
+    pub plan: ReconciliationPlan,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,6 +115,33 @@ impl FolderBackend {
         let mut report = FolderInspectionReport::default();
         inspect_user_tree(&self.root, &self.root, &mut report)?;
         Ok(report)
+    }
+
+    /// Build a resumable, read-only reconciliation plan for unmanaged regular
+    /// files. The plan never adopts or mutates user files; unsafe entries stay
+    /// visible in the inspection report and are not made authoritative.
+    pub fn plan_user_tree_reconciliation(&self) -> Result<FolderReconciliationPlan, BackendError> {
+        let inspection = self.inspect_user_tree()?;
+        let objects = inspection
+            .unmanaged_paths
+            .iter()
+            .map(|relative_path| {
+                let path = self.root.join(relative_path);
+                let metadata = fs::metadata(&path).map_err(io_error)?;
+                Ok(ReconciliationObject {
+                    key: relative_path.clone(),
+                    size_bytes: Some(metadata.len()),
+                })
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?;
+        let mut manifest =
+            ReconciliationManifest::new(self.manifest.store_id.as_str().to_string(), None);
+        let plan = plan_reconciliation(&mut manifest, &objects);
+        Ok(FolderReconciliationPlan {
+            inspection,
+            manifest,
+            plan,
+        })
     }
 
     pub fn capacity(&self) -> FolderCapacitySnapshot {
@@ -699,6 +736,7 @@ fn io_error(error: std::io::Error) -> BackendError {
 #[cfg(test)]
 mod tests {
     use super::{hash_stable_file_with_hook, FolderBackend};
+    use crate::runtime::reconciliation::ReconciliationAction;
     use dasobjectstore_core::backend::{BackendObjectKey, ObjectStoreBackend};
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
@@ -861,6 +899,37 @@ mod tests {
         let report = backend.inspect_user_tree().expect("inspection succeeds");
         assert!(!report.is_clean());
         assert_eq!(report.unmanaged_paths, vec!["incoming/run/data.txt"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_builds_read_only_resumable_reconciliation_plan() {
+        let root = unique_root();
+        let backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        fs::create_dir_all(root.join("incoming/run")).expect("user hierarchy creates");
+        fs::write(root.join("incoming/run/data.txt"), b"unmanaged").expect("user file writes");
+
+        let reconciliation = backend
+            .plan_user_tree_reconciliation()
+            .expect("reconciliation plan builds");
+
+        assert_eq!(reconciliation.manifest.store_id, "codex-folder");
+        assert_eq!(reconciliation.manifest.entries.len(), 1);
+        assert_eq!(
+            reconciliation.manifest.entries["incoming/run/data.txt"].size_bytes,
+            Some(9)
+        );
+        assert_eq!(
+            reconciliation.plan.actions,
+            vec![ReconciliationAction::Download {
+                key: "incoming/run/data.txt".to_string(),
+                relative_path: "incoming/run/data.txt".to_string(),
+                size_bytes: Some(9),
+            }]
+        );
+
+        assert!(root.join("incoming/run/data.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 

@@ -93,6 +93,10 @@ daemon-owned observations before this contract can authorize uploads.
 The daemon contract also provides a ledger-backed evaluation path: logical
 usage and outstanding reservations are read from the daemon's reservation
 ledger, while backend and SSD free-space values come from daemon-owned probes.
+Folder inspection can now also produce a durable-planner-ready reconciliation
+manifest for unmanaged regular files. This remains read-only: unsafe entries
+stay report-only, user files are not adopted, and an explicit product adoption
+decision is still required before authority changes.
 The caller cannot replace those logical observations with request data. Atomic
 reservation mutation and live S3/multipart route wiring remain follow-up work.
 The response also carries raw backend free space, configured warning/critical
