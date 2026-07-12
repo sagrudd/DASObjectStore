@@ -190,6 +190,12 @@ adapters still own their defaults, authorization, provisioning, and any
 external replication policy; those adapters are not inferred from a profile
 name.
 
+The Mnemosyne adapter crate now provides a strict versioned envelope for this
+boundary. An adapter can validate that a template is owned by its product and
+forward the request without adding defaults or filesystem/provider details.
+Synoptikon, Mneion, Mnemosyne, and standalone provisioning implementations
+remain responsible for their own product decisions.
+
 Profile promotion uses an explicit resumable state contract: planned, copying,
 destination verified, retirement pending, completed, or failed. Source
 placement remains retained through verification and is released only after an

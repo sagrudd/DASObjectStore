@@ -9,6 +9,7 @@ pub mod integrated_session;
 pub mod monas_host_boundary;
 pub mod nas_nfs_endpoint;
 pub mod nas_nfs_runtime;
+pub mod policy_templates;
 pub mod product_ui;
 pub mod prosopikon;
 pub mod storage_definition;
@@ -67,6 +68,10 @@ pub use nas_nfs_runtime::{
     NasNfsObjectServiceProbePlan, NasNfsRuntimeProbeStep, NasNfsRuntimeValidationPlan,
     NasNfsRuntimeValidationPlanError, NasNfsTenantContractBoundary,
     NAS_NFS_RUNTIME_VALIDATION_PLAN_SCHEMA_VERSION,
+};
+pub use policy_templates::{
+    ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError, ProductPolicyTemplateEnvelope,
+    PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,

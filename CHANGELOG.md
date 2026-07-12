@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.23 - 2026-07-12
+
+- Add a strict Mnemosyne adapter envelope for product-owned storage-policy
+  templates without embedding defaults or provisioning behavior.
+
 ## 0.72.22 - 2026-07-12
 
 - Add concurrent capacity-reservation regression coverage proving the

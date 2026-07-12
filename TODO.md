@@ -346,6 +346,10 @@ completion.
     unsafe slugs, unbounded new templates, invalid capacity, and copy counts
     beyond the profile's local failure-domain ceiling; product defaults,
     provisioning, and concrete adapters remain open.
+  - [x] Add a generic Mnemosyne adapter envelope that validates adapter-owned
+    template identity and emits a strict versioned shape without product
+    defaults, paths, credentials, or provisioning behavior; concrete product
+    defaults and provisioning adapters remain open.
 - [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
   import jobs preserving IDs, versions, hashes, provenance, and protection.
   - [x] Add a core resumable promotion state machine that retains source
