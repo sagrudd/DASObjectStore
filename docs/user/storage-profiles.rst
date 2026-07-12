@@ -77,6 +77,11 @@ manifest for an existing store.
 Drive manifests must declare ``media: ssd`` and stable filesystem/device
 identities. A mount path is only a hint for local probing; a name such as
 ``/Volumes/SSD`` is never accepted as evidence that the device is non-rotational.
+The platform crate now validates injected observations without touching a real
+device: media must be positively SSD, identities must match the manifest, the
+mount must be non-root and writable, and system-root status must be confirmed
+safe. Host-specific diskutil/lsblk observation and daemon adoption remain
+future integration work.
 
 Protection is independent of the profile: manifests may require ``local_only``,
 ``reproducible``, ``externally_replicated``, or ``appliance_protected`` policy.

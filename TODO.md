@@ -251,6 +251,9 @@ completion.
   - [x] Require an explicit `DriveMediaKind::Ssd` plus stable filesystem/device
     identity in portable drive manifests; runtime mount/device probing and
     create/adopt orchestration remain open.
+  - [x] Add injected platform validation for positively observed SSD media,
+    matching filesystem/device identities, safe mounted paths, root-status,
+    and writable mode; real diskutil/lsblk observation remains external.
 - [ ] Reject the system root and already-claimed devices by default; support a
   documented administrator override for virtual or unusual SSD topology.
   - [x] Reject missing drive device identity and `/` system-root mount hints in

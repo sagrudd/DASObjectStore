@@ -1,5 +1,6 @@
 //! Platform probing boundary for macOS and Linux.
 
+pub mod drive;
 pub mod enclosure;
 pub mod health;
 pub mod linux;
@@ -9,6 +10,10 @@ pub mod macos_health;
 pub mod model;
 pub mod probe;
 
+pub use drive::{
+    validate_drive_profile, DriveProfileObservation, DriveProfileValidationError,
+    ObservedDriveMedia, ValidatedDriveProfile,
+};
 pub use enclosure::{group_enclosures, with_enclosure_groups};
 pub use model::{
     EnclosureIdentity, FilesystemHint, HostPlatform, ObservedDisk, ObservedEnclosure,
