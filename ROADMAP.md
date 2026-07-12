@@ -917,7 +917,8 @@ catalogue accounting, and stale-reservation expiry remain open.
 Local file ingest now uses the same provider boundary for each non-skipped
 object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.
-S3 reconciliation and multipart paths still need explicit provider injection.
+Garage S3 reconciliation now passes its controller-owned provider into that
+worker as well; multipart paths still need explicit provider injection.
 
 ## Milestone 28: Folder ObjectStore Profile
 

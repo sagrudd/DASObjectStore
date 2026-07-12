@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.42 - 2026-07-12
+
+- Pass daemon-owned capacity reservations through Garage S3 reconciliation
+  into the local ingest settlement lifecycle.
+
 ## 0.72.41 - 2026-07-12
 
 - Wire local file ingest to daemon-owned per-object capacity reservations with

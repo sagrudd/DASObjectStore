@@ -267,6 +267,7 @@ where
             dry_run,
             accepted_at_utc,
             is_cancelled,
+            self.capacity_admission_provider.clone(),
             emit_progress,
         )
     }

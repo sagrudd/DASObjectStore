@@ -1,5 +1,6 @@
 //! Garage S3 reconciliation transfer orchestration.
 
+use super::capacity_provider::CapacityAdmissionProvider;
 use super::reconciliation::{
     plan_reconciliation, ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
     ReconciliationManifestError, ReconciliationObject,
@@ -9,7 +10,7 @@ use crate::api::{
     DaemonIngestConflictPolicy, DaemonIngressOrigin, StoreRepairS3Reconciliation,
     SubmitIngestFilesRequest,
 };
-use crate::runtime::submit_ingest_files_to_local_store_with_progress;
+use crate::runtime::submit_ingest_files_to_local_store_with_capacity_provider;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_object_service::{
@@ -26,6 +27,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     dry_run: bool,
     accepted_at_utc: &str,
     is_cancelled: &dyn Fn() -> bool,
+    capacity_provider: Option<std::sync::Arc<dyn CapacityAdmissionProvider>>,
     emit_progress: &mut dyn FnMut(
         crate::api::DaemonIngestProgressEvent,
     ) -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
@@ -234,7 +236,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
             }
         }
     }
-    let ingest = submit_ingest_files_to_local_store_with_progress(
+    let ingest = submit_ingest_files_to_local_store_with_capacity_provider(
         SubmitIngestFilesRequest {
             endpoint: store_id,
             source_path: staging_path.clone(),
@@ -248,6 +250,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         },
         accepted_at_utc,
         emit_progress,
+        capacity_provider,
     )
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
         operation: format!("S3 reconciliation ingest failed: {error}"),

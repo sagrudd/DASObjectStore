@@ -141,9 +141,10 @@ the same lifecycle before bounded profiles are enabled for that path.
 Local file ingest now uses the same daemon provider boundary per non-skipped
 object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failures release outstanding IDs. Dry
-runs and skipped existing objects never reserve. S3 reconciliation and
-multipart adapters still need explicit provider injection before those paths
-are considered quota-complete.
+runs and skipped existing objects never reserve. S3 reconciliation now passes
+the controller-owned provider through the staged-download worker;
+multipart adapters still need explicit provider injection before that path is
+considered quota-complete.
 The core ledger has a concurrent reservation regression: simultaneous callers
 contending for a bounded quota cannot overbook logical capacity. Crash/restart
 reservation persistence, multipart expiry, dedupe accounting, and full-disk

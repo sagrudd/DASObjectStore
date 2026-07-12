@@ -251,8 +251,12 @@ completion.
     non-skipped file reserves its size with the verified ingress origin before
     source/staging or direct-HDD work, commits after durable metadata settlement,
     and releases outstanding reservations on failure. Dry runs and skipped
-    existing objects do not reserve; S3 reconciliation and multipart adapters
-    still need to pass the provider through their own orchestration paths.
+    existing objects do not reserve; multipart adapters still need to pass the
+    provider through their own orchestration paths.
+  - [x] Pass the daemon-owned capacity provider through Garage S3
+    reconciliation into the local ingest worker, so staged provider downloads
+    reserve with ``remote_s3`` origin and settle through the same commit/release
+    lifecycle; appliance credentials and provider soak remain blocked.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.
