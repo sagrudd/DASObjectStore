@@ -30,6 +30,11 @@ agreement before landing.
   helpers so the daemon request-handler façade is within the production module
   budget without changing typed response or error contracts.
 
+## 0.71.10 - 2026-07-12
+
+- Extract daemon ingest pipeline work records and live progress/rate state into
+  a focused module while preserving SSD-first/direct-HDD and telemetry tests.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign

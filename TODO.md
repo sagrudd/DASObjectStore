@@ -192,6 +192,10 @@ list until every temporary size-budget exception has been removed.
   duplicated calendar implementations from daemon, GUI API, and remote client.
 - [x] Split daemon ingest runtime endpoint discovery, managed-device
   environment, and HDD scheduling from the execution façade.
+- [x] Extract daemon ingest pipeline work records and live progress/rate state
+  into `runtime/ingest_files/pipeline_state.rs`; preserve SSD-first routing,
+  direct-HDD policy, and telemetry tests while continuing the remaining
+  execution-engine split.
 - [x] Split GUI dashboard object-service discovery and telemetry projection
   from the home-dashboard assembly façade.
 - [x] Add CI enforcement for a 1,000 production-line module budget, with a
