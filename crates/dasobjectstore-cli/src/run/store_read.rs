@@ -216,7 +216,7 @@ pub(super) fn run_store_list(
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
     let registry_path = if args.portable() {
-        let ssd_root = known_ssd_root_for_adopt(args.ssd_root())?;
+        let ssd_root = super::registry_access::known_ssd_root_for_adopt(args.ssd_root())?;
         portable_store_registry_path(ssd_root)
     } else {
         args.registry_path()

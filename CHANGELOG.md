@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.29 - 2026-07-12
+
+- Extract portable registry mirroring, known-root validation, and writer-group
+  registry/ACL access into the CLI registry-access module while preserving
+  fail-closed Linux group checks and non-Linux no-op behavior.
+
 ## 0.71.28 - 2026-07-12
 
 - Extract host connection-status assessment, probe projection, preferred-path

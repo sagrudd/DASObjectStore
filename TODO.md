@@ -245,6 +245,10 @@ list until every temporary size-budget exception has been removed.
     selection, and operator recommendations into
     `crates/dasobjectstore-cli/src/run/connection_status.rs`; preserve
     Thunderbolt preference, topology context, and USB fallback guidance.
+  - [x] Extract portable registry mirroring, known-root validation, and
+    writer-group registry/ACL access into
+    `crates/dasobjectstore-cli/src/run/registry_access.rs`; preserve
+    non-Linux no-op behavior and fail-closed Linux group checks.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.

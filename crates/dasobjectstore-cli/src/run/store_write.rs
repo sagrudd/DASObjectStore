@@ -100,22 +100,26 @@ pub(super) fn run_store_create(
         .unwrap_or_else(default_store_registry_path);
     let report = upsert_store_definition(&registry_path, definition)?;
     let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
-    let portable_report = super::upsert_portable_store_definition(
+    let portable_report = super::registry_access::upsert_portable_store_definition(
         args.ssd_root(),
         allow_default_ssd,
         &report.definition,
     )?;
     if let Some(writer_group) = &report.definition.writer_group {
-        super::grant_store_writer_group_access(args.ssd_root(), allow_default_ssd, writer_group)?;
-        super::grant_writer_group_registry_access(&registry_path, writer_group)?;
-        super::grant_writer_group_registry_access(
+        super::registry_access::grant_store_writer_group_access(
+            args.ssd_root(),
+            allow_default_ssd,
+            writer_group,
+        )?;
+        super::registry_access::grant_writer_group_registry_access(&registry_path, writer_group)?;
+        super::registry_access::grant_writer_group_registry_access(
             &default_subobject_registry_path(),
             writer_group,
         )?;
     }
     if let Some(reader_group) = &report.definition.reader_group {
-        super::grant_writer_group_registry_access(&registry_path, reader_group)?;
-        super::grant_writer_group_registry_access(
+        super::registry_access::grant_writer_group_registry_access(&registry_path, reader_group)?;
+        super::registry_access::grant_writer_group_registry_access(
             &default_subobject_registry_path(),
             reader_group,
         )?;
@@ -149,7 +153,7 @@ pub(super) fn run_store_adopt(
     args: &StoreAdoptArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let ssd_root = super::known_ssd_root_for_adopt(args.ssd_root())?;
+    let ssd_root = super::registry_access::known_ssd_root_for_adopt(args.ssd_root())?;
     let portable_registry_path = portable_store_registry_path(&ssd_root);
     let definitions = read_store_registry(&portable_registry_path)?;
     if definitions.is_empty() {

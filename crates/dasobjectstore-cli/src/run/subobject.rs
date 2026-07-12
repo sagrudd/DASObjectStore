@@ -28,7 +28,11 @@ fn run_subobject_create(
         allow_default_ssd,
         &report.definition,
     )?;
-    super::grant_subobject_writer_group_registry_access(args, &report.definition, &registry_path)?;
+    super::registry_access::grant_subobject_writer_group_registry_access(
+        args,
+        &report.definition,
+        &registry_path,
+    )?;
 
     write_subobject_create_report(&report, portable_report.as_ref(), writer)
 }
@@ -137,7 +141,8 @@ fn mirror_portable_subobject_definition(
     allow_default_ssd: bool,
     definition: &SubObjectDefinition,
 ) -> Result<Option<SubObjectRegistryUpdateReport>, CliError> {
-    let Some(ssd_root) = super::known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)?
+    let Some(ssd_root) =
+        super::registry_access::known_ssd_root_for_optional_mirror(ssd_root, allow_default_ssd)?
     else {
         return Ok(None);
     };
