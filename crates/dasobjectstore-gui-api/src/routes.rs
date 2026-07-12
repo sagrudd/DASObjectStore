@@ -142,7 +142,31 @@ async fn endpoints_workspace() -> Json<EndpointsWorkspaceView> {
 }
 
 async fn activity_workspace() -> Json<ActivityWorkspaceView> {
-    Json(crate::activity_aggregator::live_activity_workspace())
+    let daemon_jobs = crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = dasobjectstore_daemon::DaemonClient::new(
+                dasobjectstore_daemon::UnixSocketDaemonTransport::new(
+                    dasobjectstore_daemon::DaemonRuntimeConfig::default_packaged().socket_path,
+                ),
+            );
+            client
+                .list_jobs(dasobjectstore_daemon::DaemonJobListRequest {
+                    limit: Some(crate::activity_aggregator::ACTIVITY_JOB_LIMIT),
+                })
+                .map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|error| match error {
+            crate::daemon_bridge::DaemonBridgeError::Client(error) => error.message,
+            crate::daemon_bridge::DaemonBridgeError::Busy => {
+                "daemon control capacity is saturated; retry shortly".to_string()
+            }
+            crate::daemon_bridge::DaemonBridgeError::Deadline => {
+                "daemon activity request exceeded its deadline; retry shortly".to_string()
+            }
+            crate::daemon_bridge::DaemonBridgeError::Join(message) => message,
+        });
+    Json(crate::activity_aggregator::live_activity_workspace_with_daemon_result(daemon_jobs))
 }
 
 async fn plan_action(

@@ -11,8 +11,7 @@ use crate::workspaces::{
 };
 use dasobjectstore_core::lifecycle::{ObjectState, PoolState};
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobState,
-    DaemonJobSummary, DaemonRuntimeConfig, UnixSocketDaemonTransport,
+    DaemonJobKind, DaemonJobListResponse, DaemonJobState, DaemonJobSummary,
 };
 use dasobjectstore_metadata::{
     read_ingest_queue, read_pool_repair_activity, IngestQueueJob, IngestQueueSnapshot,
@@ -20,12 +19,14 @@ use dasobjectstore_metadata::{
 };
 use std::path::{Path, PathBuf};
 
-const ACTIVITY_JOB_LIMIT: usize = 50;
+pub(crate) const ACTIVITY_JOB_LIMIT: usize = 50;
 const ACTIVITY_LIVE_SQLITE_ENV: &str = "DASOBJECTSTORE_LIVE_SQLITE_PATH";
 const DEFAULT_SSD_ROOT_ENV: &str = "DASOBJECTSTORE_SSD_ROOT";
 const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 
-pub fn live_activity_workspace() -> ActivityWorkspaceView {
+pub fn live_activity_workspace_with_daemon_result(
+    daemon_jobs: Result<DaemonJobListResponse, String>,
+) -> ActivityWorkspaceView {
     let live_sqlite_path = activity_live_sqlite_path();
     let (ingest, destage, mut warnings) =
         match activity_queue_views_from_live_sqlite(&live_sqlite_path) {
@@ -33,17 +34,12 @@ pub fn live_activity_workspace() -> ActivityWorkspaceView {
             Err(warning) => (None, None, vec![warning]),
         };
 
-    let client = DaemonClient::new(UnixSocketDaemonTransport::new(
-        DaemonRuntimeConfig::default_packaged().socket_path,
-    ));
-    let mut tasks = match client.list_jobs(DaemonJobListRequest {
-        limit: Some(ACTIVITY_JOB_LIMIT),
-    }) {
+    let mut tasks = match daemon_jobs {
         Ok(response) => activity_tasks_from_daemon_jobs(&response),
-        Err(err) => {
+        Err(message) => {
             warnings.push(DashboardWarning::new(
                 "daemon_activity_unavailable",
-                format!("Daemon activity job list is unavailable: {err}"),
+                format!("Daemon activity job list is unavailable: {message}"),
             ));
             Vec::new()
         }

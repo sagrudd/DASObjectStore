@@ -115,12 +115,20 @@ pub(crate) trait StandaloneObjectBrowserClient: Send + Sync {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StandaloneObjectBrowserClientError {
-    status: StatusCode,
-    code: String,
-    message: String,
+    pub(crate) status: StatusCode,
+    pub(crate) code: String,
+    pub(crate) message: String,
 }
 
 impl StandaloneObjectBrowserClientError {
+    pub(crate) fn bridge_failure(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "daemon_bridge_client_failed".to_string(),
+            message: message.into(),
+        }
+    }
+
     #[cfg(test)]
     fn forbidden(message: impl Into<String>) -> Self {
         Self {

@@ -1,5 +1,5 @@
 use crate::object_browser_routes::StandaloneObjectBrowserClientError;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -26,6 +26,11 @@ impl DaemonBridge {
             permits: Arc::new(Semaphore::new(DEFAULT_PERMITS)),
             deadline: DEFAULT_DEADLINE,
         }
+    }
+
+    pub(crate) fn shared_packaged() -> Arc<Self> {
+        static BRIDGE: OnceLock<Arc<DaemonBridge>> = OnceLock::new();
+        Arc::clone(BRIDGE.get_or_init(|| Arc::new(Self::packaged())))
     }
 
     #[cfg(test)]
@@ -65,6 +70,15 @@ impl DaemonBridge {
             Ok(Err(error)) => Err(DaemonBridgeError::Join(error.to_string())),
             Err(_) => Err(DaemonBridgeError::Deadline),
         }
+    }
+
+    pub(crate) async fn call_message<T, F>(&self, operation: F) -> Result<T, DaemonBridgeError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, String> + Send + 'static,
+    {
+        self.call(move || operation().map_err(StandaloneObjectBrowserClientError::bridge_failure))
+            .await
     }
 }
 

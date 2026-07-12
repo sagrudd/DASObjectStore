@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.52 - 2026-07-12
+
+- Route the Activity workspace daemon job-list lookup through the shared
+  bounded bridge while preserving a degraded 200 response with actionable
+  warnings when daemon capacity or deadlines prevent a live snapshot.
+
 ## 0.71.51 - 2026-07-12
 
 - Bound folder archive generation to two concurrent blocking workers, retaining
