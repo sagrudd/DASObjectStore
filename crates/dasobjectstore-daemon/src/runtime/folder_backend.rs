@@ -33,6 +33,15 @@ pub struct FolderInspectionReport {
     pub unsafe_paths: Vec<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FolderCapacitySnapshot {
+    pub used_bytes: u64,
+    pub reserved_bytes: u64,
+    pub available_bytes: Option<u64>,
+    pub logical_limit_bytes: Option<u64>,
+    pub backend_reserve_bytes: u64,
+}
+
 impl FolderInspectionReport {
     pub fn is_clean(&self) -> bool {
         self.unmanaged_paths.is_empty() && self.unsafe_paths.is_empty()
@@ -96,6 +105,17 @@ impl FolderBackend {
         let mut report = FolderInspectionReport::default();
         inspect_user_tree(&self.root, &self.root, &mut report)?;
         Ok(report)
+    }
+
+    pub fn capacity(&self) -> FolderCapacitySnapshot {
+        let policy = self.ledger.policy();
+        FolderCapacitySnapshot {
+            used_bytes: self.ledger.used_bytes(),
+            reserved_bytes: self.ledger.reserved_bytes(),
+            available_bytes: self.ledger.available_bytes(),
+            logical_limit_bytes: policy.logical_limit_bytes,
+            backend_reserve_bytes: policy.backend_reserve_bytes,
+        }
     }
 
     fn object_path(&self, key: &BackendObjectKey) -> Result<PathBuf, BackendError> {
@@ -454,6 +474,10 @@ mod tests {
             version: 1,
         };
         backend.reserve("upload-1", 11).expect("reserves capacity");
+        let capacity = backend.capacity();
+        assert_eq!(capacity.used_bytes, 0);
+        assert_eq!(capacity.reserved_bytes, 11);
+        assert_eq!(capacity.available_bytes, Some(949));
         let staged = backend
             .stage("upload-1", &key, &mut Cursor::new(b"hello world".to_vec()))
             .expect("stages object");

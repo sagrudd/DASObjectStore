@@ -53,7 +53,7 @@ pub use endpoint_registry::{
     EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,
     ENDPOINT_REGISTRY_SCHEMA,
 };
-pub use folder_backend::FolderBackend;
+pub use folder_backend::{FolderBackend, FolderCapacitySnapshot, FolderInspectionReport};
 pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,

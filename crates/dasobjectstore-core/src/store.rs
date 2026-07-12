@@ -216,6 +216,19 @@ impl CapacityReservationLedger {
         self.reservations.values().copied().sum()
     }
 
+    pub fn policy(&self) -> &CapacityPolicy {
+        &self.policy
+    }
+
+    pub fn available_bytes(&self) -> Option<u64> {
+        self.policy.logical_limit_bytes.map(|limit| {
+            limit
+                .saturating_sub(self.policy.backend_reserve_bytes)
+                .saturating_sub(self.used_bytes)
+                .saturating_sub(self.reserved_bytes())
+        })
+    }
+
     pub fn reserve(
         &mut self,
         reservation_id: impl Into<String>,

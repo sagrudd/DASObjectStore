@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.86 - 2026-07-12
+
+- Expose typed folder capacity snapshots alongside browse, read, verify, and
+  health operations for profile-aware admission inspection.
+
 ## 0.71.85 - 2026-07-12
 
 - Add read-only folder hierarchy inspection that reports unmanaged and unsafe

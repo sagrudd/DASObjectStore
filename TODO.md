@@ -194,6 +194,9 @@ completion.
     inspection, and resumable reconciliation remains open.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
+  - [x] Expose folder browse/read/verify, health, and typed capacity snapshots
+    from `FolderBackend`; repair/lifecycle/S3 and catalogue integration remain
+    open.
 - [ ] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.
