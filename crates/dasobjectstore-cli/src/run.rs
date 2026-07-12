@@ -18,6 +18,7 @@ mod disk_lockdown;
 mod disk_prepare;
 mod health;
 mod output;
+mod performance_execution;
 mod performance_io;
 mod performance_plan;
 mod performance_rates;
@@ -35,6 +36,10 @@ mod store_read;
 mod store_write;
 mod subobject;
 
+use self::performance_execution::{
+    try_submit_pending_ssd_pipeline_jobs, ActiveHddWrite, ActiveHddWriteKey, DirectHddJob,
+    SsdPipelineJob,
+};
 #[cfg(test)]
 use self::performance_io::{
     measure_copy_with_progress, performance_sync_all_calls, reset_performance_sync_all_calls,
@@ -2819,62 +2824,6 @@ fn benchmark_direct_hdd(
     })
 }
 
-#[derive(Debug)]
-struct SsdPipelineJob {
-    file_index: u32,
-    copy_index: usize,
-    relative_path: PathBuf,
-    ssd_path: PathBuf,
-    size_bytes: u64,
-}
-
-fn try_submit_pending_ssd_pipeline_jobs(
-    sender: &mpsc::SyncSender<SsdPipelineJob>,
-    pending_jobs: &mut VecDeque<SsdPipelineJob>,
-    submitted_hdd_jobs: &mut usize,
-) -> Result<bool, CliError> {
-    let mut submitted_any = false;
-    while let Some(job) = pending_jobs.pop_front() {
-        match sender.try_send(job) {
-            Ok(()) => {
-                *submitted_hdd_jobs += 1;
-                submitted_any = true;
-            }
-            Err(mpsc::TrySendError::Full(job)) => {
-                pending_jobs.push_front(job);
-                return Ok(submitted_any);
-            }
-            Err(mpsc::TrySendError::Disconnected(_)) => {
-                return Err(CliError::CommandFailed(
-                    "performance-test HDD workers stopped early".to_string(),
-                ));
-            }
-        }
-    }
-    Ok(submitted_any)
-}
-
-#[derive(Debug)]
-struct DirectHddJob {
-    payload: PerformancePayload,
-    copy_index: usize,
-}
-
-type ActiveHddWriteKey = (u32, usize);
-type ActiveHddWriteMap = Arc<Mutex<BTreeMap<ActiveHddWriteKey, ActiveHddWrite>>>;
-
-#[derive(Clone, Debug)]
-struct ActiveHddWrite {
-    file_index: u32,
-    copy_index: usize,
-    relative_path: PathBuf,
-    disk_id: DiskId,
-    size_bytes: u64,
-    bytes_written: u64,
-    started: Instant,
-    phase: PerformanceCopyProgressPhase,
-}
-
 fn timestamped_run_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5525,6 +5474,9 @@ impl From<ProbeError> for CliError {
 
 #[cfg(test)]
 mod tests {
+    use super::performance_execution::{
+        try_submit_pending_ssd_pipeline_jobs, ActiveHddWrite, ActiveHddWriteMap, SsdPipelineJob,
+    };
     use super::performance_scheduler::{DiskPlacementScheduler, DiskPlacementState};
     use super::{
         active_hdd_landing_lines, benchmark_direct_hdd, benchmark_ssd_only,
@@ -5538,18 +5490,17 @@ mod tests {
         plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
         render_performance_report, render_performance_report_from_json_artifact,
         render_performance_tui_snapshot, render_simple_pdf, reset_performance_sync_all_calls, run,
-        source_performance_workload, throughput, try_submit_pending_ssd_pipeline_jobs,
-        update_file_read_measurements_from_disk_results, validate_managed_hdds_on_supported_das,
-        validate_pdf_report_path, write_health_json, write_health_summary, write_health_verbose,
-        write_host_connection_status, write_pretty_report, zero_measurement, ActiveHddWrite,
-        ActiveHddWriteMap, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
-        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
+        source_performance_workload, throughput, update_file_read_measurements_from_disk_results,
+        validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
+        write_health_summary, write_health_verbose, write_host_connection_status,
+        write_pretty_report, zero_measurement, CliError, ConnectionAssessment, DiskHealthSummary,
+        HealthReport, ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
         PerformanceCopyProgressPhase, PerformanceDiskResult, PerformanceFileResult,
         PerformanceIoSample, PerformanceMeasurement, PerformancePayload, PerformanceRecommendation,
         PerformanceReport, PerformanceScenarioKind, PerformanceScenarioResult,
         PerformanceSsdResidencyBudget, PerformanceSsdSettler, PerformanceTuiContext,
         PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
-        SsdPipelineBenchmarkOptions, SsdPipelineJob, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
+        SsdPipelineBenchmarkOptions, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
     use crate::cli::{Cli, PerformanceFileOrder, PerformanceFileSelection};
     use clap::Parser;

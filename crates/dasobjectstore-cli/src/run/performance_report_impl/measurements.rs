@@ -1,14 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
+use super::super::super::performance_execution::{ActiveHddWrite, ActiveHddWriteMap};
 use super::super::super::performance_plan::{
     PerformanceBenchmarkResults, PerformanceDiskResult, PerformanceFileResult,
     PerformanceMeasurement, PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
     PerformanceScenarioResult,
 };
-use super::super::super::{
-    format_bytes, ActiveHddWrite, ActiveHddWriteMap, CliError, DiskId, PerformanceCopyProgressPhase,
-};
+use super::super::super::{format_bytes, CliError, DiskId, PerformanceCopyProgressPhase};
 use super::*;
 use crate::cli::PerformanceFileOrder;
 
