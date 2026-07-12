@@ -1649,6 +1649,9 @@ list until every temporary size-budget exception has been removed.
   samples, legacy throughput-file fallback, no observed IO, and telemetry
   collection failure. Preserve chart gaps and show a linked diagnostic rather
   than silently rendering an empty graph.
+  - [x] Add explicit `source` and optional `message` fields to throughput
+    summaries: daemon disk-IO retention, legacy throughput-file fallback, and
+    unavailable state are distinguishable while legacy payloads decode safely.
 - [ ] Add appliance integration coverage using managed marker, mount, sysfs,
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device

@@ -273,7 +273,10 @@ authenticated daemon telemetry contract remains the authoritative full history.
 The Home page refreshes its selected-window telemetry payload every 30 seconds
 while the page is open. The throughput telemetry chart uses a stable SVG view
 box, fixed axes, bounded labels, and an explicit empty-sample state so updates
-do not resize cards or interpolate missing data into the visible line.
+do not resize cards or interpolate missing data into the visible line. The
+throughput summary identifies whether its samples came from daemon disk-IO
+retention, the legacy throughput file, or an unavailable source, and carries a
+diagnostic message for the latter two cases.
 
 Any authenticated operator can use Home as a read-only appliance status page.
 Administrator status only affects whether the same session can enter

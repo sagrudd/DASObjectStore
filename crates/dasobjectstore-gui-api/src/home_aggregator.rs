@@ -175,7 +175,9 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
                 "throughput_telemetry_unavailable",
                 "Seven-day throughput telemetry has not yet been written for the Web dashboard.",
             ));
-            ThroughputSummaryView::bootstrap_fixture()
+            ThroughputSummaryView::unavailable(
+                "Seven-day throughput telemetry has not yet been written for the Web dashboard.",
+            )
         });
     let disk_io = telemetry
         .as_ref()
@@ -600,6 +602,8 @@ fn telemetry_throughput(
         ingest_tib: format_tib(written_bytes),
         avg_read_mib_s: mib_per_second(mean_rate(&read_rates)),
         avg_write_mib_s: mib_per_second(mean_rate(&write_rates)),
+        source: "daemon_disk_io".to_string(),
+        message: None,
         daily: daily
             .into_iter()
             .map(|(date, (read_bytes, written_bytes))| ThroughputDayView {
@@ -887,6 +891,8 @@ fn read_throughput_7d(path: &Path) -> Option<ThroughputSummaryView> {
         ingest_tib: format_tib(parsed.ingest_bytes),
         avg_read_mib_s: mib_per_second(parsed.avg_read_bytes_per_second),
         avg_write_mib_s: mib_per_second(parsed.avg_write_bytes_per_second),
+        source: "legacy_file".to_string(),
+        message: None,
         daily: parsed
             .daily
             .into_iter()
@@ -1054,6 +1060,7 @@ mod tests {
         );
         assert_eq!(view.memory_stress.pressure_percent, 25);
         assert_eq!(view.throughput_7d.avg_write_mib_s, 200);
+        assert_eq!(view.throughput_7d.source, "legacy_file");
         assert_eq!(view.throughput_7d.daily.len(), 1);
         assert!(view.object_service.remote_ready);
         assert_eq!(
@@ -1153,6 +1160,7 @@ mod tests {
         );
         assert_eq!(view.throughput_7d.avg_read_mib_s, 10);
         assert_eq!(view.throughput_7d.avg_write_mib_s, 20);
+        assert_eq!(view.throughput_7d.source, "daemon_disk_io");
         assert_eq!(view.throughput_7d.daily.len(), 1);
         assert!(view.disk_io.available);
         assert_eq!(view.disk_io.read_mib_s, 10);

@@ -193,6 +193,10 @@ pub struct ThroughputSummaryView {
     pub avg_read_mib_s: u32,
     pub avg_write_mib_s: u32,
     pub daily: Vec<ThroughputDayView>,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 impl ThroughputSummaryView {
@@ -205,6 +209,16 @@ impl ThroughputSummaryView {
             avg_read_mib_s: 0,
             avg_write_mib_s: 0,
             daily: Vec::new(),
+            source: "bootstrap_fixture".to_string(),
+            message: Some("Throughput telemetry is not available yet.".to_string()),
+        }
+    }
+
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            source: "unavailable".to_string(),
+            message: Some(message.into()),
+            ..Self::bootstrap_fixture()
         }
     }
 }

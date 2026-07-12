@@ -472,6 +472,14 @@ pub struct ThroughputSummaryResponse {
     pub avg_write_mib_s: u32,
     #[serde(default)]
     pub daily: Vec<ThroughputDayResponse>,
+    #[serde(default = "default_throughput_source")]
+    pub source: String,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+fn default_throughput_source() -> String {
+    "unavailable".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]

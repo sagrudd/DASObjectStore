@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.70 - 2026-07-12
+
+- Label Home throughput summaries by daemon telemetry, legacy file fallback, or
+  unavailable state and preserve diagnostics through the Web response contract.
+
 ## 0.71.69 - 2026-07-12
 
 - Carry Home Disk IO collection quality and raw missing-data markers alongside
