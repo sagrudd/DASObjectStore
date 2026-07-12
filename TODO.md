@@ -116,6 +116,11 @@ completion.
 - [ ] Version portable manifest and placement contracts so logical identity,
   hierarchy, versions, hashes, provenance, protection, and backend locations do
   not encode mandatory appliance SSD/HDD assumptions.
+  - [x] Add a versioned `ObjectStoreManifest` with explicit folder root,
+    drive filesystem/device identity, or appliance pool backend references;
+    legacy metadata remains untouched and profile/backend mismatches are
+    rejected. Logical object versions, placement records, and protection fields
+    remain follow-up additions.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

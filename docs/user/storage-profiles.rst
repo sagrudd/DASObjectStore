@@ -25,3 +25,10 @@ warning/critical thresholds. Its reservation ledger admits bytes transactionally
 before an upload and commits or releases the reservation after durable
 finalization. Existing appliance policies remain explicitly unbounded until an
 operator performs a compatibility-aware capacity migration.
+
+Portable manifests identify a profile with a versioned backend reference:
+folder manifests store a canonical root identity, drive manifests store stable
+filesystem/device identities plus an optional mount hint, and appliance
+manifests reference a pool. A path hint is never treated as the backend
+identity, and an explicit migration/adoption step is required before writing a
+manifest for an existing store.

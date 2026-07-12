@@ -1,0 +1,202 @@
+//! Portable, versioned ObjectStore identity and backend-location contract.
+//!
+//! This contract deliberately keeps appliance pool/disk placement separate
+//! from folder and drive identities. Existing metadata is not reinterpreted;
+//! callers must explicitly write a manifest when adopting a profile.
+
+use crate::deployment::{DeploymentProfile, HostMode};
+use crate::ids::StoreId;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
+use std::path::PathBuf;
+
+pub const OBJECT_STORE_MANIFEST_SCHEMA_VERSION: u16 = 1;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ObjectStoreManifest {
+    pub schema_version: u16,
+    pub store_id: StoreId,
+    pub deployment_profile: DeploymentProfile,
+    pub host_mode: HostMode,
+    pub backend: BackendReference,
+}
+
+impl ObjectStoreManifest {
+    pub fn validate(&self) -> Result<(), ObjectStoreManifestValidationError> {
+        if self.schema_version != OBJECT_STORE_MANIFEST_SCHEMA_VERSION {
+            return Err(ObjectStoreManifestValidationError::UnsupportedSchema {
+                schema_version: self.schema_version,
+            });
+        }
+        self.backend.validate_for_profile(self.deployment_profile)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BackendReference {
+    Folder {
+        /// Canonical root identity, not an untrusted user-facing path.
+        root_identity: String,
+    },
+    Drive {
+        filesystem_identity: String,
+        device_identity: Option<String>,
+        #[serde(default)]
+        mount_path_hint: Option<PathBuf>,
+    },
+    Appliance {
+        pool_id: String,
+    },
+}
+
+impl BackendReference {
+    fn validate_for_profile(
+        &self,
+        profile: DeploymentProfile,
+    ) -> Result<(), ObjectStoreManifestValidationError> {
+        let expected = match self {
+            Self::Folder { root_identity } => {
+                if root_identity.trim().is_empty() {
+                    return Err(ObjectStoreManifestValidationError::BlankBackendIdentity);
+                }
+                DeploymentProfile::Folder
+            }
+            Self::Drive {
+                filesystem_identity,
+                device_identity,
+                mount_path_hint,
+            } => {
+                if filesystem_identity.trim().is_empty()
+                    || device_identity
+                        .as_deref()
+                        .is_some_and(|identity| identity.trim().is_empty())
+                {
+                    return Err(ObjectStoreManifestValidationError::BlankBackendIdentity);
+                }
+                if mount_path_hint
+                    .as_ref()
+                    .is_some_and(|path| !path.is_absolute())
+                {
+                    return Err(ObjectStoreManifestValidationError::RelativeMountHint);
+                }
+                DeploymentProfile::Drive
+            }
+            Self::Appliance { pool_id } => {
+                if pool_id.trim().is_empty() {
+                    return Err(ObjectStoreManifestValidationError::BlankBackendIdentity);
+                }
+                DeploymentProfile::Appliance
+            }
+        };
+        if profile != expected {
+            return Err(ObjectStoreManifestValidationError::ProfileBackendMismatch {
+                profile,
+                backend: expected,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObjectStoreManifestValidationError {
+    UnsupportedSchema {
+        schema_version: u16,
+    },
+    BlankBackendIdentity,
+    RelativeMountHint,
+    ProfileBackendMismatch {
+        profile: DeploymentProfile,
+        backend: DeploymentProfile,
+    },
+}
+
+impl Display for ObjectStoreManifestValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedSchema { schema_version } => {
+                write!(
+                    formatter,
+                    "unsupported ObjectStore manifest schema {schema_version}"
+                )
+            }
+            Self::BlankBackendIdentity => formatter.write_str("backend identity must not be blank"),
+            Self::RelativeMountHint => {
+                formatter.write_str("drive mount_path_hint must be absolute")
+            }
+            Self::ProfileBackendMismatch { profile, backend } => write!(
+                formatter,
+                "deployment profile {} does not match backend reference {}",
+                profile.name(),
+                backend.name()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ObjectStoreManifestValidationError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION};
+    use crate::deployment::{DeploymentProfile, HostMode};
+    use crate::ids::StoreId;
+    use std::path::PathBuf;
+
+    #[test]
+    fn folder_manifest_uses_root_identity_and_stable_wire_shape() {
+        let manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex").expect("store id"),
+            deployment_profile: DeploymentProfile::Folder,
+            host_mode: HostMode::PerUser,
+            backend: BackendReference::Folder {
+                root_identity: "fsid:codex-root".to_string(),
+            },
+        };
+        manifest.validate().expect("manifest validates");
+        let encoded = serde_json::to_value(manifest).expect("manifest serializes");
+        assert_eq!(encoded["deployment_profile"], "folder");
+        assert_eq!(encoded["host_mode"], "per_user");
+        assert_eq!(encoded["backend"]["kind"], "folder");
+        assert_eq!(encoded["backend"]["root_identity"], "fsid:codex-root");
+    }
+
+    #[test]
+    fn drive_manifest_requires_absolute_mount_hint_and_matching_profile() {
+        let mut manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex-drive").expect("store id"),
+            deployment_profile: DeploymentProfile::Drive,
+            host_mode: HostMode::System,
+            backend: BackendReference::Drive {
+                filesystem_identity: "apfs:123".to_string(),
+                device_identity: Some("nvme:456".to_string()),
+                mount_path_hint: Some(PathBuf::from("/Volumes/CODEX")),
+            },
+        };
+        manifest.validate().expect("drive manifest validates");
+        if let BackendReference::Drive {
+            mount_path_hint, ..
+        } = &mut manifest.backend
+        {
+            *mount_path_hint = Some(PathBuf::from("relative"));
+        }
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn appliance_manifest_does_not_accept_folder_backend() {
+        let manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex-appliance").expect("store id"),
+            deployment_profile: DeploymentProfile::Appliance,
+            host_mode: HostMode::Integrated,
+            backend: BackendReference::Folder {
+                root_identity: "fsid:legacy".to_string(),
+            },
+        };
+        assert!(manifest.validate().is_err());
+    }
+}

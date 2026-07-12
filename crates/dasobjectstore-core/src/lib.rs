@@ -7,6 +7,7 @@ pub mod health;
 pub mod ids;
 pub mod ingress;
 pub mod lifecycle;
+pub mod manifest;
 pub mod object_type;
 pub mod placement;
 pub mod protection;
@@ -21,6 +22,7 @@ pub use config::{
     DEFAULT_STANDALONE_HTTPS_PORT,
 };
 pub use deployment::{DeploymentProfile, HostMode};
+pub use manifest::{BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION};
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
