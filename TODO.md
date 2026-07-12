@@ -70,6 +70,10 @@ completion.
   - [x] Split GUI API product workspace view models and bootstrap projections
     into `crates/dasobjectstore-gui-api/src/workspaces_product.rs`; preserve
     public JSON types and workspace-route contracts.
+  - [x] Split shared Web API request/response contracts into
+    `crates/dasobjectstore-gui-web/src/api_contracts.rs`; preserve wasm/test
+    decoding and client-facing JSON shapes, then remove the final Web API
+    module-size exception.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 
