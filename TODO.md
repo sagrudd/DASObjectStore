@@ -463,9 +463,13 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the admission-gated transfer worker, typed byte-transfer
     adapter, daemon job lifecycle events, and failure cleanup orchestration
     into `crates/dasobjectstore-daemon/src/runtime/remote_upload/transfer.rs`.
-- [ ] Split GUI API authentication routes into router/auth, contracts, daemon
+- [x] Split GUI API authentication routes into router/auth, contracts, daemon
   clients, local-group administration, enclosure administration, and reporting
   modules; consolidate repeated confirmation and client-error adapters.
+  The production route façade is now composed from dedicated router, contracts,
+  daemon-client, identity, validation, parsing, reporting, local-group, and
+  enclosure modules; the large test module remains colocated for fixture
+  locality and the module-size guard passes.
   - [x] Extract standalone route composition into
     `crates/dasobjectstore-gui-api/src/auth_router.rs`, leaving handlers and
     validation logic behind a narrow routing façade.

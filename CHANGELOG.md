@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.80 - 2026-07-12
+
+- Close the GUI authentication route decomposition milestone after verifying
+  dedicated router, contract, client, identity, validation, parsing, reporting,
+  local-group, and enclosure modules with the size guard.
+
 ## 0.71.79 - 2026-07-12
 
 - Add the shared capability-based `ObjectStoreBackend` contract and typed
