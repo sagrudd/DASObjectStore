@@ -57,7 +57,7 @@ completion.
   appliance acceptance gaps without fabricating continuity.
 - [ ] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow.
-  Current exceptions: GUI API ``workspaces.rs``; GUI Web ``api.rs``. The gate
+  Current exceptions: GUI Web ``api.rs``. The gate
   closes only when the exception file is empty. The
   previously unexcepted
   daemon ``server/request_handler/storage.rs`` violation has been split into
@@ -66,7 +66,10 @@ completion.
   continue removing the remaining listed exceptions.
   - [x] Remove stale daemon and GUI ``home_aggregator.rs`` entries after the
     module-size guard confirmed those modules are below budget; retain only
-    the two currently reported GUI exceptions.
+    the one currently reported Web exception.
+  - [x] Split GUI API product workspace view models and bootstrap projections
+    into `crates/dasobjectstore-gui-api/src/workspaces_product.rs`; preserve
+    public JSON types and workspace-route contracts.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 

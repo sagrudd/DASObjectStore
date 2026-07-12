@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.38 - 2026-07-12
+
+- Split GUI API product workspace view models and bootstrap projections into a
+  focused module, preserving public JSON types and route contracts.
+
 ## 0.71.37 - 2026-07-12
 
 - Extract GUI administrator request validation, managed-mount rejection,
