@@ -76,6 +76,7 @@ pub use tls_assets::{
     ensure_standalone_tls_assets, load_standalone_tls_assets, StandaloneTlsAssetError,
     StandaloneTlsAssetReport, StandaloneTlsAssets,
 };
+pub use view::{api_liveness, ApiLiveness, ApiLivenessStatus};
 pub use workspaces::{
     workspace_navigation, ActivityTaskKindView, ActivityTaskStateView, ActivityTaskView,
     ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, LocalGroupMembershipView,

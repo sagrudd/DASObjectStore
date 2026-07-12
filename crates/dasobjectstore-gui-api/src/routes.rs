@@ -3,7 +3,7 @@ use crate::actions::{
     GuiActionPlanError, GuiActionPlanRequest,
 };
 use crate::dashboard::{EnclosuresPageView, HomeDashboardView, ObjectStoresPageView};
-use crate::view::{api_health, ApiHealth};
+use crate::view::{api_health, api_liveness, ApiHealth, ApiLiveness};
 use crate::workspaces::{
     ActivityWorkspaceView, DisksWorkspaceView, EndpointsWorkspaceView, ObjectsWorkspaceView,
     OverviewWorkspaceView, ProductBioinformaticsWorkspaceView, ProductEnclosuresWorkspaceView,
@@ -31,6 +31,7 @@ pub fn gui_api_router() -> Router {
 pub(crate) fn gui_api_router_without_redesign_dashboards() -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/liveness", get(liveness))
         .route("/api/v1/actions", get(actions))
         .route("/api/v1/actions/plan", post(plan_action))
         .route("/api/v1/workspaces/overview", get(overview_workspace))
@@ -59,6 +60,10 @@ pub(crate) fn gui_api_router_without_redesign_dashboards() -> Router {
 
 async fn health() -> Json<ApiHealth> {
     Json(api_health())
+}
+
+async fn liveness() -> Json<ApiLiveness> {
+    Json(api_liveness())
 }
 
 async fn actions() -> Json<GuiActionCatalog> {
@@ -221,6 +226,25 @@ mod tests {
             encoded["create_object_store"]["action_kind"],
             "store_create"
         );
+    }
+
+    #[tokio::test]
+    async fn liveness_route_does_not_require_daemon_round_trip() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/liveness")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("liveness response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["status"], "ready");
+        assert_eq!(encoded["service"], "dasobjectstore-gui-api");
+        assert!(encoded["instance_id"].is_string());
     }
 
     #[tokio::test]

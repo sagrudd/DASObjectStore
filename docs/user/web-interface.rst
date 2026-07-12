@@ -13,6 +13,11 @@ The packaged listener is HTTPS on port ``8448``:
 
    https://<das-host>:8448
 
+The public ``/api/v1/liveness`` route is intentionally independent of daemon
+round trips. It reports Web service readiness and instance metadata so a load
+balancer or operator probe can distinguish an unavailable Web process from a
+daemon-dependent dashboard that is temporarily degraded.
+
 The packaged appliance configuration lives at:
 
 .. code-block:: text

@@ -10,6 +10,20 @@ pub struct ApiHealth {
     pub status: ApiStatus,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ApiLiveness {
+    pub service: String,
+    pub version: String,
+    pub instance_id: String,
+    pub status: ApiLivenessStatus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiLivenessStatus {
+    Ready,
+}
+
 impl ApiHealth {
     pub fn development(version: impl Into<String>) -> Self {
         Self {
@@ -31,6 +45,15 @@ pub fn api_health() -> ApiHealth {
     ApiHealth::development(dasobjectstore_core::VERSION)
 }
 
+pub fn api_liveness() -> ApiLiveness {
+    ApiLiveness {
+        service: "dasobjectstore-gui-api".to_string(),
+        version: dasobjectstore_core::VERSION.to_string(),
+        instance_id: api_instance_id().to_string(),
+        status: ApiLivenessStatus::Ready,
+    }
+}
+
 pub fn api_instance_id() -> &'static str {
     static INSTANCE_ID: OnceLock<String> = OnceLock::new();
     INSTANCE_ID.get_or_init(|| Uuid::new_v4().to_string())
@@ -38,7 +61,9 @@ pub fn api_instance_id() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{api_health, api_instance_id, ApiHealth, ApiStatus};
+    use super::{
+        api_health, api_instance_id, api_liveness, ApiHealth, ApiLivenessStatus, ApiStatus,
+    };
 
     #[test]
     fn builds_development_health_view() {
@@ -67,5 +92,13 @@ mod tests {
 
         assert_eq!(encoded["status"], "development");
         assert!(encoded["instance_id"].is_string());
+    }
+
+    #[test]
+    fn liveness_is_ready_without_daemon_dependency() {
+        let liveness = api_liveness();
+        assert_eq!(liveness.status, ApiLivenessStatus::Ready);
+        assert_eq!(liveness.instance_id, api_instance_id());
+        assert_eq!(liveness.service, "dasobjectstore-gui-api");
     }
 }
