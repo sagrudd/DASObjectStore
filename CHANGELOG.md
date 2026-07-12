@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.30 - 2026-07-12
+
+- Extract the hidden local-direct ingest fallback into a focused CLI module and
+  remove the CLI runner's temporary module-size exception; preserve source
+  collection, placement, authorization, and progress contracts.
+
 ## 0.71.29 - 2026-07-12
 
 - Extract portable registry mirroring, known-root validation, and writer-group

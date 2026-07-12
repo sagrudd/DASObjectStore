@@ -249,6 +249,9 @@ list until every temporary size-budget exception has been removed.
     writer-group registry/ACL access into
     `crates/dasobjectstore-cli/src/run/registry_access.rs`; preserve
     non-Linux no-op behavior and fail-closed Linux group checks.
+  - [x] Remove the CLI `run.rs` size-budget exception after extracting its
+    local-direct ingest fallback; the CLI runner now passes the 1,000-line
+    production-module guard.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.
