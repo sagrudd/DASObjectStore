@@ -989,7 +989,7 @@ mod tests {
     #[test]
     fn list_garage_objects_decodes_key_and_size() {
         let runner = super::FakeRunner::with_stdout(
-            r#"{"Contents":[{"Key":"run-42/data.bin","Size":12}],"IsTruncated":false}"#,
+            r#"{"Contents":[{"Key":"run-42/data.bin","Size":12,"ETag":"\"etag-1\""}],"IsTruncated":false}"#,
         );
         let objects = crate::runtime::service_reconciliation::list_garage_objects(
             &runner,
@@ -1004,7 +1004,7 @@ mod tests {
             vec![crate::runtime::ReconciliationObject {
                 key: "run-42/data.bin".to_string(),
                 size_bytes: Some(12),
-                source_revision: None,
+                source_revision: Some("\"etag-1\"".to_string()),
             }]
         );
         assert_eq!(runner.calls.borrow().len(), 1);

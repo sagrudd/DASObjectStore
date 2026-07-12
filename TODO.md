@@ -298,6 +298,9 @@ completion.
     can skip or resume; changed/replaced files reset to Download and wrong-store
     checkpoints fail closed. Adoption execution and catalogue authority remain
     open.
+  - [x] Preserve provider resume safety when listings expose stable ETags by
+    carrying the ETag as the source revision; providers without a revision
+    remain fail-safe and replan rather than guessing continuity.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

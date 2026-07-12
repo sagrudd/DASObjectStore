@@ -305,7 +305,10 @@ pub(super) fn list_garage_objects<R: ServiceCommandRunner>(
                 objects.push(ReconciliationObject {
                     key: key.to_string(),
                     size_bytes: object.get("Size").and_then(Value::as_u64),
-                    source_revision: None,
+                    source_revision: object
+                        .get("ETag")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
                 });
             }
         }

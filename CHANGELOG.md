@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.32 - 2026-07-12
+
+- Preserve safe provider reconciliation resumes by carrying stable S3 ETags as
+  source revisions when listings provide them.
+
 ## 0.72.31 - 2026-07-12
 
 - Make folder reconciliation checkpoints revision-aware so changed or legacy
