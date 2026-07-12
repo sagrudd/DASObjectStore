@@ -90,6 +90,12 @@ and reservation observations, and optional SSD-staging observations for direct
 ingress. Live store inventory and mutation routes still need to supply the
 daemon-owned observations before this contract can authorize uploads.
 
+The daemon contract also provides a ledger-backed evaluation path: logical
+usage and outstanding reservations are read from the daemon's reservation
+ledger, while backend and SSD free-space values come from daemon-owned probes.
+The caller cannot replace those logical observations with request data. Atomic
+reservation mutation and live S3/multipart route wiring remain follow-up work.
+
 Portable manifests identify a profile with a versioned backend reference:
 folder manifests store a canonical root identity, drive manifests store stable
 filesystem/device identities plus an optional mount hint, and appliance

@@ -216,6 +216,10 @@ completion.
     SSD fields optional; SSD-first/direct behavior is derived from the typed
     ingress origin rather than caller-supplied booleans. Transport routes and
     live store-state wiring remain.
+  - [x] Add a daemon-owned ledger evaluation helper that derives logical usage
+    and outstanding reservations from the live reservation ledger while taking
+    backend/SSD free-space observations from daemon probes; caller-supplied
+    usage cannot override the ledger.
 - [ ] Add concurrency, crash/restart, multipart expiry, quota-change, dedupe, and
   full-filesystem tests before enabling new profile writes.
 

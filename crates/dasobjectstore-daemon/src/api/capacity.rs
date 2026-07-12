@@ -8,6 +8,7 @@ use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::ingress::IngressOrigin;
 use dasobjectstore_core::store::{
     evaluate_capacity_admission, CapacityAdmissionError, CapacityAdmissionInput, CapacityPolicy,
+    CapacityReservationLedger,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -105,6 +106,31 @@ pub struct CapacityAdmissionResponse {
 }
 
 impl CapacityAdmissionResponse {
+    /// Evaluate using daemon-owned logical usage and reservations. Backend and
+    /// SSD free-space observations remain explicit inputs from the daemon's
+    /// platform/backend probes; callers cannot override ledger accounting.
+    pub fn evaluate_with_ledger(
+        request: &CapacityAdmissionRequest,
+        policy: &CapacityPolicy,
+        ledger: &CapacityReservationLedger,
+        backend_free_bytes: u64,
+        ssd_free_bytes: u64,
+    ) -> Result<Self, CapacityAdmissionValidationError> {
+        Self::evaluate(
+            request,
+            policy,
+            CapacityAdmissionInput {
+                requested_bytes: request.requested_bytes,
+                copy_count: request.copy_count,
+                requires_ssd_staging: request.requires_ssd_staging(),
+                used_bytes: ledger.used_bytes(),
+                reserved_bytes: ledger.reserved_bytes(),
+                backend_free_bytes,
+                ssd_free_bytes,
+            },
+        )
+    }
+
     pub fn evaluate(
         request: &CapacityAdmissionRequest,
         policy: &CapacityPolicy,
@@ -348,6 +374,27 @@ mod tests {
         assert_eq!(response.reason, None);
         assert_eq!(response.ssd_available_bytes, None);
         assert_eq!(response.required_ssd_bytes, 0);
+    }
+
+    #[test]
+    fn ledger_evaluation_uses_daemon_owned_usage_and_reservations() {
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 700)
+            .expect("ledger policy is valid");
+        ledger
+            .reserve("active-upload", 100)
+            .expect("reservation fits");
+        let response = CapacityAdmissionResponse::evaluate_with_ledger(
+            &request(),
+            &CapacityPolicy::bounded(1_000, 0),
+            &ledger,
+            1_000,
+            500,
+        )
+        .expect("ledger observation evaluates");
+        assert_eq!(response.used_bytes, 700);
+        assert_eq!(response.reserved_bytes, 100);
+        assert_eq!(response.logical_available_bytes, Some(200));
+        assert_eq!(response.decision, CapacityAdmissionDecision::Admitted);
     }
 
     #[test]

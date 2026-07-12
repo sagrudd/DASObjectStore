@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.19 - 2026-07-12
+
+- Add a daemon capacity-admission helper that reads logical usage and
+  outstanding reservations from the live reservation ledger.
+
 ## 0.72.18 - 2026-07-12
 
 - Add atomic parent/child SubObject capacity reservations and commits while
