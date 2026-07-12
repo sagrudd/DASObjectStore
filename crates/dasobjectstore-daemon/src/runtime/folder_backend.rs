@@ -94,11 +94,27 @@ impl FolderBackend {
         ensure_private_directory(&namespace)?;
         ensure_private_directory(&objects_root)?;
         ensure_private_directory(&staging_root)?;
+        let catalogue = FolderCatalogue::open(catalogue_path, manifest.store_id.as_str())?;
+        let catalogued_used_bytes = catalogue
+            .records()
+            .into_iter()
+            .try_fold(0_u64, |total, record| total.checked_add(record.size_bytes))
+            .ok_or_else(|| {
+                BackendError::InvalidRequest(
+                    "folder catalogue used-byte accounting overflowed".to_string(),
+                )
+            })?;
+        if used_bytes != 0 && used_bytes != catalogued_used_bytes {
+            return Err(BackendError::InvalidRequest(format!(
+                "folder catalogue used bytes {catalogued_used_bytes} do not match supplied accounting {used_bytes}"
+            )));
+        }
+        let used_bytes = used_bytes.max(catalogued_used_bytes);
         Ok(Self {
             root,
             objects_root,
             staging_root,
-            catalogue: FolderCatalogue::open(catalogue_path, manifest.store_id.as_str())?,
+            catalogue,
             manifest,
             ledger: CapacityReservationLedger::new(capacity, used_bytes).map_err(|error| {
                 BackendError::InvalidRequest(format!("capacity ledger: {error:?}"))
@@ -1165,6 +1181,14 @@ mod tests {
                 relative_path: "incoming/run/data.txt".to_string(),
             }]
         );
+        drop(backend);
+        assert!(
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 1,).is_err()
+        );
+        let reopened = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend reopens from catalogue");
+        assert_eq!(reopened.capacity().used_bytes, 9);
+        assert_eq!(reopened.catalogue_records(), records);
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(checkpoint_path.parent().expect("checkpoint parent"));
     }

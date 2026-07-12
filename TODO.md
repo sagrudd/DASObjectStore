@@ -357,7 +357,9 @@ completion.
     idempotent conflict-checked commits and file/directory fsync+rename; folder
     adoption commits the finalized record before its Complete checkpoint.
     Malformed/future-schema/wrong-store/conflict recovery tests are covered;
-    shared SQLite/object-service catalogue integration remains open.
+    shared SQLite/object-service catalogue integration remains open. Folder
+    reopen now derives used-byte accounting from the durable catalogue and
+    rejects conflicting supplied accounting before filesystem use.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

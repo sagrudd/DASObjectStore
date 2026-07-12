@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.51 - 2026-07-13
+
+- Restore bounded-folder logical usage from the durable catalogue on reopen and
+  reject mismatched caller accounting before filesystem access.
+
 ## 0.72.50 - 2026-07-13
 
 - Harden folder catalogue recovery with unique temporary names and fail-closed
