@@ -646,6 +646,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn liveness_remains_independent_while_activity_daemon_round_trip_degrades() {
+        let liveness = gui_api_router().oneshot(
+            Request::builder()
+                .uri("/api/v1/liveness")
+                .body(Body::empty())
+                .expect("liveness request builds"),
+        );
+        let activity = gui_api_router().oneshot(
+            Request::builder()
+                .uri("/api/v1/workspaces/activity")
+                .body(Body::empty())
+                .expect("activity request builds"),
+        );
+
+        let (liveness, activity) = tokio::join!(liveness, activity);
+        let liveness = liveness.expect("liveness response");
+        let activity = activity.expect("activity response");
+        assert_eq!(liveness.status(), StatusCode::OK);
+        assert_eq!(activity.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(activity.into_body(), usize::MAX)
+            .await
+            .expect("activity body bytes");
+        let encoded: serde_json::Value = serde_json::from_slice(&body).expect("activity json");
+        assert!(encoded["warnings"].as_array().is_some());
+        assert_eq!(
+            encoded["categories"].as_array().expect("categories").len(),
+            8
+        );
+    }
+
+    #[tokio::test]
     async fn actions_route_advertises_store_subobject_and_enclosure_preparation() {
         let response = gui_api_router()
             .oneshot(

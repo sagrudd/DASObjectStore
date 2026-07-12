@@ -460,7 +460,9 @@ Current delivery note: the daemon-independent liveness route is covered, and
 the Home Web workspace now retains its last successful telemetry snapshot with
 explicit stale-data/retry guidance after a refresh failure; cold-start failures
 remain visible rather than fabricating appliance state. Full cached appliance
-status, static/login saturation tests, and appliance acceptance remain open.
+status, static/login saturation tests, and appliance acceptance remain open. A
+route-level regression also proves liveness remains HTTP 200 while a daemon-
+backed Activity request degrades into a warning-bearing workspace response.
 
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 

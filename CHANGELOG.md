@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.55 - 2026-07-13
+
+- Add a route-level availability regression proving liveness remains healthy
+  while daemon-backed Activity degrades with typed warnings.
+
 ## 0.72.54 - 2026-07-13
 
 - Preserve the last successful Home dashboard snapshot across failed refreshes
