@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.50 - 2026-07-12
+
+- Route ObjectStore file and folder download lookups through the bounded GUI
+  daemon bridge, preserving typed overload/deadline responses and releasing
+  control capacity before payload streaming.
+
 ## 0.71.49 - 2026-07-12
 
 - Rebaseline historical TODO/roadmap claims around reconciliation, module-size

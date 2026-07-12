@@ -206,26 +206,7 @@ async fn object_store_browser(
         .call(move || client.object_browser(request))
         .await
         .map(Json)
-        .map_err(|error| match error {
-            DaemonBridgeError::Client(error) => {
-                route_error(error.status, error.code, error.message)
-            }
-            DaemonBridgeError::Busy => route_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "daemon_bridge_busy",
-                "daemon control capacity is saturated; retry shortly",
-            ),
-            DaemonBridgeError::Deadline => route_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "daemon_bridge_timeout",
-                "daemon control request exceeded its deadline; retry shortly",
-            ),
-            DaemonBridgeError::Join(message) => route_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "daemon_bridge_join_failed",
-                message,
-            ),
-        })
+        .map_err(daemon_bridge_route_error)
 }
 
 async fn object_store_object_download(
@@ -242,18 +223,19 @@ async fn object_store_object_download(
             err.to_string(),
         )
     })?;
+    let client = state.object_browser_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_object_download_unavailable",
+            "daemon ObjectStore download contract is not available",
+        )
+    })?;
+    let client = Arc::clone(client);
     let download = state
-        .object_browser_client
-        .as_ref()
-        .ok_or_else(|| {
-            route_error(
-                StatusCode::NOT_IMPLEMENTED,
-                "daemon_object_download_unavailable",
-                "daemon ObjectStore download contract is not available",
-            )
-        })?
-        .object_download(request)
-        .map_err(|err| route_error(err.status, err.code, err.message))?;
+        .daemon_bridge
+        .call(move || client.object_download(request))
+        .await
+        .map_err(daemon_bridge_route_error)?;
 
     let file = tokio::fs::File::open(&download.source_path)
         .await
@@ -284,18 +266,19 @@ async fn object_store_folder_download(
             err.to_string(),
         )
     })?;
+    let client = state.object_browser_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_object_folder_download_unavailable",
+            "daemon ObjectStore folder download contract is not available",
+        )
+    })?;
+    let client = Arc::clone(client);
     let download = state
-        .object_browser_client
-        .as_ref()
-        .ok_or_else(|| {
-            route_error(
-                StatusCode::NOT_IMPLEMENTED,
-                "daemon_object_folder_download_unavailable",
-                "daemon ObjectStore folder download contract is not available",
-            )
-        })?
-        .object_folder_download(request)
-        .map_err(|err| route_error(err.status, err.code, err.message))?;
+        .daemon_bridge
+        .call(move || client.object_folder_download(request))
+        .await
+        .map_err(daemon_bridge_route_error)?;
 
     let headers = object_folder_download_headers(&download)?;
     let archive_download = download.clone();
@@ -305,6 +288,27 @@ async fn object_store_folder_download(
     let mut response = Response::new(body);
     *response.headers_mut() = headers;
     Ok(response)
+}
+
+fn daemon_bridge_route_error(error: DaemonBridgeError) -> (StatusCode, Json<AuthRouteError>) {
+    match error {
+        DaemonBridgeError::Client(error) => route_error(error.status, error.code, error.message),
+        DaemonBridgeError::Busy => route_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "daemon_bridge_busy",
+            "daemon control capacity is saturated; retry shortly",
+        ),
+        DaemonBridgeError::Deadline => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "daemon_bridge_timeout",
+            "daemon control request exceeded its deadline; retry shortly",
+        ),
+        DaemonBridgeError::Join(message) => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "daemon_bridge_join_failed",
+            message,
+        ),
+    }
 }
 
 fn object_browser_request(
