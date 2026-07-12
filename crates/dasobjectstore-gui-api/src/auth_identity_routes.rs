@@ -129,7 +129,7 @@ pub(super) async fn remote_authenticate(
     let requested_lifetime = request.requested_session_lifetime_seconds;
     let session = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
-            let client = DaemonClient::new(UnixSocketDaemonTransport::new(
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
             ));
             let created = client

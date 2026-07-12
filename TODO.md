@@ -919,8 +919,10 @@ list until every temporary size-budget exception has been removed.
   async bridge and bounded blocking pool. The identified browser, activity,
   remote-auth, administrator, and archive paths now have deadlines, bounded
   permits, typed overload/degraded responses, and a circuit breaker with a
-  single half-open probe; strict cancellation propagation remains open because
-  the synchronous Unix transport cannot yet interrupt a blocked child call.
+  single half-open probe. GUI bridge transports now opt into bounded idle
+  deadlines (reset by progress frames), so stalled socket workers return and
+  release bridge capacity; default CLI/long-ingest transports remain
+  unbounded. Async HTTP bridging and appliance soak acceptance remain open.
 - [x] Route ObjectStore file and folder download authorization/location lookups
   through the shared bounded daemon bridge; preserve typed `429`/`503`
   overload/deadline responses and release control capacity before payload

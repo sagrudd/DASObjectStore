@@ -113,7 +113,7 @@ pub(super) struct DaemonStandaloneLocalGroupAdminClient {
 impl DaemonStandaloneLocalGroupAdminClient {
     pub(super) fn default_packaged() -> Self {
         Self {
-            client: DaemonClient::new(UnixSocketDaemonTransport::new(
+            client: DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
             )),
         }
@@ -164,7 +164,7 @@ pub(super) struct DaemonStandaloneEnclosureAdminClient {
 impl DaemonStandaloneEnclosureAdminClient {
     pub(super) fn default_packaged() -> Self {
         Self {
-            client: DaemonClient::new(UnixSocketDaemonTransport::new(
+            client: DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
             )),
         }

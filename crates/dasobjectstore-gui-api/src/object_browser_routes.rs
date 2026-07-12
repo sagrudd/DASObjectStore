@@ -146,7 +146,7 @@ struct DaemonStandaloneObjectBrowserClient {
 impl DaemonStandaloneObjectBrowserClient {
     fn default_packaged() -> Self {
         Self {
-            client: DaemonClient::new(UnixSocketDaemonTransport::new(
+            client: DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
             )),
         }

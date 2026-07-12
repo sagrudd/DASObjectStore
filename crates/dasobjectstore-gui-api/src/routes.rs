@@ -145,7 +145,7 @@ async fn activity_workspace() -> Json<ActivityWorkspaceView> {
     let daemon_jobs = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             let client = dasobjectstore_daemon::DaemonClient::new(
-                dasobjectstore_daemon::UnixSocketDaemonTransport::new(
+                dasobjectstore_daemon::UnixSocketDaemonTransport::for_bounded_bridge(
                     dasobjectstore_daemon::DaemonRuntimeConfig::default_packaged().socket_path,
                 ),
             );

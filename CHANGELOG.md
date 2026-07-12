@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.71 - 2026-07-12
+
+- Bound idle GUI daemon socket calls with progress-aware cancellation so a
+  stalled bridge worker releases its capacity without changing CLI or
+  long-running ingest transport behavior.
+
 ## 0.71.70 - 2026-07-12
 
 - Label Home throughput summaries by daemon telemetry, legacy file fallback, or
