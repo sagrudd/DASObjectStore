@@ -108,6 +108,7 @@ pub use runtime::{
     plan_reconciliation, plan_remote_upload_cancellation_cleanup, provision_garage_store_registry,
     query_object_browser_metadata, read_authoritative_ingest_policy, read_object_browser_metadata,
     record_remote_upload_s3_transfer_job, run_remote_easyconnect_aws_cli_upload_job,
+    run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider,
     run_remote_upload_cancellation_cleanup, upsert_endpoint_inventory_record,
     validate_appliance_telemetry_cadence, AdminJobRegistry, ApplianceCpuTelemetry,
     ApplianceDiskCapacityTelemetry, ApplianceDiskIoTelemetry, ApplianceEnclosureTelemetry,

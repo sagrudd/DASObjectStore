@@ -2,8 +2,9 @@ use super::capacity_provider::CapacityAdmissionProvider;
 use super::{
     admin_jobs::AdminJobRegistry,
     remote_upload::{
-        run_remote_easyconnect_aws_cli_upload_job, RemoteEasyconnectAwsCliUploadJobRequest,
-        RemoteUploadAdmissionGate, RemoteUploadS3TransferWorkerReport,
+        run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider,
+        RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
+        RemoteUploadS3TransferWorkerReport,
     },
 };
 use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
@@ -194,7 +195,13 @@ where
         gate: Arc<RemoteUploadAdmissionGate>,
         request: RemoteEasyconnectAwsCliUploadJobRequest,
     ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
-        run_remote_easyconnect_aws_cli_upload_job(registry, gate, &self.runner, request)
+        run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider(
+            registry,
+            gate,
+            &self.runner,
+            self.capacity_admission_provider.clone(),
+            request,
+        )
     }
 
     /// Pulls a provisioned Garage bucket to a private SSD staging area and then

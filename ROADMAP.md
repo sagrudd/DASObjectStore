@@ -909,8 +909,11 @@ injects a registry-backed provider with persisted ledgers and ``statvfs``
 probes. Ingest/S3/multipart reservation completion, catalogue accounting, and
 stale-reservation expiry remain open.
 The provider also exposes durable commit/release lifecycle operations with
-rollback on persistence failure; transfer-job reservation ownership remains
-the next integration slice.
+rollback on persistence failure. The daemon-owned remote S3 transfer worker
+now retains the job ID as the reservation ID, admits before invoking the typed
+byte-transfer adapter, and commits or releases after transfer and catalogue
+completion; rejection is persisted as a failed job. Local ingest, multipart,
+catalogue accounting, and stale-reservation expiry remain open.
 
 ## Milestone 28: Folder ObjectStore Profile
 

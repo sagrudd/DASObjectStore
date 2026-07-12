@@ -117,9 +117,10 @@ pub use remote_sessions::{
 };
 pub use remote_upload::{
     plan_remote_upload_cancellation_cleanup, record_remote_upload_s3_transfer_job,
-    run_remote_easyconnect_aws_cli_upload_job, run_remote_upload_cancellation_cleanup,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
-    RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
+    run_remote_easyconnect_aws_cli_upload_job,
+    run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider,
+    run_remote_upload_cancellation_cleanup, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteUploadAdmissionGate, RemoteUploadAwsCliByteTransfer, RemoteUploadAwsCliTransferPlan,
     RemoteUploadCancellationCleanupAction, RemoteUploadCancellationCleanupActionReport,
     RemoteUploadCancellationCleanupActionState, RemoteUploadCancellationCleanupError,
     RemoteUploadCancellationCleanupPlan, RemoteUploadCancellationCleanupRequest,

@@ -1,3 +1,4 @@
+use super::super::capacity_provider::CapacityAdmissionProvider;
 use super::super::{admin_jobs::AdminJobRegistry, service::DaemonServiceRuntimeError};
 use super::{
     daemon_job_event_for_summary, record_remote_upload_s3_transfer_job,
@@ -8,13 +9,16 @@ use super::{
     RemoteUploadS3TransferProgressReporter,
 };
 use crate::api::{
-    DaemonJobEvent, DaemonJobId, DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobSummary,
+    CapacityAdmissionDecision, DaemonJobEvent, DaemonJobId, DaemonJobKind, DaemonJobProgress,
+    DaemonJobState, DaemonJobSummary,
 };
+use dasobjectstore_core::ids::StoreId;
 use std::{fmt, sync::Arc};
 
 pub struct RemoteUploadS3TransferWorker<'a> {
     gate: Arc<RemoteUploadAdmissionGate>,
     registry: &'a dyn AdminJobRegistry,
+    capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
 }
 
 /// The daemon-owned handoff that must succeed before a remote provider upload
@@ -57,7 +61,19 @@ impl std::error::Error for RemoteUploadCompletionCommitError {}
 
 impl<'a> RemoteUploadS3TransferWorker<'a> {
     pub fn new(gate: Arc<RemoteUploadAdmissionGate>, registry: &'a dyn AdminJobRegistry) -> Self {
-        Self { gate, registry }
+        Self {
+            gate,
+            registry,
+            capacity_provider: None,
+        }
+    }
+
+    pub fn with_capacity_admission_provider(
+        mut self,
+        provider: Arc<dyn CapacityAdmissionProvider>,
+    ) -> Self {
+        self.capacity_provider = Some(provider);
+        self
     }
 
     pub fn run<E>(
@@ -175,6 +191,44 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             }
         };
 
+        let capacity_reservation = if let Some(provider) = &self.capacity_provider {
+            let response = provider
+                .admit_remote_upload(&job.object_store, job.source_bytes, &job.job_id)
+                .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!("remote upload capacity admission failed: {error}"),
+                })?;
+            if response.decision != CapacityAdmissionDecision::Admitted {
+                let summary = RemoteUploadS3TransferJobSummary {
+                    job_id: job.job_id,
+                    object_store: job.object_store,
+                    source_bytes: job.source_bytes,
+                    outcome: RemoteUploadS3TransferJobOutcome::Failed {
+                        error: response
+                            .message
+                            .unwrap_or_else(|| "remote upload capacity rejected".to_string()),
+                    },
+                    runtime_after: self.gate.snapshot(),
+                };
+                let final_event = record_remote_upload_s3_transfer_job(
+                    self.registry,
+                    &summary,
+                    submitted_at_utc,
+                    finished_at_utc,
+                    actor,
+                )?;
+                return Ok(RemoteUploadS3TransferWorkerReport {
+                    running_event: None,
+                    progress_events: Vec::new(),
+                    final_event,
+                    runtime_after: summary.runtime_after,
+                    cleanup_report: None,
+                });
+            }
+            Some(Arc::clone(provider))
+        } else {
+            None
+        };
+
         let running_job = running_daemon_job_for_s3_transfer(
             &job,
             submitted_at_utc.clone(),
@@ -210,6 +264,39 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                 .transpose()
                 .map(|_| ())
         });
+        let transfer_result = match (transfer_result, capacity_reservation) {
+            (Ok(()), Some(provider)) => {
+                let store_id = StoreId::new(job.object_store.clone()).map_err(|error| {
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!("remote upload object store is invalid: {error}"),
+                    }
+                })?;
+                match provider.commit(&store_id, &job.job_id) {
+                    Ok(()) => Ok(()),
+                    Err(error) => match provider.release(&store_id, &job.job_id) {
+                        Ok(()) => Err(error.to_string()),
+                        Err(release_error) => {
+                            Err(format!("{error}; capacity release failed: {release_error}"))
+                        }
+                    },
+                }
+            }
+            (Err(error), Some(provider)) => {
+                let store_id = StoreId::new(job.object_store.clone()).map_err(|error| {
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!("remote upload object store is invalid: {error}"),
+                    }
+                })?;
+                let release = provider.release(&store_id, &job.job_id);
+                match release {
+                    Ok(()) => Err(error),
+                    Err(release_error) => {
+                        Err(format!("{error}; capacity release failed: {release_error}"))
+                    }
+                }
+            }
+            (result, None) => result,
+        };
         let progress_events = progress_reporter.into_events();
         drop(permit);
 

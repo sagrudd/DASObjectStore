@@ -1,3 +1,4 @@
+use super::capacity_provider::CapacityAdmissionProvider;
 use super::{
     admin_jobs::AdminJobRegistry,
     service::{DaemonServiceRuntimeError, ServiceCommandRunner},
@@ -196,6 +197,18 @@ pub fn run_remote_easyconnect_aws_cli_upload_job(
     runner: &dyn ServiceCommandRunner,
     request: RemoteEasyconnectAwsCliUploadJobRequest,
 ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+    run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider(
+        registry, gate, runner, None, request,
+    )
+}
+
+pub fn run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider(
+    registry: &dyn AdminJobRegistry,
+    gate: Arc<RemoteUploadAdmissionGate>,
+    runner: &dyn ServiceCommandRunner,
+    capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
+    request: RemoteEasyconnectAwsCliUploadJobRequest,
+) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
     let worker_request = RemoteUploadS3TransferWorkerRequest {
         job: RemoteUploadS3TransferJob {
             job_id: request.job_id,
@@ -224,7 +237,13 @@ pub fn run_remote_easyconnect_aws_cli_upload_job(
         transfer_plan = transfer_plan.with_progress_message(message);
     }
     let transfer = RemoteUploadAwsCliByteTransfer::new(transfer_plan, runner);
-    RemoteUploadS3TransferWorker::new(gate, registry).run_byte_transfer(worker_request, &transfer)
+    let worker = RemoteUploadS3TransferWorker::new(gate, registry);
+    let worker = if let Some(provider) = capacity_provider {
+        worker.with_capacity_admission_provider(provider)
+    } else {
+        worker
+    };
+    worker.run_byte_transfer(worker_request, &transfer)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -258,16 +277,95 @@ mod tests {
         RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
     };
     use crate::api::{
+        CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
         DaemonIngestQueueDepths, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
         DaemonIngestWorkerTelemetry, DaemonJobEvent, DaemonJobKind, DaemonJobState,
         DaemonJobStatusRequest, DaemonSsdPressure, RemoteEasyconnectUploadAdmissionDecision,
         RemoteEasyconnectUploadBackpressureReason,
     };
-    use crate::runtime::{admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry};
+    use crate::runtime::{
+        admin_job_registry_path, AdminJobRegistry, CapacityAdmissionProvider,
+        FileBackedAdminJobRegistry,
+    };
     use crate::runtime::{DaemonServiceRuntimeError, ServiceCommandOutput, ServiceCommandRunner};
+    use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
+    use std::sync::Mutex;
+
+    struct RecordingCapacityProvider {
+        events: Mutex<Vec<String>>,
+        decision: CapacityAdmissionDecision,
+        message: Option<String>,
+    }
+
+    impl CapacityAdmissionProvider for RecordingCapacityProvider {
+        fn admit(
+            &self,
+            _request: CapacityAdmissionRequest,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "test provider only supports remote upload admission".to_string(),
+            })
+        }
+
+        fn admit_remote_upload(
+            &self,
+            object_store: &str,
+            requested_bytes: u64,
+            reservation_id: &str,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            self.events.lock().expect("events lock").push(format!(
+                "admit:{object_store}:{requested_bytes}:{reservation_id}"
+            ));
+            Ok(CapacityAdmissionResponse {
+                store_id: StoreId::new(object_store).expect("store id"),
+                decision: self.decision,
+                reason: None,
+                requested_bytes,
+                copy_count: 2,
+                requires_ssd_staging: true,
+                logical_limit_bytes: Some(1_000_000),
+                used_bytes: 0,
+                reserved_bytes: 0,
+                logical_available_bytes: Some(1_000_000),
+                backend_free_bytes: 2_000_000,
+                backend_available_bytes: 2_000_000,
+                ssd_available_bytes: Some(2_000_000),
+                required_backend_bytes: requested_bytes * 2,
+                required_ssd_bytes: requested_bytes,
+                copy_amplification_basis_points: 20_000,
+                warning_threshold_basis_points: 8_000,
+                critical_threshold_basis_points: 9_500,
+                message: self.message.clone(),
+            })
+        }
+
+        fn commit(
+            &self,
+            store_id: &StoreId,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("commit:{store_id}:{reservation_id}"));
+            Ok(())
+        }
+
+        fn release(
+            &self,
+            store_id: &StoreId,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("release:{store_id}:{reservation_id}"));
+            Ok(())
+        }
+    }
 
     #[test]
     fn gate_increments_active_s3_transfers_only_when_admitted() {
@@ -775,6 +873,99 @@ mod tests {
             Some("catalogue commit failed")
         );
         assert_eq!(completion.records.borrow().len(), 1);
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_commits_capacity_on_success_and_releases_on_failure() {
+        let root = temp_root("remote-upload-capacity-lifecycle");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Admitted,
+            message: None,
+        });
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+            .with_capacity_admission_provider(provider.clone());
+
+        let success = worker
+            .run(worker_request("remote-upload-capacity-success"), || {
+                Ok::<(), &'static str>(())
+            })
+            .expect("capacity-admitted transfer succeeds");
+        assert!(matches!(success.final_event, DaemonJobEvent::Complete(_)));
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:42:remote-upload-capacity-success",
+                "commit:zymo_fecal_2025.05:remote-upload-capacity-success",
+            ]
+        );
+
+        let failed_provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Admitted,
+            message: None,
+        });
+        let failed_worker =
+            RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+                .with_capacity_admission_provider(failed_provider.clone());
+        let failure = failed_worker
+            .run(worker_request("remote-upload-capacity-failure"), || {
+                Err::<(), &'static str>("transfer failed")
+            })
+            .expect("failed transfer is recorded");
+        let DaemonJobEvent::Failed(job) = failure.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(job.failure_message.as_deref(), Some("transfer failed"));
+        assert_eq!(
+            *failed_provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:42:remote-upload-capacity-failure",
+                "release:zymo_fecal_2025.05:remote-upload-capacity-failure",
+            ]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn transfer_worker_persists_capacity_rejection_without_running_transfer() {
+        let root = temp_root("remote-upload-capacity-rejected");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Rejected,
+            message: Some("logical quota exhausted".to_string()),
+        });
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+            .with_capacity_admission_provider(provider.clone());
+
+        let report = worker
+            .run(
+                worker_request("remote-upload-capacity-rejected"),
+                || -> Result<(), &'static str> {
+                    panic!("capacity-rejected transfer must not execute")
+                },
+            )
+            .expect("capacity rejection is recorded");
+        assert!(report.running_event.is_none());
+        let DaemonJobEvent::Failed(job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(
+            job.failure_message.as_deref(),
+            Some("logical quota exhausted")
+        );
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec!["admit:zymo_fecal_2025.05:42:remote-upload-capacity-rejected"]
+        );
         assert_eq!(gate.snapshot().active_s3_transfers, 0);
 
         cleanup(&root);

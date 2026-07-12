@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.40 - 2026-07-12
+
+- Wire remote S3 transfer jobs to daemon-owned capacity reservations, committing
+  or releasing each job reservation across transfer and catalogue outcomes.
+
 ## 0.72.39 - 2026-07-12
 
 - Add durable capacity-reservation commit and release operations with

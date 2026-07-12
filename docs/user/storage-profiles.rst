@@ -132,6 +132,13 @@ store policy; callers cannot reduce redundancy through the admission request.
 Reservations have explicit daemon-owned ``commit`` and ``release`` lifecycle
 operations. A failed durable update restores the prior ledger snapshot; upload
 workers must retain the reservation ID until their catalogue outcome is known.
+The daemon-owned remote S3 transfer worker now uses the remote job ID as that
+reservation ID: it admits before starting the byte-transfer adapter, then
+commits on successful transfer and catalogue completion or releases on any
+failure. Capacity rejection is recorded as a failed daemon job rather than
+silently running an unbounded transfer. Local ingest and multipart adapters
+still need to adopt the same lifecycle before bounded profiles are enabled
+for those paths.
 The core ledger has a concurrent reservation regression: simultaneous callers
 contending for a bounded quota cannot overbook logical capacity. Crash/restart
 reservation persistence, multipart expiry, dedupe accounting, and full-disk

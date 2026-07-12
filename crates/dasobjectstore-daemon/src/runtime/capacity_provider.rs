@@ -52,6 +52,18 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         request: CapacityAdmissionRequest,
     ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError>;
 
+    fn admit_remote_upload(
+        &self,
+        object_store: &str,
+        requested_bytes: u64,
+        reservation_id: &str,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        let _ = (object_store, requested_bytes, reservation_id);
+        Err(unavailable(
+            "remote upload capacity provider is not configured",
+        ))
+    }
+
     fn commit(
         &self,
         _store_id: &StoreId,
@@ -125,6 +137,15 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             .into_iter()
             .find(|definition| definition.store_id == store_id.clone())
             .map(|definition| definition.policy.capacity)
+            .ok_or_else(|| unavailable(format!("unknown object store {store_id}")))
+    }
+
+    fn copies_for_store(&self, store_id: &StoreId) -> Result<u8, DaemonServiceRuntimeError> {
+        read_store_registry(&self.store_registry_path)
+            .map_err(DaemonServiceRuntimeError::ObjectService)?
+            .into_iter()
+            .find(|definition| definition.store_id == store_id.clone())
+            .map(|definition| definition.policy.copies)
             .ok_or_else(|| unavailable(format!("unknown object store {store_id}")))
     }
 
@@ -247,6 +268,24 @@ where
             )));
         }
         Ok(response)
+    }
+
+    fn admit_remote_upload(
+        &self,
+        object_store: &str,
+        requested_bytes: u64,
+        reservation_id: &str,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        let store_id = StoreId::new(object_store.to_string())
+            .map_err(|error| unavailable(format!("invalid object store: {error}")))?;
+        let copy_count = self.copies_for_store(&store_id)?;
+        self.admit(CapacityAdmissionRequest {
+            store_id: object_store.to_string(),
+            requested_bytes,
+            copy_count,
+            ingress_origin: crate::api::DaemonIngressOrigin::RemoteS3,
+            client_request_id: Some(reservation_id.to_string()),
+        })
     }
 
     fn commit(

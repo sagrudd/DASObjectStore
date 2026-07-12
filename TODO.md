@@ -241,6 +241,12 @@ completion.
   - [x] Add explicit provider commit/release lifecycle operations with
     snapshot rollback when durable persistence fails; transfer workers still
     need to carry reservation IDs through their completion/failure paths.
+  - [x] Wire the daemon-owned remote S3 transfer worker to retain the job ID as
+    the reservation ID, admit before invoking the byte-transfer adapter, and
+    commit or release the reservation after transfer and catalogue completion;
+    admission rejection is persisted as a failed daemon job and provider
+    lifecycle failures remain fail-closed. Local ingest, multipart, catalogue
+    accounting, and stale-reservation expiry remain separate follow-up work.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.
