@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.21 - 2026-07-12
+
+- Move performance report persistence and QR/PDF/metadata helpers into the
+  report module while preserving artifact and authoritative-policy contracts.
+
 ## 0.71.20 - 2026-07-12
 
 - Extract performance scenario-matrix execution orchestration into a focused

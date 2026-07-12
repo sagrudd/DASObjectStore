@@ -316,6 +316,10 @@ list until every temporary size-budget exception has been removed.
       `crates/dasobjectstore-cli/src/run/performance_scenarios.rs`; preserve
       file-order sequencing, scenario result ordering, completion TUI frames,
       and report-path context.
+    - [x] Move performance report artifact persistence and QR/PDF/metadata
+      helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
+      preserve JSON validation, chart generation, authoritative policy output,
+      and report rebuild contracts.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser

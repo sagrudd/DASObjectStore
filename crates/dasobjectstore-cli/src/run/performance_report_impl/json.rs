@@ -6,9 +6,9 @@ use std::process::Command as ProcessCommand;
 
 use super::super::super::{
     compact_hash, compact_path, compact_run_id, format_bytes, format_bytes_compact,
-    friendly_file_order, humanize_report_token, performance_artifact_signature,
-    report_renderer_command, CliError,
+    friendly_file_order, humanize_report_token, performance_artifact_signature, CliError,
 };
+use super::super::report_renderer_command;
 use super::*;
 use super::{yes_no, PerformanceChartArtifact};
 
