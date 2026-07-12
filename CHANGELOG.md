@@ -24,6 +24,12 @@ agreement before landing.
   request-handler modules; the production module-size guard now passes against
   the reviewed baseline.
 
+## 0.71.9 - 2026-07-12
+
+- Split request-handler orchestration, job projection, and shared request
+  helpers so the daemon request-handler façade is within the production module
+  budget without changing typed response or error contracts.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign

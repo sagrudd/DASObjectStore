@@ -57,13 +57,14 @@ completion.
   appliance acceptance gaps without fabricating continuity.
 - [ ] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow.
-  Current exceptions: CLI ``run.rs``; daemon ``ingest_files.rs``,
-  ``remote_upload.rs``, and ``request_handler.rs``; GUI API ``auth_routes.rs``,
+  Current exceptions: CLI ``run.rs``; daemon ``ingest_files.rs`` and
+  ``remote_upload.rs``; GUI API ``auth_routes.rs``,
   ``home_aggregator.rs``, and ``workspaces.rs``; GUI Web ``api.rs``. The gate
   closes only when the exception file is empty. The previously unexcepted
   daemon ``server/request_handler/storage.rs`` violation has been split into
   storage reconciliation/helpers modules; the guard now passes against the
-  reviewed baseline. Continue removing the remaining listed exceptions.
+  reviewed baseline. The request-handler façade is now also below budget;
+  continue removing the remaining listed exceptions.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 
@@ -179,6 +180,10 @@ list until every temporary size-budget exception has been removed.
   test modules; retain a small routing façade and shared state-message renderer.
 - [x] Split daemon request dispatch into service/admin, storage/telemetry, and
   EasyConnect request-family handlers.
+- [x] Split request-handler orchestration, job projection, and shared request
+  helpers into focused sibling modules so the public handler façade remains
+  within the production module budget; preserve all typed responses and error
+  contracts.
 - [x] Split daemon storage request reconciliation and registry/path helpers
   into focused sibling modules so the storage dispatcher remains within the
   production module budget; preserve reconciliation job and authorization
