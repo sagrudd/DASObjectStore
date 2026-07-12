@@ -206,8 +206,12 @@ completion.
   unsafe keys, unsupported names, and files changed during import.
   - [x] Harden `FolderBackend` namespace/parent traversal against symlink
     escapes and reject non-regular entries during enumeration; unsafe key and
-    symlink regression tests pass on macOS. Hard-link/file-change adoption
-    checks remain part of the inspection/reconciliation gate.
+    symlink regression tests pass on macOS.
+  - [x] Classify hard-linked user files as unsafe and add a file-specific
+    stable-source staging primitive that re-hashes the source after copying;
+    macOS tests cover hard-link inspection and unchanged source adoption.
+  - [ ] Add fd/path identity checks during enumerate/verify/finalize and a
+    deterministic mutation race fixture before enabling resumable adoption.
 - [ ] Add read-only inspection followed by resumable adoption/reconciliation;
   report unmanaged drift without silently accepting it as authoritative.
   - [x] Add a read-only `FolderBackend::inspect_user_tree` report for unmanaged

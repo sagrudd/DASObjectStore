@@ -118,6 +118,46 @@ impl FolderBackend {
         }
     }
 
+    /// Stage an existing regular file only when its contents remain stable for
+    /// the complete read. This is the safe ingress primitive for a future
+    /// explicit adoption/reconciliation workflow; it does not grant authority
+    /// over the source hierarchy.
+    pub fn stage_path(
+        &mut self,
+        reservation_id: &str,
+        key: &BackendObjectKey,
+        source_path: &Path,
+    ) -> Result<BackendObjectRecord, BackendError> {
+        reject_ambiguous_source(source_path)?;
+        let mut source = File::open(source_path).map_err(io_error)?;
+        let staged = self.stage(reservation_id, key, &mut source)?;
+        if let Err(error) = reject_ambiguous_source(source_path) {
+            self.discard_staged(&staged, reservation_id);
+            return Err(error);
+        }
+        let mut verification_source = match File::open(source_path) {
+            Ok(file) => file,
+            Err(error) => {
+                self.discard_staged(&staged, reservation_id);
+                return Err(io_error(error));
+            }
+        };
+        let current_checksum = match hash_reader(&mut verification_source) {
+            Ok(checksum) => checksum,
+            Err(error) => {
+                self.discard_staged(&staged, reservation_id);
+                return Err(error);
+            }
+        };
+        if current_checksum != staged.checksum {
+            self.discard_staged(&staged, reservation_id);
+            return Err(BackendError::InvalidRequest(
+                "source file changed during folder import".to_string(),
+            ));
+        }
+        Ok(staged)
+    }
+
     fn object_path(&self, key: &BackendObjectKey) -> Result<PathBuf, BackendError> {
         validate_object_key(key)?;
         Ok(self.objects_root.join(&key.object_id))
@@ -148,6 +188,13 @@ impl FolderBackend {
         checksum: String,
     ) -> Result<BackendObjectRecord, BackendError> {
         record_for_path(&self.root, key, path, checksum)
+    }
+
+    fn discard_staged(&mut self, staged: &BackendObjectRecord, reservation_id: &str) {
+        let temporary_path = self.root.join(&staged.location);
+        self.staged_reservations.remove(&temporary_path);
+        let _ = fs::remove_file(temporary_path);
+        let _ = self.ledger.release(reservation_id);
     }
 }
 
@@ -371,6 +418,8 @@ fn inspect_user_tree(
             report.unsafe_paths.push(relative);
         } else if file_type.is_dir() {
             inspect_user_tree(root, &path, report)?;
+        } else if is_ambiguous_hard_link(&path)? {
+            report.unsafe_paths.push(relative);
         } else {
             report.unmanaged_paths.push(relative);
         }
@@ -389,6 +438,35 @@ fn hash_reader(reader: &mut dyn Read) -> Result<String, BackendError> {
         hasher.update(&buffer[..read]);
     }
     Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+fn reject_ambiguous_source(path: &Path) -> Result<(), BackendError> {
+    let metadata = fs::symlink_metadata(path).map_err(io_error)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(BackendError::InvalidRequest(
+            "folder import source must be a regular file, not a symlink or special entry"
+                .to_string(),
+        ));
+    }
+    if is_ambiguous_hard_link(path)? {
+        return Err(BackendError::InvalidRequest(
+            "folder import source has multiple hard links".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn is_ambiguous_hard_link(path: &Path) -> Result<bool, BackendError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return Ok(fs::metadata(path).map_err(io_error)?.nlink() > 1);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(false)
+    }
 }
 
 fn validate_object_key(key: &BackendObjectKey) -> Result<(), BackendError> {
@@ -585,6 +663,51 @@ mod tests {
         let report = backend.inspect_user_tree().expect("inspection succeeds");
         assert!(!report.is_clean());
         assert_eq!(report.unmanaged_paths, vec!["incoming/run/data.txt"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_stages_stable_source_path() {
+        let root = unique_root();
+        let source = root.join("source.bin");
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        fs::write(&source, b"stable source").expect("source writes");
+        let key = BackendObjectKey {
+            object_id: "adopted/source.bin".to_string(),
+            version: 1,
+        };
+        backend
+            .reserve("source-import", 13)
+            .expect("reserves capacity");
+        let staged = backend
+            .stage_path("source-import", &key, &source)
+            .expect("stable source stages");
+        let finalized = backend.finalize(staged).expect("finalizes source");
+        assert_eq!(finalized.size_bytes, 13);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_backend_marks_hard_linked_user_files_unsafe() {
+        let root = unique_root();
+        let backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        fs::create_dir_all(root.join("incoming")).expect("user directory creates");
+        let first = root.join("incoming/first.txt");
+        let second = root.join("incoming/second.txt");
+        fs::write(&first, b"shared").expect("source writes");
+        fs::hard_link(&first, &second).expect("hard link creates");
+        let report = backend.inspect_user_tree().expect("inspection succeeds");
+        assert!(report
+            .unsafe_paths
+            .contains(&"incoming/first.txt".to_string()));
+        assert!(report
+            .unsafe_paths
+            .contains(&"incoming/second.txt".to_string()));
+        assert!(report.unmanaged_paths.is_empty());
         let _ = fs::remove_dir_all(root);
     }
 

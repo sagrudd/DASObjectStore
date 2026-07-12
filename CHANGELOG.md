@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.92 - 2026-07-12
+
+- Reject hard-linked folder import sources and classify hard-linked user files
+  as unsafe; add stable-source staging that rechecks content after copying.
+
 ## 0.71.91 - 2026-07-12
 
 - Keep folder-backend enumeration locations aligned with finalized catalogue

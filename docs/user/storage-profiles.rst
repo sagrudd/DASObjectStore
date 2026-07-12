@@ -26,6 +26,8 @@ while reading, writes only beneath the private ``.dasobjectstore`` namespace,
 syncs the file and destination directory, then renames atomically. Enumerated
 records retain the same nested, relative catalogue location as finalized
 objects, while the private namespace remains hidden from user-tree inspection.
+Hard-linked user files are reported as unsafe, and file-based adoption uses a
+post-copy checksum check so a changing source is not silently accepted.
 Catalogue registration and user-facing profile creation still require the
 subsequent daemon contract and explicit adoption workflow.
 
