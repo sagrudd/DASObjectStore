@@ -13,6 +13,7 @@ stabilized in the current MVP.
    web-interface
    store-classes
    storage-profiles
+   metadata-compatibility
    nas-endpoints
    disk-preparation
    object-stores

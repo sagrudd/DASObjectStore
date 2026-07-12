@@ -15,6 +15,7 @@ use std::path::PathBuf;
 pub const OBJECT_STORE_MANIFEST_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectStoreManifest {
     pub schema_version: u16,
     pub store_id: StoreId,
@@ -33,9 +34,35 @@ impl ObjectStoreManifest {
         }
         self.backend.validate_for_profile(self.deployment_profile)
     }
+
+    /// Decode a persisted manifest using the compatibility boundary. Schema is
+    /// inspected before profile/backend fields so future versions fail with a
+    /// typed error even when they introduce unknown enum variants.
+    pub fn decode_json(input: &str) -> Result<Self, ObjectStoreManifestDecodeError> {
+        let value: serde_json::Value = serde_json::from_str(input)
+            .map_err(|error| ObjectStoreManifestDecodeError::MalformedJson(error.to_string()))?;
+        let schema_version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+            .ok_or(ObjectStoreManifestDecodeError::MissingOrInvalidSchemaVersion)?;
+        if schema_version != OBJECT_STORE_MANIFEST_SCHEMA_VERSION {
+            return Err(ObjectStoreManifestDecodeError::UnsupportedSchema {
+                found: schema_version,
+                supported: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            });
+        }
+        let manifest: Self = serde_json::from_value(value)
+            .map_err(|error| ObjectStoreManifestDecodeError::MalformedJson(error.to_string()))?;
+        manifest
+            .validate()
+            .map_err(ObjectStoreManifestDecodeError::InvalidManifest)?;
+        Ok(manifest)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BackendReference {
     Folder {
@@ -169,10 +196,40 @@ impl Display for ObjectStoreManifestValidationError {
 
 impl std::error::Error for ObjectStoreManifestValidationError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObjectStoreManifestDecodeError {
+    MalformedJson(String),
+    MissingOrInvalidSchemaVersion,
+    UnsupportedSchema { found: u16, supported: u16 },
+    InvalidManifest(ObjectStoreManifestValidationError),
+}
+
+impl Display for ObjectStoreManifestDecodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MalformedJson(message) => {
+                write!(formatter, "malformed ObjectStore manifest: {message}")
+            }
+            Self::MissingOrInvalidSchemaVersion => formatter
+                .write_str("ObjectStore manifest schema_version must be an unsigned integer"),
+            Self::UnsupportedSchema { found, supported } => write!(
+                formatter,
+                "unsupported ObjectStore manifest schema {found}; supported schema is {supported}"
+            ),
+            Self::InvalidManifest(error) => {
+                write!(formatter, "invalid ObjectStore manifest: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ObjectStoreManifestDecodeError {}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendReference, DriveMediaKind, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+        BackendReference, DriveMediaKind, ObjectStoreManifest, ObjectStoreManifestDecodeError,
+        OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
     };
     use crate::deployment::{DeploymentProfile, HostMode};
     use crate::ids::StoreId;
@@ -283,5 +340,64 @@ mod tests {
             *mount_path_hint = Some(PathBuf::from("/"));
         }
         assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn manifest_validation_rejects_unknown_schema_without_migration() {
+        let mut manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex-schema").expect("store id"),
+            deployment_profile: DeploymentProfile::Folder,
+            host_mode: HostMode::PerUser,
+            protection: ProtectionPolicy::LocalOnly,
+            backend: BackendReference::Folder {
+                root_identity: "fsid:schema".to_string(),
+            },
+        };
+        manifest.schema_version = OBJECT_STORE_MANIFEST_SCHEMA_VERSION + 1;
+        assert!(matches!(
+            manifest.validate(),
+            Err(super::ObjectStoreManifestValidationError::UnsupportedSchema {
+                schema_version
+            }) if schema_version == OBJECT_STORE_MANIFEST_SCHEMA_VERSION + 1
+        ));
+    }
+
+    #[test]
+    fn decode_json_enforces_strict_v1_compatibility_boundary() {
+        let manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex-decode").expect("store id"),
+            deployment_profile: DeploymentProfile::Folder,
+            host_mode: HostMode::PerUser,
+            protection: ProtectionPolicy::LocalOnly,
+            backend: BackendReference::Folder {
+                root_identity: "fsid:decode".to_string(),
+            },
+        };
+        let encoded = serde_json::to_string(&manifest).expect("manifest serializes");
+        assert_eq!(ObjectStoreManifest::decode_json(&encoded), Ok(manifest));
+
+        let unknown = format!(
+            "{encoded_trimmed},\"future_field\":true}}",
+            encoded_trimmed = encoded.trim_end_matches('}')
+        );
+        assert!(matches!(
+            ObjectStoreManifest::decode_json(&unknown),
+            Err(ObjectStoreManifestDecodeError::MalformedJson(_))
+        ));
+
+        let future = encoded.replace("\"schema_version\":1", "\"schema_version\":2");
+        assert_eq!(
+            ObjectStoreManifest::decode_json(&future),
+            Err(ObjectStoreManifestDecodeError::UnsupportedSchema {
+                found: 2,
+                supported: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            })
+        );
+        assert!(matches!(
+            ObjectStoreManifest::decode_json("{\"schema_version\":\"one\"}"),
+            Err(ObjectStoreManifestDecodeError::MissingOrInvalidSchemaVersion)
+        ));
     }
 }

@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.2 - 2026-07-12
+
+- Add strict v1 ObjectStore manifest decoding with fail-closed future-schema
+  handling and dedicated compatibility/migration documentation.
+
+## 0.72.1 - 2026-07-12
+
+- Document manifest compatibility and migration rules and add a future-schema
+  rejection regression test.
+
 ## 0.72.0 - 2026-07-12
 
 - Expose guarded drive-profile capacity snapshots and read-only user-tree

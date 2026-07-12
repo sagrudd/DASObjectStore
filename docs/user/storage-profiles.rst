@@ -98,6 +98,19 @@ Protection is independent of the profile: manifests may require ``local_only``,
 The physical backend does not silently choose a protection promise; product
 adapters must request and validate one explicitly.
 
+Compatibility and migration rules
+---------------------------------
+
+Portable manifests are versioned contracts. The current schema is version 1;
+unknown or future versions are rejected rather than guessed or silently
+rewritten. Existing appliance metadata and legacy policy files are never
+interpreted as a folder or drive manifest. An explicit adoption or migration
+operation must validate the backend identity, host mode, protection policy, and
+capacity policy before writing a new manifest. Drive mount hints may become
+stale and are only local probe hints; filesystem and device identities are the
+authority. A future schema migration must be additive, versioned, and tested
+before it can write persistent metadata.
+
 All profiles implement the same backend capability boundary: validation,
 reservation, staging, durable finalization, reads, enumeration, verification,
 health, reconciliation, and removal. A profile may report an unsupported

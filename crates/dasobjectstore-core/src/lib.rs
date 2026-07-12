@@ -28,7 +28,8 @@ pub use config::{
 };
 pub use deployment::{DeploymentProfile, HostMode};
 pub use manifest::{
-    BackendReference, DriveMediaKind, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+    BackendReference, DriveMediaKind, ObjectStoreManifest, ObjectStoreManifestDecodeError,
+    OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
 };
 pub use protection::ProtectionPolicy;
 

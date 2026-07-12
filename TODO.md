@@ -148,6 +148,11 @@ completion.
     no longer implies protection semantics.
 - [ ] Document compatibility and migration rules before changing persistent
   metadata, public APIs, CLI behavior, or existing appliance pools.
+  - [x] Document version-1 manifest compatibility, fail-closed future-schema
+    handling, untouched legacy metadata, explicit adoption/migration writes,
+    and identity-over-path rules; strict decode rejects unknown fields and
+    future schemas before interpretation. Migration implementation remains
+    gated until a new persistent field is approved.
 - [ ] Put existing appliance placement behind the backend contract with
   regression evidence showing unchanged ingress, repair, and export behavior.
 
