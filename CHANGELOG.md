@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.31 - 2026-07-12
+
+- Extract ingest queue inspection, rendering, and daemon-owned drain handling
+  into a focused CLI module while preserving dry-run risk gates and output
+  contracts.
+
 ## 0.71.30 - 2026-07-12
 
 - Extract the hidden local-direct ingest fallback into a focused CLI module and

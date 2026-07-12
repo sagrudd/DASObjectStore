@@ -252,6 +252,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Remove the CLI `run.rs` size-budget exception after extracting its
     local-direct ingest fallback; the CLI runner now passes the 1,000-line
     production-module guard.
+  - [x] Extract ingest queue inspection, rendering, and daemon-owned drain
+    handling into `crates/dasobjectstore-cli/src/run/ingest_queue.rs`; preserve
+    dry-run risk gates, JSON/text output, and daemon mutation ownership.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.
