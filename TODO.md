@@ -129,8 +129,14 @@ completion.
 - [ ] Extend every ObjectStore policy with logical capacity limit, mandatory
   backend reserve, warning threshold, and critical threshold; require a finite
   limit for ``folder``.
+  - [x] Add serde-compatible `CapacityPolicy` fields and strict validation to
+    the shared `StorePolicy` model while retaining unbounded legacy defaults
+    until profile creation supplies a finite limit.
 - [ ] Add a transactional quota ledger and capacity reservations so concurrent,
   streaming, versioned, and multipart uploads cannot overbook the same bytes.
+  - [x] Add a core transactional `CapacityReservationLedger` with reserve,
+    commit, release, overflow, duplicate-ID, and backend-reserve enforcement
+    tests; daemon/S3/multipart admission wiring remains open.
 - [ ] Admit against the strictest of logical quota, outstanding reservations,
   backend usable space after reserve, SSD staging, and copy amplification.
 - [ ] Charge each logical object version at full logical size even when physical

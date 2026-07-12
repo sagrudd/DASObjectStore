@@ -19,3 +19,9 @@ drive is not a license for direct writes that bypass manifests, checksums,
 quota reservations, or durable finalization. The folder profile must be size
 bounded, and all profiles will eventually expose the same logical capacity and
 admission semantics through CLI, Web, S3, and product adapters.
+
+The shared policy contract now carries a logical limit, backend reserve, and
+warning/critical thresholds. Its reservation ledger admits bytes transactionally
+before an upload and commits or releases the reservation after durable
+finalization. Existing appliance policies remain explicitly unbounded until an
+operator performs a compatibility-aware capacity migration.

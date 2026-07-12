@@ -1,6 +1,7 @@
 //! Store classes and policy.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
@@ -122,6 +123,154 @@ pub enum CredentialPolicy {
     PerStore,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityPolicy {
+    /// `None` preserves the legacy appliance policy until a finite limit is
+    /// explicitly configured. New bounded profiles must provide a value.
+    pub logical_limit_bytes: Option<u64>,
+    pub backend_reserve_bytes: u64,
+    pub warning_threshold_basis_points: u16,
+    pub critical_threshold_basis_points: u16,
+}
+
+impl Default for CapacityPolicy {
+    fn default() -> Self {
+        Self {
+            logical_limit_bytes: None,
+            backend_reserve_bytes: 0,
+            warning_threshold_basis_points: 8_000,
+            critical_threshold_basis_points: 9_500,
+        }
+    }
+}
+
+impl CapacityPolicy {
+    pub fn bounded(logical_limit_bytes: u64, backend_reserve_bytes: u64) -> Self {
+        Self {
+            logical_limit_bytes: Some(logical_limit_bytes),
+            backend_reserve_bytes,
+            ..Self::default()
+        }
+    }
+
+    pub fn validation_error(&self) -> Option<CapacityPolicyValidationError> {
+        if self
+            .logical_limit_bytes
+            .is_some_and(|limit| limit == 0 || self.backend_reserve_bytes >= limit)
+        {
+            return Some(CapacityPolicyValidationError::InvalidLimitOrReserve);
+        }
+        if self.warning_threshold_basis_points > 10_000
+            || self.critical_threshold_basis_points > 10_000
+            || self.warning_threshold_basis_points > self.critical_threshold_basis_points
+        {
+            return Some(CapacityPolicyValidationError::InvalidThresholds);
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CapacityPolicyValidationError {
+    InvalidLimitOrReserve,
+    InvalidThresholds,
+}
+
+impl Display for CapacityPolicyValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLimitOrReserve => {
+                formatter.write_str("capacity logical limit must be positive and exceed backend reserve")
+            }
+            Self::InvalidThresholds => formatter.write_str(
+                "capacity warning/critical thresholds must be ordered and within 0..=10000 basis points",
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CapacityReservationLedger {
+    policy: CapacityPolicy,
+    used_bytes: u64,
+    reservations: HashMap<String, u64>,
+}
+
+impl CapacityReservationLedger {
+    pub fn new(policy: CapacityPolicy, used_bytes: u64) -> Result<Self, CapacityLedgerError> {
+        if let Some(error) = policy.validation_error() {
+            return Err(CapacityLedgerError::InvalidPolicy(error));
+        }
+        Ok(Self {
+            policy,
+            used_bytes,
+            reservations: HashMap::new(),
+        })
+    }
+
+    pub fn used_bytes(&self) -> u64 {
+        self.used_bytes
+    }
+
+    pub fn reserved_bytes(&self) -> u64 {
+        self.reservations.values().copied().sum()
+    }
+
+    pub fn reserve(
+        &mut self,
+        reservation_id: impl Into<String>,
+        bytes: u64,
+    ) -> Result<(), CapacityLedgerError> {
+        let reservation_id = reservation_id.into();
+        if reservation_id.trim().is_empty() || self.reservations.contains_key(&reservation_id) {
+            return Err(CapacityLedgerError::InvalidReservationId);
+        }
+        let outstanding = self
+            .used_bytes
+            .checked_add(self.reserved_bytes())
+            .and_then(|value| value.checked_add(bytes))
+            .ok_or(CapacityLedgerError::Overflow)?;
+        if let Some(limit) = self.policy.logical_limit_bytes {
+            let admitted_limit = limit.saturating_sub(self.policy.backend_reserve_bytes);
+            if outstanding > admitted_limit {
+                return Err(CapacityLedgerError::InsufficientCapacity {
+                    available_bytes: admitted_limit
+                        .saturating_sub(self.used_bytes.saturating_add(self.reserved_bytes())),
+                });
+            }
+        }
+        self.reservations.insert(reservation_id, bytes);
+        Ok(())
+    }
+
+    pub fn commit(&mut self, reservation_id: &str) -> Result<(), CapacityLedgerError> {
+        let bytes = self
+            .reservations
+            .remove(reservation_id)
+            .ok_or(CapacityLedgerError::UnknownReservation)?;
+        self.used_bytes = self
+            .used_bytes
+            .checked_add(bytes)
+            .ok_or(CapacityLedgerError::Overflow)?;
+        Ok(())
+    }
+
+    pub fn release(&mut self, reservation_id: &str) -> Result<u64, CapacityLedgerError> {
+        self.reservations
+            .remove(reservation_id)
+            .ok_or(CapacityLedgerError::UnknownReservation)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CapacityLedgerError {
+    InvalidPolicy(CapacityPolicyValidationError),
+    InvalidReservationId,
+    UnknownReservation,
+    InsufficientCapacity { available_bytes: u64 },
+    Overflow,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ExportPolicy {
     S3,
@@ -143,6 +292,8 @@ pub struct StorePolicy {
     pub capacity_behavior: CapacityBehavior,
     pub credential_policy: CredentialPolicy,
     pub export_policy: ExportPolicy,
+    #[serde(default)]
+    pub capacity: CapacityPolicy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -171,6 +322,8 @@ pub struct PoolPolicyDefaults {
     pub capacity_behavior: CapacityBehavior,
     pub credential_policy: CredentialPolicy,
     pub export_policy: ExportPolicy,
+    #[serde(default)]
+    pub capacity: CapacityPolicy,
 }
 
 impl PoolPolicyDefaults {
@@ -208,6 +361,7 @@ impl PoolPolicyDefaults {
                 .credential_policy
                 .unwrap_or(self.credential_policy),
             export_policy: overrides.export_policy.unwrap_or(self.export_policy),
+            capacity: overrides.capacity.unwrap_or_else(|| self.capacity.clone()),
         }
     }
 
@@ -224,6 +378,7 @@ impl PoolPolicyDefaults {
             capacity_behavior: policy.capacity_behavior,
             credential_policy: policy.credential_policy,
             export_policy: policy.export_policy,
+            capacity: policy.capacity,
         }
     }
 }
@@ -241,6 +396,7 @@ pub struct StorePolicyOverrides {
     pub capacity_behavior: Option<CapacityBehavior>,
     pub credential_policy: Option<CredentialPolicy>,
     pub export_policy: Option<ExportPolicy>,
+    pub capacity: Option<CapacityPolicy>,
 }
 
 impl StorePolicy {
@@ -266,6 +422,7 @@ impl StorePolicy {
                 capacity_behavior: CapacityBehavior::MarkRedownloadRequired,
                 credential_policy: CredentialPolicy::PerStore,
                 export_policy: ExportPolicy::S3,
+                capacity: CapacityPolicy::default(),
             },
             StoreClass::GeneratedData => Self {
                 class,
@@ -280,6 +437,7 @@ impl StorePolicy {
                 capacity_behavior: CapacityBehavior::BackpressureByPriority,
                 credential_policy: CredentialPolicy::PerStore,
                 export_policy: ExportPolicy::S3,
+                capacity: CapacityPolicy::default(),
             },
             StoreClass::CriticalMetadata => Self {
                 class,
@@ -294,6 +452,7 @@ impl StorePolicy {
                 capacity_behavior: CapacityBehavior::RejectWrites,
                 credential_policy: CredentialPolicy::PerStore,
                 export_policy: ExportPolicy::S3,
+                capacity: CapacityPolicy::default(),
             },
             StoreClass::ExportBundle => Self {
                 class,
@@ -308,6 +467,7 @@ impl StorePolicy {
                 capacity_behavior: CapacityBehavior::BackpressureByPriority,
                 credential_policy: CredentialPolicy::PerStore,
                 export_policy: ExportPolicy::ReadOnlyFileExport,
+                capacity: CapacityPolicy::default(),
             },
             StoreClass::IngestStaging => Self {
                 class,
@@ -322,6 +482,7 @@ impl StorePolicy {
                 capacity_behavior: CapacityBehavior::BackpressureByPriority,
                 credential_policy: CredentialPolicy::PerStore,
                 export_policy: ExportPolicy::Disabled,
+                capacity: CapacityPolicy::default(),
             },
         }
     }
@@ -379,6 +540,10 @@ impl StorePolicy {
 
         if self.class == StoreClass::IngestStaging && self.export_policy != ExportPolicy::Disabled {
             errors.push(StorePolicyValidationError::IngestStagingExportEnabled);
+        }
+
+        if let Some(error) = self.capacity.validation_error() {
+            errors.push(StorePolicyValidationError::InvalidCapacity { error });
         }
 
         errors
@@ -465,6 +630,9 @@ pub enum StorePolicyValidationError {
         class: StoreClass,
     },
     IngestStagingExportEnabled,
+    InvalidCapacity {
+        error: CapacityPolicyValidationError,
+    },
 }
 
 impl Display for StorePolicyValidationError {
@@ -504,6 +672,7 @@ impl Display for StorePolicyValidationError {
             Self::IngestStagingExportEnabled => {
                 formatter.write_str("ingest staging store export policy must be disabled")
             }
+            Self::InvalidCapacity { error } => write!(formatter, "invalid capacity policy: {error}"),
         }
     }
 }
@@ -511,10 +680,45 @@ impl Display for StorePolicyValidationError {
 #[cfg(test)]
 mod tests {
     use super::{
-        AcknowledgementPolicy, CapacityBehavior, EnclosurePlacement, EnclosurePlacementContext,
-        ExportPolicy, IngestMode, MutabilityPolicy, PoolPolicyDefaults, RepairPolicy,
-        RetentionPolicy, StoreClass, StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
+        AcknowledgementPolicy, CapacityBehavior, CapacityLedgerError, CapacityPolicy,
+        EnclosurePlacement, EnclosurePlacementContext, ExportPolicy, IngestMode, MutabilityPolicy,
+        PoolPolicyDefaults, RepairPolicy, RetentionPolicy, StoreClass, StorePolicy,
+        StorePolicyOverrides, StorePolicyValidationError,
     };
+
+    #[test]
+    fn bounded_capacity_reservations_are_transactional_and_respect_backend_reserve() {
+        let policy = CapacityPolicy::bounded(100, 20);
+        let mut ledger = super::CapacityReservationLedger::new(policy, 50)
+            .expect("bounded capacity policy is valid");
+
+        ledger.reserve("upload-a", 25).expect("reservation fits");
+        assert_eq!(ledger.reserved_bytes(), 25);
+        assert_eq!(
+            ledger.reserve("upload-b", 10),
+            Err(CapacityLedgerError::InsufficientCapacity { available_bytes: 5 })
+        );
+        ledger.commit("upload-a").expect("reservation commits");
+        assert_eq!(ledger.used_bytes(), 75);
+        assert_eq!(ledger.reserved_bytes(), 0);
+        assert_eq!(
+            ledger.release("missing"),
+            Err(CapacityLedgerError::UnknownReservation)
+        );
+    }
+
+    #[test]
+    fn capacity_policy_rejects_invalid_reserve_and_thresholds() {
+        assert!(CapacityPolicy::bounded(10, 10).validation_error().is_some());
+        assert!(CapacityPolicy {
+            logical_limit_bytes: Some(100),
+            backend_reserve_bytes: 1,
+            warning_threshold_basis_points: 9_500,
+            critical_threshold_basis_points: 9_000,
+        }
+        .validation_error()
+        .is_some());
+    }
 
     #[test]
     fn store_class_names_are_stable_snake_case() {
