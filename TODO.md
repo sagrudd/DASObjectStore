@@ -768,6 +768,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Move Home telemetry chart and source/gap treatments into
     `styles/home.css`, keeping the global sheet focused on shared primitives and
     loading the feature sheet through Trunk and CSS contract tests.
+  - [x] Correct the screenshot runner’s footer assertion to accept the approved
+    report-style sans-serif footer and reject only an accidental monospace
+    treatment; full Playwright artifact execution remains environment-gated.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 

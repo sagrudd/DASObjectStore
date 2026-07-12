@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.49 - 2026-07-12
+
+- Correct Web screenshot regression validation for the approved sans-serif
+  Mnemosyne footer contract.
+
 ## 0.72.48 - 2026-07-12
 
 - Add the shared Yew TaskPane primitive with explicit workflow modes,

@@ -152,8 +152,8 @@ async function assertVisualContract(page, { auth }) {
       issues.push("footer is not visible");
     } else {
       const footerStyle = window.getComputedStyle(footer);
-      if (!footerStyle.fontFamily.toLowerCase().includes("mono")) {
-        issues.push(`footer is not using a monospace stack: ${footerStyle.fontFamily}`);
+      if (footerStyle.fontFamily.toLowerCase().includes("mono")) {
+        issues.push(`footer must use the report-style sans-serif stack: ${footerStyle.fontFamily}`);
       }
       if (footerStyle.backgroundColor === "rgba(0, 0, 0, 0)") {
         issues.push("footer background is transparent");
