@@ -35,6 +35,12 @@ agreement before landing.
 - Extract daemon ingest pipeline work records and live progress/rate state into
   a focused module while preserving SSD-first/direct-HDD and telemetry tests.
 
+## 0.71.11 - 2026-07-12
+
+- Extract bounded SSD-flush/HDD-settlement workers and admission helpers into
+  a focused daemon ingest module while preserving backpressure and cancellation
+  behavior.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign

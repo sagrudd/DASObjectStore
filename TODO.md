@@ -196,6 +196,9 @@ list until every temporary size-budget exception has been removed.
   into `runtime/ingest_files/pipeline_state.rs`; preserve SSD-first routing,
   direct-HDD policy, and telemetry tests while continuing the remaining
   execution-engine split.
+- [x] Extract bounded SSD-flush/HDD-settlement workers and admission helpers
+  into `runtime/ingest_files/pipeline_workers.rs`; preserve queue backpressure,
+  cancellation, worker error messages, and SSD-pressure behavior.
 - [x] Split GUI dashboard object-service discovery and telemetry projection
   from the home-dashboard assembly façade.
 - [x] Add CI enforcement for a 1,000 production-line module budget, with a
