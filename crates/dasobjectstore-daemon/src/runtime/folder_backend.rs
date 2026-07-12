@@ -1,7 +1,8 @@
 //! Local bounded folder backend implementation.
 
 use super::reconciliation::{
-    plan_reconciliation, ReconciliationManifest, ReconciliationObject, ReconciliationPlan,
+    plan_reconciliation, ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
+    ReconciliationObject, ReconciliationPlan,
 };
 use dasobjectstore_core::backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
@@ -162,6 +163,111 @@ impl FolderBackend {
             })
             .collect::<Result<Vec<_>, BackendError>>()?;
         Ok(plan_reconciliation(manifest, &objects))
+    }
+
+    /// Explicitly adopt the current read-only reconciliation plan into the
+    /// private managed namespace. User files are copied through the stable
+    /// source path primitive, verified, durably finalized, and only then
+    /// marked complete in the caller-owned checkpoint. The caller chooses the
+    /// checkpoint location and must treat the resulting records as input to
+    /// its catalogue transaction; this method never mutates user files.
+    pub fn adopt_user_tree_reconciliation(
+        &mut self,
+        checkpoint_path: &Path,
+        manifest: &mut ReconciliationManifest,
+        reservation_prefix: &str,
+    ) -> Result<Vec<BackendObjectRecord>, BackendError> {
+        if reservation_prefix.trim().is_empty()
+            || !reservation_prefix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(BackendError::InvalidRequest(
+                "reconciliation reservation prefix must use ASCII letters, digits, '-' or '_'"
+                    .to_string(),
+            ));
+        }
+        let plan = self.replan_user_tree_reconciliation(manifest)?;
+        let mut records = Vec::new();
+        for (index, action) in plan.actions.iter().enumerate() {
+            let (key, relative_path, size_bytes) = match action {
+                ReconciliationAction::Download {
+                    key,
+                    relative_path,
+                    size_bytes,
+                }
+                | ReconciliationAction::Resume {
+                    key,
+                    relative_path,
+                    size_bytes,
+                    ..
+                } => (key, relative_path, *size_bytes),
+                ReconciliationAction::SkipComplete { .. }
+                | ReconciliationAction::InvalidKey { .. }
+                | ReconciliationAction::Collision { .. } => continue,
+            };
+            let source_path = self.root.join(relative_path);
+            let size_bytes = size_bytes
+                .or_else(|| {
+                    fs::symlink_metadata(&source_path)
+                        .ok()
+                        .map(|metadata| metadata.len())
+                })
+                .ok_or_else(|| {
+                    BackendError::InvalidRequest(format!(
+                        "reconciliation source size is unavailable: {relative_path}"
+                    ))
+                })?;
+            let reservation_id = format!("{reservation_prefix}-{index}");
+            manifest
+                .checkpoint(
+                    checkpoint_path,
+                    key,
+                    ReconciliationEntryState::InProgress,
+                    None,
+                    0,
+                )
+                .map_err(reconciliation_error)?;
+            let object_key = BackendObjectKey {
+                object_id: relative_path.clone(),
+                version: 1,
+            };
+            let finalized = (|| {
+                self.reserve(&reservation_id, size_bytes)?;
+                let staged = self.stage_path(&reservation_id, &object_key, &source_path)?;
+                match self.finalize(staged.clone()) {
+                    Ok(finalized) => Ok(finalized),
+                    Err(error) => {
+                        self.discard_staged(&staged, &reservation_id);
+                        Err(error)
+                    }
+                }
+            })();
+            let finalized = match finalized {
+                Ok(finalized) => finalized,
+                Err(error) => {
+                    let _ = manifest.checkpoint(
+                        checkpoint_path,
+                        key,
+                        ReconciliationEntryState::Failed,
+                        Some(error.to_string()),
+                        0,
+                    );
+                    return Err(error);
+                }
+            };
+            manifest
+                .checkpoint(
+                    checkpoint_path,
+                    key,
+                    ReconciliationEntryState::Complete,
+                    None,
+                    size_bytes,
+                )
+                .map_err(reconciliation_error)?;
+            records.push(finalized);
+        }
+        Ok(records)
     }
 
     pub fn capacity(&self) -> FolderCapacitySnapshot {
@@ -561,6 +667,10 @@ fn source_revision(metadata: &Metadata) -> String {
     {
         format!("portable:{}:{}", metadata.len(), modified)
     }
+}
+
+fn reconciliation_error(error: super::reconciliation::ReconciliationManifestError) -> BackendError {
+    BackendError::InvalidRequest(format!("reconciliation checkpoint: {error}"))
 }
 
 fn hash_stable_file(path: &Path) -> Result<(String, u64), BackendError> {
@@ -978,6 +1088,58 @@ mod tests {
 
         assert!(root.join("incoming/run/data.txt").exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_adopts_unmanaged_files_with_restart_safe_checkpoints() {
+        let root = unique_root();
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        let source = root.join("incoming/run/data.txt");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("parent creates");
+        fs::write(&source, b"unmanaged").expect("user file writes");
+
+        let checkpoint_path = root.with_extension("adoption").join("manifest.json");
+        let mut checkpoint = backend
+            .plan_user_tree_reconciliation()
+            .expect("reconciliation plan builds")
+            .manifest;
+        checkpoint
+            .save_atomic(&checkpoint_path)
+            .expect("checkpoint saves");
+        let mut resumed = ReconciliationManifest::load(&checkpoint_path).expect("checkpoint loads");
+        let records = backend
+            .adopt_user_tree_reconciliation(&checkpoint_path, &mut resumed, "adopt")
+            .expect("adoption succeeds");
+
+        assert_eq!(records.len(), 1);
+        assert!(source.exists(), "adoption never mutates the user file");
+        assert_eq!(backend.capacity().used_bytes, 9);
+        assert_eq!(
+            backend
+                .enumerate(None)
+                .expect("managed objects enumerate")
+                .len(),
+            1
+        );
+        assert!(matches!(
+            resumed.entries["incoming/run/data.txt"].state,
+            ReconciliationEntryState::Complete
+        ));
+
+        let resumed_plan = backend
+            .replan_user_tree_reconciliation(&mut resumed)
+            .expect("completed checkpoint replans");
+        assert_eq!(
+            resumed_plan.actions,
+            vec![ReconciliationAction::SkipComplete {
+                key: "incoming/run/data.txt".to_string(),
+                relative_path: "incoming/run/data.txt".to_string(),
+            }]
+        );
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(checkpoint_path.parent().expect("checkpoint parent"));
     }
 
     #[test]

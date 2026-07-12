@@ -348,6 +348,11 @@ completion.
   - [x] Preserve provider resume safety when listings expose stable ETags by
     carrying the ETag as the source revision; providers without a revision
     remain fail-safe and replan rather than guessing continuity.
+  - [x] Add an explicit folder adoption executor that copies unmanaged files
+    through stable-source verification, private staging, checksum/finalization,
+    and restart-safe manifest checkpoints. User files remain untouched and
+    failed attempts are checkpointed without silently becoming authoritative;
+    catalogue transaction handoff remains a separate integration task.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

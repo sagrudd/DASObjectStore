@@ -941,6 +941,12 @@ colliding while preserving deterministic retries for the same source.
 Goal: manage one bounded directory with hierarchical files, portable manifests,
 atomic ingress, drift detection, safe adoption, browsing, and common S3 access.
 
+Current delivery note: read-only inspection now has an explicit opt-in adoption
+executor. It preserves user files, stages through the hardened folder backend,
+verifies and durably finalizes each object, and checkpoints InProgress/Complete/
+Failed states atomically for restart-safe retries. Catalogue authority and S3
+integration remain open.
+
 Exit criteria: system and per-user deployments can create/adopt, ingest, verify,
 reconcile, browse, expose through S3, restart, and recover a folder store without
 following symlinks or accepting unmanaged changes silently.

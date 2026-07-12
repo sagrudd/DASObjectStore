@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.46 - 2026-07-12
+
+- Add explicit bounded-folder adoption execution with stable-source checks,
+  durable finalization, capacity settlement, and restart-safe checkpoints.
+
 ## 0.72.45 - 2026-07-12
 
 - Add durable capacity-reservation timestamps, schema-v1 compatibility, and a
