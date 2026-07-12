@@ -14,6 +14,11 @@ agreement before landing.
   profile-aware S3, migration, and Mnemosyne integration explicit delivery
   gates while preserving the completed appliance milestone history.
 
+## 0.71.5 - 2026-07-12
+
+- Extract CLI performance SSD residency budgeting and bounded batch admission
+  into a dedicated module with capacity-boundary regression coverage.
+
 ## 0.71.3 - 2026-07-11
 
 - Complete scoped Garage reconciliation without replacing the live metadata

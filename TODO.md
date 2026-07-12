@@ -260,8 +260,11 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract performance-report artifact rebuild dispatch into the existing
     performance report module, keeping PDF/markdown lifecycle handling out of
     the top-level runner.
-  - [ ] Continue extracting the large CLI runner before removing the CLI size
-    exception.
+  - [x] Extract SSD residency budgeting, bounded batch planning, and admission
+    boundary tests into `crates/dasobjectstore-cli/src/run/performance_residency.rs`.
+  - [ ] Extract the remaining performance execution engine (scenario runners,
+    disk scheduler, copy primitives, and measurement helpers) before removing
+    the CLI runner exception.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser
