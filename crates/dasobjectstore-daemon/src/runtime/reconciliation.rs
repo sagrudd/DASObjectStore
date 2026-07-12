@@ -19,6 +19,8 @@ pub const RECONCILIATION_MANIFEST_SCHEMA: u32 = 1;
 pub struct ReconciliationObject {
     pub key: String,
     pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub source_revision: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -140,6 +142,8 @@ pub struct ReconciliationManifestEntry {
     pub source_key: String,
     pub relative_path: Option<String>,
     pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub source_revision: Option<String>,
     pub state: ReconciliationEntryState,
     pub downloaded_bytes: u64,
     pub message: Option<String>,
@@ -205,6 +209,7 @@ pub fn plan_reconciliation(
                         source_key: object.key.clone(),
                         relative_path: None,
                         size_bytes: object.size_bytes,
+                        source_revision: object.source_revision.clone(),
                         state: ReconciliationEntryState::InvalidKey,
                         downloaded_bytes: 0,
                         message: Some(reason.clone()),
@@ -229,6 +234,7 @@ pub fn plan_reconciliation(
                         source_key: object.key.clone(),
                         relative_path: Some(relative_path.clone()),
                         size_bytes: object.size_bytes,
+                        source_revision: object.source_revision.clone(),
                         state: ReconciliationEntryState::Collision,
                         downloaded_bytes: 0,
                         message: Some("multiple provider keys normalize to one path".to_string()),
@@ -245,22 +251,56 @@ pub fn plan_reconciliation(
 
         let object = objects[0];
         let previous = manifest.entries.get(&object.key).cloned();
-        let (state, downloaded_bytes) = match previous {
-            Some(entry) if entry.state == ReconciliationEntryState::Complete => {
+        let revision_matches = previous
+            .as_ref()
+            .and_then(|entry| entry.source_revision.as_ref())
+            .zip(object.source_revision.as_ref())
+            .is_some_and(|(previous, current)| previous == current);
+        let (state, downloaded_bytes, message) = match previous {
+            Some(entry)
+                if entry.state == ReconciliationEntryState::Complete && revision_matches =>
+            {
                 actions.push(ReconciliationAction::SkipComplete {
                     key: object.key.clone(),
                     relative_path: relative_path.clone(),
                 });
-                (ReconciliationEntryState::Complete, entry.downloaded_bytes)
+                (
+                    ReconciliationEntryState::Complete,
+                    entry.downloaded_bytes,
+                    None,
+                )
             }
-            Some(entry) if entry.state == ReconciliationEntryState::InProgress => {
+            Some(entry)
+                if entry.state == ReconciliationEntryState::InProgress && revision_matches =>
+            {
                 actions.push(ReconciliationAction::Resume {
                     key: object.key.clone(),
                     relative_path: relative_path.clone(),
                     size_bytes: object.size_bytes,
                     downloaded_bytes: entry.downloaded_bytes,
                 });
-                (ReconciliationEntryState::InProgress, entry.downloaded_bytes)
+                (
+                    ReconciliationEntryState::InProgress,
+                    entry.downloaded_bytes,
+                    None,
+                )
+            }
+            Some(entry)
+                if matches!(
+                    entry.state,
+                    ReconciliationEntryState::Complete | ReconciliationEntryState::InProgress
+                ) =>
+            {
+                actions.push(ReconciliationAction::Download {
+                    key: object.key.clone(),
+                    relative_path: relative_path.clone(),
+                    size_bytes: object.size_bytes,
+                });
+                (
+                    ReconciliationEntryState::Pending,
+                    0,
+                    Some("source revision changed; restarting safely".to_string()),
+                )
             }
             _ => {
                 actions.push(ReconciliationAction::Download {
@@ -268,7 +308,7 @@ pub fn plan_reconciliation(
                     relative_path: relative_path.clone(),
                     size_bytes: object.size_bytes,
                 });
-                (ReconciliationEntryState::Pending, 0)
+                (ReconciliationEntryState::Pending, 0, None)
             }
         };
         manifest.entries.insert(
@@ -277,9 +317,10 @@ pub fn plan_reconciliation(
                 source_key: object.key.clone(),
                 relative_path: Some(relative_path),
                 size_bytes: object.size_bytes,
+                source_revision: object.source_revision.clone(),
                 state,
                 downloaded_bytes,
-                message: None,
+                message,
             },
         );
     }
@@ -420,14 +461,17 @@ mod tests {
                 ReconciliationObject {
                     key: "../escape".to_string(),
                     size_bytes: Some(1),
+                    source_revision: None,
                 },
                 ReconciliationObject {
                     key: "a//b".to_string(),
                     size_bytes: Some(2),
+                    source_revision: None,
                 },
                 ReconciliationObject {
                     key: "a/b".to_string(),
                     size_bytes: Some(3),
+                    source_revision: None,
                 },
             ],
         );
@@ -456,6 +500,7 @@ mod tests {
         let objects = vec![ReconciliationObject {
             key: "run-42/data.bin".to_string(),
             size_bytes: Some(100),
+            source_revision: Some("revision-1".to_string()),
         }];
         let first = plan_reconciliation(&mut manifest, &objects);
         assert!(matches!(
@@ -496,5 +541,38 @@ mod tests {
             ReconciliationAction::SkipComplete { .. }
         ));
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn legacy_entries_without_source_revision_never_skip_or_resume() {
+        let mut manifest = ReconciliationManifest::new("store-legacy", None);
+        manifest.entries.insert(
+            "data.bin".to_string(),
+            ReconciliationManifestEntry {
+                source_key: "data.bin".to_string(),
+                relative_path: Some("data.bin".to_string()),
+                size_bytes: Some(4),
+                source_revision: None,
+                state: ReconciliationEntryState::Complete,
+                downloaded_bytes: 4,
+                message: None,
+            },
+        );
+        let plan = plan_reconciliation(
+            &mut manifest,
+            &[ReconciliationObject {
+                key: "data.bin".to_string(),
+                size_bytes: Some(4),
+                source_revision: None,
+            }],
+        );
+        assert!(matches!(
+            plan.actions.as_slice(),
+            [ReconciliationAction::Download { .. }]
+        ));
+        assert_eq!(
+            manifest.entries["data.bin"].state,
+            ReconciliationEntryState::Pending
+        );
     }
 }

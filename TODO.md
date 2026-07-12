@@ -293,6 +293,11 @@ completion.
   - [x] Convert the read-only inspection into a resumable reconciliation plan
     with manifest entries and normalized download actions; unsafe paths remain
     report-only and no user file is adopted or mutated.
+  - [x] Make that report-only plan revision-aware and restart-safe: stable
+    source identity revisions are required before Complete/InProgress entries
+    can skip or resume; changed/replaced files reset to Download and wrong-store
+    checkpoints fail closed. Adoption execution and catalogue authority remain
+    open.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

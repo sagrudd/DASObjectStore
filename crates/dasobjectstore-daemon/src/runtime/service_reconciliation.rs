@@ -305,6 +305,7 @@ pub(super) fn list_garage_objects<R: ServiceCommandRunner>(
                 objects.push(ReconciliationObject {
                     key: key.to_string(),
                     size_bytes: object.get("Size").and_then(Value::as_u64),
+                    source_revision: None,
                 });
             }
         }

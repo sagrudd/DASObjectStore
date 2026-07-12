@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.31 - 2026-07-12
+
+- Make folder reconciliation checkpoints revision-aware so changed or legacy
+  revision-less sources cannot be skipped or resumed as authoritative.
+
 ## 0.72.30 - 2026-07-12
 
 - Add daemon atomic, fsync-ordered capacity-ledger JSON persistence with

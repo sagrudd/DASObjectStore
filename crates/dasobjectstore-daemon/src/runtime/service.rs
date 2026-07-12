@@ -1004,6 +1004,7 @@ mod tests {
             vec![crate::runtime::ReconciliationObject {
                 key: "run-42/data.bin".to_string(),
                 size_bytes: Some(12),
+                source_revision: None,
             }]
         );
         assert_eq!(runner.calls.borrow().len(), 1);

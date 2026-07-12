@@ -122,26 +122,46 @@ impl FolderBackend {
     /// visible in the inspection report and are not made authoritative.
     pub fn plan_user_tree_reconciliation(&self) -> Result<FolderReconciliationPlan, BackendError> {
         let inspection = self.inspect_user_tree()?;
-        let objects = inspection
-            .unmanaged_paths
-            .iter()
-            .map(|relative_path| {
-                let path = self.root.join(relative_path);
-                let metadata = fs::metadata(&path).map_err(io_error)?;
-                Ok(ReconciliationObject {
-                    key: relative_path.clone(),
-                    size_bytes: Some(metadata.len()),
-                })
-            })
-            .collect::<Result<Vec<_>, BackendError>>()?;
-        let mut manifest =
-            ReconciliationManifest::new(self.manifest.store_id.as_str().to_string(), None);
-        let plan = plan_reconciliation(&mut manifest, &objects);
+        let mut manifest = ReconciliationManifest::new(self.manifest.store_id.as_str(), None);
+        let plan = self.replan_user_tree_reconciliation(&mut manifest)?;
         Ok(FolderReconciliationPlan {
             inspection,
             manifest,
             plan,
         })
+    }
+
+    /// Replan against a caller-owned checkpoint without adopting or mutating
+    /// user files. The checkpoint must belong to this logical store.
+    pub fn replan_user_tree_reconciliation(
+        &self,
+        manifest: &mut ReconciliationManifest,
+    ) -> Result<ReconciliationPlan, BackendError> {
+        if manifest.store_id != self.manifest.store_id.as_str() {
+            return Err(BackendError::InvalidRequest(
+                "reconciliation manifest belongs to a different ObjectStore".to_string(),
+            ));
+        }
+        let inspection = self.inspect_user_tree()?;
+        let objects = inspection
+            .unmanaged_paths
+            .iter()
+            .map(|relative_path| {
+                let path = self.root.join(relative_path);
+                let metadata = fs::symlink_metadata(&path).map_err(io_error)?;
+                if !metadata.is_file() {
+                    return Err(BackendError::InvalidRequest(format!(
+                        "folder entry changed during reconciliation: {relative_path}"
+                    )));
+                }
+                Ok(ReconciliationObject {
+                    key: relative_path.clone(),
+                    size_bytes: Some(metadata.len()),
+                    source_revision: Some(source_revision(&metadata)),
+                })
+            })
+            .collect::<Result<Vec<_>, BackendError>>()?;
+        Ok(plan_reconciliation(manifest, &objects))
     }
 
     pub fn capacity(&self) -> FolderCapacitySnapshot {
@@ -517,6 +537,32 @@ fn snapshot(metadata: &Metadata) -> FileSnapshot {
     }
 }
 
+fn source_revision(metadata: &Metadata) -> String {
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| format!("{}:{}", duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or_else(|| "unknown".to_string());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return format!(
+            "unix:{}:{}:{}:{}:{}:{}",
+            metadata.dev(),
+            metadata.ino(),
+            metadata.nlink(),
+            metadata.len(),
+            modified,
+            metadata.mode()
+        );
+    }
+    #[cfg(not(unix))]
+    {
+        format!("portable:{}:{}", metadata.len(), modified)
+    }
+}
+
 fn hash_stable_file(path: &Path) -> Result<(String, u64), BackendError> {
     hash_stable_file_with_hook(path, None)
 }
@@ -737,7 +783,8 @@ fn io_error(error: std::io::Error) -> BackendError {
 mod tests {
     use super::{hash_stable_file_with_hook, FolderBackend};
     use crate::runtime::reconciliation::ReconciliationAction;
-    use dasobjectstore_core::backend::{BackendObjectKey, ObjectStoreBackend};
+    use crate::runtime::reconciliation::{ReconciliationEntryState, ReconciliationManifest};
+    use dasobjectstore_core::backend::{BackendError, BackendObjectKey, ObjectStoreBackend};
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::manifest::{
@@ -930,6 +977,80 @@ mod tests {
         );
 
         assert!(root.join("incoming/run/data.txt").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_reconciliation_resume_requires_matching_source_revision() {
+        let root = unique_root();
+        let backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        let source = root.join("incoming/data.txt");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("parent creates");
+        fs::write(&source, b"stable").expect("source writes");
+
+        let checkpoint_root = root.with_extension("checkpoint");
+        let checkpoint_path = checkpoint_root.join("manifest.json");
+        let mut first = backend
+            .plan_user_tree_reconciliation()
+            .expect("initial plan builds")
+            .manifest;
+        first
+            .save_atomic(&checkpoint_path)
+            .expect("checkpoint saves");
+        first
+            .checkpoint(
+                &checkpoint_path,
+                "incoming/data.txt",
+                ReconciliationEntryState::InProgress,
+                None,
+                3,
+            )
+            .expect("progress checkpoints");
+        let mut resumed = ReconciliationManifest::load(&checkpoint_path).expect("checkpoint loads");
+        let plan = backend
+            .replan_user_tree_reconciliation(&mut resumed)
+            .expect("unchanged plan resumes");
+        assert_eq!(
+            plan.actions,
+            vec![ReconciliationAction::Resume {
+                key: "incoming/data.txt".to_string(),
+                relative_path: "incoming/data.txt".to_string(),
+                size_bytes: Some(6),
+                downloaded_bytes: 3,
+            }]
+        );
+
+        fs::remove_file(&source).expect("source removes");
+        fs::write(&source, b"stable").expect("replacement writes");
+        let changed = backend
+            .replan_user_tree_reconciliation(&mut resumed)
+            .expect("changed plan rebuilds");
+        assert!(matches!(
+            changed.actions.as_slice(),
+            [ReconciliationAction::Download {
+                size_bytes: Some(6),
+                ..
+            }]
+        ));
+        assert_eq!(resumed.entries["incoming/data.txt"].downloaded_bytes, 0);
+        assert!(source.exists());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(checkpoint_root);
+    }
+
+    #[test]
+    fn folder_reconciliation_rejects_wrong_store_checkpoint() {
+        let root = unique_root();
+        let backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        let mut manifest = ReconciliationManifest::new("other-store", None);
+        let error = backend
+            .replan_user_tree_reconciliation(&mut manifest)
+            .expect_err("wrong store rejects");
+        assert!(
+            matches!(error, BackendError::InvalidRequest(message) if message.contains("different ObjectStore"))
+        );
         let _ = fs::remove_dir_all(root);
     }
 

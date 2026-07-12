@@ -3,7 +3,7 @@
   "product": {
     "id": "dasobjectstore",
     "name": "DASObjectStore",
-    "version": "0.72.30"
+    "version": "0.72.31"
   },
   "compatibility": {
     "min_synoptikon_version": "0.2.0",
