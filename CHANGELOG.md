@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.3 - 2026-07-12
+
+- Add pure per-user/system folder host-path derivation with explicit missing
+  runtime handling and bounded socket-path validation.
+
 ## 0.72.2 - 2026-07-12
 
 - Add strict v1 ObjectStore manifest decoding with fail-closed future-schema

@@ -7,6 +7,7 @@ mod drive_backend;
 mod enclosure_prepare;
 mod endpoint_registry;
 mod folder_backend;
+mod folder_paths;
 mod ingest_files;
 mod local_admin;
 mod object_browser;
@@ -56,6 +57,7 @@ pub use endpoint_registry::{
     ENDPOINT_REGISTRY_SCHEMA,
 };
 pub use folder_backend::{FolderBackend, FolderCapacitySnapshot, FolderInspectionReport};
+pub use folder_paths::{folder_host_paths, FolderHostPathError, FolderHostPaths};
 pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_progress,

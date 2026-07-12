@@ -34,6 +34,14 @@ before rename and failed validation leaves the reservation recoverable.
 Catalogue registration and user-facing profile creation still require the
 subsequent daemon contract and explicit adoption workflow.
 
+Per-user host mode derives state beneath ``XDG_STATE_HOME`` or
+``$HOME/.local/state/dasobjectstore``. Runtime sockets use
+``XDG_RUNTIME_DIR/dasobjectstore`` when provided; offline folder operations may
+run without a runtime directory, but socket resolution fails explicitly rather
+than falling back to shared ``/tmp``. System and integrated modes retain the
+packaged daemon state/runtime roots. Directory ownership, permissions, and user
+service installation remain deployment-layer responsibilities.
+
 For local validation, set
 ``DASOBJECTSTORE_CODEX_VALIDATION_ROOT=/Users/stephen/.dasobjectstore-codex-validation``
 when running the folder backend tests. They create only a uniquely named child

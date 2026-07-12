@@ -246,6 +246,10 @@ completion.
 - [ ] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.
+  - [x] Add pure per-user/system state and runtime path derivation. Per-user
+    state falls back beneath HOME, missing XDG runtime remains explicitly
+    unavailable (never shared `/tmp`), and socket length/name validation is
+    covered locally; service-manager creation and ownership checks remain.
 - [ ] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
 
