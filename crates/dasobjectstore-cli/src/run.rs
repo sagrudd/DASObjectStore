@@ -23,6 +23,7 @@ mod performance_plan;
 mod performance_rates;
 mod performance_report;
 mod performance_residency;
+mod performance_scheduler;
 mod performance_settle;
 mod performance_tui;
 mod performance_workload;
@@ -52,6 +53,10 @@ use self::performance_residency::PerformanceSsdResidencyBudget;
 use self::performance_residency::{
     performance_ssd_can_admit_payload, performance_ssd_residency_budget,
     plan_ssd_residency_batches, validate_performance_payload_fits_ssd,
+};
+use self::performance_scheduler::{
+    complete_performance_disk, hdd_queue_capacity, new_shared_disk_placement_scheduler,
+    reserve_performance_disk_for_file,
 };
 use self::performance_settle::{PerformanceSsdSettler, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY};
 use self::probe::run_probe;
@@ -2870,164 +2875,6 @@ struct ActiveHddWrite {
     phase: PerformanceCopyProgressPhase,
 }
 
-#[derive(Clone, Debug)]
-struct DiskPlacement {
-    disk_id: DiskId,
-    root_path: PathBuf,
-}
-
-#[derive(Clone, Debug)]
-struct DiskPlacementState {
-    disk_id: DiskId,
-    root_path: PathBuf,
-    active: usize,
-    total_bytes: u64,
-    available_bytes: u64,
-    assigned_bytes: u64,
-    completed_seconds: f64,
-}
-
-#[derive(Debug)]
-struct DiskPlacementScheduler {
-    disks: Vec<DiskPlacementState>,
-    logical_file_disks: BTreeMap<u32, BTreeSet<DiskId>>,
-}
-
-type SharedDiskPlacementScheduler = Arc<(Mutex<DiskPlacementScheduler>, Condvar)>;
-
-impl DiskPlacementScheduler {
-    fn new(disks: &[(DiskId, PathBuf)]) -> Result<Self, CliError> {
-        Ok(Self {
-            disks: disks
-                .iter()
-                .map(|(disk_id, root_path)| {
-                    fs::create_dir_all(root_path)?;
-                    let capacity = measure_ssd_capacity(root_path)?;
-                    Ok(DiskPlacementState {
-                        disk_id: disk_id.clone(),
-                        root_path: root_path.clone(),
-                        active: 0,
-                        total_bytes: capacity.total_bytes,
-                        available_bytes: capacity.available_bytes,
-                        assigned_bytes: 0,
-                        completed_seconds: 0.0,
-                    })
-                })
-                .collect::<Result<Vec<_>, CliError>>()?,
-            logical_file_disks: BTreeMap::new(),
-        })
-    }
-
-    fn reserve_disk_for_file(&mut self, file_index: u32) -> Option<DiskPlacement> {
-        let already_assigned = self
-            .logical_file_disks
-            .get(&file_index)
-            .cloned()
-            .unwrap_or_default();
-        let index = self.select_idle_disk(|disk| !already_assigned.contains(&disk.disk_id))?;
-        self.reserve_disk_index(file_index, index)
-    }
-
-    fn select_idle_disk(
-        &self,
-        accepts_disk: impl Fn(&DiskPlacementState) -> bool,
-    ) -> Option<usize> {
-        self.disks
-            .iter()
-            .enumerate()
-            .filter(|(_, disk)| disk.active == 0 && accepts_disk(disk))
-            .max_by(|(_, left), (_, right)| compare_disk_free_fraction(left, right))
-            .map(|(index, _)| index)
-    }
-
-    fn reserve_disk_index(&mut self, file_index: u32, index: usize) -> Option<DiskPlacement> {
-        let disk = self.disks.get_mut(index)?;
-        disk.active = 1;
-        self.logical_file_disks
-            .entry(file_index)
-            .or_default()
-            .insert(disk.disk_id.clone());
-        Some(DiskPlacement {
-            disk_id: disk.disk_id.clone(),
-            root_path: disk.root_path.clone(),
-        })
-    }
-
-    fn complete_disk(&mut self, disk_id: &DiskId, bytes: u64, seconds: f64) {
-        if let Some(disk) = self.disks.iter_mut().find(|disk| &disk.disk_id == disk_id) {
-            disk.active = disk.active.saturating_sub(1);
-            disk.assigned_bytes = disk.assigned_bytes.saturating_add(bytes);
-            disk.completed_seconds += seconds.max(0.0);
-        }
-    }
-}
-
-fn new_shared_disk_placement_scheduler(
-    disks: &[(DiskId, PathBuf)],
-) -> Result<SharedDiskPlacementScheduler, CliError> {
-    Ok(Arc::new((
-        Mutex::new(DiskPlacementScheduler::new(disks)?),
-        Condvar::new(),
-    )))
-}
-
-fn reserve_performance_disk_for_file(
-    scheduler: &SharedDiskPlacementScheduler,
-    file_index: u32,
-) -> Result<DiskPlacement, CliError> {
-    let (lock, condvar) = &**scheduler;
-    let mut scheduler = lock.lock().map_err(|_| {
-        CliError::CommandFailed("performance-test disk scheduler lock poisoned".to_string())
-    })?;
-    loop {
-        check_performance_cancelled()?;
-        if let Some(placement) = scheduler.reserve_disk_for_file(file_index) {
-            return Ok(placement);
-        }
-        let result = condvar
-            .wait_timeout(scheduler, Duration::from_millis(250))
-            .map_err(|_| {
-                CliError::CommandFailed("performance-test disk scheduler lock poisoned".to_string())
-            })?;
-        scheduler = result.0;
-    }
-}
-
-fn complete_performance_disk(
-    scheduler: &SharedDiskPlacementScheduler,
-    disk_id: &DiskId,
-    bytes: u64,
-    seconds: f64,
-) -> Result<(), CliError> {
-    let (lock, condvar) = &**scheduler;
-    let mut scheduler = lock.lock().map_err(|_| {
-        CliError::CommandFailed("performance-test disk scheduler lock poisoned".to_string())
-    })?;
-    scheduler.complete_disk(disk_id, bytes, seconds);
-    condvar.notify_one();
-    Ok(())
-}
-
-fn compare_disk_free_fraction(
-    left: &DiskPlacementState,
-    right: &DiskPlacementState,
-) -> std::cmp::Ordering {
-    let left_free = left.available_bytes.saturating_sub(left.assigned_bytes);
-    let right_free = right.available_bytes.saturating_sub(right.assigned_bytes);
-    (u128::from(left_free) * u128::from(right.total_bytes.max(1)))
-        .cmp(&(u128::from(right_free) * u128::from(left.total_bytes.max(1))))
-        .then_with(|| left_free.cmp(&right_free))
-        .then_with(|| right.completed_seconds.total_cmp(&left.completed_seconds))
-        .then_with(|| right.disk_id.cmp(&left.disk_id))
-}
-
-fn hdd_queue_capacity(concurrency: usize, redundancy: usize) -> usize {
-    concurrency
-        .saturating_mul(redundancy)
-        .saturating_mul(2)
-        .clamp(1, 64)
-}
-
 fn timestamped_run_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5678,6 +5525,7 @@ impl From<ProbeError> for CliError {
 
 #[cfg(test)]
 mod tests {
+    use super::performance_scheduler::{DiskPlacementScheduler, DiskPlacementState};
     use super::{
         active_hdd_landing_lines, benchmark_direct_hdd, benchmark_ssd_only,
         benchmark_ssd_pipeline_with_options, benchmark_ssd_stage_then_drain, collect_ingest_files,
@@ -5694,15 +5542,14 @@ mod tests {
         update_file_read_measurements_from_disk_results, validate_managed_hdds_on_supported_das,
         validate_pdf_report_path, write_health_json, write_health_summary, write_health_verbose,
         write_host_connection_status, write_pretty_report, zero_measurement, ActiveHddWrite,
-        ActiveHddWriteMap, CliError, ConnectionAssessment, DiskHealthSummary,
-        DiskPlacementScheduler, HealthReport, ManagedHddDevice, PerformanceBenchmarkResults,
-        PerformanceConcurrencyResult, PerformanceCopyProgressPhase, PerformanceDiskResult,
-        PerformanceFileResult, PerformanceIoSample, PerformanceMeasurement, PerformancePayload,
-        PerformanceRecommendation, PerformanceReport, PerformanceScenarioKind,
-        PerformanceScenarioResult, PerformanceSsdResidencyBudget, PerformanceSsdSettler,
-        PerformanceTuiContext, PerformanceTuiSnapshot, PerformanceWorkload,
-        PerformanceWorkloadKind, SsdPipelineBenchmarkOptions, SsdPipelineJob,
-        PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
+        ActiveHddWriteMap, CliError, ConnectionAssessment, DiskHealthSummary, HealthReport,
+        ManagedHddDevice, PerformanceBenchmarkResults, PerformanceConcurrencyResult,
+        PerformanceCopyProgressPhase, PerformanceDiskResult, PerformanceFileResult,
+        PerformanceIoSample, PerformanceMeasurement, PerformancePayload, PerformanceRecommendation,
+        PerformanceReport, PerformanceScenarioKind, PerformanceScenarioResult,
+        PerformanceSsdResidencyBudget, PerformanceSsdSettler, PerformanceTuiContext,
+        PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
+        SsdPipelineBenchmarkOptions, SsdPipelineJob, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
     use crate::cli::{Cli, PerformanceFileOrder, PerformanceFileSelection};
     use clap::Parser;
@@ -6275,7 +6122,7 @@ mod tests {
         let disk_c = DiskId::new("disk-c").expect("disk id");
         let mut scheduler = DiskPlacementScheduler {
             disks: vec![
-                super::DiskPlacementState {
+                DiskPlacementState {
                     disk_id: disk_a.clone(),
                     root_path: PathBuf::from("/hdd/a"),
                     active: 0,
@@ -6284,7 +6131,7 @@ mod tests {
                     assigned_bytes: 0,
                     completed_seconds: 0.0,
                 },
-                super::DiskPlacementState {
+                DiskPlacementState {
                     disk_id: disk_b,
                     root_path: PathBuf::from("/hdd/b"),
                     active: 1,
@@ -6293,7 +6140,7 @@ mod tests {
                     assigned_bytes: 0,
                     completed_seconds: 0.0,
                 },
-                super::DiskPlacementState {
+                DiskPlacementState {
                     disk_id: disk_c.clone(),
                     root_path: PathBuf::from("/hdd/c"),
                     active: 0,

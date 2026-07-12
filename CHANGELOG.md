@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.14 - 2026-07-12
+
+- Extract CLI performance disk placement and bounded queue-capacity scheduling
+  into a focused module while preserving distinct-disk redundancy behavior.
+
 ## 0.71.6 - 2026-07-12
 
 - Extract CLI performance live-rate accounting into a dedicated module with
