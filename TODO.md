@@ -235,6 +235,10 @@ completion.
   and full-filesystem tests before enabling new profile writes.
   - [x] Add a concurrent reservation regression using the transactional core
     ledger; eight workers contend for a bounded quota and cannot overbook it.
+  - [x] Add a schema-versioned, strict capacity-ledger snapshot/restore
+    contract that preserves used bytes and outstanding reservations across a
+    restart boundary; daemon file persistence and stale-reservation expiry
+    remain open.
     Crash/restart persistence, multipart expiry, dedupe, and full-filesystem
     fixtures remain open.
 

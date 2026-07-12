@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.29 - 2026-07-12
+
+- Add strict schema-versioned capacity-ledger snapshot and restore contracts
+  for restart-safe reservation persistence.
+
 ## 0.72.28 - 2026-07-12
 
 - Expose static folder/drive/appliance capability discovery through the typed

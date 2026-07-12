@@ -83,6 +83,10 @@ validation and removes no hard-linked or changed object; repair and catalogue
 transaction integration remain separate gates.
 Folder staging also requires the copied byte count to equal its reservation,
 so logical usage cannot drift from the payload size.
+The core ledger also exposes a schema-versioned snapshot/restore boundary for
+restart-safe persistence. Unknown schemas and snapshots that would overbook a
+policy are rejected; the daemon still needs to supply durable file persistence
+and stale-reservation expiry.
 
 The daemon API now has a transport-neutral capacity admission contract. It
 returns an explicit admitted/rejected decision, stable rejection reason, quota

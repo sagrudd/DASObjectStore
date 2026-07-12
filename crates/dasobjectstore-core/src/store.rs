@@ -1,7 +1,7 @@
 //! Store classes and policy.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
@@ -307,6 +307,16 @@ pub struct CapacityReservationLedger {
     reservations: HashMap<String, u64>,
 }
 
+pub const CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityReservationLedgerSnapshot {
+    pub schema_version: u32,
+    pub policy: CapacityPolicy,
+    pub used_bytes: u64,
+    pub reservations: BTreeMap<String, u64>,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapacityPressureState {
@@ -343,6 +353,34 @@ impl CapacityReservationLedger {
 
     pub fn policy(&self) -> &CapacityPolicy {
         &self.policy
+    }
+
+    pub fn snapshot(&self) -> CapacityReservationLedgerSnapshot {
+        CapacityReservationLedgerSnapshot {
+            schema_version: CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION,
+            policy: self.policy.clone(),
+            used_bytes: self.used_bytes,
+            reservations: self
+                .reservations
+                .iter()
+                .map(|(id, bytes)| (id.clone(), *bytes))
+                .collect(),
+        }
+    }
+
+    pub fn from_snapshot(
+        snapshot: CapacityReservationLedgerSnapshot,
+    ) -> Result<Self, CapacityLedgerError> {
+        if snapshot.schema_version != CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION {
+            return Err(CapacityLedgerError::InvalidSnapshotSchema {
+                schema_version: snapshot.schema_version,
+            });
+        }
+        let mut ledger = Self::new(snapshot.policy, snapshot.used_bytes)?;
+        for (reservation_id, bytes) in snapshot.reservations {
+            ledger.reserve(reservation_id, bytes)?;
+        }
+        Ok(ledger)
     }
 
     /// Replace capacity policy without deleting data. Lowering a limit below
@@ -455,6 +493,9 @@ impl CapacityReservationLedger {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CapacityLedgerError {
     InvalidPolicy(CapacityPolicyValidationError),
+    InvalidSnapshotSchema {
+        schema_version: u32,
+    },
     InvalidReservationId,
     UnknownReservation,
     UsedBytesUnderflow {
@@ -1004,6 +1045,50 @@ mod tests {
         assert_eq!(successes, 3);
         assert_eq!(ledger.reserved_bytes(), 90);
         assert!(ledger.used_bytes() + ledger.reserved_bytes() <= 100);
+    }
+
+    #[test]
+    fn capacity_ledger_snapshot_restores_usage_and_reservations() {
+        let mut ledger =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 25), 100)
+                .expect("capacity policy is valid");
+        ledger.reserve("in-flight", 200).expect("reservation fits");
+
+        let snapshot = ledger.snapshot();
+        let encoded = serde_json::to_vec(&snapshot).expect("snapshot serializes");
+        let decoded = serde_json::from_slice(&encoded).expect("snapshot decodes");
+        let restored =
+            super::CapacityReservationLedger::from_snapshot(decoded).expect("snapshot restores");
+
+        assert_eq!(restored.used_bytes(), 100);
+        assert_eq!(restored.reserved_bytes(), 200);
+        assert_eq!(restored.reservation_bytes("in-flight"), Some(200));
+        assert_eq!(restored.policy(), ledger.policy());
+    }
+
+    #[test]
+    fn capacity_ledger_snapshot_rejects_unknown_schema_and_overbooking() {
+        let mut snapshot =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(100, 0), 0)
+                .expect("capacity policy is valid")
+                .snapshot();
+        snapshot.schema_version += 1;
+        assert_eq!(
+            super::CapacityReservationLedger::from_snapshot(snapshot),
+            Err(CapacityLedgerError::InvalidSnapshotSchema {
+                schema_version: super::CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION + 1,
+            })
+        );
+
+        let mut overbooked =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(100, 0), 0)
+                .expect("capacity policy is valid")
+                .snapshot();
+        overbooked.reservations.insert("too-large".to_string(), 101);
+        assert!(matches!(
+            super::CapacityReservationLedger::from_snapshot(overbooked),
+            Err(CapacityLedgerError::InsufficientCapacity { .. })
+        ));
     }
 
     #[test]
