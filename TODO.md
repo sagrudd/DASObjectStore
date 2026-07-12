@@ -436,6 +436,10 @@ list until every temporary size-budget exception has been removed.
     EasyConnect route handlers into
     `crates/dasobjectstore-gui-api/src/auth_identity_routes.rs`; preserve
     router visibility, response contracts, and local-password error mapping.
+  - [x] Extract administrator request validation, managed-mount rejection,
+    client-request-ID checks, and action-specific confirmation markers into
+    `crates/dasobjectstore-gui-api/src/auth_validation.rs`; preserve dry-run
+    safety gates and field-specific HTTP errors.
 - [x] Move object-service Docker status/bind parsing into one shared
   inspection module used by both CLI and GUI API, with one bounded timeout
   policy and parser regressions beside the shared implementation.

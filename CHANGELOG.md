@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.37 - 2026-07-12
+
+- Extract GUI administrator request validation, managed-mount rejection,
+  client-request-ID checks, and action-specific confirmation markers into a
+  focused validation module while preserving dry-run safety gates and errors.
+
 ## 0.71.36 - 2026-07-12
 
 - Extract GUI standalone authentication, session, remote-authentication, and
