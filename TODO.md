@@ -308,6 +308,9 @@ completion.
   Mneion, Mnemosyne, and small standalone/package-managed projects.
 - [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
   import jobs preserving IDs, versions, hashes, provenance, and protection.
+  - [x] Add a core resumable promotion state machine that retains source
+    placement through destination verification and explicit retirement; actual
+    copy workers, durable checkpoints, and profile adapters remain.
 - [ ] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
 

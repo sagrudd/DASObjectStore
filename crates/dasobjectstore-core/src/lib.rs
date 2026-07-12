@@ -9,6 +9,7 @@ pub mod ids;
 pub mod ingress;
 pub mod lifecycle;
 pub mod manifest;
+pub mod migration;
 pub mod object_type;
 pub mod placement;
 pub mod protection;

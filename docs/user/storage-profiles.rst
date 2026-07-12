@@ -150,3 +150,9 @@ store-inventory contract. It also states only the static local failure-domain
 ceiling: folder and drive are one domain, while appliance may represent up to
 three local copies. This is not a current placement or external-replication
 promise.
+
+Profile promotion uses an explicit resumable state contract: planned, copying,
+destination verified, retirement pending, completed, or failed. Source
+placement remains retained through verification and is released only after an
+explicit retirement confirmation. The state machine does not itself copy files
+or mutate stores; daemon workers and durable checkpoints remain required.

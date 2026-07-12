@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.9 - 2026-07-12
+
+- Add a resumable profile-promotion state machine that retains source
+  placement until verification and explicit retirement confirmation.
+
 ## 0.72.8 - 2026-07-12
 
 - Derive capacity SSD-staging requirements from typed ingress origins rather
