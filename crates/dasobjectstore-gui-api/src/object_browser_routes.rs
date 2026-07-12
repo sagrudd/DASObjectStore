@@ -1,4 +1,5 @@
 use crate::{
+    daemon_bridge::{DaemonBridge, DaemonBridgeError},
     discover_local_user, AuthRouteError, AuthenticatedGuiActor, LocalAuthStore,
     LocalUserDiscoveryError, LocalUserMetadata,
 };
@@ -60,6 +61,7 @@ pub(crate) struct StandaloneObjectBrowserRouteState {
     auth_store: LocalAuthStore,
     object_browser_client: Option<Arc<dyn StandaloneObjectBrowserClient>>,
     local_user_provider: Arc<dyn ObjectBrowserLocalUserProvider>,
+    daemon_bridge: Arc<DaemonBridge>,
 }
 
 impl StandaloneObjectBrowserRouteState {
@@ -70,6 +72,7 @@ impl StandaloneObjectBrowserRouteState {
                 DaemonStandaloneObjectBrowserClient::default_packaged(),
             )),
             local_user_provider: Arc::new(SystemObjectBrowserLocalUserProvider),
+            daemon_bridge: Arc::new(DaemonBridge::packaged()),
         }
     }
 }
@@ -190,19 +193,39 @@ async fn object_store_browser(
         )
     })?;
 
+    let client = state.object_browser_client.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "daemon_object_browser_unavailable",
+            "daemon ObjectStore browser contract is not available",
+        )
+    })?;
+    let client = Arc::clone(client);
     state
-        .object_browser_client
-        .as_ref()
-        .ok_or_else(|| {
-            route_error(
-                StatusCode::NOT_IMPLEMENTED,
-                "daemon_object_browser_unavailable",
-                "daemon ObjectStore browser contract is not available",
-            )
-        })?
-        .object_browser(request)
+        .daemon_bridge
+        .call(move || client.object_browser(request))
+        .await
         .map(Json)
-        .map_err(|err| route_error(err.status, err.code, err.message))
+        .map_err(|error| match error {
+            DaemonBridgeError::Client(error) => {
+                route_error(error.status, error.code, error.message)
+            }
+            DaemonBridgeError::Busy => route_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "daemon_bridge_busy",
+                "daemon control capacity is saturated; retry shortly",
+            ),
+            DaemonBridgeError::Deadline => route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "daemon_bridge_timeout",
+                "daemon control request exceeded its deadline; retry shortly",
+            ),
+            DaemonBridgeError::Join(message) => route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "daemon_bridge_join_failed",
+                message,
+            ),
+        })
 }
 
 async fn object_store_object_download(
@@ -626,7 +649,7 @@ mod tests {
         StandaloneObjectBrowserClientError, StandaloneObjectBrowserRouteState,
     };
     use crate::{
-        LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata,
+        daemon_bridge::DaemonBridge, LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata,
         STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
@@ -1062,6 +1085,7 @@ mod tests {
             auth_store,
             object_browser_client: Some(client),
             local_user_provider: Arc::new(FixedObjectBrowserLocalUserProvider),
+            daemon_bridge: Arc::new(DaemonBridge::packaged()),
         })
     }
 

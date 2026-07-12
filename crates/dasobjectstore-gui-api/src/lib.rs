@@ -5,6 +5,7 @@ mod activity_aggregator;
 pub mod auth;
 pub mod auth_guard;
 pub mod auth_routes;
+mod daemon_bridge;
 pub mod dashboard;
 mod enclosures_aggregator;
 pub mod endpoints;

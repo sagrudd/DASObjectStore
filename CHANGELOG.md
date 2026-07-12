@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.48 - 2026-07-12
+
+- Add the first bounded async GUI-to-daemon bridge for ObjectStore browser
+  listings: synchronous socket work runs on a capped blocking pool, has a
+  typed overload response, and is subject to an overall deadline.
+
 ## 0.71.47 - 2026-07-12
 
 - Reserve a bounded Unix-socket priority lane for administrator cancellation
