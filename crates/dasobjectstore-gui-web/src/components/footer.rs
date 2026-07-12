@@ -123,6 +123,10 @@ mod tests {
         assert!(styles.contains("--dos-mnemosyne-footer-bg: #1c2b0b"));
         assert!(styles.contains(".dos-product-footer__partial"));
         assert!(styles.contains("filter: invert(1) brightness(1.8)"));
+        assert!(styles.contains("--dos-interaction-primary: #0f6b78"));
+        assert!(styles.contains("--dos-status-danger-fg: #8a3d24"));
+        assert!(styles.contains("background: var(--dos-interaction-primary)"));
+        assert!(styles.contains("color: var(--dos-status-danger-fg)"));
         assert!(!styles.contains(".dos-product-footer {\n  flex: 0 0 auto;\n  padding"));
     }
 }

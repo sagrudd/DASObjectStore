@@ -871,8 +871,10 @@ TODO Milestone 24 and must not outrun storage/profile contracts.
 Current delivery note: the shared footer now uses the approved local Mnemosyne
 wordmark and partial mark, a ``#1c2b0b`` provenance surface, responsive
 application-shell layout, and pinned local asset provenance tests. Shared
-semantic status tokens, the TaskPane primitive, and page-flow refactors remain
-open work in TODO Milestone 24.
+semantic interaction/status tokens now cover primary actions, focus, warning,
+danger, and success states without reusing Mnemosyne green as a generic action.
+The TaskPane primitive and page-flow refactors remain open work in TODO
+Milestone 24.
 
 ## Milestone 25: Campaign Re-baseline and Compatibility Contracts
 

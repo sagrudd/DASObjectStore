@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.47 - 2026-07-12
+
+- Add shared Web semantic interaction and status tokens with regression
+  coverage, keeping Mnemosyne green reserved for provenance/footer surfaces.
+
 ## 0.72.46 - 2026-07-12
 
 - Add explicit bounded-folder adoption execution with stable-source checks,

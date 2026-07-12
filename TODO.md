@@ -2077,11 +2077,12 @@ non-destructive close, and restores focus to its trigger when closed.
   Do not use the partial mark as a button, repeated card motif, spinner, or
   status icon. Retain the current footer component as the one shared source of
   truth; do not introduce page-specific footer copies.
-- [ ] Add and use semantic CSS variables for Mnemosyne footer/provenance,
+- [x] Add and use semantic CSS variables for Mnemosyne footer/provenance,
   interaction, and status roles. The current teal action treatment may remain
   the primary interaction colour, but Mnemosyne green is reserved for company
   provenance/footer and must not become a generic success badge or action
-  colour. Use explicit text plus colour for every state.
+  colour. Use explicit text plus colour for every state; contract tests pin the
+  variables and their use in the shared stylesheet.
 - [ ] Add a reusable Yew `TaskPane` component under
   `crates/dasobjectstore-gui-web/src/components/` or extend the existing
   `InspectorDrawer` only if it gains the full task contract: title, selected
