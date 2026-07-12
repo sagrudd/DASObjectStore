@@ -50,12 +50,14 @@ historical checklists remain below and in TODO as evidence.
 ### Open technical debt
 
 The active baseline still has release-relevant gaps: provider upload completion
-is not yet an atomic catalogue transaction; reconciliation is not fully
-resumable/cancellable; control/Web capacity is not fully reserved under ingest;
-telemetry device mapping and appliance acceptance remain incomplete; UI/design
-work remains; and the module-size guard currently fails. Hardware-only
-acceptance is deferred while travelling without DAS access, but offline design,
-domain, metadata, API, test, and packaging work should continue.
+is not yet an atomic catalogue transaction; reconciliation has a durable
+provider-independent manifest/resume foundation but is not yet wired through
+the provider transfer worker; control/Web capacity is not fully reserved under
+ingest; telemetry device mapping and appliance acceptance remain incomplete;
+and UI/design work remains. The module-size guard now passes with no
+exceptions. Hardware-only acceptance is deferred while travelling without DAS
+access, but offline design, domain, metadata, API, test, and packaging work
+should continue.
 
 ## Historical Appliance MVP Definition
 

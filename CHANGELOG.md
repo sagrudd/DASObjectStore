@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.44 - 2026-07-12
+
+- Correct the roadmap baseline to record that the production module-size guard
+  passes without exceptions and that reconciliation now has a durable manifest
+  foundation while provider transfer integration remains open.
+
 ## 0.71.43 - 2026-07-12
 
 - Add a versioned provider-independent reconciliation manifest/resume planner
