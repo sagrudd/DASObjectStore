@@ -1043,6 +1043,10 @@ dark Mnemosyne product style used by sibling Web surfaces: monospace text,
 Mnemosyne link, and 2026 Mnemosyne Biosciences attribution.
 
 This footer is a product provenance requirement, not decorative page copy.
+Approved Mnemosyne branding files are copied into the Web package at build
+time; the decorative partial mark is registered as a local Trunk asset and
+its source SHA-256 is pinned by the Web workspace contract test. The partial
+mark is not fetched from a sibling checkout at runtime.
 Future pages, dialogs that own a full operator route, and standalone error
 states should keep the shared footer visible unless they are embedded inside a
 host product that already supplies an equivalent Mnemosyne provenance footer.

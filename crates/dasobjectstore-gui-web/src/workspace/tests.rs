@@ -83,6 +83,25 @@ use crate::stores::STORES_WORKSPACE_ROUTE;
 use crate::users_groups::USERS_GROUPS_WORKSPACE_ROUTE;
 
 #[test]
+fn approved_mnemosyne_partial_asset_is_registered_with_provenance() {
+    use sha2::{Digest, Sha256};
+
+    const EXPECTED_SHA256: &str =
+        "14f0b0d208b9c3358914aaba165b803e8d62bb4888ed5066b94d600e4acdcb90";
+    let bytes = include_bytes!("../../assets/mnemosyne-biosciences-partial.png");
+    let digest = Sha256::digest(bytes);
+    assert_eq!(format!("{digest:x}"), EXPECTED_SHA256);
+
+    let index = include_str!("../../index.html");
+    assert_eq!(
+        index
+            .matches("assets/mnemosyne-biosciences-partial.png")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn primary_navigation_uses_redesign_labels() {
     let labels: Vec<_> = PRIMARY_NAVIGATION.iter().map(|page| page.label()).collect();
 

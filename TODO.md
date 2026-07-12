@@ -2013,6 +2013,9 @@ non-destructive close, and restores focus to its trigger when closed.
   `crates/dasobjectstore-gui-web/index.html`. Preserve source identity with a
   checksum or byte-comparison test/documented provenance; do not make the
   browser fetch a sibling-repository path at runtime.
+  - [x] Import the approved partial mark into the repository, register it as a
+    Trunk asset, and pin its source SHA-256 in the Web workspace contract test;
+    footer layout/usage remains a separate task.
 - [ ] Replace the current near-black/monospace `.dos-product-footer` treatment
   in `crates/dasobjectstore-gui-web/styles.css` and
   `src/components/footer.rs` with the Mnemosyne footer contract:
