@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.24 - 2026-07-12
+
+- Extract daemon-backed ingest request submission, builders, TUI streaming, and
+  completion rendering into a focused CLI module.
+
 ## 0.71.23 - 2026-07-12
 
 - Mark the CLI performance execution-engine decomposition complete; remaining
