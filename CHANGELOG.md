@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.55 - 2026-07-12
+
+- Route Web ObjectStore creation through the bounded daemon bridge while
+  preserving daemon-owned mutation and typed overload/deadline failures.
+
 ## 0.71.54 - 2026-07-12
 
 - Route Web administrator job status and cancellation through the bounded

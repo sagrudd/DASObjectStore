@@ -933,6 +933,9 @@ list until every temporary size-budget exception has been removed.
   bounded bridge, preserving daemon errors and typed busy/deadline responses;
   cancellation now has a bounded Web-side worker path as well as the daemon's
   priority lane.
+- [x] Route Web ObjectStore creation through the bounded bridge, preserving
+  daemon-owned mutation and typed overload/deadline failures before reporting
+  the accepted job to the browser.
 - [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.

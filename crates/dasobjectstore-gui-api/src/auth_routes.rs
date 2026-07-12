@@ -295,7 +295,9 @@ async fn create_object_store(
     let mut request = validate_create_object_store_request(request)?;
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
-    submit_create_object_store_request(&state, request).map(Json)
+    submit_create_object_store_request(&state, request)
+        .await
+        .map(Json)
 }
 
 async fn update_object_store_ingest_policy(
