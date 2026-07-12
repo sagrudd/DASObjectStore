@@ -241,7 +241,10 @@ and time range, the telemetry state file could not be read, or the local
 platform does not expose the counter. A sparse chart shows only the samples the
 daemon reported; the Web UI leaves gaps and empty states visible instead of
 interpolating missing throughput, CPU, memory, disk, or user activity into a
-continuous line.
+continuous line. When a managed disk is still awaiting its first counter pair,
+the Disk IO card says that rates are warming up and names the disk and mapped
+device; if another disk is unavailable while valid disks report rates, the card
+retains the valid totals and shows an elevated per-disk diagnostic.
 
 Operators can use the Home telemetry window selector to view the latest
 ``1 hour``, ``1 day``, ``10 days``, or ``3 months`` of daemon appliance

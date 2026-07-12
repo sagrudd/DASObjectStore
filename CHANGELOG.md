@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.67 - 2026-07-12
+
+- Propagate mapped disk identity, missing reasons, and sample timestamps through
+  daemon disk-IO summaries and surface warm-up/missing-device diagnostics in the
+  Home Disk IO card without discarding valid disk totals.
+
 ## 0.71.66 - 2026-07-12
 
 - Resolve managed-HDD telemetry markers through fixtureable sysfs and stable

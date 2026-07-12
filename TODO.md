@@ -1637,6 +1637,14 @@ list until every temporary size-budget exception has been removed.
   device name, and collection status through the daemon and Home API so the
   Disk IO card identifies the affected disk and corrective action instead of
   only stating that telemetry is unavailable.
+  - [x] Add optional mapped device, missing-reason, and current-sample timestamp
+    fields to daemon disk-IO summaries and series points, preserving decoding of
+    older responses.
+  - [x] Surface warm-up and missing-device diagnostics, including disk and
+    mapped device identity, in the Home Disk IO card; mixed valid/missing disks
+    retain valid totals while showing an elevated diagnostic.
+  - [ ] Carry sample age and full collection-status metadata through the Home
+    wire view once the dashboard contract gains structured diagnostic fields.
 - [ ] Make the Home throughput chart explicitly distinguish retained Disk IO
   samples, legacy throughput-file fallback, no observed IO, and telemetry
   collection failure. Preserve chart gaps and show a linked diagnostic rather

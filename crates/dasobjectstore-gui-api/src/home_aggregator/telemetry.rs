@@ -6,7 +6,9 @@ use crate::dashboard::{
     DiskIoSummaryView, MemoryStressStateView, MemoryStressView, TelemetryCardStateView,
 };
 use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
-use dasobjectstore_daemon::{ApplianceTelemetrySample, ApplianceTelemetrySampleSet};
+use dasobjectstore_daemon::{
+    ApplianceTelemetryMissingReason, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
+};
 use std::fs;
 use std::path::Path;
 
@@ -85,7 +87,21 @@ pub(super) fn disk_io_summary(
     let latest = latest(sample_set, window)?;
     let (mut read_bytes, mut write_bytes, mut read_ops, mut write_ops) = (0.0, 0.0, 0.0, 0.0);
     let (mut busiest_disk, mut saw_value) = (None::<(String, f64)>, false);
+    let mut missing_diagnostics = Vec::new();
     for disk_io in &latest.disk_io {
+        if let Some(reason) = disk_io.missing_reason {
+            let device = disk_io
+                .device_name
+                .as_deref()
+                .map(|name| format!(" (device {name})"))
+                .unwrap_or_default();
+            missing_diagnostics.push(format!(
+                "{}{}: {}",
+                disk_io.disk_id,
+                device,
+                telemetry_missing_reason_label(reason)
+            ));
+        }
         let read = finite_nonnegative(disk_io.read_bytes_per_second).unwrap_or(0.0);
         let write = finite_nonnegative(disk_io.write_bytes_per_second).unwrap_or(0.0);
         if disk_io.read_bytes_per_second.is_some() || disk_io.write_bytes_per_second.is_some() {
@@ -108,16 +124,62 @@ pub(super) fn disk_io_summary(
             write_ops += value;
         }
     }
-    saw_value.then(|| DiskIoSummaryView {
-        available: true,
-        read_mib_s: mib_per_second(read_bytes.round() as u64),
-        write_mib_s: mib_per_second(write_bytes.round() as u64),
-        read_ops_s: rounded_u32(read_ops),
-        write_ops_s: rounded_u32(write_ops),
-        busiest_disk_id: busiest_disk.map(|(id, _)| id),
-        state: TelemetryCardStateView::Nominal,
-        message: None,
+    if saw_value {
+        return Some(DiskIoSummaryView {
+            available: true,
+            read_mib_s: mib_per_second(read_bytes.round() as u64),
+            write_mib_s: mib_per_second(write_bytes.round() as u64),
+            read_ops_s: rounded_u32(read_ops),
+            write_ops_s: rounded_u32(write_ops),
+            busiest_disk_id: busiest_disk.map(|(id, _)| id),
+            state: if missing_diagnostics.is_empty() {
+                TelemetryCardStateView::Nominal
+            } else {
+                TelemetryCardStateView::Elevated
+            },
+            message: (!missing_diagnostics.is_empty()).then(|| {
+                format!(
+                    "Some disk IO telemetry is unavailable: {}.",
+                    missing_diagnostics.join(", ")
+                )
+            }),
+        });
+    }
+
+    latest.disk_io.iter().find_map(|disk_io| {
+        let reason = disk_io.missing_reason?;
+        let disk = disk_io.disk_id.as_str();
+        let device = disk_io
+            .device_name
+            .as_deref()
+            .map(|name| format!(" (device {name})"))
+            .unwrap_or_default();
+        let message = match reason {
+            ApplianceTelemetryMissingReason::FirstSampleWarmup => format!(
+                "Disk IO rates are warming up for {disk}{device}; they will be available after the next telemetry cadence."
+            ),
+            _ => format!(
+                "Disk IO telemetry is unavailable for {disk}{device}: {}.",
+                telemetry_missing_reason_label(reason)
+            ),
+        };
+        Some(DiskIoSummaryView::unavailable(message))
     })
+}
+
+fn telemetry_missing_reason_label(reason: ApplianceTelemetryMissingReason) -> &'static str {
+    match reason {
+        ApplianceTelemetryMissingReason::CollectorUnavailable => "collector unavailable",
+        ApplianceTelemetryMissingReason::PermissionDenied => "permission denied",
+        ApplianceTelemetryMissingReason::UnsupportedPlatform => "unsupported platform",
+        ApplianceTelemetryMissingReason::DeviceMissing => "device mapping missing",
+        ApplianceTelemetryMissingReason::CounterReset => "counter reset",
+        ApplianceTelemetryMissingReason::DaemonStartup => "daemon startup",
+        ApplianceTelemetryMissingReason::FirstSampleWarmup => "first sample warm-up",
+        ApplianceTelemetryMissingReason::SampleTimeout => "sample timed out",
+        ApplianceTelemetryMissingReason::NotConfigured => "not configured",
+        ApplianceTelemetryMissingReason::Unknown => "unknown reason",
+    }
 }
 
 pub(super) fn cpu_usage_summary(
@@ -256,4 +318,40 @@ fn pressure_warning(state: MemoryStressStateView, pressure: u8) -> Option<Dashbo
             format!("Memory pressure is {pressure}% on this appliance."),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::disk_io_summary;
+    use dasobjectstore_daemon::api::ApplianceTelemetryWindow;
+    use dasobjectstore_daemon::ApplianceTelemetrySampleSet;
+    use serde_json::json;
+
+    #[test]
+    fn disk_io_summary_surfaces_warmup_device_diagnostic() {
+        let sample_set: ApplianceTelemetrySampleSet = serde_json::from_value(json!({
+            "schema_version": "dasobjectstore.appliance_telemetry.v1",
+            "generated_at_utc": "2026-07-09T18:00:00Z",
+            "cadence_seconds": 6.0,
+            "source": {"appliance_id": "fixture", "host_id": "fixture"},
+            "samples": [{
+                "timestamp_utc": "2026-07-09T18:00:00Z",
+                "collection_quality": "partial",
+                "missing_data": [],
+                "cpu": {"usage_percent": null, "load_average_1m": null, "load_average_5m": null, "load_average_15m": null, "logical_core_count": null, "missing_reason": "daemon_startup"},
+                "memory": {"total_bytes": null, "available_bytes": null, "used_percent": null, "swap_total_bytes": null, "swap_used_bytes": null, "missing_reason": "collector_unavailable"},
+                "enclosures": [],
+                "disks": [],
+                "disk_io": [{"disk_id": "hdd-a", "label": "HDD A", "mount_path": "/srv/hdd-a", "role": "hdd", "enclosure_id": null, "bay_label": "1", "device_path": "/dev/disk/by-id/hdd-a", "device_name": "sda", "read_bytes_per_second": null, "write_bytes_per_second": null, "read_operations_per_second": null, "write_operations_per_second": null, "average_await_millis": null, "io_time_percent": null, "missing_reason": "first_sample_warmup"}],
+                "sessions": {"web_active_sessions": null, "remote_agent_active_sessions": null, "distinct_logged_in_users": null, "administrator_sessions": null, "operator_sessions": null, "missing_reason": "collector_unavailable"}
+            }]
+        })).expect("telemetry fixture decodes");
+
+        let summary = disk_io_summary(&sample_set, ApplianceTelemetryWindow::OneHour)
+            .expect("warmup diagnostic summary");
+        assert!(!summary.available);
+        let message = summary.message.expect("diagnostic message");
+        assert!(message.contains("hdd-a (device sda)"));
+        assert!(message.contains("warming up"));
+    }
 }

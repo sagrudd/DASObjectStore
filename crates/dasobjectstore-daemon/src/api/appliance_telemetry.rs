@@ -121,17 +121,21 @@ pub struct ApplianceTelemetryDiskCapacitySummary {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ApplianceTelemetryDiskIoSummary {
     pub disk_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sample_timestamp_utc: Option<String>,
     pub label: Option<String>,
     pub mount_path: String,
     pub role: String,
     pub enclosure_id: Option<String>,
     pub bay_label: Option<String>,
+    pub device_name: Option<String>,
     pub read_bytes_per_second: Option<u64>,
     pub write_bytes_per_second: Option<u64>,
     pub read_operations_per_second: Option<u64>,
     pub write_operations_per_second: Option<u64>,
     pub average_await_micros: Option<u64>,
     pub io_time_percent_basis_points: Option<u16>,
+    pub missing_reason: Option<ApplianceTelemetryMissingReason>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -173,16 +177,19 @@ pub struct ApplianceTelemetryDiskIoSeries {
     pub label: Option<String>,
     pub enclosure_id: Option<String>,
     pub bay_label: Option<String>,
+    pub device_name: Option<String>,
     pub points: Vec<ApplianceTelemetryDiskIoPoint>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ApplianceTelemetryDiskIoPoint {
     pub timestamp_utc: String,
+    pub device_name: Option<String>,
     pub read_bytes_per_second: Option<u64>,
     pub write_bytes_per_second: Option<u64>,
     pub read_operations_per_second: Option<u64>,
     pub write_operations_per_second: Option<u64>,
+    pub missing_reason: Option<ApplianceTelemetryMissingReason>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -303,7 +310,11 @@ fn current_summary(sample: &ApplianceTelemetrySample) -> ApplianceTelemetryCurre
         },
         capacity: capacity_summary(&sample.disks),
         disks: sample.disks.iter().map(disk_capacity_summary).collect(),
-        disk_io: sample.disk_io.iter().map(disk_io_summary).collect(),
+        disk_io: sample
+            .disk_io
+            .iter()
+            .map(|disk| disk_io_summary(&sample.timestamp_utc, disk))
+            .collect(),
     }
 }
 
@@ -333,14 +344,19 @@ fn disk_capacity_summary(
     }
 }
 
-fn disk_io_summary(disk_io: &ApplianceDiskIoTelemetry) -> ApplianceTelemetryDiskIoSummary {
+fn disk_io_summary(
+    sample_timestamp_utc: &str,
+    disk_io: &ApplianceDiskIoTelemetry,
+) -> ApplianceTelemetryDiskIoSummary {
     ApplianceTelemetryDiskIoSummary {
         disk_id: disk_io.disk_id.clone(),
+        sample_timestamp_utc: Some(sample_timestamp_utc.to_string()),
         label: disk_io.label.clone(),
         mount_path: disk_io.mount_path.clone(),
         role: disk_io.role.clone(),
         enclosure_id: disk_io.enclosure_id.clone(),
         bay_label: disk_io.bay_label.clone(),
+        device_name: disk_io.device_name.clone(),
         read_bytes_per_second: rounded_u64(disk_io.read_bytes_per_second),
         write_bytes_per_second: rounded_u64(disk_io.write_bytes_per_second),
         read_operations_per_second: rounded_u64(disk_io.read_operations_per_second),
@@ -349,6 +365,7 @@ fn disk_io_summary(disk_io: &ApplianceDiskIoTelemetry) -> ApplianceTelemetryDisk
             .average_await_millis
             .and_then(|value| rounded_u64(Some(value * 1_000.0))),
         io_time_percent_basis_points: percent_basis_points(disk_io.io_time_percent),
+        missing_reason: disk_io.missing_reason,
     }
 }
 
@@ -363,14 +380,17 @@ fn series_from_samples(samples: &[ApplianceTelemetrySample]) -> ApplianceTelemet
                     label: disk_io.label.clone(),
                     enclosure_id: disk_io.enclosure_id.clone(),
                     bay_label: disk_io.bay_label.clone(),
+                    device_name: disk_io.device_name.clone(),
                     points: Vec::new(),
                 });
             series.points.push(ApplianceTelemetryDiskIoPoint {
                 timestamp_utc: sample.timestamp_utc.clone(),
+                device_name: disk_io.device_name.clone(),
                 read_bytes_per_second: rounded_u64(disk_io.read_bytes_per_second),
                 write_bytes_per_second: rounded_u64(disk_io.write_bytes_per_second),
                 read_operations_per_second: rounded_u64(disk_io.read_operations_per_second),
                 write_operations_per_second: rounded_u64(disk_io.write_operations_per_second),
+                missing_reason: disk_io.missing_reason,
             });
         }
     }
@@ -505,7 +525,10 @@ fn rounded_u64(value: Option<f64>) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{query_appliance_telemetry, ApplianceTelemetryRequest, ApplianceTelemetryWindow};
+    use super::{
+        query_appliance_telemetry, ApplianceTelemetryDiskIoSummary, ApplianceTelemetryRequest,
+        ApplianceTelemetryWindow,
+    };
     use crate::runtime::{
         ApplianceCpuTelemetry, ApplianceDiskCapacityTelemetry, ApplianceDiskIoTelemetry,
         ApplianceMemoryTelemetry, ApplianceSessionTelemetry, ApplianceTelemetryCollectionQuality,
@@ -513,6 +536,29 @@ mod tests {
         ApplianceTelemetrySample, ApplianceTelemetrySampleSet, ApplianceTelemetrySource,
     };
     use dasobjectstore_core::utc::{format_utc_timestamp_seconds, parse_utc_timestamp_seconds};
+    use serde_json::json;
+
+    #[test]
+    fn disk_io_summary_decodes_without_new_optional_diagnostics() {
+        let summary: ApplianceTelemetryDiskIoSummary = serde_json::from_value(json!({
+            "disk_id": "hdd-a",
+            "label": "HDD A",
+            "mount_path": "/srv/hdd-a",
+            "role": "hdd",
+            "enclosure_id": null,
+            "bay_label": "1",
+            "read_bytes_per_second": 512,
+            "write_bytes_per_second": 256,
+            "read_operations_per_second": 2,
+            "write_operations_per_second": 1,
+            "average_await_micros": 2500,
+            "io_time_percent_basis_points": 1000
+        }))
+        .expect("legacy disk IO summary decodes");
+        assert_eq!(summary.sample_timestamp_utc, None);
+        assert_eq!(summary.device_name, None);
+        assert_eq!(summary.missing_reason, None);
+    }
 
     #[test]
     fn query_returns_current_summary_series_and_missing_intervals_for_window() {
@@ -546,9 +592,23 @@ mod tests {
         assert_eq!(current.disks[0].bay_label.as_deref(), Some("1"));
         assert_eq!(current.disk_io[0].read_bytes_per_second, Some(512));
         assert_eq!(current.disk_io[0].bay_label.as_deref(), Some("1"));
+        assert_eq!(
+            current.disk_io[0].sample_timestamp_utc,
+            Some("2026-07-09T18:30:00Z".to_string())
+        );
+        assert_eq!(current.disk_io[0].device_name.as_deref(), Some("sda"));
+        assert_eq!(current.disk_io[0].missing_reason, None);
 
         assert_eq!(response.series.cpu_usage.len(), 3);
         assert_eq!(response.series.disk_io[0].points.len(), 3);
+        assert_eq!(
+            response.series.disk_io[0].device_name.as_deref(),
+            Some("sda")
+        );
+        assert_eq!(
+            response.series.disk_io[0].points[0].device_name.as_deref(),
+            Some("sda")
+        );
         assert_eq!(response.series.disk_io[0].bay_label.as_deref(), Some("1"));
         assert_eq!(
             response.available_windows[0].window,
