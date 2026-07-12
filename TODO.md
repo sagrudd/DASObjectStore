@@ -207,6 +207,9 @@ completion.
 
 - [ ] Create/adopt only an explicit mount backed by a validated non-rotational
   device; identify it by stable filesystem/device identity rather than name.
+  - [x] Require an explicit `DriveMediaKind::Ssd` plus stable filesystem/device
+    identity in portable drive manifests; runtime mount/device probing and
+    create/adopt orchestration remain open.
 - [ ] Reject the system root and already-claimed devices by default; support a
   documented administrator override for virtual or unusual SSD topology.
 - [ ] Implement reserve, pressure, capacity, SMART/NVMe health, endurance,

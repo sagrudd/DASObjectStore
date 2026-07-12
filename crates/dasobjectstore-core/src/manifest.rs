@@ -44,12 +44,19 @@ pub enum BackendReference {
     Drive {
         filesystem_identity: String,
         device_identity: Option<String>,
+        media: DriveMediaKind,
         #[serde(default)]
         mount_path_hint: Option<PathBuf>,
     },
     Appliance {
         pool_id: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveMediaKind {
+    Ssd,
 }
 
 impl BackendReference {
@@ -67,6 +74,7 @@ impl BackendReference {
             Self::Drive {
                 filesystem_identity,
                 device_identity,
+                media,
                 mount_path_hint,
             } => {
                 if filesystem_identity.trim().is_empty()
@@ -81,6 +89,9 @@ impl BackendReference {
                     .is_some_and(|path| !path.is_absolute())
                 {
                     return Err(ObjectStoreManifestValidationError::RelativeMountHint);
+                }
+                if *media != DriveMediaKind::Ssd {
+                    return Err(ObjectStoreManifestValidationError::DriveMustBeSsd);
                 }
                 DeploymentProfile::Drive
             }
@@ -108,6 +119,7 @@ pub enum ObjectStoreManifestValidationError {
     },
     BlankBackendIdentity,
     RelativeMountHint,
+    DriveMustBeSsd,
     ProfileBackendMismatch {
         profile: DeploymentProfile,
         backend: DeploymentProfile,
@@ -127,6 +139,9 @@ impl Display for ObjectStoreManifestValidationError {
             Self::RelativeMountHint => {
                 formatter.write_str("drive mount_path_hint must be absolute")
             }
+            Self::DriveMustBeSsd => {
+                formatter.write_str("drive backend must declare non-rotational SSD media")
+            }
             Self::ProfileBackendMismatch { profile, backend } => write!(
                 formatter,
                 "deployment profile {} does not match backend reference {}",
@@ -141,7 +156,9 @@ impl std::error::Error for ObjectStoreManifestValidationError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION};
+    use super::{
+        BackendReference, DriveMediaKind, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+    };
     use crate::deployment::{DeploymentProfile, HostMode};
     use crate::ids::StoreId;
     use crate::protection::ProtectionPolicy;
@@ -178,6 +195,7 @@ mod tests {
             backend: BackendReference::Drive {
                 filesystem_identity: "apfs:123".to_string(),
                 device_identity: Some("nvme:456".to_string()),
+                media: DriveMediaKind::Ssd,
                 mount_path_hint: Some(PathBuf::from("/Volumes/CODEX")),
             },
         };
@@ -204,5 +222,23 @@ mod tests {
             },
         };
         assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn drive_manifest_requires_explicit_ssd_media() {
+        let manifest = ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new("codex-drive-media").expect("store id"),
+            deployment_profile: DeploymentProfile::Drive,
+            host_mode: HostMode::System,
+            protection: ProtectionPolicy::Reproducible,
+            backend: BackendReference::Drive {
+                filesystem_identity: "apfs:123".to_string(),
+                device_identity: Some("disk:456".to_string()),
+                media: DriveMediaKind::Ssd,
+                mount_path_hint: Some(PathBuf::from("/Volumes/CODEX")),
+            },
+        };
+        manifest.validate().expect("SSD drive manifest validates");
     }
 }

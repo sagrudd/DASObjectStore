@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.87 - 2026-07-12
+
+- Require explicit non-rotational SSD media classification in drive manifests,
+  alongside stable filesystem and device identities.
+
 ## 0.71.86 - 2026-07-12
 
 - Expose typed folder capacity snapshots alongside browse, read, verify, and

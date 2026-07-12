@@ -27,7 +27,9 @@ pub use config::{
     DEFAULT_STANDALONE_HTTPS_PORT,
 };
 pub use deployment::{DeploymentProfile, HostMode};
-pub use manifest::{BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION};
+pub use manifest::{
+    BackendReference, DriveMediaKind, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+};
 pub use protection::ProtectionPolicy;
 
 /// Current core crate version.

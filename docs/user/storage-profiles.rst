@@ -51,6 +51,10 @@ manifests reference a pool. A path hint is never treated as the backend
 identity, and an explicit migration/adoption step is required before writing a
 manifest for an existing store.
 
+Drive manifests must declare ``media: ssd`` and stable filesystem/device
+identities. A mount path is only a hint for local probing; a name such as
+``/Volumes/SSD`` is never accepted as evidence that the device is non-rotational.
+
 Protection is independent of the profile: manifests may require ``local_only``,
 ``reproducible``, ``externally_replicated``, or ``appliance_protected`` policy.
 The physical backend does not silently choose a protection promise; product
