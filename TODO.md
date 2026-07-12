@@ -57,8 +57,8 @@ completion.
   appliance acceptance gaps without fabricating continuity.
 - [ ] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow.
-  Current exceptions: GUI API ``auth_routes.rs`` and ``workspaces.rs``; GUI
-  Web ``api.rs``. The gate closes only when the exception file is empty. The
+  Current exceptions: GUI API ``workspaces.rs``; GUI Web ``api.rs``. The gate
+  closes only when the exception file is empty. The
   previously unexcepted
   daemon ``server/request_handler/storage.rs`` violation has been split into
   storage reconciliation/helpers modules; the guard now passes against the
@@ -66,7 +66,7 @@ completion.
   continue removing the remaining listed exceptions.
   - [x] Remove stale daemon and GUI ``home_aggregator.rs`` entries after the
     module-size guard confirmed those modules are below budget; retain only
-    the three currently reported GUI exceptions.
+    the two currently reported GUI exceptions.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 
@@ -432,6 +432,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract local-user authority, local-group, and enclosure daemon client
     adapters into `crates/dasobjectstore-gui-api/src/auth_admin_clients.rs`;
     preserve request/error projections and macOS-safe compilation.
+  - [x] Extract standalone authentication, session, remote-authentication, and
+    EasyConnect route handlers into
+    `crates/dasobjectstore-gui-api/src/auth_identity_routes.rs`; preserve
+    router visibility, response contracts, and local-password error mapping.
 - [x] Move object-service Docker status/bind parsing into one shared
   inspection module used by both CLI and GUI API, with one bounded timeout
   policy and parser regressions beside the shared implementation.

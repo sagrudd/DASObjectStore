@@ -2,21 +2,6 @@
 
 use super::*;
 
-pub(super) trait LocalPasswordAuthenticator: Send + Sync {
-    fn authenticate(&self, username: &str, password: &str) -> Result<(), LocalPasswordAuthError>;
-}
-
-#[derive(Default)]
-pub(super) struct SystemLocalPasswordAuthenticator {
-    pam: PamLocalPasswordAuthenticator,
-}
-
-impl LocalPasswordAuthenticator for SystemLocalPasswordAuthenticator {
-    fn authenticate(&self, username: &str, password: &str) -> Result<(), LocalPasswordAuthError> {
-        self.pam.authenticate(username, password)
-    }
-}
-
 pub(super) trait LocalUserAuthorityProvider: Send + Sync {
     fn local_user(
         &self,
