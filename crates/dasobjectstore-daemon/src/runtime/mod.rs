@@ -10,6 +10,7 @@ mod local_admin;
 mod object_browser;
 mod object_download;
 mod performance_policy;
+mod reconciliation;
 mod remote_pairings;
 mod remote_sessions;
 mod remote_upload;
@@ -73,6 +74,11 @@ pub use performance_policy::{
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
+};
+pub use reconciliation::{
+    normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,
+    ReconciliationManifest, ReconciliationManifestEntry, ReconciliationManifestError,
+    ReconciliationObject, ReconciliationPlan, RECONCILIATION_MANIFEST_SCHEMA,
 };
 pub use remote_pairings::{
     remote_easyconnect_pairing_store_path, session_credentials_from_store_credentials,

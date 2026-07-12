@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.43 - 2026-07-12
+
+- Add a versioned provider-independent reconciliation manifest/resume planner
+  with safe key normalization, collision and malformed-key reporting, atomic
+  durable checkpoints, and restart coverage; Garage worker integration remains
+  a follow-up.
+
 ## 0.71.42 - 2026-07-12
 
 - Route `disk prepare-das` through the daemon-owned enclosure executor and

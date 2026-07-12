@@ -50,6 +50,12 @@ completion.
   contract before exposing the endpoint.
 - [ ] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
+  - [x] Add a versioned provider-independent per-key manifest/resume planner
+    with safe key normalization, collision/malformed-key outcomes, atomic
+    durable checkpoints, cancellation-safe in-progress state, and restart
+    tests; provider transfer wiring and appliance progress acceptance remain.
+  - [ ] Integrate manifest checkpoints into the Garage transfer worker and
+    expose per-key progress/cancellation through the daemon job stream.
 - [ ] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
   during blocked or saturated ingest.
