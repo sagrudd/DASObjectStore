@@ -873,8 +873,9 @@ wordmark and partial mark, a ``#1c2b0b`` provenance surface, responsive
 application-shell layout, and pinned local asset provenance tests. Shared
 semantic interaction/status tokens now cover primary actions, focus, warning,
 danger, and success states without reusing Mnemosyne green as a generic action.
-The TaskPane primitive and page-flow refactors remain open work in TODO
-Milestone 24.
+The shared Yew TaskPane primitive now provides explicit Closed/Create/Edit/Review
+state, focus/escape behavior, selected context, labelled form content, and
+footer actions; page-flow refactors remain open work in TODO Milestone 24.
 
 ## Milestone 25: Campaign Re-baseline and Compatibility Contracts
 

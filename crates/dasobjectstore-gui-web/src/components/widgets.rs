@@ -62,6 +62,99 @@ pub fn inspector_drawer(props: &InspectorDrawerProps) -> Html {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TaskPaneMode {
+    Closed,
+    Create,
+    Edit(String),
+    Review,
+}
+
+impl TaskPaneMode {
+    fn is_open(&self) -> bool {
+        !matches!(self, Self::Closed)
+    }
+}
+
+#[derive(Clone, PartialEq, Properties)]
+pub struct TaskPaneProps {
+    pub mode: TaskPaneMode,
+    pub title: String,
+    #[prop_or_default]
+    pub selected_context: Option<String>,
+    pub on_close: Callback<()>,
+    #[prop_or_default]
+    pub return_focus_to: Option<NodeRef>,
+    #[prop_or_default]
+    pub children: Children,
+    #[prop_or_default]
+    pub footer_actions: Html,
+}
+
+#[function_component(TaskPane)]
+pub fn task_pane(props: &TaskPaneProps) -> Html {
+    let pane_ref = use_node_ref();
+    let is_open = props.mode.is_open();
+    {
+        let pane_ref = pane_ref.clone();
+        let return_focus_to = props.return_focus_to.clone();
+        use_effect_with(is_open, move |is_open| {
+            if *is_open {
+                if let Some(pane) = pane_ref.cast::<web_sys::HtmlElement>() {
+                    let _ = pane.focus();
+                }
+            } else if let Some(trigger) =
+                return_focus_to.and_then(|reference| reference.cast::<web_sys::HtmlElement>())
+            {
+                let _ = trigger.focus();
+            }
+            || ()
+        });
+    }
+    if !is_open {
+        return html! {};
+    }
+
+    let on_close = props.on_close.clone();
+    let on_keydown = Callback::from(move |event: KeyboardEvent| {
+        if event.key() == "Escape" {
+            event.prevent_default();
+            on_close.emit(());
+        }
+    });
+    let on_close_button = {
+        let on_close = props.on_close.clone();
+        Callback::from(move |_| on_close.emit(()))
+    };
+    html! {
+        <aside
+            class="dos-task-pane"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dos-task-pane-title"
+            tabindex="-1"
+            ref={pane_ref}
+            onkeydown={on_keydown}
+        >
+            <header class="dos-task-pane__header">
+                <div>
+                    <h2 id="dos-task-pane-title">{ props.title.clone() }</h2>
+                    if let Some(context) = &props.selected_context {
+                        <p class="dos-task-pane__context">{ context }</p>
+                    }
+                </div>
+                <button class="dos-task-pane__close" type="button" aria-label="Close task pane" onclick={on_close_button}>{ "Close" }</button>
+            </header>
+            <form class="dos-task-pane__form" aria-label={props.title.clone()}>
+                { for props.children.iter() }
+            </form>
+            <footer class="dos-task-pane__footer">
+                { props.footer_actions.clone() }
+            </footer>
+        </aside>
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Properties)]
 pub struct StatusBadgeProps {
     pub label: String,

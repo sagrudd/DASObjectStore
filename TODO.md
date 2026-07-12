@@ -2083,7 +2083,7 @@ non-destructive close, and restores focus to its trigger when closed.
   provenance/footer and must not become a generic success badge or action
   colour. Use explicit text plus colour for every state; contract tests pin the
   variables and their use in the shared stylesheet.
-- [ ] Add a reusable Yew `TaskPane` component under
+- [x] Add a reusable Yew `TaskPane` component under
   `crates/dasobjectstore-gui-web/src/components/` or extend the existing
   `InspectorDrawer` only if it gains the full task contract: title, selected
   context, close button, focus management, Escape handling, labelled form
@@ -2091,7 +2091,10 @@ non-destructive close, and restores focus to its trigger when closed.
   state as one explicit enum (for example `Closed | Create | Edit(Id) |
   Review`) rather than multiple unrelated booleans. A small anchored pane is
   permitted for one-step low-risk work; use a side sheet on desktop and a
-  full-height sheet on narrow screens for the workflows below.
+  full-height sheet on narrow screens for the workflows below. The shared
+  component now implements focus-on-open, trigger-focus restoration, Escape
+  close, labelled form content, selected context, and footer actions; page
+  migrations to it remain in the workflow tasks below.
 - [ ] Update the shared Web CSS and component tests so panes, footer, tables,
   status chips, and responsive layouts share primitives rather than adding
   page-local variants. Keep the source split under the repository’s production

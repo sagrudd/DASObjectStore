@@ -13,7 +13,8 @@ pub use footer::{DasObjectStoreFooter, DasObjectStoreFooterProps};
 pub use widgets::{
     CapacityBar, CapacityBarProps, DenseTable, DenseTableProps, IconButton, IconButtonProps,
     InspectorDrawer, InspectorDrawerProps, RiskyConfirmationPanel, RiskyConfirmationPanelProps,
-    SegmentedControl, SegmentedControlProps, StatusBadge, StatusBadgeProps,
+    SegmentedControl, SegmentedControlProps, StatusBadge, StatusBadgeProps, TaskPane, TaskPaneMode,
+    TaskPaneProps,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

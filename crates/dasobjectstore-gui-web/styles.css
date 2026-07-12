@@ -123,6 +123,74 @@ main[data-host] {
   pointer-events: none;
 }
 
+.dos-task-pane {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100vw);
+  height: 100vh;
+  padding: 24px;
+  border-left: 1px solid #d9e0e3;
+  background: #ffffff;
+  box-shadow: -12px 0 32px rgba(30, 37, 43, 0.14);
+  outline: none;
+}
+
+.dos-task-pane__header,
+.dos-task-pane__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dos-task-pane__header {
+  padding-bottom: 18px;
+  border-bottom: 1px solid #e1e7ea;
+}
+
+.dos-task-pane__header h2 {
+  margin: 0;
+  color: #182128;
+  font-size: 1.2rem;
+}
+
+.dos-task-pane__context {
+  margin: 4px 0 0;
+  color: #5d6a72;
+  font-size: 0.84rem;
+}
+
+.dos-task-pane__close {
+  border: 1px solid #c9d2d7;
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: #303b43;
+  background: #ffffff;
+}
+
+.dos-task-pane__close:focus-visible {
+  border-color: var(--dos-interaction-primary);
+  outline: 2px solid var(--dos-interaction-focus-ring);
+}
+
+.dos-task-pane__form {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 20px 0;
+}
+
+.dos-task-pane__footer {
+  justify-content: flex-end;
+  padding-top: 18px;
+  border-top: 1px solid #e1e7ea;
+}
+
 h1,
 h2,
 p {
@@ -1166,6 +1234,11 @@ h2 {
   .dos-product-footer__provenance {
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .dos-task-pane {
+    width: 100vw;
+    padding: 18px 14px;
   }
 
   .dos-auth-brand,

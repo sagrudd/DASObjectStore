@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.48 - 2026-07-12
+
+- Add the shared Yew TaskPane primitive with explicit workflow modes,
+  focus/escape behavior, labelled forms, and responsive side-sheet styling.
+
 ## 0.72.47 - 2026-07-12
 
 - Add shared Web semantic interaction and status tokens with regression

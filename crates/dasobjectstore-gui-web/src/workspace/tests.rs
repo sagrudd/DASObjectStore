@@ -2031,7 +2031,8 @@ fn activity_css_is_feature_owned_and_registered_before_base_styles() {
     let index = include_str!("../../index.html");
 
     assert!(!base.contains(".dos-activity"));
-    assert!(!base.contains(".dos-task-"));
+    assert!(!base.contains(".dos-task-list"));
+    assert!(!base.contains(".dos-task-card"));
     for selector in [
         ".dos-activity-grid",
         ".dos-activity-queues",
