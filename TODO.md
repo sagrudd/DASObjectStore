@@ -257,6 +257,14 @@ completion.
     reconciliation into the local ingest worker, so staged provider downloads
     reserve with ``remote_s3`` origin and settle through the same commit/release
     lifecycle; appliance credentials and provider soak remain blocked.
+  - [x] Fail closed before local writes when a capacity-enabled ingest request
+    supplies a copy-count override that differs from the daemon ObjectStore
+    policy; this preserves daemon-authoritative redundancy rather than charging
+    a reservation for a client-selected copy count. The legacy no-provider
+    executor tests retain their existing explicit override coverage.
+  - [x] Scope local-ingest reservation IDs with a client request ID or stable
+    source-path digest, preventing unrelated same-second jobs from colliding
+    while preserving deterministic retries for the same source.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.

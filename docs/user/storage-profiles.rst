@@ -145,6 +145,12 @@ runs and skipped existing objects never reserve. S3 reconciliation now passes
 the controller-owned provider through the staged-download worker;
 multipart adapters still need explicit provider injection before that path is
 considered quota-complete.
+When daemon capacity admission is enabled, local ingest rejects a copy-count
+override that differs from the ObjectStore policy before reading source data;
+the daemon remains authoritative for redundancy accounting.
+Reservation IDs include the client request identity when supplied, otherwise a
+stable source-path digest, so unrelated same-second jobs cannot collide while
+retries of the same source remain deterministic.
 The core ledger has a concurrent reservation regression: simultaneous callers
 contending for a bounded quota cannot overbook logical capacity. Crash/restart
 reservation persistence, multipart expiry, dedupe accounting, and full-disk

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.43 - 2026-07-12
+
+- Reject capacity-enabled local-ingest copy overrides that differ from the
+  daemon ObjectStore policy before source reads begin.
+
 ## 0.72.42 - 2026-07-12
 
 - Pass daemon-owned capacity reservations through Garage S3 reconciliation

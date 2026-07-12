@@ -43,7 +43,7 @@ mod progress;
 mod scheduling;
 mod source_classification;
 
-use capacity::IngestCapacityReservations;
+use capacity::{reservation_scope, IngestCapacityReservations};
 use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
 #[cfg(test)]
 use environment::SSD_ROOT_ENV;
@@ -186,6 +186,12 @@ impl LocalFileIngestExecutor {
         )?;
         let managed_disk_roots = discover_managed_hdd_roots(&self.hdd_root)?;
         let copies = request.copies.unwrap_or(endpoint.store.policy.copies);
+        if self.capacity_provider.is_some() && copies != endpoint.store.policy.copies {
+            return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "capacity admission requires daemon policy copy count {}; requested override was {copies}",
+                endpoint.store.policy.copies
+            )));
+        }
         if copies == 0 || managed_disk_roots.len() < copies as usize {
             return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
                 "ingest files requires at least {copies} managed HDD root(s), got {}",
@@ -223,6 +229,7 @@ impl LocalFileIngestExecutor {
         let mut capacity_reservations = IngestCapacityReservations::new(
             self.capacity_provider.clone(),
             endpoint.store.store_id.clone(),
+            reservation_scope(&request),
         );
 
         progress(DaemonIngestProgressEvent {
@@ -1235,13 +1242,12 @@ mod tests {
             find_payloads(&hdd_root.join("disk-a").join("objects")),
             vec![b"reproducible reference".to_vec()]
         );
-        assert_eq!(
-            *capacity_provider.events.lock().expect("events lock"),
-            vec![
-                "admit:zymo_fecal_2025.05:22:1:local_server",
-                "commit:zymo_fecal_2025.05:ingest-files-2026-07-09t13-02-22z/zymo_fecal_2025.05/reference.fa.zst"
-            ]
-        );
+        let capacity_events = capacity_provider.events.lock().expect("events lock");
+        assert_eq!(capacity_events.len(), 2);
+        assert!(capacity_events[0].starts_with("admit:zymo_fecal_2025.05:22:1:local_server"));
+        assert!(capacity_events[1]
+            .starts_with("commit:zymo_fecal_2025.05:ingest-files-2026-07-09t13-02-22z/"));
+        assert!(capacity_events[1].ends_with("/zymo_fecal_2025.05/reference.fa.zst"));
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

@@ -3,12 +3,25 @@ use super::{DaemonIngestFilesRuntimeError, IngestJobId};
 use crate::api::DaemonIngressOrigin;
 use crate::runtime::capacity_provider::CapacityAdmissionProvider;
 use dasobjectstore_core::ids::StoreId;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+pub(super) fn reservation_scope(request: &super::SubmitIngestFilesRequest) -> String {
+    let scope = request
+        .client_request_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| request.source_path.to_string_lossy().into_owned());
+    let digest = Sha256::digest(scope.as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
 
 pub(super) struct IngestCapacityReservations {
     provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     store_id: StoreId,
+    scope: String,
     reservations: HashMap<String, String>,
 }
 
@@ -16,10 +29,12 @@ impl IngestCapacityReservations {
     pub(super) fn new(
         provider: Option<Arc<dyn CapacityAdmissionProvider>>,
         store_id: StoreId,
+        scope: String,
     ) -> Self {
         Self {
             provider,
             store_id,
+            scope,
             reservations: HashMap::new(),
         }
     }
@@ -34,7 +49,7 @@ impl IngestCapacityReservations {
         let Some(provider) = &self.provider else {
             return Ok(());
         };
-        let reservation_id = format!("{job_id}/{}", entry.object_id);
+        let reservation_id = format!("{job_id}/{}/{}", self.scope, entry.object_id);
         let response = provider
             .admit_ingest(
                 self.store_id.as_str(),

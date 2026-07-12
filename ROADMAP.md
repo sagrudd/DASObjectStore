@@ -919,6 +919,12 @@ object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.
 Garage S3 reconciliation now passes its controller-owned provider into that
 worker as well; multipart paths still need explicit provider injection.
+Capacity-enabled local ingest also rejects a client copy-count override before
+any source read when it differs from the daemon ObjectStore policy; legacy
+standalone executor paths retain their explicit override behavior.
+Reservation IDs include the client request identity when supplied, otherwise a
+stable source-path digest, preventing unrelated same-second jobs from
+colliding while preserving deterministic retries for the same source.
 
 ## Milestone 28: Folder ObjectStore Profile
 
