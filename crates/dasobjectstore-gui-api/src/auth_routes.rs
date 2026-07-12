@@ -319,7 +319,9 @@ async fn upsert_endpoint_inventory(
     let mut request = validate_endpoint_inventory_upsert_request(request)?;
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
-    submit_endpoint_inventory_upsert_request(&state, request).map(Json)
+    submit_endpoint_inventory_upsert_request(&state, request)
+        .await
+        .map(Json)
 }
 
 async fn rebuild_performance_report(
