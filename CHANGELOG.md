@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.47 - 2026-07-12
+
+- Reserve a bounded Unix-socket priority lane for administrator cancellation
+  requests so routine control queries and ingest submissions cannot exhaust the
+  cancellation capacity; saturated lanes return the typed `server_busy` error.
+
 ## 0.71.46 - 2026-07-12
 
 - Add administrator cancellation tokens to active Garage reconciliation jobs;

@@ -895,6 +895,11 @@ list until every temporary size-budget exception has been removed.
 ### Web availability under heavy ingest and I/O pressure
 
 - [x] Split the daemon Unix-socket control plane from long-running ingest execution. The listener continues accepting health, inventory, status, and cancellation requests while an ingest streams progress by using bounded, separately admitted ingest and control execution lanes rather than holding the sole request handler for the transfer lifetime.
+- [x] Reserve a separate bounded priority-control lane for administrator
+  cancellation requests so cancellation capacity cannot be consumed by routine
+  queries or new ingest submissions; saturated lanes return the typed
+  `server_busy` response. Async HTTP bridging, deadlines, circuit breaking,
+  and appliance soak acceptance remain follow-up work below.
 - [ ] Give control, query, and cancellation requests reserved daemon capacity and priority over new ingest work. Bound every queue and return an explicit overload/degraded response instead of allowing an ingest to monopolize the socket or request workers.
 - [ ] Replace synchronous daemon Unix-socket calls in Axum handlers with an async bridge and bounded blocking pool. Apply per-route deadlines, cancellation propagation, and a circuit breaker so a stalled daemon produces a quick typed `503`/`429` response without exhausting HTTP accept/runtime threads.
 - [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.

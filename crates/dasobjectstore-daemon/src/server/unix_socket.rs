@@ -14,6 +14,7 @@ use std::thread;
 
 const SOCKET_MODE: u32 = 0o660;
 const MAX_CONTROL_CONNECTIONS: usize = 8;
+const MAX_PRIORITY_CONTROL_CONNECTIONS: usize = 2;
 const MAX_INGEST_CONNECTIONS: usize = 2;
 
 pub struct UnixSocketDaemonServer<H> {
@@ -42,6 +43,7 @@ where
     {
         let listener = bind_listener(&self.socket_path)?;
         let control_connections = AtomicUsize::new(0);
+        let priority_control_connections = AtomicUsize::new(0);
         let ingest_connections = AtomicUsize::new(0);
 
         thread::scope(|scope| {
@@ -52,6 +54,11 @@ where
                 };
                 let active_connections = if pending.request.is_ingest_submission() {
                     (&ingest_connections, MAX_INGEST_CONNECTIONS)
+                } else if pending.request.is_priority_control_request() {
+                    (
+                        &priority_control_connections,
+                        MAX_PRIORITY_CONTROL_CONNECTIONS,
+                    )
                 } else {
                     (&control_connections, MAX_CONTROL_CONNECTIONS)
                 };
@@ -350,6 +357,7 @@ fn handle_pending_stream(
 
 trait DaemonApiRequestClass {
     fn is_ingest_submission(&self) -> bool;
+    fn is_priority_control_request(&self) -> bool;
 }
 
 impl DaemonApiRequestClass for DaemonApiRequest {
@@ -358,6 +366,10 @@ impl DaemonApiRequestClass for DaemonApiRequest {
             self,
             Self::SubmitIngestFiles(_) | Self::RemoteEasyconnectSubmitAwsCliUpload(_)
         )
+    }
+
+    fn is_priority_control_request(&self) -> bool {
+        matches!(self, Self::CancelJob(_))
     }
 }
 
@@ -390,11 +402,11 @@ fn write_response_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::UnixSocketDaemonServer;
+    use super::{DaemonApiRequestClass, UnixSocketDaemonServer};
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
-        DaemonIngestStage, DaemonServiceStatusResponse, StoreInventoryRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        DaemonIngestStage, DaemonJobCancelRequest, DaemonJobId, DaemonServiceStatusResponse,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
     };
     use dasobjectstore_core::ids::{IngestJobId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
@@ -404,6 +416,20 @@ mod tests {
     use std::sync::{mpsc, Mutex};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn classifies_cancellation_as_priority_control() {
+        let cancellation = DaemonApiRequest::CancelJob(DaemonJobCancelRequest {
+            job_id: DaemonJobId::new("reconcile-job-1").expect("job id"),
+            reason: Some("operator requested cancellation".to_string()),
+        });
+        assert!(cancellation.is_priority_control_request());
+        assert!(!cancellation.is_ingest_submission());
+
+        let status = DaemonApiRequest::StoreInventory(StoreInventoryRequest::default());
+        assert!(!status.is_priority_control_request());
+        assert!(!status.is_ingest_submission());
+    }
 
     #[test]
     fn handles_one_line_json_request() {
