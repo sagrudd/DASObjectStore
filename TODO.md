@@ -1965,6 +1965,11 @@ list until every temporary size-budget exception has been removed.
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device
   diagnostics, Disk IO card values, and throughput-chart points.
+  - [x] Add a macOS/Linux-safe collector fixture matrix for direct SATA,
+    partition, stable USB `by-id`, device-mapper `by-path`, and missing-device
+    mappings. It asserts warm-up, mapped names, non-zero second-sample rates,
+    and explicit `device_missing`; authoritative enclosure topology and live
+    packaged-loop acceptance remain blocked.
 - [ ] Add an operator runbook for restoring Home telemetry: verify daemon loop
   health, marker/device mapping, `/proc/diskstats` visibility, sample state
   ownership, and the distinction between an idle disk and unavailable data.

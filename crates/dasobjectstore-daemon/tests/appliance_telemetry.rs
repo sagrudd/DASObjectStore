@@ -542,6 +542,122 @@ fn proc_collector_resolves_stable_device_alias_through_sysfs_fixture() {
 }
 
 #[test]
+fn proc_collector_covers_partition_usb_device_mapper_and_missing_fixtures() {
+    let root = temp_root("appliance-telemetry-topology-fixtures");
+    let proc_root = root.join("proc");
+    let hdd_root = root.join("hdd");
+    let sys_root = root.join("sys");
+    fs::create_dir_all(&proc_root).expect("proc fixture directory");
+    fs::create_dir_all(sys_root.join("class/block/sda")).expect("sata sysfs fixture");
+    fs::create_dir_all(sys_root.join("class/block/sdb")).expect("usb sysfs fixture");
+    fs::create_dir_all(sys_root.join("class/block/dm-0")).expect("dm sysfs fixture");
+    fs::create_dir_all(sys_root.join("dev/disk/by-id")).expect("by-id fixture");
+    fs::create_dir_all(sys_root.join("dev/disk/by-path")).expect("by-path fixture");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            "../../../class/block/sdb",
+            sys_root.join("dev/disk/by-id/fixture-usb"),
+        )
+        .expect("usb alias symlink");
+        std::os::unix::fs::symlink(
+            "../../../class/block/dm-0",
+            sys_root.join("dev/disk/by-path/fixture-dm"),
+        )
+        .expect("dm alias symlink");
+    }
+
+    let first_diskstats = "\
+   8       0 sda 100 0 2000 300 40 0 1000 200 0 500 600
+   8       1 sdb1 10 0 20 3 4 0 8 2 0 6 7
+   8      16 sdb 20 0 40 6 8 0 16 4 0 12 14
+ 253       0 dm-0 30 0 60 9 12 0 24 6 0 18 21
+";
+    let second_diskstats = "\
+   8       0 sda 130 0 2600 360 70 0 1600 290 0 620 760
+   8       1 sdb1 20 0 40 6 8 0 16 4 0 12 14
+   8      16 sdb 50 0 100 12 16 0 32 8 0 24 28
+ 253       0 dm-0 45 0 90 14 18 0 36 9 0 27 32
+";
+    fs::write(proc_root.join("stat"), PROC_STAT_1).expect("stat fixture written");
+    fs::write(proc_root.join("loadavg"), "1.00 0.50 0.25 1/100 123\n")
+        .expect("loadavg fixture written");
+    fs::write(proc_root.join("meminfo"), PROC_MEMINFO).expect("meminfo fixture written");
+    fs::write(proc_root.join("diskstats"), first_diskstats).expect("first diskstats written");
+
+    for (directory, marker) in [
+        (
+            "disk-sata",
+            "role=hdd:sata\ndevice=/dev/sda\nenclosure_id=fixture\nbay_label=1\n",
+        ),
+        (
+            "disk-partition",
+            "role=hdd:partition\ndiskstats_device=sdb1\ndevice=/dev/sdb1\nenclosure_id=fixture\nbay_label=2\n",
+        ),
+        (
+            "disk-usb",
+            "role=hdd:usb\ndevice=/dev/disk/by-id/fixture-usb\nenclosure_id=fixture\nbay_label=3\n",
+        ),
+        (
+            "disk-dm",
+            "role=hdd:dm\ndevice=/dev/disk/by-path/fixture-dm\nenclosure_id=fixture\nbay_label=4\n",
+        ),
+        (
+            "disk-missing",
+            "role=hdd:missing\ndevice=/dev/not-present\nenclosure_id=fixture\nbay_label=5\n",
+        ),
+    ] {
+        let disk_root = hdd_root.join(directory);
+        fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
+        fs::write(disk_root.join(".dasobjectstore/device.env"), marker)
+            .expect("device marker written");
+    }
+
+    let mut collector = LinuxProcTelemetryCollector::new(&proc_root)
+        .with_hdd_root(&hdd_root)
+        .with_sys_root(&sys_root);
+    let first = collector
+        .collect(None, 6, "2026-07-09T18:00:00Z")
+        .expect("first topology sample collected");
+    fs::write(proc_root.join("diskstats"), second_diskstats).expect("second diskstats written");
+    let second = collector
+        .collect(Some(&first.cpu_snapshot), 6, "2026-07-09T18:00:06Z")
+        .expect("second topology sample collected");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+
+    assert_eq!(first.disk_io.len(), 5);
+    for disk in &first.disk_io {
+        assert_eq!(
+            disk.missing_reason,
+            Some(if disk.disk_id == "missing" {
+                ApplianceTelemetryMissingReason::DeviceMissing
+            } else {
+                ApplianceTelemetryMissingReason::FirstSampleWarmup
+            })
+        );
+    }
+
+    let by_id = second
+        .disk_io
+        .iter()
+        .map(|disk| (disk.disk_id.as_str(), disk))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(by_id["sata"].device_name.as_deref(), Some("sda"));
+    assert_eq!(by_id["partition"].device_name.as_deref(), Some("sdb1"));
+    assert_eq!(by_id["usb"].device_name.as_deref(), Some("sdb"));
+    assert_eq!(by_id["dm"].device_name.as_deref(), Some("dm-0"));
+    for disk_id in ["sata", "partition", "usb", "dm"] {
+        assert!(by_id[disk_id].read_bytes_per_second.unwrap_or_default() > 0.0);
+        assert_eq!(by_id[disk_id].missing_reason, None);
+    }
+    assert_eq!(by_id["missing"].device_name, None);
+    assert_eq!(
+        by_id["missing"].missing_reason,
+        Some(ApplianceTelemetryMissingReason::DeviceMissing)
+    );
+}
+
+#[test]
 fn session_telemetry_counts_web_and_remote_agent_sessions() {
     let root = temp_root("appliance-telemetry-sessions");
     let auth_root = root.join("auth");

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.56 - 2026-07-13
+
+- Add fixture coverage for SATA, partition, USB alias, device-mapper alias,
+  warm-up, non-zero rates, and missing-device telemetry diagnostics.
+
 ## 0.72.55 - 2026-07-13
 
 - Add a route-level availability regression proving liveness remains healthy

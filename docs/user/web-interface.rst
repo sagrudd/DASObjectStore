@@ -280,6 +280,11 @@ identity, mapped device, rates, and missing reason. This lets an operator
 distinguish a single missing disk from a healthy aggregate; collection-quality
 and raw missing-data markers are included in the same Home payload, while the
 authenticated daemon telemetry contract remains the authoritative full history.
+The local regression matrix exercises direct SATA names, partitions, stable
+USB ``by-id`` aliases, device-mapper ``by-path`` aliases, and an absent device;
+it verifies first-sample warm-up, subsequent non-zero rates, mapped device
+identity, and explicit ``device_missing`` diagnostics without requiring a live
+appliance.
 
 The Home page refreshes its selected-window telemetry payload every 30 seconds
 while the page is open. The throughput telemetry chart uses a stable SVG view
