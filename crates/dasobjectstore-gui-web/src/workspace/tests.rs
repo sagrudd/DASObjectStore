@@ -102,6 +102,41 @@ fn approved_mnemosyne_partial_asset_is_registered_with_provenance() {
 }
 
 #[test]
+fn approved_mnemosyne_brand_assets_are_registered_with_pinned_provenance() {
+    use sha2::{Digest, Sha256};
+
+    let index = include_str!("../../index.html");
+    let assets = [
+        (
+            "assets/mnemosyne-biosciences-logo-icon-black.png",
+            include_bytes!("../../assets/mnemosyne-biosciences-logo-icon-black.png") as &[u8],
+            "53b533846d53dd6c9533574eb1c307964f99f7080362868e92285fec7853cb3c",
+        ),
+        (
+            "assets/mnemosyne-biosciences-logo-master-mono.png",
+            include_bytes!("../../assets/mnemosyne-biosciences-logo-master-mono.png") as &[u8],
+            "d529ce803cd14119745d91b1c2ae23512b71f6c5c094e44226b3cd9586e34b55",
+        ),
+        (
+            "assets/mnemosyne-biosciences-partial.png",
+            include_bytes!("../../assets/mnemosyne-biosciences-partial.png") as &[u8],
+            "14f0b0d208b9c3358914aaba165b803e8d62bb4888ed5066b94d600e4acdcb90",
+        ),
+    ];
+
+    for (path, bytes, expected_sha256) in assets {
+        let digest = Sha256::digest(bytes);
+        assert_eq!(
+            format!("{digest:x}"),
+            expected_sha256,
+            "asset provenance: {path}"
+        );
+        assert_eq!(index.matches(path).count(), 1, "Trunk registration: {path}");
+        assert!(!bytes.is_empty(), "asset bytes: {path}");
+    }
+}
+
+#[test]
 fn primary_navigation_uses_redesign_labels() {
     let labels: Vec<_> = PRIMARY_NAVIGATION.iter().map(|page| page.label()).collect();
 

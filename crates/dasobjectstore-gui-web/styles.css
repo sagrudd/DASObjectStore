@@ -1,8 +1,8 @@
 :root {
-  --dos-mnemosyne-footer-bg: rgba(1, 14, 12, 0.94);
-  --dos-mnemosyne-footer-border: rgba(138, 255, 105, 0.18);
-  --dos-mnemosyne-footer-text: rgba(238, 246, 230, 0.66);
-  --dos-mnemosyne-accent: rgba(138, 255, 105, 0.9);
+  --dos-mnemosyne-footer-bg: #1c2b0b;
+  --dos-mnemosyne-footer-border: rgba(238, 246, 230, 0.2);
+  --dos-mnemosyne-footer-text: rgba(238, 246, 230, 0.72);
+  --dos-mnemosyne-footer-link: #eaf6d8;
   color: #1e252b;
   background: #f5f7f8;
   font-family:
@@ -47,31 +47,69 @@ main[data-host] {
 }
 
 .dos-product-footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
   flex: 0 0 auto;
-  padding: 10px 24px 12px;
+  min-height: 76px;
+  padding: 14px 24px;
   border-top: 1px solid var(--dos-mnemosyne-footer-border);
   color: var(--dos-mnemosyne-footer-text);
   background: var(--dos-mnemosyne-footer-bg);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 0.74rem;
   line-height: 1.4;
-  text-align: center;
+  isolation: isolate;
+}
+
+.dos-product-footer__brand,
+.dos-product-footer__provenance {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dos-product-footer__wordmark {
+  width: clamp(154px, 20vw, 220px);
+  max-height: 34px;
+  object-fit: contain;
+  object-position: left center;
+  filter: invert(1) brightness(1.8);
+}
+
+.dos-product-footer__provenance {
+  justify-content: flex-end;
+  text-align: right;
 }
 
 .dos-product-footer a {
-  color: var(--dos-mnemosyne-accent);
+  color: var(--dos-mnemosyne-footer-link);
   text-decoration: none;
 }
 
 .dos-product-footer a:hover {
-  color: #8aff69;
+  color: #ffffff;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
 .dos-product-footer__version {
-  color: var(--dos-mnemosyne-accent);
+  color: var(--dos-mnemosyne-footer-link);
   font-weight: 800;
+}
+
+.dos-product-footer__partial {
+  position: absolute;
+  z-index: 0;
+  right: -18px;
+  bottom: -56px;
+  width: 190px;
+  opacity: 0.2;
+  pointer-events: none;
 }
 
 h1,
@@ -1108,7 +1146,15 @@ h2 {
   }
 
   .dos-product-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
     padding: 10px 14px 12px;
+  }
+
+  .dos-product-footer__provenance {
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .dos-auth-brand,

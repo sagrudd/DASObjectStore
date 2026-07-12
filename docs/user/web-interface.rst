@@ -1037,10 +1037,12 @@ local appliance authentication is being used in standalone mode, and that the
 surface belongs to the Mnemosyne Biosciences product family.
 
 The Web application uses the shared ``DasObjectStoreFooter`` component on both
-the login page and authenticated console pages. The footer follows the compact
-dark Mnemosyne product style used by sibling Web surfaces: monospace text,
-``DASObjectStore v<version>``, "Developed by", a ``https://mnemosyne.co.uk``
-Mnemosyne link, and 2026 Mnemosyne Biosciences attribution.
+the login page and authenticated console pages. The footer uses the Mnemosyne
+green ``#1c2b0b`` surface, the approved reversed wordmark, one cropped
+decorative partial mark, compact ``DASObjectStore v<version>`` provenance,
+"Developed by", a ``https://mnemosyne.co.uk`` Mnemosyne link, and 2026
+Mnemosyne Biosciences attribution. It remains a shared flex-shell footer on
+short and long pages.
 
 This footer is a product provenance requirement, not decorative page copy.
 Approved Mnemosyne branding files are copied into the Web package at build

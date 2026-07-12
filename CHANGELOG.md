@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.44 - 2026-07-12
+
+- Deliver the Mnemosyne footer contract with local wordmark/partial assets,
+  green provenance surface, responsive flex-shell layout, and regression tests.
+
 ## 0.72.43 - 2026-07-12
 
 - Reject capacity-enabled local-ingest copy overrides that differ from the

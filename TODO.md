@@ -245,8 +245,8 @@ completion.
     the reservation ID, admit before invoking the byte-transfer adapter, and
     commit or release the reservation after transfer and catalogue completion;
     admission rejection is persisted as a failed daemon job and provider
-    lifecycle failures remain fail-closed. Local ingest, multipart, catalogue
-    accounting, and stale-reservation expiry remain separate follow-up work.
+    lifecycle failures remain fail-closed. Multipart, catalogue accounting,
+    and stale-reservation expiry remain separate follow-up work.
   - [x] Wire local file ingest through the same daemon provider boundary: each
     non-skipped file reserves its size with the verified ingress origin before
     source/staging or direct-HDD work, commits after durable metadata settlement,
@@ -2031,7 +2031,7 @@ non-destructive close, and restores focus to its trigger when closed.
 
 ### 24.1 Shared tokens, assets, footer, and task-pane primitive
 
-- [ ] Import the approved Mnemosyne assets into
+- [x] Import the approved Mnemosyne assets into
   `crates/dasobjectstore-gui-web/assets/` from
   `../mnemosyne_design_language/assets/branding/` without redrawing them:
   `mnemosyne-biosciences-logo-master-mono.png`,
@@ -2040,10 +2040,9 @@ non-destructive close, and restores focus to its trigger when closed.
   `crates/dasobjectstore-gui-web/index.html`. Preserve source identity with a
   checksum or byte-comparison test/documented provenance; do not make the
   browser fetch a sibling-repository path at runtime.
-  - [x] Import the approved partial mark into the repository, register it as a
-    Trunk asset, and pin its source SHA-256 in the Web workspace contract test;
-    footer layout/usage remains a separate task.
-- [ ] Replace the current near-black/monospace `.dos-product-footer` treatment
+  - [x] Import all three approved marks into the repository, register each as a
+    Trunk asset, and pin each source SHA-256 in the Web workspace contract test.
+- [x] Replace the current near-black/monospace `.dos-product-footer` treatment
   in `crates/dasobjectstore-gui-web/styles.css` and
   `src/components/footer.rs` with the Mnemosyne footer contract:
   - use `#1c2b0b` as the footer surface, not the current near-black;

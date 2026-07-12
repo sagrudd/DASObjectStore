@@ -868,6 +868,12 @@ Local Access, Endpoints, and ObjectStore-scoped remote upload with the approved
 Mnemosyne product language. Detailed tasks and visual acceptance remain in
 TODO Milestone 24 and must not outrun storage/profile contracts.
 
+Current delivery note: the shared footer now uses the approved local Mnemosyne
+wordmark and partial mark, a ``#1c2b0b`` provenance surface, responsive
+application-shell layout, and pinned local asset provenance tests. Shared
+semantic status tokens, the TaskPane primitive, and page-flow refactors remain
+open work in TODO Milestone 24.
+
 ## Milestone 25: Campaign Re-baseline and Compatibility Contracts
 
 Goal: turn the appliance implementation into an explicit multi-profile product
