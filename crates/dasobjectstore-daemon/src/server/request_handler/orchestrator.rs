@@ -46,6 +46,21 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn reconcile_store_s3_cancellable(
+        &self,
+        store_id: StoreId,
+        prefix: Option<String>,
+        dry_run: bool,
+        accepted_at_utc: &str,
+        is_cancelled: &dyn Fn() -> bool,
+        emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
+    ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
+        let _ = is_cancelled;
+        self.reconcile_store_s3(store_id, prefix, dry_run, accepted_at_utc, emit_progress)
+    }
+
     fn prepare_enclosure(
         &self,
         _request: PrepareEnclosureRequest,

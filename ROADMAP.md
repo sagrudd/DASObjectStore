@@ -50,11 +50,12 @@ historical checklists remain below and in TODO as evidence.
 ### Open technical debt
 
 The active baseline still has release-relevant gaps: provider upload completion
-is not yet an atomic catalogue transaction; reconciliation has a durable
-provider-independent manifest/resume foundation but is not yet wired through
-the provider transfer worker; control/Web capacity is not fully reserved under
-ingest; telemetry device mapping and appliance acceptance remain incomplete;
-and UI/design work remains. The module-size guard now passes with no
+is not yet an atomic catalogue transaction; Garage reconciliation now uses a
+durable provider-independent manifest/resume worker with per-key progress and
+administrator cancellation checkpoints, while non-Garage providers and
+appliance soak acceptance remain open; control/Web capacity is not fully
+reserved under ingest; telemetry device mapping and appliance acceptance remain
+incomplete; and UI/design work remains. The module-size guard now passes with no
 exceptions. Hardware-only acceptance is deferred while travelling without DAS
 access, but offline design, domain, metadata, API, test, and packaging work
 should continue.

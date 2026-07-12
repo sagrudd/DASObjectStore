@@ -184,6 +184,28 @@ where
         )
             -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
+        self.reconcile_store_s3_cancellable(
+            store_id,
+            prefix,
+            dry_run,
+            accepted_at_utc,
+            &|| false,
+            emit_progress,
+        )
+    }
+
+    pub fn reconcile_store_s3_cancellable(
+        &self,
+        store_id: StoreId,
+        prefix: Option<String>,
+        dry_run: bool,
+        accepted_at_utc: &str,
+        is_cancelled: &dyn Fn() -> bool,
+        emit_progress: &mut dyn FnMut(
+            crate::api::DaemonIngestProgressEvent,
+        )
+            -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
+    ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
         super::service_reconciliation::reconcile_store_s3(
             &self.config,
             &self.runner,
@@ -191,6 +213,7 @@ where
             prefix,
             dry_run,
             accepted_at_utc,
+            is_cancelled,
             emit_progress,
         )
     }

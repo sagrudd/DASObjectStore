@@ -58,8 +58,11 @@ completion.
     aggregate `aws s3 sync` with safe per-key downloads, and expose per-key
     progress through the daemon job stream; interrupted clients leave durable
     in-progress checkpoints for restart.
-  - [ ] Add explicit administrator cancellation tokens for an active
-    reconciliation job and complete appliance/provider soak acceptance.
+  - [x] Add explicit administrator cancellation tokens for an active
+    reconciliation job; cancellation is checked between provider transfers and
+    leaves the durable in-progress manifest available for restart.
+  - [ ] Complete appliance/provider soak acceptance (blocked while the
+    DASServer, Garage appliance, and deployment credentials are unavailable).
 - [ ] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
   during blocked or saturated ingest.

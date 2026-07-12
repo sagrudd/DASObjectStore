@@ -25,6 +25,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     prefix: Option<String>,
     dry_run: bool,
     accepted_at_utc: &str,
+    is_cancelled: &dyn Fn() -> bool,
     emit_progress: &mut dyn FnMut(
         crate::api::DaemonIngestProgressEvent,
     ) -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
@@ -134,6 +135,11 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         .map_err(reconciliation_manifest_error)?;
     let total = plan.actions.len();
     for (index, action) in plan.actions.iter().enumerate() {
+        if is_cancelled() {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "S3 reconciliation cancelled by administrator".to_string(),
+            });
+        }
         match action {
             ReconciliationAction::SkipComplete { .. } => {}
             ReconciliationAction::Download {

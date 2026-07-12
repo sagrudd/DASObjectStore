@@ -5,8 +5,8 @@ use crate::api::{
     AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
     CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
     DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    DaemonJobId, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
+    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
@@ -65,11 +65,12 @@ use dasobjectstore_object_service::{
     portable_subobject_registry_path, read_managed_credential_registry, read_store_registry,
     read_subobject_registry, upsert_store_definition, ObjectServiceError, ObjectServiceProviderId,
 };
+use std::collections::BTreeSet;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod dispatch;
@@ -106,6 +107,7 @@ pub struct DaemonRequestHandler<S, C> {
     remote_easyconnect_session_store_path: PathBuf,
     credential_registry_path: PathBuf,
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
+    cancelled_job_ids: Arc<Mutex<BTreeSet<String>>>,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -134,6 +136,7 @@ where
             credential_registry_path:
                 dasobjectstore_object_service::default_garage_credential_registry_path(),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
+            cancelled_job_ids: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -162,6 +165,7 @@ where
             credential_registry_path:
                 dasobjectstore_object_service::default_garage_credential_registry_path(),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
+            cancelled_job_ids: Arc::new(Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -277,11 +281,36 @@ where
         request: DaemonJobCancelRequest,
         accepted_at_utc: &str,
     ) -> Result<DaemonJobCancelResponse, DaemonServiceRuntimeError> {
-        if let Some(registry) = &self.admin_job_registry {
-            return registry.cancel(request, accepted_at_utc);
+        let response = if let Some(registry) = &self.admin_job_registry {
+            registry.cancel(request, accepted_at_utc)?
+        } else {
+            self.service_orchestrator
+                .cancel_job(request, accepted_at_utc)?
+        };
+        let mut cancelled_job_ids = self
+            .cancelled_job_ids
+            .lock()
+            .expect("cancelled job lock poisoned");
+        if response.accepted {
+            cancelled_job_ids.insert(response.job_id.to_string());
+        } else {
+            cancelled_job_ids.remove(response.job_id.as_str());
         }
-        self.service_orchestrator
-            .cancel_job(request, accepted_at_utc)
+        Ok(response)
+    }
+
+    fn is_job_cancelled(&self, job_id: &DaemonJobId) -> bool {
+        self.cancelled_job_ids
+            .lock()
+            .expect("cancelled job lock poisoned")
+            .contains(job_id.as_str())
+    }
+
+    fn clear_job_cancelled(&self, job_id: &DaemonJobId) {
+        self.cancelled_job_ids
+            .lock()
+            .expect("cancelled job lock poisoned")
+            .remove(job_id.as_str());
     }
 
     fn update_object_store_ingest_policy(
@@ -706,6 +735,28 @@ where
             prefix,
             dry_run,
             accepted_at_utc,
+            emit_progress,
+        )
+    }
+
+    fn reconcile_store_s3_cancellable(
+        &self,
+        store_id: StoreId,
+        prefix: Option<String>,
+        dry_run: bool,
+        accepted_at_utc: &str,
+        is_cancelled: &dyn Fn() -> bool,
+        emit_progress: &mut dyn FnMut(
+            DaemonIngestProgressEvent,
+        ) -> Result<(), DaemonIngestFilesRuntimeError>,
+    ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
+        GarageServiceController::reconcile_store_s3_cancellable(
+            self,
+            store_id,
+            prefix,
+            dry_run,
+            accepted_at_utc,
+            is_cancelled,
             emit_progress,
         )
     }
@@ -1776,6 +1827,9 @@ mod tests {
                 ..
             })
         ));
+        assert!(!handler.is_job_cancelled(
+            &DaemonJobId::new("enclosure-prepare-2026-07-08t19-40-00z").expect("job id")
+        ));
 
         cleanup(&root);
     }
@@ -1852,10 +1906,11 @@ mod tests {
         let service = FakeService::default();
         let handler =
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T20:06:00Z"));
+        let job_id = DaemonJobId::new("enclosure-prepare-1").expect("job id");
 
         let response = handler
             .handle(DaemonApiRequest::CancelJob(DaemonJobCancelRequest {
-                job_id: DaemonJobId::new("enclosure-prepare-1").expect("job id"),
+                job_id: job_id.clone(),
                 reason: Some("operator requested cancellation".to_string()),
             }))
             .expect("request handled");
@@ -1879,6 +1934,9 @@ mod tests {
                 "enclosure-prepare-1".to_string(),
             )]
         );
+        assert!(handler.is_job_cancelled(&job_id));
+        handler.clear_job_cancelled(&job_id);
+        assert!(!handler.is_job_cancelled(&job_id));
     }
 
     #[test]

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.46 - 2026-07-12
+
+- Add administrator cancellation tokens to active Garage reconciliation jobs;
+  cancellation is checked between provider transfers while durable in-progress
+  manifests remain available for restart.
+
 ## 0.71.45 - 2026-07-12
 
 - Wire durable reconciliation manifests into Garage S3 reconciliation:

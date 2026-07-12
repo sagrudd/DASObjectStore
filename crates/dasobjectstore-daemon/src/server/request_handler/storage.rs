@@ -452,7 +452,7 @@ where
             .map_err(|error| ("store_repair_job_id_failed", error))?;
             self.record_admin_job(job.clone())
                 .map_err(|error| ("store_repair_job_registry_failed", error.to_string()))?;
-            Some((job.job_id, accepted_at_utc))
+            Some((job.job_id.clone(), accepted_at_utc))
         } else {
             None
         };
@@ -470,11 +470,16 @@ where
                     .expect("validated reconciliation store id");
                 Some(
                     self.service_orchestrator
-                        .reconcile_store_s3(
+                        .reconcile_store_s3_cancellable(
                             store_id,
                             request.s3_prefix.clone(),
                             request.dry_run,
                             &self.clock.now_utc(),
+                            &|| {
+                                reconciliation_job
+                                    .as_ref()
+                                    .is_some_and(|(job_id, _)| self.is_job_cancelled(job_id))
+                            },
                             emit_progress,
                         )
                         .map_err(|error| {
@@ -533,6 +538,7 @@ where
         let Some((job_id, accepted_at_utc)) = reconciliation_job else {
             return result;
         };
+        self.clear_job_cancelled(&job_id);
         let (state, message, failure_message) = match &result {
             Ok(_) => (
                 crate::api::DaemonJobState::Complete,
