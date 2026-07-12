@@ -322,6 +322,9 @@ list until every temporary size-budget exception has been removed.
       TUI streaming, and completion rendering into
       `crates/dasobjectstore-cli/src/run/ingest_client.rs`; preserve normal
       SSD-first and direct-import request contracts.
+    - [x] Extract packaged-daemon source canonicalization and Linux ACL planning
+      into `crates/dasobjectstore-cli/src/run/ingest_source_access.rs`; preserve
+      fail-closed permission handling and the non-Linux no-op.
     - [x] Move performance report artifact persistence and QR/PDF/metadata
       helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
       preserve JSON validation, chart generation, authoritative policy output,

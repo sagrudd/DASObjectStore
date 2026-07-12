@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.25 - 2026-07-12
+
+- Extract packaged-daemon source canonicalization and Linux ACL planning into
+  a focused ingest source-access module with fail-closed errors.
+
 ## 0.71.24 - 2026-07-12
 
 - Extract daemon-backed ingest request submission, builders, TUI streaming, and
