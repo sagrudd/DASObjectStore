@@ -791,6 +791,16 @@ h2 {
   background: var(--dos-status-danger-bg);
 }
 
+.dos-stale-banner {
+  padding: 10px 12px;
+  border: 1px solid #e1c27b;
+  border-radius: 8px;
+  color: #6f5410;
+  background: #fff8dd;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
 .dos-table-wrap {
   max-width: 100%;
   overflow-x: auto;

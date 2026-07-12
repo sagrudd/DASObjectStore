@@ -456,6 +456,12 @@ Exit criteria:
   users supersede that requirement;
 - package/service docs state the permanent port policy.
 
+Current delivery note: the daemon-independent liveness route is covered, and
+the Home Web workspace now retains its last successful telemetry snapshot with
+explicit stale-data/retry guidance after a refresh failure; cold-start failures
+remain visible rather than fabricating appliance state. Full cached appliance
+status, static/login saturation tests, and appliance acceptance remain open.
+
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 
 Goal: make DASObjectStore a native storage endpoint across Mneion for DAS-backed

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.54 - 2026-07-13
+
+- Preserve the last successful Home dashboard snapshot across failed refreshes
+  with explicit stale-data and retry guidance.
+
 ## 0.72.53 - 2026-07-13
 
 - Consolidate Web table and reusable-widget styling into shared responsive

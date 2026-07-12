@@ -289,6 +289,36 @@ where
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+fn page_load_state_from_result_with_stale<T, F>(
+    previous: &ApiLoadState<T>,
+    result: Result<T, crate::api::ApiError>,
+    empty_message: F,
+) -> ApiLoadState<T>
+where
+    T: Clone,
+    F: FnOnce(&T) -> Option<String>,
+{
+    match result {
+        Ok(view) => match empty_message(&view) {
+            Some(message) => ApiLoadState::empty(message),
+            None => ApiLoadState::success(view),
+        },
+        Err(error) if error.is_permission_denied() => {
+            ApiLoadState::permission_denied(error.message)
+        }
+        Err(error) => match previous {
+            ApiLoadState::Success(value) | ApiLoadState::StaleData { value, .. } => {
+                ApiLoadState::stale_data(
+                    value.clone(),
+                    format!("Live dashboard refresh failed: {}. Showing the last successful snapshot; retry shortly.", error.message),
+                )
+            }
+            _ => ApiLoadState::transport_error(error.message),
+        },
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 mod activity;
 #[cfg(any(target_arch = "wasm32", test))]
 mod activity_data;

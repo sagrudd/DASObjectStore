@@ -18,6 +18,12 @@ round trips. It reports Web service readiness and instance metadata so a load
 balancer or operator probe can distinguish an unavailable Web process from a
 daemon-dependent dashboard that is temporarily degraded.
 
+The Home dashboard retains its last successful telemetry snapshot when a
+refresh fails after initial load. It labels that data as stale and provides
+retry guidance; a cold-start transport failure remains an explicit error rather
+than fabricated status. Liveness, static assets, and login/session routes do
+not depend on that dashboard snapshot.
+
 The packaged appliance configuration lives at:
 
 .. code-block:: text

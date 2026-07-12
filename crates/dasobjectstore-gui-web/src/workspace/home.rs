@@ -16,9 +16,12 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
         let dashboard_state = dashboard_state.clone();
         use_effect_with(api_path.clone(), move |path| {
             let path = path.clone();
+            let previous = (*dashboard_state).clone();
             wasm_bindgen_futures::spawn_local(async move {
-                dashboard_state.set(page_load_state_from_result(
-                    crate::api::get_home_dashboard(&path).await,
+                let result = crate::api::get_home_dashboard(&path).await;
+                dashboard_state.set(page_load_state_from_result_with_stale(
+                    &previous,
+                    result,
                     |_| None,
                 ));
             });
@@ -35,8 +38,11 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
                 let path = path.clone();
                 let dashboard_state = dashboard_state.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    dashboard_state.set(page_load_state_from_result(
-                        crate::api::get_home_dashboard(&path).await,
+                    let previous = (*dashboard_state).clone();
+                    let result = crate::api::get_home_dashboard(&path).await;
+                    dashboard_state.set(page_load_state_from_result_with_stale(
+                        &previous,
+                        result,
                         |_| None,
                     ));
                 });
@@ -75,18 +81,13 @@ pub(super) fn render_home_dashboard_state(
                 </section>
             </>
         },
-        ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => html! {
-            <>
-                { render_home_telemetry_window_control(view, selected_telemetry_window) }
-                <div class="dos-metric-grid">
-                    { for home_dashboard_metrics(view).into_iter().map(render_metric_card) }
-                </div>
-                { render_home_throughput_chart(view) }
-                <div class="dos-attention-grid">
-                    { for home_dashboard_attention(view).into_iter().map(render_attention_card) }
-                </div>
-            </>
-        },
+        ApiLoadState::Success(view) => {
+            render_home_dashboard_content(view, selected_telemetry_window, None)
+        }
+        ApiLoadState::StaleData {
+            value: view,
+            message,
+        } => render_home_dashboard_content(view, selected_telemetry_window, Some(message)),
         ApiLoadState::Empty(message) => {
             render_home_state_message("Empty", "No dashboard data", message)
         }
@@ -98,6 +99,29 @@ pub(super) fn render_home_dashboard_state(
         ApiLoadState::TransportError(message) => {
             render_home_state_message("Error", "Unable to load Home dashboard", message)
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_home_dashboard_content(
+    view: &HomeDashboardResponse,
+    selected_telemetry_window: UseStateHandle<String>,
+    stale_message: Option<&str>,
+) -> Html {
+    html! {
+            <>
+                if let Some(message) = stale_message {
+                    <div class="dos-stale-banner" role="status">{ message }</div>
+                }
+                { render_home_telemetry_window_control(view, selected_telemetry_window) }
+                <div class="dos-metric-grid">
+                    { for home_dashboard_metrics(view).into_iter().map(render_metric_card) }
+                </div>
+                { render_home_throughput_chart(view) }
+                <div class="dos-attention-grid">
+                    { for home_dashboard_attention(view).into_iter().map(render_attention_card) }
+                </div>
+            </>
     }
 }
 

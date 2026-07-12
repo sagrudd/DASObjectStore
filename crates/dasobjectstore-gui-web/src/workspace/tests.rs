@@ -122,7 +122,8 @@ use super::{
     object_store_card_summaries, object_store_configure_review_from_values,
     object_store_create_confirmation_matches, object_store_create_review_from_values,
     object_store_creation_fields_ready, objectstores_workspace_api_path,
-    primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
+    page_load_state_from_result_with_stale, primary_navigation_for_host,
+    remote_upload_folder_count, remote_upload_workspace_api_path,
     subobject_registry_preview_from_values, users_groups_summary_cards,
     users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, RemoteUploadSelectedFile,
     RemoteUploadSelectionSummary, ThroughputDayResponse, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
@@ -130,6 +131,32 @@ use super::{
     HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
     REMOTE_UPLOAD_WORKSPACE_ROUTE,
 };
+
+#[test]
+fn home_refresh_preserves_a_successful_snapshot_when_transport_fails() {
+    let previous = ApiLoadState::success("last-known-good".to_string());
+    let failed = Err(crate::api::ApiError {
+        message: "daemon unavailable".to_string(),
+        status: None,
+    });
+    let stale = page_load_state_from_result_with_stale(&previous, failed, |_| None);
+    match stale {
+        ApiLoadState::StaleData { value, message } => {
+            assert_eq!(value, "last-known-good");
+            assert!(message.contains("last successful snapshot"));
+            assert!(message.contains("daemon unavailable"));
+        }
+        other => panic!("expected stale snapshot, got {}", other.state_name()),
+    }
+
+    let cold = ApiLoadState::<String>::Loading;
+    let failed = Err(crate::api::ApiError {
+        message: "daemon unavailable".to_string(),
+        status: None,
+    });
+    let degraded = page_load_state_from_result_with_stale(&cold, failed, |_| None);
+    assert_eq!(degraded.state_name(), "transport-error");
+}
 use super::{
     local_group_assignment_fields_ready, local_group_create_fields_ready, local_group_display_name,
     users_groups_view_with_group_assignment, users_groups_view_with_writer_group,

@@ -6,19 +6,20 @@ use super::*;
 mod admin;
 pub use admin::*;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiError {
     pub message: String,
     pub status: Option<u16>,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 impl ApiError {
     pub fn is_permission_denied(&self) -> bool {
         matches!(self.status, Some(401 | 403))
     }
 
+    #[cfg(target_arch = "wasm32")]
     pub fn is_transport_failure(&self) -> bool {
         self.status.is_none()
     }
