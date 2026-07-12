@@ -1,5 +1,29 @@
 use super::*;
 
+fn parse_disk_roots(values: &[String]) -> Result<Vec<DiskCopyRoot>, CliError> {
+    values
+        .iter()
+        .map(|value| {
+            let (disk_id, root_path) =
+                value
+                    .split_once('=')
+                    .ok_or_else(|| CliError::InvalidDiskRootMapping {
+                        value: value.clone(),
+                    })?;
+            let disk_id = DiskId::new(disk_id).map_err(|_| CliError::InvalidDiskRootMapping {
+                value: value.clone(),
+            })?;
+            if root_path.is_empty() {
+                return Err(CliError::InvalidDiskRootMapping {
+                    value: value.clone(),
+                });
+            }
+
+            Ok(DiskCopyRoot::new(disk_id, root_path))
+        })
+        .collect()
+}
+
 pub(crate) fn run_object_inspect(
     args: &ObjectInspectArgs,
     writer: &mut impl Write,
@@ -67,6 +91,38 @@ pub(crate) fn run_object_put(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_disk_roots;
+
+    #[test]
+    fn parse_disk_roots_rejects_missing_separator() {
+        assert!(parse_disk_roots(&["disk-a".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_disk_roots_rejects_invalid_disk_id() {
+        assert!(parse_disk_roots(&[" =/tmp/disk".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_disk_roots_rejects_empty_root() {
+        assert!(parse_disk_roots(&["disk-a=".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_disk_roots_preserves_order_and_paths() {
+        let roots =
+            parse_disk_roots(&["disk-a=/tmp/a".to_string(), "disk-b=relative/b".to_string()])
+                .expect("valid disk root mappings");
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].disk_id.as_str(), "disk-a");
+        assert_eq!(roots[0].root_path.to_string_lossy(), "/tmp/a");
+        assert_eq!(roots[1].disk_id.as_str(), "disk-b");
+        assert_eq!(roots[1].root_path.to_string_lossy(), "relative/b");
+    }
 }
 
 pub(crate) fn run_service_render_compose(

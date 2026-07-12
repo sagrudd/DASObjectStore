@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.33 - 2026-07-12
+
+- Move Object export/put disk-root mapping validation beside its command
+  handlers and add malformed-ID, empty-path, and order-preservation tests.
+
 ## 0.71.32 - 2026-07-12
 
 - Extract shared live-SQLite path resolution into the CLI metadata-path module

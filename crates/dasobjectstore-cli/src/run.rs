@@ -574,30 +574,6 @@ fn run_ingest_direct_import(
     Ok(())
 }
 
-fn parse_disk_roots(values: &[String]) -> Result<Vec<DiskCopyRoot>, CliError> {
-    values
-        .iter()
-        .map(|value| {
-            let (disk_id, root_path) =
-                value
-                    .split_once('=')
-                    .ok_or_else(|| CliError::InvalidDiskRootMapping {
-                        value: value.clone(),
-                    })?;
-            let disk_id = DiskId::new(disk_id).map_err(|_| CliError::InvalidDiskRootMapping {
-                value: value.clone(),
-            })?;
-            if root_path.is_empty() {
-                return Err(CliError::InvalidDiskRootMapping {
-                    value: value.clone(),
-                });
-            }
-
-            Ok(DiskCopyRoot::new(disk_id, root_path))
-        })
-        .collect()
-}
-
 #[derive(Debug)]
 pub(crate) enum CliError {
     Io(io::Error),

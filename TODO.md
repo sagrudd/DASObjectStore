@@ -259,6 +259,9 @@ list until every temporary size-budget exception has been removed.
     `crates/dasobjectstore-cli/src/run/metadata_paths.rs`; preserve explicit
     override behavior and unknown-store diagnostics for queue and contents
     readers.
+  - [x] Move Object export/put disk-root mapping validation beside its runtime
+    handlers in `crates/dasobjectstore-cli/src/run/command_handlers.rs`; add
+    regressions for malformed IDs, empty paths, and order preservation.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.
