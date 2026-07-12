@@ -926,6 +926,9 @@ list until every temporary size-budget exception has been removed.
 - [x] Route the Activity workspace daemon job-list lookup through the shared
   bounded bridge and retain a 200/degraded workspace with an actionable warning
   when the daemon is busy or exceeds its deadline.
+- [x] Route the standalone remote-authentication pairing/approval/exchange
+  transaction through the shared bounded bridge so a stalled daemon cannot pin
+  an Axum worker; preserve typed overload and deadline responses.
 - [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.

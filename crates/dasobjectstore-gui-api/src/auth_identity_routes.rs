@@ -125,34 +125,43 @@ pub(super) async fn remote_authenticate(
         writer_group: store.writer_group.clone(),
         object_type: store.object_type.clone(),
     };
-    let client = DaemonClient::new(UnixSocketDaemonTransport::new(
-        DaemonRuntimeConfig::default_packaged().socket_path,
-    ));
-    let created = client
-        .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
-            client_name: "dasobjectstore-remote authenticate".to_string(),
-            callback_url: "https://127.0.0.1/api/v1/remote/authenticate/callback".to_string(),
-            requested_object_store: Some(request.object_store.clone()),
-            requested_session_lifetime_seconds: request.requested_session_lifetime_seconds,
-            client_request_id: None,
+    let requested_object_store = request.object_store.clone();
+    let requested_lifetime = request.requested_session_lifetime_seconds;
+    let session = crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::new(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            let created = client
+                .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
+                    client_name: "dasobjectstore-remote authenticate".to_string(),
+                    callback_url: "https://127.0.0.1/api/v1/remote/authenticate/callback"
+                        .to_string(),
+                    requested_object_store: Some(requested_object_store),
+                    requested_session_lifetime_seconds: requested_lifetime,
+                    client_request_id: None,
+                })
+                .map_err(|error| error.to_string())?;
+            let approved = client
+                .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
+                    pairing_id: created.pairing_id.clone(),
+                    approved_actor: current_user.username,
+                    auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+                    allowed_object_stores: vec![grant],
+                    approval_expires_at_utc: created.expires_at_utc,
+                })
+                .map_err(|error| error.to_string())?;
+            let exchanged = client
+                .remote_easyconnect_exchange_pairing(RemoteEasyconnectExchangePairingRequest {
+                    pairing_id: approved.pairing_id,
+                    exchange_code: approved.exchange_code,
+                    client_request_id: None,
+                })
+                .map_err(|error| error.to_string())?;
+            Ok(exchanged.session)
         })
-        .map_err(remote_auth_daemon_error)?;
-    let approved = client
-        .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
-            pairing_id: created.pairing_id.clone(),
-            approved_actor: current_user.username,
-            auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-            allowed_object_stores: vec![grant],
-            approval_expires_at_utc: created.expires_at_utc,
-        })
-        .map_err(remote_auth_daemon_error)?;
-    let exchanged = client
-        .remote_easyconnect_exchange_pairing(RemoteEasyconnectExchangePairingRequest {
-            pairing_id: approved.pairing_id,
-            exchange_code: approved.exchange_code,
-            client_request_id: None,
-        })
-        .map_err(remote_auth_daemon_error)?;
+        .await
+        .map_err(remote_auth_bridge_error)?;
 
     Ok(Json(RemoteAuthenticateResponse {
         schema_version: "dasobjectstore.remote_authenticate.v1".to_string(),
@@ -161,7 +170,7 @@ pub(super) async fn remote_authenticate(
         addressing_style: "path".to_string(),
         object_store: request.object_store,
         bucket: store.bucket.clone(),
-        session: exchanged.session,
+        session,
     }))
 }
 
@@ -194,14 +203,29 @@ fn validate_remote_authenticate_request(
     Ok(())
 }
 
-fn remote_auth_daemon_error(
-    error: dasobjectstore_daemon::DaemonClientError,
+fn remote_auth_bridge_error(
+    error: crate::daemon_bridge::DaemonBridgeError,
 ) -> (StatusCode, Json<AuthRouteError>) {
-    route_error(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "remote_session_unavailable",
-        error.to_string(),
-    )
+    match error {
+        crate::daemon_bridge::DaemonBridgeError::Client(error) => {
+            route_error(StatusCode::SERVICE_UNAVAILABLE, error.code, error.message)
+        }
+        crate::daemon_bridge::DaemonBridgeError::Busy => route_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "remote_session_busy",
+            "daemon control capacity is saturated; retry shortly",
+        ),
+        crate::daemon_bridge::DaemonBridgeError::Deadline => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "remote_session_timeout",
+            "remote session authentication exceeded its deadline; retry shortly",
+        ),
+        crate::daemon_bridge::DaemonBridgeError::Join(message) => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "remote_session_unavailable",
+            message,
+        ),
+    }
 }
 
 pub(super) async fn logout(
