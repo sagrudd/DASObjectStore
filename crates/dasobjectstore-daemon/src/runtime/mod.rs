@@ -15,6 +15,7 @@ mod remote_pairings;
 mod remote_sessions;
 mod remote_upload;
 mod service;
+mod service_reconciliation;
 
 pub use admin_jobs::{
     admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,

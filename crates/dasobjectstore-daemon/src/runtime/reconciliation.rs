@@ -85,7 +85,7 @@ impl ReconciliationManifest {
                 .and_then(|name| name.to_str())
                 .unwrap_or("manifest"),
             std::process::id(),
-            self.updated_at_unix_seconds
+            now_unix_nanos()
         ));
         let mut file = OpenOptions::new()
             .create_new(true)
@@ -332,6 +332,13 @@ fn now_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn now_unix_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
         .unwrap_or_default()
 }
 

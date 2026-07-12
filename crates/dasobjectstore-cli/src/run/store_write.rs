@@ -343,6 +343,9 @@ pub(super) fn run_store_repair(
                 writeln!(writer, "Prefix: {prefix}")?;
             }
             writeln!(writer, "SSD staging: {}", reconciliation.staging_path)?;
+            if let Some(manifest_path) = reconciliation.manifest_path {
+                writeln!(writer, "Reconciliation manifest: {manifest_path}")?;
+            }
             if let Some(job_id) = reconciliation.ingest_job_id {
                 writeln!(writer, "Ingest job: {job_id}")?;
             }

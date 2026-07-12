@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.45 - 2026-07-12
+
+- Wire durable reconciliation manifests into Garage S3 reconciliation:
+  enumerate keys safely, reject malformed/colliding paths before transfer,
+  download per key with atomic checkpoints, and stream per-key progress through
+  the daemon job path.
+
 ## 0.71.44 - 2026-07-12
 
 - Correct the roadmap baseline to record that the production module-size guard

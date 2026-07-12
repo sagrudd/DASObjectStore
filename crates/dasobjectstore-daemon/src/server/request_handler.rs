@@ -3559,6 +3559,7 @@ mod tests {
                 prefix,
                 staging_path: "/srv/dasobjectstore/ssd/.dasobjectstore/remote-s3-reconcile/codex"
                     .to_string(),
+                manifest_path: None,
                 ingest_job_id: Some("ingest-reconcile-codex".to_string()),
                 dry_run,
             })

@@ -48,6 +48,8 @@ pub struct StoreRepairS3Reconciliation {
     pub bucket_name: String,
     pub prefix: Option<String>,
     pub staging_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_path: Option<String>,
     pub ingest_job_id: Option<String>,
     pub dry_run: bool,
 }

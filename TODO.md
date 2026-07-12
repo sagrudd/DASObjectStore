@@ -54,8 +54,12 @@ completion.
     with safe key normalization, collision/malformed-key outcomes, atomic
     durable checkpoints, cancellation-safe in-progress state, and restart
     tests; provider transfer wiring and appliance progress acceptance remain.
-  - [ ] Integrate manifest checkpoints into the Garage transfer worker and
-    expose per-key progress/cancellation through the daemon job stream.
+  - [x] Integrate manifest checkpoints into the Garage transfer path, replace
+    aggregate `aws s3 sync` with safe per-key downloads, and expose per-key
+    progress through the daemon job stream; interrupted clients leave durable
+    in-progress checkpoints for restart.
+  - [ ] Add explicit administrator cancellation tokens for an active
+    reconciliation job and complete appliance/provider soak acceptance.
 - [ ] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
   during blocked or saturated ingest.

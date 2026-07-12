@@ -6,18 +6,14 @@ use super::{
     },
 };
 use crate::api::{
-    DaemonIngestConflictPolicy, DaemonIngressOrigin, DaemonJobId, DaemonRequestValidationError,
-    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-    DaemonServiceStatusDetail, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    StoreRepairS3Reconciliation, SubmitIngestFilesRequest,
+    DaemonJobId, DaemonRequestValidationError, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceStatusDetail,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, StoreRepairS3Reconciliation,
 };
-use crate::runtime::submit_ingest_files_to_local_store_with_progress;
 use dasobjectstore_core::ids::StoreId;
-use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_object_service::{
-    bucket_name_for_definition, default_garage_credential_registry_path,
-    default_store_registry_path, generate_per_store_credentials, plan_garage_provisioning,
-    plan_store_service_layout, read_managed_credential_registry, read_store_registry,
+    default_garage_credential_registry_path, generate_per_store_credentials,
+    plan_garage_provisioning, plan_store_service_layout, read_store_registry,
     resolve_managed_store_credentials, GarageProvisioningCommandKind, ObjectServiceError,
     ObjectServiceProviderId, ServiceState, StoreServiceCredential, SystemCredentialEntropy,
 };
@@ -188,117 +184,15 @@ where
         )
             -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
-        self.config.validate()?;
-        let definitions = read_store_registry(default_store_registry_path())?;
-        let definition = definitions
-            .iter()
-            .find(|definition| definition.store_id == store_id)
-            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
-                operation: format!("S3 reconciliation store {} is not registered", store_id),
-            })?;
-        let bucket_name = bucket_name_for_definition(definition)?;
-        let stage_name = accepted_at_utc
-            .chars()
-            .map(|character| {
-                if character.is_ascii_alphanumeric() {
-                    character
-                } else {
-                    '-'
-                }
-            })
-            .collect::<String>();
-        let staging_path = crate::runtime::default_ssd_root()
-            .join(".dasobjectstore")
-            .join("remote-s3-reconcile")
-            .join(store_id.as_str())
-            .join(stage_name);
-        if dry_run {
-            return Ok(StoreRepairS3Reconciliation {
-                bucket_name,
-                prefix,
-                staging_path: staging_path.display().to_string(),
-                ingest_job_id: None,
-                dry_run: true,
-            });
-        }
-
-        let credential_registry = read_managed_credential_registry(
-            default_garage_credential_registry_path(),
-            accepted_at_utc,
-        )?;
-        let credential = credential_registry
-            .credentials
-            .iter()
-            .find(|credential| {
-                credential.store_id == store_id && credential.bucket_name == bucket_name
-            })
-            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
-                operation: format!(
-                    "S3 reconciliation requires provisioned Garage credentials for {}",
-                    store_id
-                ),
-            })?;
-        std::fs::create_dir_all(&staging_path).map_err(|error| {
-            DaemonServiceRuntimeError::CommandIo {
-                program: "create remote S3 staging directory".to_string(),
-                message: error.to_string(),
-            }
-        })?;
-        let source = match prefix.as_deref() {
-            Some(prefix) => format!("s3://{bucket_name}/{}", prefix.trim_matches('/')),
-            None => format!("s3://{bucket_name}"),
-        };
-        let args = vec![
-            "--endpoint-url".to_string(),
-            self.config.endpoint.clone(),
-            "s3".to_string(),
-            "sync".to_string(),
-            source,
-            staging_path.display().to_string(),
-            "--no-progress".to_string(),
-        ];
-        let display_args = args.clone();
-        self.runner.run_with_display_args_and_env(
-            "aws",
-            &args,
-            &display_args,
-            &[
-                (
-                    "AWS_ACCESS_KEY_ID".to_string(),
-                    credential.access_key_id.clone(),
-                ),
-                (
-                    "AWS_SECRET_ACCESS_KEY".to_string(),
-                    credential.secret_access_key.clone(),
-                ),
-                ("AWS_DEFAULT_REGION".to_string(), "garage".to_string()),
-            ],
-        )?;
-        let ingest = submit_ingest_files_to_local_store_with_progress(
-            SubmitIngestFilesRequest {
-                endpoint: store_id,
-                source_path: staging_path.clone(),
-                object_type: ObjectType::Naive,
-                copies: None,
-                hdd_workers: None,
-                ingress_origin: DaemonIngressOrigin::RemoteS3,
-                conflict_policy: DaemonIngestConflictPolicy::Lazy,
-                dry_run: false,
-                client_request_id: Some(format!("garage-reconcile-{accepted_at_utc}")),
-            },
+        super::service_reconciliation::reconcile_store_s3(
+            &self.config,
+            &self.runner,
+            store_id,
+            prefix,
+            dry_run,
             accepted_at_utc,
             emit_progress,
         )
-        .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
-            operation: format!("S3 reconciliation ingest failed: {error}"),
-        })?;
-        Ok(StoreRepairS3Reconciliation {
-            bucket_name,
-            prefix,
-            staging_path: staging_path.display().to_string(),
-            ingest_job_id: Some(ingest.job_id.to_string()),
-            dry_run: false,
-        })
     }
 }
 
@@ -1067,6 +961,43 @@ mod tests {
         assert_eq!(second.credentials_issued, 0);
         assert_eq!(second.credentials_reused, 1);
         assert_eq!(controller.runner.calls.borrow().len(), 6);
+    }
+
+    #[test]
+    fn list_garage_objects_decodes_key_and_size() {
+        let runner = super::FakeRunner::with_stdout(
+            r#"{"Contents":[{"Key":"run-42/data.bin","Size":12}],"IsTruncated":false}"#,
+        );
+        let objects = crate::runtime::service_reconciliation::list_garage_objects(
+            &runner,
+            "http://127.0.0.1:3900",
+            "dos-generated",
+            Some("run-42"),
+            &[],
+        )
+        .expect("object listing decoded");
+        assert_eq!(
+            objects,
+            vec![crate::runtime::ReconciliationObject {
+                key: "run-42/data.bin".to_string(),
+                size_bytes: Some(12),
+            }]
+        );
+        assert_eq!(runner.calls.borrow().len(), 1);
+    }
+
+    #[test]
+    fn list_garage_objects_rejects_invalid_json() {
+        let runner = super::FakeRunner::with_stdout("not-json");
+        let error = crate::runtime::service_reconciliation::list_garage_objects(
+            &runner,
+            "http://127.0.0.1:3900",
+            "dos-generated",
+            None,
+            &[],
+        )
+        .expect_err("invalid listing should fail closed");
+        assert!(error.to_string().contains("invalid JSON"));
     }
 
     fn config() -> GarageServiceRuntimeConfig {
