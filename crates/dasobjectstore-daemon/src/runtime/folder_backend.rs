@@ -147,18 +147,7 @@ impl FolderBackend {
         path: &Path,
         checksum: String,
     ) -> Result<BackendObjectRecord, BackendError> {
-        let size_bytes = fs::metadata(path).map_err(io_error)?.len();
-        let location = path
-            .strip_prefix(&self.root)
-            .map_err(|_| BackendError::InvalidRequest("backend path escaped root".to_string()))?
-            .display()
-            .to_string();
-        Ok(BackendObjectRecord {
-            key,
-            size_bytes,
-            checksum,
-            location,
-        })
+        record_for_path(&self.root, key, path, checksum)
     }
 }
 
@@ -258,7 +247,13 @@ impl ObjectStoreBackend for FolderBackend {
 
     fn enumerate(&self, prefix: Option<&str>) -> Result<Vec<BackendObjectRecord>, BackendError> {
         let mut records = Vec::new();
-        enumerate_files(&self.objects_root, &self.objects_root, prefix, &mut records)?;
+        enumerate_files(
+            &self.objects_root,
+            &self.root,
+            &self.objects_root,
+            prefix,
+            &mut records,
+        )?;
         Ok(records)
     }
 
@@ -291,7 +286,8 @@ impl ObjectStoreBackend for FolderBackend {
 }
 
 fn enumerate_files(
-    root: &Path,
+    object_root: &Path,
+    location_root: &Path,
     directory: &Path,
     prefix: Option<&str>,
     records: &mut Vec<BackendObjectRecord>,
@@ -306,7 +302,7 @@ fn enumerate_files(
             ));
         }
         if file_type.is_dir() {
-            enumerate_files(root, &path, prefix, records)?;
+            enumerate_files(object_root, location_root, &path, prefix, records)?;
             continue;
         }
         if !file_type.is_file() {
@@ -315,7 +311,7 @@ fn enumerate_files(
             ));
         }
         let relative = path
-            .strip_prefix(root)
+            .strip_prefix(object_root)
             .map_err(|_| BackendError::InvalidRequest("backend path escaped root".to_string()))?;
         let object_id = relative
             .to_string_lossy()
@@ -329,15 +325,29 @@ fn enumerate_files(
         };
         let mut file = File::open(&path).map_err(io_error)?;
         let checksum = hash_reader(&mut file)?;
-        let size_bytes = fs::metadata(&path).map_err(io_error)?.len();
-        records.push(BackendObjectRecord {
-            key,
-            size_bytes,
-            checksum,
-            location: path.display().to_string(),
-        });
+        records.push(record_for_path(location_root, key, &path, checksum)?);
     }
     Ok(())
+}
+
+fn record_for_path(
+    root: &Path,
+    key: BackendObjectKey,
+    path: &Path,
+    checksum: String,
+) -> Result<BackendObjectRecord, BackendError> {
+    let size_bytes = fs::metadata(path).map_err(io_error)?.len();
+    let location = path
+        .strip_prefix(root)
+        .map_err(|_| BackendError::InvalidRequest("backend path escaped root".to_string()))?
+        .display()
+        .to_string();
+    Ok(BackendObjectRecord {
+        key,
+        size_bytes,
+        checksum,
+        location,
+    })
 }
 
 fn inspect_user_tree(
@@ -508,6 +518,11 @@ mod tests {
                 .expect("enumerates")
                 .len(),
             1
+        );
+        let enumerated = backend.enumerate(None).expect("enumerates records");
+        assert_eq!(
+            enumerated[0].location,
+            ".dasobjectstore/objects/sample/run/data.txt"
         );
         backend.remove(&key).expect("removes object");
         assert!(backend

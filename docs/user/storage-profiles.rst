@@ -23,9 +23,11 @@ admission semantics through CLI, Web, S3, and product adapters.
 The first local backend implementation is available to daemon-side tests as
 ``FolderBackend``. It reserves logical bytes before staging, computes SHA-256
 while reading, writes only beneath the private ``.dasobjectstore`` namespace,
-syncs the file and destination directory, then renames atomically. Catalogue
-registration and user-facing profile creation still require the subsequent
-daemon contract and explicit adoption workflow.
+syncs the file and destination directory, then renames atomically. Enumerated
+records retain the same nested, relative catalogue location as finalized
+objects, while the private namespace remains hidden from user-tree inspection.
+Catalogue registration and user-facing profile creation still require the
+subsequent daemon contract and explicit adoption workflow.
 
 For local validation, set
 ``DASOBJECTSTORE_CODEX_VALIDATION_ROOT=/Users/stephen/.dasobjectstore-codex-validation``

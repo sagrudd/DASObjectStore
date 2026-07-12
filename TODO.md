@@ -198,8 +198,10 @@ completion.
   - [x] Run the folder backend regression against the dedicated generated-data
     root `/Users/stephen/.dasobjectstore-codex-validation` on macOS; the test
     removes only its uniquely named child after completion.
-- [ ] Preserve user-visible hierarchy while reserving and protecting the
-  ``.dasobjectstore`` namespace.
+- [x] Preserve user-visible hierarchy while reserving and protecting the
+  ``.dasobjectstore`` namespace. Folder objects remain under the private
+  namespace with relative catalogue locations that preserve nested keys;
+  read-only inspection excludes that namespace and never adopts user files.
 - [ ] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,
   unsafe keys, unsupported names, and files changed during import.
   - [x] Harden `FolderBackend` namespace/parent traversal against symlink

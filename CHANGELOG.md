@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.91 - 2026-07-12
+
+- Keep folder-backend enumeration locations aligned with finalized catalogue
+  locations while preserving nested user-visible object hierarchy.
+
 ## 0.71.90 - 2026-07-12
 
 - Add strictest-constraint capacity admission evaluation across logical quota,
