@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.4 - 2026-07-12
+
+- Add a versioned static profile-capability catalogue for product adapters,
+  separating backend operations from service requirements and runtime health.
+
 ## 0.72.3 - 2026-07-12
 
 - Add pure per-user/system folder host-path derivation with explicit missing

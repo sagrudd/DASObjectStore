@@ -292,6 +292,9 @@ completion.
 - [ ] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic.
+  - [x] Add a versioned static profile-capability catalogue DTO with separate
+    backend-operation, service, host-mode, protection, and requirement fields;
+    runtime store readiness and provisioning routes remain separate.
 - [ ] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
 - [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/

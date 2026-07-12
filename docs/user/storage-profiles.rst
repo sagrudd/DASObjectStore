@@ -124,3 +124,14 @@ reservation, staging, durable finalization, reads, enumeration, verification,
 health, reconciliation, and removal. A profile may report an unsupported
 capability explicitly; callers must not assume appliance-only placement methods
 exist for folder or drive stores.
+
+Product capability discovery
+----------------------------
+
+The daemon API exposes a versioned static profile-capability catalogue for
+Mnemosyne and standalone clients. It describes profile maturity, supported host
+modes and protection policies, backend operations, service capabilities, and
+requirements such as bounded capacity or dedicated SSD media. It does not
+contain mount paths, device IDs, credentials, free-space observations, or a
+claim that a configured store is healthy; runtime readiness remains a separate
+store-inventory contract.

@@ -13,6 +13,7 @@ mod local_admin;
 mod object_browser;
 mod object_mutation;
 mod object_store;
+mod profile_capabilities;
 mod remote_easyconnect;
 mod service;
 mod storage_mutation;
@@ -101,6 +102,10 @@ pub use object_mutation::{ObjectPutRequest, ObjectPutResponse, ObjectPutValidati
 pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
     OBJECT_STORE_CREATE_CONFIRMATION,
+};
+pub use profile_capabilities::{
+    ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
+    ObjectStoreCapabilityValidationError,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
