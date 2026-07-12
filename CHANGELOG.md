@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.25 - 2026-07-12
+
+- Extend the migration worker to guarded dedicated-SSD drive destinations
+  while retaining source data through verification and retirement approval.
+
 ## 0.72.24 - 2026-07-12
 
 - Add a daemon folder-to-folder migration worker with source verification,

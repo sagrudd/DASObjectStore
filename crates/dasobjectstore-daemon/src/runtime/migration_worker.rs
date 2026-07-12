@@ -1,9 +1,11 @@
 //! Local folder-to-folder migration execution.
 
+use super::drive_backend::DriveBackend;
 use super::folder_backend::FolderBackend;
 use dasobjectstore_core::backend::{
     BackendError, BackendObjectKey, BackendObjectRecord, ObjectStoreBackend,
 };
+use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::migration::{MigrationTransitionError, StoreMigration};
 use std::fmt::{self, Display};
 
@@ -17,8 +19,28 @@ pub fn copy_folder_object(
     key: &BackendObjectKey,
     reservation_id: &str,
 ) -> Result<BackendObjectRecord, FolderMigrationError> {
-    if migration.source_store_id != source.manifest().store_id
-        || migration.destination_store_id != destination.manifest().store_id
+    copy_object(migration, source, destination, key, reservation_id)
+}
+
+pub fn copy_folder_to_drive(
+    migration: &mut StoreMigration,
+    source: &mut FolderBackend,
+    destination: &mut DriveBackend,
+    key: &BackendObjectKey,
+    reservation_id: &str,
+) -> Result<BackendObjectRecord, FolderMigrationError> {
+    copy_object(migration, source, destination, key, reservation_id)
+}
+
+fn copy_object(
+    migration: &mut StoreMigration,
+    source: &mut dyn MigrationBackend,
+    destination: &mut dyn MigrationBackend,
+    key: &BackendObjectKey,
+    reservation_id: &str,
+) -> Result<BackendObjectRecord, FolderMigrationError> {
+    if migration.source_store_id != *source.store_id()
+        || migration.destination_store_id != *destination.store_id()
     {
         return Err(FolderMigrationError::StoreIdentityMismatch);
     }
@@ -91,6 +113,31 @@ pub fn copy_folder_object(
     Ok(finalized)
 }
 
+pub trait MigrationBackend: ObjectStoreBackend {
+    fn store_id(&self) -> &StoreId;
+    fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError>;
+}
+
+impl MigrationBackend for FolderBackend {
+    fn store_id(&self) -> &StoreId {
+        &self.manifest().store_id
+    }
+
+    fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError> {
+        FolderBackend::release_reservation(self, reservation_id)
+    }
+}
+
+impl MigrationBackend for DriveBackend {
+    fn store_id(&self) -> &StoreId {
+        &self.manifest().store_id
+    }
+
+    fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError> {
+        DriveBackend::release_reservation(self, reservation_id)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FolderMigrationError {
     StoreIdentityMismatch,
@@ -121,7 +168,8 @@ impl std::error::Error for FolderMigrationError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_folder_object, FolderMigrationError};
+    use super::super::drive_backend::{DriveBackend, DriveRuntimeGuard};
+    use super::{copy_folder_object, copy_folder_to_drive, FolderMigrationError};
     use crate::runtime::folder_backend::FolderBackend;
     use dasobjectstore_core::backend::{BackendObjectKey, ObjectStoreBackend};
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
@@ -135,7 +183,8 @@ mod tests {
     use std::fs;
     use std::io::Cursor;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn manifest(store_id: &str) -> ObjectStoreManifest {
@@ -148,6 +197,34 @@ mod tests {
             backend: BackendReference::Folder {
                 root_identity: format!("{store_id}-root"),
             },
+        }
+    }
+
+    fn drive_manifest(store_id: &str) -> ObjectStoreManifest {
+        ObjectStoreManifest {
+            schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+            store_id: StoreId::new(store_id).expect("store ID"),
+            deployment_profile: DeploymentProfile::Drive,
+            host_mode: HostMode::System,
+            protection: ProtectionPolicy::LocalOnly,
+            backend: BackendReference::Drive {
+                filesystem_identity: format!("{store_id}-filesystem"),
+                device_identity: Some(format!("{store_id}-device")),
+                media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
+                mount_path_hint: Some(PathBuf::from("/Volumes/CODEX")),
+            },
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestDriveGuard(AtomicBool);
+
+    impl DriveRuntimeGuard for TestDriveGuard {
+        fn validate(&self) -> Result<(), String> {
+            self.0
+                .load(Ordering::SeqCst)
+                .then_some(())
+                .ok_or_else(|| "drive unavailable".to_string())
         }
     }
 
@@ -264,6 +341,61 @@ mod tests {
         .expect_err("identity mismatch rejects");
         assert_eq!(error, FolderMigrationError::StoreIdentityMismatch);
         assert_eq!(migration.state, MigrationState::Planned);
+        let _ = fs::remove_dir_all(source_root);
+        let _ = fs::remove_dir_all(destination_root);
+    }
+
+    #[test]
+    fn copies_folder_object_to_guarded_drive_backend() {
+        let source_root = root("migration-drive-source");
+        let destination_root = root("migration-drive-destination");
+        let mut source = FolderBackend::open(
+            &source_root,
+            manifest("source-store"),
+            CapacityPolicy::bounded(1_000, 0),
+            0,
+        )
+        .expect("source opens");
+        let guard: Arc<dyn DriveRuntimeGuard> = Arc::new(TestDriveGuard(AtomicBool::new(true)));
+        let mut destination = DriveBackend::open(
+            &destination_root,
+            drive_manifest("drive-store"),
+            CapacityPolicy::bounded(1_000, 0),
+            0,
+            guard,
+        )
+        .expect("drive opens");
+        let key = BackendObjectKey {
+            object_id: "run/result.txt".to_string(),
+            version: 1,
+        };
+        source
+            .reserve("source-upload", 11)
+            .expect("source reserves");
+        let staged = source
+            .stage(
+                "source-upload",
+                &key,
+                &mut Cursor::new(b"hello world".to_vec()),
+            )
+            .expect("source stages");
+        source.finalize(staged).expect("source finalizes");
+        let mut migration = StoreMigration::new(
+            "migration-drive",
+            source.manifest().store_id.clone(),
+            destination.manifest().store_id.clone(),
+        )
+        .expect("migration creates");
+        copy_folder_to_drive(
+            &mut migration,
+            &mut source,
+            &mut destination,
+            &key,
+            "drive-upload",
+        )
+        .expect("folder object copies to drive");
+        assert_eq!(migration.state, MigrationState::RetirementPending);
+        assert_eq!(destination.capacity().used_bytes, 11);
         let _ = fs::remove_dir_all(source_root);
         let _ = fs::remove_dir_all(destination_root);
     }

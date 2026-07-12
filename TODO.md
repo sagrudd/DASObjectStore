@@ -360,6 +360,9 @@ completion.
     source, reserves destination capacity, streams through the bounded folder
     backend, verifies the finalized destination, and leaves source retirement
     pending; retries retain failed staged data and reservations safely.
+  - [x] Generalize the migration worker to a guarded dedicated-SSD drive
+    destination, preserving the same source-retention and checksum guarantees;
+    appliance adapters and catalogue transaction wiring remain open.
 - [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
   - [x] The core migration state machine and atomic checkpoints retain source

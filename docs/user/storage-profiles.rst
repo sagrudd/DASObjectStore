@@ -207,3 +207,6 @@ validation: it verifies the source, reserves destination capacity, streams and
 durably finalizes the object, verifies the destination checksum, and stops at
 ``retirement_pending``. Failed finalization does not silently delete staged
 data or release its reservation, so an operator or retry worker can recover it.
+The same worker can target the guarded dedicated-SSD drive backend; drive
+identity validation runs before any filesystem operation. Appliance placement
+adapters and catalogue transaction wiring remain separate integration work.

@@ -70,7 +70,7 @@ pub use local_admin::{
     LocalGroupAdministrationRequest, LocalGroupAdministrationResponse, LocalGroupCommandPlanner,
     SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
 };
-pub use migration_worker::{copy_folder_object, FolderMigrationError};
+pub use migration_worker::{copy_folder_object, copy_folder_to_drive, FolderMigrationError};
 pub use object_browser::{
     query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,
     ObjectBrowserMetadataReadError, ObjectBrowserQueryError,

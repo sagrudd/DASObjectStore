@@ -86,6 +86,10 @@ impl DriveBackend {
         self.folder.inspect_user_tree()
     }
 
+    pub(crate) fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError> {
+        self.folder.release_reservation(reservation_id)
+    }
+
     fn guard(&self) -> Result<(), BackendError> {
         self.guard.validate().map_err(BackendError::InvalidRequest)
     }
