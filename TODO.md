@@ -319,8 +319,11 @@ completion.
     placement through destination verification and explicit retirement; actual
     copy workers and profile adapters remain. Add atomic schema-versioned
     checkpoint save/load with strict source-retention invariants.
-- [ ] Retain source placements until destination verification and explicit
+- [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
+  - [x] The core migration state machine and atomic checkpoints retain source
+    placement until explicit retirement; daemon copy-worker, catalogue, and
+    profile-adapter execution remain.
 
 ### Gate 6: Integration and market-readiness acceptance
 

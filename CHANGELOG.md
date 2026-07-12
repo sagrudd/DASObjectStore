@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.14 - 2026-07-12
+
+- Mark migration source-retention execution as partial: core state/checkpoints
+  are delivered while daemon copy/catalogue workers remain open.
+
 ## 0.72.13 - 2026-07-12
 
 - Reconcile TODO campaign gate markers so partial delivery and external
