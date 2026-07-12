@@ -429,6 +429,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract the shared authentication/admin request and response DTOs into
     `crates/dasobjectstore-gui-api/src/auth_contracts.rs` without changing JSON
     shapes or route behavior.
+  - [x] Extract local-user authority, local-group, and enclosure daemon client
+    adapters into `crates/dasobjectstore-gui-api/src/auth_admin_clients.rs`;
+    preserve request/error projections and macOS-safe compilation.
 - [x] Move object-service Docker status/bind parsing into one shared
   inspection module used by both CLI and GUI API, with one bounded timeout
   policy and parser regressions beside the shared implementation.

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.35 - 2026-07-12
+
+- Extract GUI API local-user authority, local-group, and enclosure daemon
+  client adapters into a focused authentication-admin module while preserving
+  request/error projections and route behavior.
+
 ## 0.71.34 - 2026-07-12
 
 - Remove stale daemon and GUI module-size exception entries after guard
