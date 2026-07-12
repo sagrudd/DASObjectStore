@@ -17,11 +17,16 @@ fn workspace_component_source() -> String {
 
 fn web_styles_source() -> String {
     [
-        include_str!("../../styles.css"),
-        include_str!("../../styles/home.css"),
         include_str!("../../styles/remote-upload.css"),
+        include_str!("../../styles/home.css"),
+        include_str!("../../styles/object-browser.css"),
+        include_str!("../../styles.css"),
     ]
     .concat()
+}
+
+fn object_browser_styles_source() -> &'static str {
+    include_str!("../../styles/object-browser.css")
 }
 
 use super::{
@@ -1171,11 +1176,40 @@ fn object_browser_component_contract_covers_placement_badges_and_no_overlap_css(
     assert!(css
         .contains(".dos-object-browser-placement {\n  display: inline-flex;\n  max-width: 220px;"));
     assert!(css.contains("@media (max-width: 980px)"));
-    assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders,"));
+    assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders {"));
     assert!(css.contains("grid-template-columns: repeat(2, minmax(0, 1fr));"));
     assert!(css.contains("@media (max-width: 640px)"));
-    assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders,"));
+    assert!(css.contains(".dos-object-browser-controls,\n  .dos-object-browser-folders {"));
     assert!(css.contains("grid-template-columns: 1fr;"));
+}
+
+#[test]
+fn object_browser_css_is_feature_owned_and_registered_before_base_styles() {
+    let base = include_str!("../../styles.css");
+    let feature = object_browser_styles_source();
+    let index = include_str!("../../index.html");
+
+    assert!(!base.contains(".dos-object-browser"));
+    for selector in [
+        ".dos-object-browser-controls",
+        ".dos-object-browser-folders",
+        ".dos-object-browser-table-wrap",
+        ".dos-object-browser-placement",
+        ".dos-object-browser-download",
+        "@media (max-width: 980px)",
+        "@media (max-width: 640px)",
+    ] {
+        assert!(
+            feature.contains(selector),
+            "missing feature selector {selector}"
+        );
+    }
+    let feature_link = index
+        .find("styles/object-browser.css")
+        .expect("object browser sheet registered");
+    let base_link = index.find("styles.css").expect("base sheet registered");
+    assert!(feature_link < base_link);
+    assert_eq!(index.matches("styles/object-browser.css").count(), 1);
 }
 
 #[test]

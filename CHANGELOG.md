@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.33 - 2026-07-12
+
+- Move Object Browser CSS into a feature-owned responsive stylesheet with
+  contract coverage while preserving shared status-pill styling.
+
 ## 0.72.32 - 2026-07-12
 
 - Preserve safe provider reconciliation resumes by carrying stable S3 ETags as
