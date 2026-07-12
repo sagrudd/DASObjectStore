@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.12 - 2026-07-12
+
+- Publish the profile-by-host-mode support matrix and fail-closed migration
+  policy for local preview and DASServer-blocked paths.
+
 ## 0.72.11 - 2026-07-12
 
 - Add atomic schema-versioned migration checkpoint save/load with strict

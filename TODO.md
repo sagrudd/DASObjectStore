@@ -319,6 +319,9 @@ completion.
 ### Gate 6: Integration and market-readiness acceptance
 
 - [ ] Publish a profile-by-host-mode support matrix and upgrade/migration policy.
+  - [x] Publish the current profile/host-mode matrix and fail-closed upgrade
+    policy in `docs/user/storage-profile-matrix.rst`, distinguishing local
+    preview contracts from DASServer/Garage-blocked acceptance.
 - [ ] Run package install/upgrade/uninstall, authentication, quota, S3,
   migration, recovery, security, observability, and performance matrices for
   folder, drive, and appliance.

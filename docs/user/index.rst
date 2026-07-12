@@ -14,6 +14,7 @@ stabilized in the current MVP.
    store-classes
    storage-profiles
    metadata-compatibility
+   storage-profile-matrix
    nas-endpoints
    disk-preparation
    object-stores
