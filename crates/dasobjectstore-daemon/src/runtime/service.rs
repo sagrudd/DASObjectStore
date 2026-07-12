@@ -123,6 +123,15 @@ where
         ))
     }
 
+    pub fn prepare_enclosure(
+        &self,
+        request: crate::api::PrepareEnclosureRequest,
+        accepted_at_utc: impl AsRef<str>,
+    ) -> Result<crate::api::PrepareEnclosureResponse, DaemonServiceRuntimeError> {
+        self.config.validate()?;
+        super::enclosure_prepare::prepare_enclosure(&self.runner, request, accepted_at_utc.as_ref())
+    }
+
     pub fn provision_buckets(
         &self,
         credentials: &[StoreServiceCredential],

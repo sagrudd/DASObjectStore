@@ -624,6 +624,14 @@ where
         GarageServiceController::lifecycle(self, request, accepted_at_utc)
     }
 
+    fn prepare_enclosure(
+        &self,
+        request: PrepareEnclosureRequest,
+        accepted_at_utc: &str,
+    ) -> Result<PrepareEnclosureResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::prepare_enclosure(self, request, accepted_at_utc)
+    }
+
     fn provision(
         &self,
         request: DaemonServiceProvisionRequest,

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.41 - 2026-07-12
+
+- Add the daemon-owned enclosure preparation executor with typed validation,
+  command-runner injection, ext4/xfs planning, and atomic fsync'd role
+  markers; CLI routing remains a separate follow-up.
+
 ## 0.71.40 - 2026-07-12
 
 - Split the Web API administration request/response contracts into a focused

@@ -73,6 +73,13 @@ completion.
     `crates/dasobjectstore-gui-web/src/api_contracts.rs`; preserve wasm/test
     decoding and client-facing JSON shapes, then remove the final Web API
     module-size exception.
+- [x] Implement the daemon-owned enclosure preparation executor with typed
+  validation, command-runner injection, ext4/xfs planning, and atomic fsync'd
+  role markers; keep destructive execution behind the existing confirmation
+  and existing-data acknowledgement gates.
+- [ ] Route `disk prepare-das` through the daemon executor and remove normal
+  appliance preparation writes from the CLI; preserve dry-run reports,
+  confirmation behavior, and machine-readable output.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 

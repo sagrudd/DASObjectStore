@@ -3,6 +3,7 @@
 mod admin_jobs;
 mod appliance_telemetry;
 mod config;
+mod enclosure_prepare;
 mod endpoint_registry;
 mod ingest_files;
 mod local_admin;
