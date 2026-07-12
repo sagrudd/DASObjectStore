@@ -113,6 +113,9 @@ completion.
 - [ ] Define a capability-based backend contract for validation, reservation,
   staging, durable finalization, reads, enumeration, verification, health,
   reconciliation, and removal.
+  - [x] Add the shared `ObjectStoreBackend` trait, typed object/health/error
+    records, and explicit capability flags for every operation; concrete folder,
+    drive, and appliance implementations remain subsequent gates.
 - [ ] Version portable manifest and placement contracts so logical identity,
   hierarchy, versions, hashes, provenance, protection, and backend locations do
   not encode mandatory appliance SSD/HDD assumptions.

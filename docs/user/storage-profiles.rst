@@ -37,3 +37,9 @@ Protection is independent of the profile: manifests may require ``local_only``,
 ``reproducible``, ``externally_replicated``, or ``appliance_protected`` policy.
 The physical backend does not silently choose a protection promise; product
 adapters must request and validate one explicitly.
+
+All profiles implement the same backend capability boundary: validation,
+reservation, staging, durable finalization, reads, enumeration, verification,
+health, reconciliation, and removal. A profile may report an unsupported
+capability explicitly; callers must not assume appliance-only placement methods
+exist for folder or drive stores.

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.79 - 2026-07-12
+
+- Add the shared capability-based `ObjectStoreBackend` contract and typed
+  backend records for validation, reservation, staging, durable finalization,
+  reads, enumeration, verification, health, reconciliation, and removal.
+
 ## 0.71.78 - 2026-07-12
 
 - Add profile-independent protection policy names to portable ObjectStore

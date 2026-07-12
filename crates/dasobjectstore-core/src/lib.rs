@@ -1,5 +1,6 @@
 //! Core domain types for DASObjectStore.
 
+pub mod backend;
 pub mod config;
 pub mod deployment;
 pub mod file_export;
@@ -17,6 +18,10 @@ pub mod risk;
 pub mod store;
 pub mod utc;
 
+pub use backend::{
+    BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
+    ObjectStoreBackend,
+};
 pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,
     DEFAULT_STANDALONE_HTTPS_PORT,
