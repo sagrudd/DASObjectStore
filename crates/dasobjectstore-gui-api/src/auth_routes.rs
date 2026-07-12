@@ -284,7 +284,9 @@ async fn prepare_enclosure(
     let mut request = validate_prepare_enclosure_request(request)?;
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     request.administrator_actor = Some(current_user.username);
-    submit_prepare_enclosure_request(&state, request).map(Json)
+    submit_prepare_enclosure_request(&state, request)
+        .await
+        .map(Json)
 }
 
 async fn create_object_store(

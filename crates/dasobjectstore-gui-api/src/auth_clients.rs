@@ -37,7 +37,7 @@ pub(super) fn submit_local_group_admin_request(
     Ok(response)
 }
 
-pub(super) fn submit_prepare_enclosure_request(
+pub(super) async fn submit_prepare_enclosure_request(
     state: &StandaloneEnclosureAdminRouteState,
     request: StandaloneEnclosurePrepareDaemonRequest,
 ) -> Result<StandaloneEnclosurePrepareResponse, (StatusCode, Json<AuthRouteError>)> {
@@ -47,13 +47,17 @@ pub(super) fn submit_prepare_enclosure_request(
             "daemon enclosure preparation contract is not available",
         )
     })?;
-    client.submit_prepare_enclosure(request).map_err(|err| {
-        route_error(
-            StatusCode::BAD_GATEWAY,
-            "daemon_enclosure_prepare_failed",
-            err.message,
-        )
-    })
+    let client = Arc::clone(client);
+    state
+        .daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_prepare_enclosure(request)
+                .map_err(|err| err.message)
+        })
+        .await
+        .map_err(admin_daemon_bridge_error)
 }
 
 pub(super) async fn submit_create_object_store_request(
