@@ -325,6 +325,10 @@ list until every temporary size-budget exception has been removed.
     - [x] Extract packaged-daemon source canonicalization and Linux ACL planning
       into `crates/dasobjectstore-cli/src/run/ingest_source_access.rs`; preserve
       fail-closed permission handling and the non-Linux no-op.
+    - [x] Extract managed-DAS root discovery, marker validation, supported
+      enclosure checks, and SSD/HDD root policy into
+      `crates/dasobjectstore-cli/src/run/managed_roots.rs`; preserve QNAP
+      guard fixtures and environment overrides.
     - [x] Move performance report artifact persistence and QR/PDF/metadata
       helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
       preserve JSON validation, chart generation, authoritative policy output,

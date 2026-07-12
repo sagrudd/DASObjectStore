@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.26 - 2026-07-12
+
+- Extract managed-DAS roots, marker validation, supported-enclosure checks, and
+  SSD/HDD root policy into a focused CLI module.
+
 ## 0.71.25 - 2026-07-12
 
 - Extract packaged-daemon source canonicalization and Linux ACL planning into
