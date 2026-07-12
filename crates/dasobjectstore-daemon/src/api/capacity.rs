@@ -5,6 +5,7 @@
 //! provide trusted usage or free-space observations.
 
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::ingress::IngressOrigin;
 use dasobjectstore_core::store::{
     evaluate_capacity_admission, CapacityAdmissionError, CapacityAdmissionInput, CapacityPolicy,
 };
@@ -16,12 +17,17 @@ pub struct CapacityAdmissionRequest {
     pub store_id: String,
     pub requested_bytes: u64,
     pub copy_count: u8,
-    pub requires_ssd_staging: bool,
+    #[serde(default)]
+    pub ingress_origin: IngressOrigin,
     #[serde(default)]
     pub client_request_id: Option<String>,
 }
 
 impl CapacityAdmissionRequest {
+    pub fn requires_ssd_staging(&self) -> bool {
+        self.ingress_origin.requires_ssd_staging()
+    }
+
     pub fn validate(&self) -> Result<StoreId, CapacityAdmissionValidationError> {
         if !is_safe_store_id(&self.store_id) {
             return Err(CapacityAdmissionValidationError::InvalidStoreId);
@@ -108,7 +114,7 @@ impl CapacityAdmissionResponse {
         let input = CapacityAdmissionInput {
             requested_bytes: request.requested_bytes,
             copy_count: request.copy_count,
-            requires_ssd_staging: request.requires_ssd_staging,
+            requires_ssd_staging: request.requires_ssd_staging(),
             ..input
         };
         let result = evaluate_capacity_admission(policy, input);
@@ -139,16 +145,18 @@ impl CapacityAdmissionResponse {
             reason,
             requested_bytes: request.requested_bytes,
             copy_count: request.copy_count,
-            requires_ssd_staging: request.requires_ssd_staging,
+            requires_ssd_staging: request.requires_ssd_staging(),
             logical_limit_bytes: policy.logical_limit_bytes,
             used_bytes: input.used_bytes,
             reserved_bytes: input.reserved_bytes,
             logical_available_bytes,
             backend_available_bytes,
-            ssd_available_bytes: request.requires_ssd_staging.then_some(input.ssd_free_bytes),
+            ssd_available_bytes: request
+                .requires_ssd_staging()
+                .then_some(input.ssd_free_bytes),
             required_backend_bytes,
             required_ssd_bytes: request
-                .requires_ssd_staging
+                .requires_ssd_staging()
                 .then_some(request.requested_bytes)
                 .unwrap_or(0),
             message,
@@ -202,7 +210,7 @@ mod tests {
             store_id: "codex".to_string(),
             requested_bytes: 100,
             copy_count: 2,
-            requires_ssd_staging: true,
+            ingress_origin: IngressOrigin::LocalServerSsdFirst,
             client_request_id: Some("request-1".to_string()),
         }
     }
@@ -225,7 +233,7 @@ mod tests {
         request.requested_bytes = 0;
         request.validate().expect("zero-byte request is valid");
         let encoded = serde_json::to_value(request).expect("request serializes");
-        assert_eq!(encoded["requires_ssd_staging"], true);
+        assert_eq!(encoded["ingress_origin"], "local_server_ssd_first");
         assert_eq!(encoded["client_request_id"], "request-1");
     }
 
@@ -326,7 +334,7 @@ mod tests {
     #[test]
     fn direct_admission_omits_ssd_observations() {
         let mut request = request();
-        request.requires_ssd_staging = false;
+        request.ingress_origin = IngressOrigin::LocalServerDirectImport;
         let response = CapacityAdmissionResponse::evaluate(
             &request,
             &CapacityPolicy::bounded(1_000, 100),

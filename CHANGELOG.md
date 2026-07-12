@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.8 - 2026-07-12
+
+- Derive capacity SSD-staging requirements from typed ingress origins rather
+  than caller-supplied booleans.
+
 ## 0.72.7 - 2026-07-12
 
 - Make SSD staging an explicit capacity-admission input so approved direct
