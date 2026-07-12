@@ -43,7 +43,7 @@ variable at user or project data.
 If a test process is interrupted, remove only generated validation children with
 the documented safe command::
 
-   find /Users/stephen/.dasobjectstore-codex-validation -maxdepth 1 -type d -name 'dasobjectstore-folder-backend-*' -prune -exec rm -rf -- {} +
+   find /Users/stephen/.dasobjectstore-codex-validation -maxdepth 1 -type d \( -name 'dasobjectstore-folder-backend-*' -o -name 'dasobjectstore-drive-backend-*' \) -prune -exec rm -rf -- {} +
 
 The shared policy contract now carries a logical limit, backend reserve, and
 warning/critical thresholds. Its reservation ledger admits bytes transactionally
@@ -82,6 +82,13 @@ device: media must be positively SSD, identities must match the manifest, the
 mount must be non-root and writable, and system-root status must be confirmed
 safe. Host-specific diskutil/lsblk observation and daemon adoption remain
 future integration work.
+
+The daemon now has a guarded drive backend that retains the drive manifest and
+delegates the hardened folder engine for hierarchy, checksums, atomic durable
+finalization, verification, and bounded capacity. A runtime guard is checked
+before filesystem operations so an unmounted or identity-drifted SSD cannot be
+treated as an ordinary directory; host-specific guard implementations remain
+future work.
 
 Protection is independent of the profile: manifests may require ``local_only``,
 ``reproducible``, ``externally_replicated``, or ``appliance_protected`` policy.

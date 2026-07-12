@@ -3,6 +3,7 @@
 mod admin_jobs;
 mod appliance_telemetry;
 mod config;
+mod drive_backend;
 mod enclosure_prepare;
 mod endpoint_registry;
 mod folder_backend;
@@ -48,6 +49,7 @@ pub use config::{
     DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR,
     LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
 };
+pub use drive_backend::{DriveBackend, DriveRuntimeGuard};
 pub use endpoint_registry::{
     default_endpoint_registry_path, upsert_endpoint_inventory_record,
     EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,

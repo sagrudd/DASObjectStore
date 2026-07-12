@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.99 - 2026-07-12
+
+- Add a guarded drive backend that reuses hardened folder storage semantics
+  while failing closed on injected mount or identity drift.
+
 ## 0.71.98 - 2026-07-12
 
 - Add injected SSD drive-profile validation for stable identities, safe mounts,

@@ -263,6 +263,10 @@ completion.
   mount-loss, replacement, import/export, and read-only degraded behavior.
 - [ ] Reuse folder hierarchy/manifest/S3 semantics while making the single-
   device failure domain explicit in policy, CLI, TUI, and Web.
+  - [x] Add a drive backend wrapper that retains the drive manifest while
+    delegating hardened folder hierarchy, checksum, durable-finalization, and
+    bounded-capacity behavior; an injected runtime guard fails closed before
+    filesystem I/O when mount/device state drifts.
 - [ ] Add Linux package, reboot/remount, device replacement, full-disk,
   corruption, and performance acceptance coverage.
 
