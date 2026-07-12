@@ -114,6 +114,7 @@ pub(crate) struct StandaloneEnclosureAdminRouteState {
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
     enclosure_admin_client: Option<Arc<dyn StandaloneEnclosureAdminClient>>,
     daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
+    priority_daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
 }
 
 #[derive(Clone)]
@@ -132,6 +133,7 @@ impl StandaloneEnclosureAdminRouteState {
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             )),
             daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
+            priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
         }
     }
 }
@@ -2577,6 +2579,7 @@ mod tests {
             enclosure_admin_client: enclosure_admin_client
                 .map(|client| client as Arc<dyn StandaloneEnclosureAdminClient>),
             daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
+            priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
         }
     }
 

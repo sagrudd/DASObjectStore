@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 const DEFAULT_PERMITS: usize = 8;
+const PRIORITY_PERMITS: usize = 2;
 const DEFAULT_DEADLINE: Duration = Duration::from_secs(2);
 const CIRCUIT_FAILURE_THRESHOLD: usize = 3;
 const CIRCUIT_COOLDOWN: Duration = Duration::from_secs(5);
@@ -43,6 +44,21 @@ impl DaemonBridge {
     pub(crate) fn shared_packaged() -> Arc<Self> {
         static BRIDGE: OnceLock<Arc<DaemonBridge>> = OnceLock::new();
         Arc::clone(BRIDGE.get_or_init(|| Arc::new(Self::packaged())))
+    }
+
+    pub(crate) fn priority_packaged() -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(PRIORITY_PERMITS)),
+            deadline: DEFAULT_DEADLINE,
+            consecutive_failures: Arc::new(AtomicUsize::new(0)),
+            open_until: Arc::new(Mutex::new(None)),
+            probe_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn shared_priority_packaged() -> Arc<Self> {
+        static BRIDGE: OnceLock<Arc<DaemonBridge>> = OnceLock::new();
+        Arc::clone(BRIDGE.get_or_init(|| Arc::new(Self::priority_packaged())))
     }
 
     #[cfg(test)]
@@ -249,5 +265,26 @@ mod tests {
         ));
         release_sender.send(()).expect("release probe");
         assert!(probe.await.expect("probe joins").is_ok());
+    }
+
+    #[tokio::test]
+    async fn priority_bridge_keeps_cancellation_capacity_when_routine_circuit_opens() {
+        let routine = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(100));
+        let priority = DaemonBridge::priority_packaged();
+        for _ in 0..3 {
+            let result: Result<(), _> = routine
+                .call(
+                    || -> Result<(), super::StandaloneObjectBrowserClientError> {
+                        panic!("simulated routine worker failure")
+                    },
+                )
+                .await;
+            assert!(matches!(result, Err(DaemonBridgeError::Join(_))));
+        }
+        assert!(matches!(
+            routine.call(|| Ok(())).await,
+            Err(DaemonBridgeError::CircuitOpen)
+        ));
+        assert!(priority.call(|| Ok(())).await.is_ok());
     }
 }

@@ -168,7 +168,7 @@ pub(super) async fn submit_admin_job_cancel_request(
         )
     })?;
     let client = Arc::clone(client);
-    let bridge = state.daemon_bridge.clone();
+    let bridge = state.priority_daemon_bridge.clone();
     bridge
         .call_message(move || client.cancel_job(request).map_err(|err| err.message))
         .await

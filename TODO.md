@@ -952,6 +952,9 @@ list until every temporary size-budget exception has been removed.
 - [x] Route Web local-group creation and membership assignment through the
   bounded bridge, keeping the daemon as mutation authority and updating the
   local group registry only after accepted non-dry-run responses.
+- [x] Keep Web administrator cancellation on a dedicated bounded priority
+  bridge/circuit so routine query or mutation degradation cannot suppress the
+  emergency cancellation path.
 - [x] Bound performance-report PDF rebuilds to a separate two-worker
   `spawn_blocking` semaphore held until rendering completes; saturated requests
   return a typed `429` without running the renderer.
