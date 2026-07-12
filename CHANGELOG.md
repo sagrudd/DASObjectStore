@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.20 - 2026-07-12
+
+- Extract performance scenario-matrix execution orchestration into a focused
+  module while preserving ordering, result aggregation, and TUI context.
+
 ## 0.71.19 - 2026-07-12
 
 - Extract the direct-HDD performance scenario into a focused module while

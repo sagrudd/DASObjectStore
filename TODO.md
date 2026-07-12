@@ -312,6 +312,10 @@ list until every temporary size-budget exception has been removed.
     - [x] Extract the direct-HDD performance scenario into
       `crates/dasobjectstore-cli/src/run/performance_direct_hdd.rs`; preserve
       bounded placement, split read/write accounting, and live TUI coverage.
+    - [x] Extract scenario-matrix execution orchestration into
+      `crates/dasobjectstore-cli/src/run/performance_scenarios.rs`; preserve
+      file-order sequencing, scenario result ordering, completion TUI frames,
+      and report-path context.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser
