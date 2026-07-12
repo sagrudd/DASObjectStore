@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.50 - 2026-07-13
+
+- Harden folder catalogue recovery with unique temporary names and fail-closed
+  malformed/schema/identity/conflict regression tests.
+
 ## 0.72.49 - 2026-07-12
 
 - Correct Web screenshot regression validation for the approved sans-serif

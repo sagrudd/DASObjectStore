@@ -356,7 +356,8 @@ completion.
   - [x] Add a versioned, private folder-profile catalogue snapshot with
     idempotent conflict-checked commits and file/directory fsync+rename; folder
     adoption commits the finalized record before its Complete checkpoint.
-    Shared SQLite/object-service catalogue integration remains open.
+    Malformed/future-schema/wrong-store/conflict recovery tests are covered;
+    shared SQLite/object-service catalogue integration remains open.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

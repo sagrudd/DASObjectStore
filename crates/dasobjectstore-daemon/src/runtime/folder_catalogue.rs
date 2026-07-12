@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const FOLDER_CATALOGUE_SCHEMA_VERSION: u32 = 1;
 
@@ -101,12 +102,16 @@ impl FolderCatalogue {
             BackendError::InvalidRequest(format!("folder catalogue encode failed: {error}"))
         })?;
         let temporary = parent.join(format!(
-            ".{}.tmp-{}",
+            ".{}.tmp-{}-{}",
             self.path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("catalogue"),
-            std::process::id()
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
         ));
         let mut file = OpenOptions::new()
             .create_new(true)
@@ -181,6 +186,57 @@ mod tests {
 
         let restarted = FolderCatalogue::open(&path, "codex").expect("catalogue reloads");
         assert_eq!(restarted.records(), vec![record()]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn conflicting_commit_preserves_the_previous_snapshot() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        let mut catalogue = FolderCatalogue::open(&path, "codex").expect("catalogue opens");
+        catalogue
+            .commit_records([record()])
+            .expect("record commits");
+        let mut conflicting = record();
+        conflicting.checksum = "sha256:different".to_string();
+        assert!(catalogue.commit_records([conflicting]).is_err());
+
+        let restarted = FolderCatalogue::open(&path, "codex").expect("catalogue reloads");
+        assert_eq!(restarted.records(), vec![record()]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_schema_and_store_identity_fail_closed() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        std::fs::create_dir_all(&root).expect("root creates");
+        std::fs::write(&path, b"not-json").expect("malformed catalogue writes");
+        assert!(FolderCatalogue::open(&path, "codex").is_err());
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "schema_version": 99,
+                "store_id": "codex",
+                "records": {}
+            })
+            .to_string(),
+        )
+        .expect("future catalogue writes");
+        assert!(FolderCatalogue::open(&path, "codex").is_err());
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "schema_version": 1,
+                "store_id": "other",
+                "records": {}
+            })
+            .to_string(),
+        )
+        .expect("wrong-store catalogue writes");
+        assert!(FolderCatalogue::open(&path, "codex").is_err());
         let _ = std::fs::remove_dir_all(root);
     }
 }
