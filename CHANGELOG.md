@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.32 - 2026-07-12
+
+- Extract shared live-SQLite path resolution into the CLI metadata-path module
+  while preserving explicit override behavior and unknown-store diagnostics.
+
 ## 0.71.31 - 2026-07-12
 
 - Extract ingest queue inspection, rendering, and daemon-owned drain handling

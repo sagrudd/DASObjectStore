@@ -9,8 +9,11 @@ pub(super) fn run_store_contents(
     if args.du() && args.tree() {
         return Err(CliError::UnsupportedStoreContentsFormat);
     }
-    let live_sqlite_path =
-        resolve_store_live_sqlite_path(args.store_id(), args.live_sqlite_path(), None)?;
+    let live_sqlite_path = super::metadata_paths::resolve_store_live_sqlite_path(
+        args.store_id(),
+        args.live_sqlite_path(),
+        None,
+    )?;
     let mut request = StoreContentsRequest::new(live_sqlite_path, args.store_id().clone());
     if let Some(prefix) = args.prefix() {
         request = request.with_prefix(prefix);

@@ -255,6 +255,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract ingest queue inspection, rendering, and daemon-owned drain
     handling into `crates/dasobjectstore-cli/src/run/ingest_queue.rs`; preserve
     dry-run risk gates, JSON/text output, and daemon mutation ownership.
+  - [x] Extract shared live-SQLite path resolution into
+    `crates/dasobjectstore-cli/src/run/metadata_paths.rs`; preserve explicit
+    override behavior and unknown-store diagnostics for queue and contents
+    readers.
   - [x] Extract the performance report, JSON artifact, chart, and PDF rendering
     helpers into `crates/dasobjectstore-cli/src/run/performance_report.rs`;
     preserve report output and existing regressions.

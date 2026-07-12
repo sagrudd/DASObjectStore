@@ -6,7 +6,7 @@ pub(super) fn run_ingest_queue(
     args: &IngestQueueArgs,
     writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let live_sqlite_path = super::resolve_live_sqlite_path(args.live_sqlite_path());
+    let live_sqlite_path = super::metadata_paths::resolve_live_sqlite_path(args.live_sqlite_path());
     let snapshot = read_ingest_queue_for_store(&live_sqlite_path, args.store_id())?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
