@@ -696,6 +696,9 @@ list until every temporary size-budget exception has been removed.
     `styles/object-browser.css`; register it before shared styles and preserve
     CSS contract coverage. Remaining auth/enclosure/activity CSS and screenshot
     runner modularity remain open.
+  - [x] Move Activity grids, queue/task cards, typography, and responsive
+    rules into `styles/activity.css`; keep shared card/form primitives in the
+    base sheet and preserve feature ownership/order tests.
   - [x] Move remote-upload layout and selection styles into the dedicated
     `styles/remote-upload.css` feature sheet, register it with Trunk, and keep
     CSS contract tests loading the shared and feature-owned sheets together.

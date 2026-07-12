@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.34 - 2026-07-12
+
+- Move Activity workspace grids, queues, and task cards into a feature-owned
+  responsive stylesheet with CSS ownership and order tests.
+
 ## 0.72.33 - 2026-07-12
 
 - Move Object Browser CSS into a feature-owned responsive stylesheet with

@@ -20,6 +20,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/remote-upload.css"),
         include_str!("../../styles/home.css"),
         include_str!("../../styles/object-browser.css"),
+        include_str!("../../styles/activity.css"),
         include_str!("../../styles.css"),
     ]
     .concat()
@@ -27,6 +28,10 @@ fn web_styles_source() -> String {
 
 fn object_browser_styles_source() -> &'static str {
     include_str!("../../styles/object-browser.css")
+}
+
+fn activity_styles_source() -> &'static str {
+    include_str!("../../styles/activity.css")
 }
 
 use super::{
@@ -1904,6 +1909,7 @@ fn home_throughput_chart_preserves_invalid_sample_gaps() {
 fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     let source = workspace_component_source();
     let css = web_styles_source();
+    let activity_css = activity_styles_source();
 
     assert!(source.contains("<div class=\"dos-metric-grid\">"));
     assert!(source.contains("home_dashboard_metrics(view).into_iter().map(render_metric_card)"));
@@ -1927,7 +1933,7 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     assert!(source.contains("dos-home-telemetry-toolbar"));
     assert!(source.contains("dos-window-segments"));
 
-    assert!(css.contains(".dos-metric-grid,\n.dos-store-grid,\n.dos-attention-grid,"));
+    assert!(css.contains(".dos-metric-grid,\n.dos-store-grid,\n.dos-attention-grid {"));
     assert!(css.contains("grid-template-columns: repeat(4, minmax(0, 1fr));"));
     assert!(css.contains(".dos-card {\n  min-height: 140px;"));
     assert!(css.contains(".dos-metric-card strong,\n.dos-enclosure-card strong,"));
@@ -1951,12 +1957,47 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
         ".dos-chart-label,\n.dos-chart-empty,\n.dos-chart-gap-message {\n  fill: #56666d;"
     ));
     assert!(css.contains("@media (max-width: 980px)"));
-    assert!(css.contains(".dos-metric-grid,\n  .dos-store-grid,\n  .dos-activity-grid {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"));
-    assert!(css.contains("@media (max-width: 640px)"));
     assert!(css.contains(
-        ".dos-metric-grid,\n  .dos-store-grid,\n  .dos-activity-grid,\n  .dos-activity-queues,"
+        ".dos-metric-grid,\n  .dos-store-grid {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"
+    ));
+    assert!(activity_css
+        .contains(".dos-activity-grid {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"));
+    assert!(css.contains("@media (max-width: 640px)"));
+    assert!(css.contains(".dos-metric-grid,\n  .dos-store-grid,\n  .dos-form-grid,"));
+    assert!(activity_css.contains(
+        ".dos-activity-grid,\n  .dos-activity-queues {\n    grid-template-columns: 1fr;"
     ));
     assert!(css.contains("grid-template-columns: 1fr;"));
+}
+
+#[test]
+fn activity_css_is_feature_owned_and_registered_before_base_styles() {
+    let base = include_str!("../../styles.css");
+    let feature = activity_styles_source();
+    let index = include_str!("../../index.html");
+
+    assert!(!base.contains(".dos-activity"));
+    assert!(!base.contains(".dos-task-"));
+    for selector in [
+        ".dos-activity-grid",
+        ".dos-activity-queues",
+        ".dos-activity-tasks",
+        ".dos-task-list",
+        ".dos-task-card",
+        "@media (max-width: 980px)",
+        "@media (max-width: 640px)",
+    ] {
+        assert!(
+            feature.contains(selector),
+            "missing Activity selector {selector}"
+        );
+    }
+    let feature_link = index
+        .find("styles/activity.css")
+        .expect("Activity sheet registered");
+    let base_link = index.find("styles.css").expect("base sheet registered");
+    assert!(feature_link < base_link);
+    assert_eq!(index.matches("styles/activity.css").count(), 1);
 }
 
 #[test]

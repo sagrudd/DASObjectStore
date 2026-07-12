@@ -1,0 +1,67 @@
+/* Activity workspace styles. Keep this feature-owned surface separate from
+ * shared card, status, and form primitives in styles.css. */
+.dos-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dos-activity-card strong {
+  display: block;
+  color: #182128;
+  font-size: 1.05rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.dos-activity-queues {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dos-activity-tasks,
+.dos-task-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dos-task-list {
+  gap: 10px;
+}
+
+.dos-task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #e0e7eb;
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.dos-task-card strong {
+  display: block;
+  margin-top: 4px;
+  color: #182128;
+  overflow-wrap: anywhere;
+}
+
+.dos-task-card p {
+  margin-top: 4px;
+  color: #5b6770;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .dos-activity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .dos-activity-grid,
+  .dos-activity-queues {
+    grid-template-columns: 1fr;
+  }
+}

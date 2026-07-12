@@ -387,8 +387,7 @@ h2 {
 
 .dos-metric-grid,
 .dos-store-grid,
-.dos-attention-grid,
-.dos-activity-grid {
+.dos-attention-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
@@ -442,10 +441,6 @@ h2 {
   background: #e3f1f3;
 }
 
-.dos-activity-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
 .dos-card {
   min-height: 140px;
   padding: 16px;
@@ -492,8 +487,7 @@ h2 {
 
 .dos-metric-card strong,
 .dos-enclosure-card strong,
-.dos-store-card strong,
-.dos-activity-card strong {
+.dos-store-card strong {
   display: block;
   color: #182128;
   font-size: 1.35rem;
@@ -502,8 +496,7 @@ h2 {
 }
 
 .dos-enclosure-card strong,
-.dos-store-card strong,
-.dos-activity-card strong {
+.dos-store-card strong {
   font-size: 1.05rem;
 }
 
@@ -993,45 +986,6 @@ h2 {
   min-height: 180px;
 }
 
-.dos-activity-queues {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.dos-activity-tasks {
-  display: grid;
-  gap: 12px;
-}
-
-.dos-task-list {
-  display: grid;
-  gap: 10px;
-}
-
-.dos-task-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: start;
-  padding: 12px;
-  border: 1px solid #e0e7eb;
-  border-radius: 8px;
-  background: #fbfcfc;
-}
-
-.dos-task-card strong {
-  display: block;
-  margin-top: 4px;
-  color: #182128;
-  overflow-wrap: anywhere;
-}
-
-.dos-task-card p {
-  margin-top: 4px;
-  color: #5b6770;
-  font-size: 0.82rem;
-  overflow-wrap: anywhere;
-}
-
 .dos-prosopikon-widget-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1120,8 +1074,7 @@ h2 {
   }
 
   .dos-metric-grid,
-  .dos-store-grid,
-  .dos-activity-grid {
+  .dos-store-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1180,8 +1133,6 @@ h2 {
 
   .dos-metric-grid,
   .dos-store-grid,
-  .dos-activity-grid,
-  .dos-activity-queues,
   .dos-form-grid,
   .dos-remote-upload-grid,
   .dos-remote-upload-summary {
