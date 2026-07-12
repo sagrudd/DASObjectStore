@@ -37,6 +37,8 @@ pub(crate) enum StoreCommand {
     Deduplicate(StoreDeduplicateArgs),
     /// Emit the built-in JSON policy defaults for a store class.
     Defaults(StoreDefaultsArgs),
+    /// Show daemon-owned folder, drive, and appliance capability contracts.
+    Capabilities(StoreCapabilitiesArgs),
     /// List system-managed object stores.
     List(StoreListArgs),
     /// Inspect or update the daemon-owned store ingest landing policy.
@@ -45,6 +47,19 @@ pub(crate) enum StoreCommand {
     S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreCapabilitiesArgs {
+    /// Emit the capability catalogue as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreCapabilitiesArgs {
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -616,6 +631,19 @@ mod tests {
                 "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"
             ))
         );
+    }
+
+    #[test]
+    fn parses_profile_capabilities_json_flag() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "store", "capabilities", "--json"])
+            .expect("store capabilities parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::Capabilities(capabilities)) = args.command() else {
+            panic!("expected capabilities command")
+        };
+        assert!(capabilities.json());
     }
 
     #[test]

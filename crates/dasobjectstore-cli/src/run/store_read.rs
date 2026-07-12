@@ -250,6 +250,41 @@ pub(super) fn run_store_defaults(
     Ok(())
 }
 
+pub(super) fn run_store_capabilities(
+    args: &StoreCapabilitiesArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.profile_capabilities(ObjectStoreCapabilityDiscoveryRequest::default())?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "ObjectStore profile capabilities")?;
+        writeln!(writer, "Schema: {}", response.schema_version)?;
+        for profile in response.profiles {
+            writeln!(
+                writer,
+                "- {}: availability={:?} host_modes={} bounded_capacity={} dedicated_ssd={} local_failure_domains={}",
+                profile.profile,
+                profile.availability,
+                profile.host_modes.len(),
+                profile.requirements.bounded_capacity_required,
+                profile.requirements.dedicated_ssd_required,
+                profile
+                    .max_distinct_local_failure_domains
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "unavailable".to_string())
+            )?;
+            if let Some(reason) = profile.unavailable_reason {
+                writeln!(writer, "  reason: {reason}")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_s3_upload(
     args: &StoreS3UploadArgs,
     writer: &mut impl Write,

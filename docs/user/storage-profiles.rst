@@ -188,6 +188,9 @@ Clients can request this catalogue through the typed daemon
 ``profile_capabilities`` command. The response is deliberately static and safe
 for feature gating; runtime readiness and provisioning still require the
 profile-specific daemon workflows.
+The CLI exposes the same contract through ``dasobjectstore store capabilities``
+(``--json`` is available for automation); it does not bypass daemon authority
+or claim that an appliance is reachable.
 
 Product-owned policy templates
 ------------------------------

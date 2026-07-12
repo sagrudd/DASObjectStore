@@ -31,8 +31,8 @@ pub(crate) use service::{
     ServiceRenderComposeArgs, ServiceStatusArgs,
 };
 pub(crate) use store::{
-    StoreAdoptArgs, StoreArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs,
-    StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
+    StoreAdoptArgs, StoreArgs, StoreCapabilitiesArgs, StoreCommand, StoreContentsArgs,
+    StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
     StoreIngestPolicyArgs, StoreListArgs, StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs,
     StoreVerifyArgs,
 };

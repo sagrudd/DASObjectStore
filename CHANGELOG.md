@@ -6,6 +6,10 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.35 - 2026-07-12
+
+- Add read-only CLI profile-capability discovery with human and JSON output.
+
 ## 0.72.34 - 2026-07-12
 
 - Move Activity workspace grids, queues, and task cards into a feature-owned

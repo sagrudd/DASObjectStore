@@ -363,6 +363,9 @@ completion.
   - [x] Wire static profile-capability discovery through the typed daemon
     request/response and client boundaries; runtime readiness and provisioning
     remain separate and appliance availability stays explicitly blocked.
+  - [x] Expose the same static capability contract through the read-only CLI
+    command ``store capabilities`` with human and JSON output; no provisioning
+    or runtime health is inferred locally.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit
