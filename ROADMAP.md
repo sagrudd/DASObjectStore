@@ -1,14 +1,63 @@
 # DASObjectStore Roadmap
 
-Status: Draft  
-Tracked TODO status: complete through Milestone 18 as of 2026-07-07;
-new Web console completion work is tracked in Milestones 19 and 20 as of
-2026-07-08; ObjectStore file browsing and remote easyconnect upload planning
-are tracked in Milestones 21 and 22
-Scope: MVP for a DAS-based object store for bioinformatics development  
+Status: Active product-integration campaign
+Tracked TODO status: Milestones 1-18 record the delivered appliance foundation;
+Milestones 19-24 contain partially delivered console, browser, upload,
+telemetry, and design work. Milestones 25-31 define the dependency-ordered
+campaign for multi-profile deployment and Mnemosyne-wide integration.
+Scope: a common managed object-storage service ranging from bounded local
+folders and dedicated SSDs to tiered DAS appliances
 Target platforms: Linux full support, macOS development/read-export support
 
-## MVP Definition
+## Product Direction and Campaign Gates
+
+DASObjectStore is no longer defined only as a mixed-disk appliance. It SHALL
+offer one object, manifest, ingress, authorization, S3, and lifecycle contract
+across three deployment profiles:
+
+- ``folder``: one explicitly bounded managed directory on a single host;
+- ``drive``: one dedicated, validated SSD filesystem on a single host;
+- ``appliance``: the existing SSD-ingest and managed-HDD placement system.
+
+Storage profile and host authority are separate. A folder may be managed by a
+per-user daemon or system service; drive and appliance profiles normally use a
+system service. All profiles remain daemon-owned and capability-driven.
+
+Market/integration readiness requires these campaign gates, in order:
+
+1. stabilize daemon ownership, ingress completion, metadata durability, and
+   control-plane availability already owed by the appliance implementation;
+2. define versioned backend-capability, portable-manifest, protection-state,
+   capacity, reservation, and migration contracts;
+3. deliver the bounded folder profile, including safe adoption and S3 access;
+4. deliver the dedicated-SSD drive profile with mount identity and health;
+5. make CLI, Web, package, Synoptikon, Mneion, and product adapters profile-aware;
+6. validate migration, recovery, quotas, S3 semantics, and realistic workloads.
+
+An implementation is not integration-ready merely because its route or UI is
+present. The relevant TODO must be implemented, tested, documented, committed,
+pushed, and ready for real-world validation.
+
+### Current delivered baseline
+
+The repository already contains the Rust workspace and domain model, portable
+metadata foundations, Linux/macOS probing, store policy, appliance SSD/HDD
+ingress and placement, Garage orchestration, daemon/client APIs, CLI/TUI, Web
+shell and administrator workflows, object browsing/download, EasyConnect
+sessions, telemetry foundations, and Mnemosyne adapter/design work. Completed
+historical checklists remain below and in TODO as evidence.
+
+### Open technical debt
+
+The active baseline still has release-relevant gaps: provider upload completion
+is not yet an atomic catalogue transaction; reconciliation is not fully
+resumable/cancellable; control/Web capacity is not fully reserved under ingest;
+telemetry device mapping and appliance acceptance remain incomplete; UI/design
+work remains; and the module-size guard currently fails. Hardware-only
+acceptance is deferred while travelling without DAS access, but offline design,
+domain, metadata, API, test, and packaging work should continue.
+
+## Historical Appliance MVP Definition
 
 Priority: bringing DASObjectStore under the Synoptikon umbrella as a formal
 Mnemosyne product/plugin is now the primary planning priority. Standalone
@@ -41,10 +90,9 @@ appliance:
   when a better integrated storage architecture requires coordinated changes
   across affected Mnemosyne software.
 
-Current completion-hardening work is limited to keeping the tracked status,
-operator documentation, and user-guide indexes coherent now that the checklist
-through Milestone 18 has no unchecked items. New implementation scope should be
-recorded as a future milestone or Post-MVP direction.
+Milestones 1-18 delivered a substantial appliance foundation, but their
+acceptance and later integration debts remain open. The active campaign gates
+take precedence over historical milestone numbering when selecting new work.
 
 The Web interface has a coherent Yew shell and API contracts, but several
 current surfaces are holder implementations rather than completed operator
@@ -809,7 +857,85 @@ Exit criteria:
 - API, daemon, Web, and floundeR regression tests cover normal collection,
   missing/corrupt data, time-window changes, and chart rendering contracts.
 
-## Post-MVP Direction
+## Milestone 24: Mnemosyne Design Language Alignment (Active Historical Work)
+
+Goal: align shared Web primitives, footer/provenance, contextual task panes,
+Local Access, Endpoints, and ObjectStore-scoped remote upload with the approved
+Mnemosyne product language. Detailed tasks and visual acceptance remain in
+TODO Milestone 24 and must not outrun storage/profile contracts.
+
+## Milestone 25: Campaign Re-baseline and Compatibility Contracts
+
+Goal: turn the appliance implementation into an explicit multi-profile product
+without destabilizing existing pools or metadata.
+
+Scope includes deployment-profile and host-mode decisions, backend capability
+contracts, portable placements/protection states, universal capacity policy,
+S3 authority, compatibility/versioning, and migration design.
+
+Exit criteria: architecture and requirements are approved; existing appliance
+metadata remains readable; public and persistent compatibility boundaries have
+tests before profile-specific implementation begins.
+
+## Milestone 26: Appliance Debt and Control-Plane Readiness
+
+Goal: close current daemon ownership, upload completion, reconciliation,
+availability, telemetry, module-size, packaging, and soak-test gaps.
+
+Exit criteria: uploads are not complete before catalogue finalization; control
+requests retain bounded capacity under ingest; temporary module exceptions have
+owners and removal plans; appliance-only acceptance blockers are recorded and
+repeatable.
+
+## Milestone 27: Universal Capacity and Reservation Policy
+
+Goal: make every ObjectStore explicitly capacity-governed.
+
+Scope includes logical quotas, backend reserve, warning/critical thresholds,
+transactional reservations, multipart/concurrent admission, physical
+amplification, nested SubObject budgets, over-quota behavior, and observability.
+
+Exit criteria: ``folder`` requires a finite quota; drive/appliance ``unlimited``
+means backend-bounded; no concurrent ingress can overbook the same capacity;
+quota reduction never deletes data.
+
+## Milestone 28: Folder ObjectStore Profile
+
+Goal: manage one bounded directory with hierarchical files, portable manifests,
+atomic ingress, drift detection, safe adoption, browsing, and common S3 access.
+
+Exit criteria: system and per-user deployments can create/adopt, ingest, verify,
+reconcile, browse, expose through S3, restart, and recover a folder store without
+following symlinks or accepting unmanaged changes silently.
+
+## Milestone 29: Dedicated SSD Drive Profile
+
+Goal: manage one dedicated SSD filesystem with the same logical contracts.
+
+Exit criteria: mount/device identity, non-rotational validation, reserve,
+capacity, SMART/NVMe telemetry, ingress, S3, Web operation, replacement, and
+import/export are tested; the UI states honestly that this is one failure domain.
+
+## Milestone 30: Profile-Aware Product and Mnemosyne Integration
+
+Goal: let other Mnemosyne Biosciences products request storage capabilities
+without embedding appliance assumptions.
+
+Exit criteria: shared API/schema and adapters support folder, drive, and
+appliance; capabilities drive UI/actions; product packages can provision a
+bounded store idempotently; Synoptikon/Mneion integration and standalone modes
+use the same daemon job model.
+
+## Milestone 31: Migration, Protection, and Market-Readiness Acceptance
+
+Goal: promote data safely between profiles and prove operational behavior.
+
+Exit criteria: folder-to-drive/appliance migration preserves identities,
+versions, hashes, and provenance; protection policies are explicit; source data
+is retained until confirmed retirement; package, upgrade, quota, S3, recovery,
+security, performance, and real-workload acceptance gates pass.
+
+## Post-Campaign Direction
 
 Post-MVP work may include:
 

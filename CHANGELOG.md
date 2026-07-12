@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.4 - 2026-07-12
+
+- Re-baseline the roadmap, requirements, architecture, and active TODO campaign
+  around bounded folder, dedicated-SSD drive, and tiered appliance profiles.
+- Make universal transactional capacity admission, portable backend contracts,
+  profile-aware S3, migration, and Mnemosyne integration explicit delivery
+  gates while preserving the completed appliance milestone history.
+
 ## 0.71.3 - 2026-07-11
 
 - Complete scoped Garage reconciliation without replacing the live metadata

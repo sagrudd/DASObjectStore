@@ -12,6 +12,35 @@ adapters.
 The architecture should keep the public core useful without Mnemosyne while
 leaving a clean adapter path for Monas and Synoptikon integration.
 
+## Deployment Profiles and Host Modes
+
+The storage backend SHALL be selected by explicit deployment profile rather
+than appliance-specific branching throughout clients and services:
+
+- ``folder`` owns one bounded managed directory;
+- ``drive`` owns one dedicated validated SSD filesystem;
+- ``appliance`` owns SSD landing plus managed HDD placement.
+
+Backends SHALL expose narrow capabilities for validation, capacity reservation,
+staged writing, durable atomic finalization, readable placement, verification,
+health, reconciliation, and safe removal. Domain/service code SHALL decide from
+capabilities such as atomic rename, redundancy, repairability, telemetry, and
+external-provider support.
+
+Host mode is independent: a per-user daemon uses XDG-owned state/socket paths;
+a system daemon owns shared folder, drive, and appliance deployments. Neither
+mode permits clients to mutate managed roots directly.
+
+The portable manifest model SHALL represent logical objects separately from
+backend-specific placements and SHALL carry protection state honestly. Folder
+and drive profiles are single failure domains unless an explicit external
+protection policy is satisfied.
+
+Capacity admission is a daemon-owned transaction spanning logical quota,
+outstanding reservations, backend reserve, staging, and copy amplification.
+Filesystem free-space observation audits the transaction; it does not replace
+the quota ledger.
+
 ## Server/Client Boundary
 
 DASObjectStore is an enterprise server/client appliance, not a CLI tool that

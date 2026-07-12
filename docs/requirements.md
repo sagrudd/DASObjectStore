@@ -1,13 +1,15 @@
-# DASObjectStore Initial Requirements Draft
+# DASObjectStore Product Requirements
 
-Status: Draft  
-Date: 2026-06-23  
-Scope: MVP and near-term architecture alignment
+Status: Draft
+Baseline date: 2026-06-23
+Campaign re-baseline: 2026-07-12
+Scope: common managed object storage for local and appliance deployments
 
 ## 1. Product Position
 
-DASObjectStore SHALL be a portable, SSD-ingest-first, mixed-disk DAS object
-appliance.
+DASObjectStore SHALL provide a common managed object, manifest, ingress,
+capacity, lifecycle, and S3 contract across bounded local-folder, dedicated-SSD
+drive, and tiered DAS-appliance deployment profiles.
 
 DASObjectStore SHALL be implemented primarily in Rust.
 
@@ -37,8 +39,10 @@ DASObjectStore SHALL NOT claim to be a backup solution.
 
 DASObjectStore SHALL support these primary use cases:
 
+- expose a size-bounded local folder as a managed hierarchical ObjectStore;
+- expose a dedicated SSD filesystem as a monitored single-node ObjectStore;
 - reuse older HDDs in USB-C DAS enclosures;
-- ingest writes onto a mandatory SSD;
+- apply profile-appropriate managed ingress with durable atomic finalization;
 - settle verified object copies onto heterogeneous HDD members;
 - expose object storage through an S3-compatible interface;
 - provide CLI and Web UI health visibility;
@@ -81,9 +85,20 @@ supporting services.
 
 DASObjectStore MAY support native/systemd service management where appropriate.
 
-## 5. Storage Hardware Model
+## 5. Storage Profiles and Hardware Model
 
-DASObjectStore SHALL model these disk roles:
+DASObjectStore SHALL model deployment profile separately from host authority.
+Profiles SHALL initially include:
+
+- ``folder``: one finite-capacity managed directory;
+- ``drive``: one dedicated validated SSD filesystem;
+- ``appliance``: SSD landing plus managed heterogeneous HDD capacity.
+
+Host authority SHALL support a system daemon and a future per-user daemon with
+user-owned XDG state/runtime paths. Products SHALL discover capabilities rather
+than infer appliance behavior from profile names.
+
+DASObjectStore appliance mode SHALL model these disk roles:
 
 - mandatory SSD ingest disk;
 - HDD capacity member;
@@ -113,9 +128,15 @@ SMART limitations SHALL be visible to users and are documented in
 DASObjectStore SHALL NOT rely on hidden host-local state as the sole authority for a
 pool.
 
-DASObjectStore SHALL store live metadata on the mandatory SSD.
+DASObjectStore SHALL store live metadata on the profile's authoritative local
+metadata tier. Appliance mode uses the managed SSD; folder and drive modes use a
+protected metadata namespace on the same managed filesystem unless an approved
+external metadata policy applies.
 
-DASObjectStore SHALL replicate recovery metadata snapshots onto HDD members.
+DASObjectStore appliance mode SHALL replicate recovery metadata snapshots onto
+HDD members. Folder and drive modes SHALL expose their single-failure-domain
+status and SHALL support portable manifest export and explicit external
+protection policies.
 
 DASObjectStore SHALL support dirty attach behavior after unclean unplug.
 
@@ -215,17 +236,25 @@ policy and available capacity allows it.
 
 ## 10. Ingest Requirements
 
-DASObjectStore SHALL require a mandatory SSD ingest device.
+Appliance profile SHALL require a managed SSD ingest device and SHALL preserve
+its existing SSD-first policy except for explicitly policy-approved, verified
+local direct-to-HDD imports.
 
-Normal S3/API writes SHALL use SSD-first ingest.
+Folder and drive profiles SHALL use private same-filesystem staging so durable
+atomic rename is possible; drive profile SHALL use its managed SSD filesystem.
+
+Normal S3/API writes SHALL use daemon-owned managed ingress appropriate to the
+profile and SHALL NOT become visible before durable payload and catalogue
+finalization.
 
 Write acknowledgement policy SHALL be configurable per store:
 
 - acknowledge after SSD ingest;
 - acknowledge after HDD placement satisfies store policy.
 
-The store policy model represents these modes as `AfterSsdIngest` and
-`AfterHddPlacement`.
+Appliance store policy represents these modes as `AfterSsdIngest` and
+`AfterHddPlacement`. Folder/drive acknowledgement SHALL use profile-neutral
+durable-finalization terminology in future compatibility-sensitive contracts.
 
 DASObjectStore SHALL support CLI-managed direct-to-HDD imports for massive
 server-local datasets where SSD staging is undesirable.
@@ -376,7 +405,28 @@ staged SSD payload bytes across process restart.
 DASObjectStore SHALL preserve metadata-committed ingest jobs, their linked object
 rows, and staged SSD payload references across process restart.
 
-Per-store SSD budgets MAY be added later.
+Every ObjectStore SHALL have an explicit capacity policy.
+
+``folder`` ObjectStores SHALL require a finite logical capacity limit. ``drive``
+and ``appliance`` profiles MAY offer an ``unlimited`` policy, but it SHALL mean
+bounded by backend usable capacity and mandatory free-space reserves.
+
+Capacity admission SHALL evaluate the strictest of logical quota remaining,
+transactionally reserved bytes, backend usable space after reserve, and
+profile-specific staging/copy amplification. Concurrent and multipart uploads
+SHALL reserve capacity before bytes are accepted and SHALL release or expire
+reservations after completion, failure, or cancellation.
+
+Logical usage SHALL charge each logical object version its full size even when
+physical content is deduplicated. Replicated/staged profiles SHALL separately
+report projected and actual physical amplification.
+
+Lowering a quota below current usage SHALL place the store into an explicit
+over-quota/no-new-ingress state and SHALL NOT delete data. Reads, verified
+deletes, repair, and cleanup SHALL remain available.
+
+SubObject budgets MAY divide a parent quota, but child reservations SHALL update
+the child and parent atomically and SHALL never exceed the parent allocation.
 
 ## 16. Performance Requirements
 

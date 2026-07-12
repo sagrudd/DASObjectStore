@@ -5,14 +5,11 @@ Source roadmap: [ROADMAP.md](ROADMAP.md)
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
 developers
 
-Current status: the tracked MVP/current-round checklist is functionally complete
-through Milestone 18 as of 2026-07-07, with a small number of daemon ingest
-hardening items still tracked under Milestone 12. Milestone 12 remains recorded
-below as the daemon/client boundary that all normal CLI, HTTPS API, Web UI, TUI,
-and Synoptikon-facing storage mutation flows must preserve. New Web console
-completion scope is tracked under Milestones 19 and 20 rather than reopening
-older checklist claims. ObjectStore file browsing and remote easyconnect upload
-planning are tracked under Milestones 21 and 22.
+Current status: Milestones 1-18 record the delivered appliance foundation, not
+market completion. Milestones 19-24 and the architecture-remediation backlog
+contain active debt. The new market/integration campaign below is the primary
+dependency order; historical milestone checklists remain as implementation
+evidence and detailed source tasks.
 
 ## Working Rules
 
@@ -21,6 +18,157 @@ planning are tracked under Milestones 21 and 22.
 - Update this file when tasks are completed, split, or superseded.
 - Keep persistent metadata, CLI behavior, and compatibility-impacting changes
   documented before merging implementation.
+
+## Market and Mnemosyne Integration Campaign
+
+Work one campaign gate at a time. A checked campaign item must meet the
+repository Definition of Done; a design or accepted request alone is not
+completion.
+
+### Decisions required
+
+- [ ] Approve the public HTTPS authentication contract for a paired remote
+  client to declare provider upload completion. A renewal token is currently
+  available and daemon-side write-grant authorization is tested, but treating
+  it as a bearer credential is a product/security decision.
+- [ ] Decide whether one ``folder`` root maps one-to-one to one logical
+  ObjectStore and define whether direct user edits are forbidden, detected as
+  drift, or eligible only through explicit reconcile/adopt.
+- [ ] Decide native embedded versus provider-backed S3 gateway support for
+  folder and drive profiles; catalogue/daemon authority is mandatory either way.
+- [ ] Approve logical quota accounting at full object-version size independent
+  of physical deduplication, with physical amplification reported separately.
+
+### Gate 0: Re-baseline and close release-critical appliance debt
+
+- [ ] Reconcile every unchecked item in historical Milestones 12 and 19-24
+  into this campaign as implemented, locally actionable, externally blocked, or
+  superseded; remove stale claims that the product is complete through M18.
+- [ ] Finish daemon-owned remote upload completion so provider success is not
+  reported before SSD-first ingest, checksum, placement, and catalogue commit.
+  Resolve and document the public paired-session completion authentication
+  contract before exposing the endpoint.
+- [ ] Finish resumable/cancellable reconciliation with per-key manifests,
+  collision/malformed-key reporting, provider progress, and restart recovery.
+- [ ] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
+  login, static assets, cancellation, and degraded cached status responsive
+  during blocked or saturated ingest.
+- [ ] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
+  appliance acceptance gaps without fabricating continuity.
+- [ ] Remove temporary production module-size exceptions through owned,
+  test-preserving splits; keep dispatcher and public façades narrow.
+  Current exceptions: CLI ``run.rs``; daemon ``ingest_files.rs``,
+  ``remote_upload.rs``, and ``request_handler.rs``; GUI API ``auth_routes.rs``,
+  ``home_aggregator.rs``, and ``workspaces.rs``; GUI Web ``api.rs``. The gate
+  closes only when the exception file is empty. The guard currently also fails
+  on unexcepted daemon ``server/request_handler/storage.rs`` (1,110 production
+  lines); split it before the campaign baseline can pass, and remove any stale
+  exception entries whose modules are already below budget.
+- [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
+  after storage contracts stabilize.
+
+### Gate 1: Profile, backend, manifest, and compatibility contracts
+
+- [ ] Add compatibility-sensitive domain types for ``folder``, ``drive``, and
+  ``appliance`` deployment profiles; keep host mode orthogonal as per-user,
+  system, or integrated authority.
+- [ ] Decide and document profile creation/adoption semantics, including whether
+  one folder root maps exactly to one ObjectStore and how existing data drifts.
+- [ ] Define a capability-based backend contract for validation, reservation,
+  staging, durable finalization, reads, enumeration, verification, health,
+  reconciliation, and removal.
+- [ ] Version portable manifest and placement contracts so logical identity,
+  hierarchy, versions, hashes, provenance, protection, and backend locations do
+  not encode mandatory appliance SSD/HDD assumptions.
+- [ ] Define protection policies independently from profiles: local-only,
+  reproducible, externally replicated, appliance protected, and future
+  multi-site protection.
+- [ ] Document compatibility and migration rules before changing persistent
+  metadata, public APIs, CLI behavior, or existing appliance pools.
+- [ ] Put existing appliance placement behind the backend contract with
+  regression evidence showing unchanged ingress, repair, and export behavior.
+
+### Gate 2: Universal capacity and transactional admission
+
+- [ ] Extend every ObjectStore policy with logical capacity limit, mandatory
+  backend reserve, warning threshold, and critical threshold; require a finite
+  limit for ``folder``.
+- [ ] Add a transactional quota ledger and capacity reservations so concurrent,
+  streaming, versioned, and multipart uploads cannot overbook the same bytes.
+- [ ] Admit against the strictest of logical quota, outstanding reservations,
+  backend usable space after reserve, SSD staging, and copy amplification.
+- [ ] Charge each logical object version at full logical size even when physical
+  content is deduplicated; report physical staging/replication separately.
+- [ ] Define over-quota behavior: preserve reads, verified deletion, repair, and
+  cleanup; reject new ingress; never delete data when a quota is lowered.
+- [ ] Add optional SubObject budgets whose reservations atomically update both
+  child and parent allocations.
+- [ ] Expose used, reserved, available, backend free, amplification, thresholds,
+  and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
+- [ ] Add concurrency, crash/restart, multipart expiry, quota-change, dedupe, and
+  full-filesystem tests before enabling new profile writes.
+
+### Gate 3: Bounded folder profile
+
+- [ ] Implement system-service and programmatic create/adopt for one explicitly
+  bounded directory, including idempotent DEB/RPM provisioning hooks.
+- [ ] Finalize ingress on the same filesystem using private temporary files,
+  in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
+  transactional manifest/catalogue commit.
+- [ ] Preserve user-visible hierarchy while reserving and protecting the
+  ``.dasobjectstore`` namespace.
+- [ ] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,
+  unsafe keys, unsupported names, and files changed during import.
+- [ ] Add read-only inspection followed by resumable adoption/reconciliation;
+  report unmanaged drift without silently accepting it as authoritative.
+- [ ] Implement profile-aware browse, download, verify, capacity, health,
+  repair, lifecycle, and common S3 operations.
+- [ ] Add per-user host mode with XDG state/runtime paths and a user service;
+  do not require root for a user-owned folder and test coexistence with system
+  mode.
+- [ ] Validate package-created, programmatically created, adopted, container-
+  mounted, restart/recovery, quota, and hostile-filesystem fixtures.
+
+### Gate 4: Dedicated SSD drive profile
+
+- [ ] Create/adopt only an explicit mount backed by a validated non-rotational
+  device; identify it by stable filesystem/device identity rather than name.
+- [ ] Reject the system root and already-claimed devices by default; support a
+  documented administrator override for virtual or unusual SSD topology.
+- [ ] Implement reserve, pressure, capacity, SMART/NVMe health, endurance,
+  mount-loss, replacement, import/export, and read-only degraded behavior.
+- [ ] Reuse folder hierarchy/manifest/S3 semantics while making the single-
+  device failure domain explicit in policy, CLI, TUI, and Web.
+- [ ] Add Linux package, reboot/remount, device replacement, full-disk,
+  corruption, and performance acceptance coverage.
+
+### Gate 5: Unified S3, product APIs, and migrations
+
+- [ ] Decide native embedded gateway versus provider-backed S3 per profile while
+  preserving one public S3 contract.
+- [ ] Route S3 PUT and multipart completion through quota reservation, daemon
+  ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
+  catalogue state rather than provider listings.
+- [ ] Add profile/capability discovery and idempotent provisioning APIs so a
+  Mnemosyne product requests storage policy without implementing filesystem or
+  appliance logic.
+- [ ] Provide product-owned policy templates and adapters for Synoptikon,
+  Mneion, Mnemosyne, and small standalone/package-managed projects.
+- [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
+  import jobs preserving IDs, versions, hashes, provenance, and protection.
+- [ ] Retain source placements until destination verification and explicit
+  retirement confirmation; make interrupted promotion resumable.
+
+### Gate 6: Integration and market-readiness acceptance
+
+- [ ] Publish a profile-by-host-mode support matrix and upgrade/migration policy.
+- [ ] Run package install/upgrade/uninstall, authentication, quota, S3,
+  migration, recovery, security, observability, and performance matrices for
+  folder, drive, and appliance.
+- [ ] Validate generated-data stress tests plus representative Mnemosyne product
+  workflows; never use customer/project data in automated acceptance.
+- [ ] Require real-world validation readiness, operator runbooks, release notes,
+  and no unexplained critical TODO blockers before declaring a profile ready.
 
 ## Architecture Remediation Backlog
 
@@ -475,7 +623,11 @@ list until every temporary size-budget exception has been removed.
 - [x] Add executor route-plan regression coverage proving Remote/Web/USB external origins select SSD-first under a direct-capable store policy.
 - [x] Add full-pipeline coverage proving external-origin SSD-first behavior through staged settlement under a direct-capable policy.
 - [x] Add deterministic performance coverage for no pre-copy hash on normal direct ingress and bounded high-frequency progress delivery; existing fan-out and staged external fixtures cover byte-path correctness.
-- [ ] Add appliance sustained external-origin throughput and direct-ingest no-precopy soak acceptance. Broader performance/soak acceptance remains tracked under Web availability. Blocked on 2026-07-11 while an existing 25 GiB appliance performance-test uses real source data; do not overlap this generated-data ``codex`` acceptance run with it.
+- [ ] Add appliance sustained external-origin throughput and direct-ingest
+  no-precopy soak acceptance. Broader performance/soak acceptance remains
+  tracked under Web availability. Deferred while travelling without DAS host
+  access; when resumed, verify the appliance is quiescent and do not overlap
+  the generated-data ``codex`` acceptance with production or performance work.
 
 ### Local source classification and direct-HDD operator intent
 
