@@ -117,7 +117,7 @@ pub(super) fn submit_endpoint_inventory_upsert_request(
         })
 }
 
-pub(super) fn submit_admin_job_status_request(
+pub(super) async fn submit_admin_job_status_request(
     state: &StandaloneEnclosureAdminRouteState,
     request: StandaloneAdminJobStatusDaemonRequest,
 ) -> Result<StandaloneAdminJobStatusResponse, (StatusCode, Json<AuthRouteError>)> {
@@ -127,16 +127,15 @@ pub(super) fn submit_admin_job_status_request(
             "daemon administrator job status contract is not available",
         )
     })?;
-    client.job_status(request).map_err(|err| {
-        route_error(
-            StatusCode::BAD_GATEWAY,
-            "daemon_admin_job_status_failed",
-            err.message,
-        )
-    })
+    let client = Arc::clone(client);
+    let bridge = state.daemon_bridge.clone();
+    bridge
+        .call_message(move || client.job_status(request).map_err(|err| err.message))
+        .await
+        .map_err(admin_daemon_bridge_error)
 }
 
-pub(super) fn submit_admin_job_cancel_request(
+pub(super) async fn submit_admin_job_cancel_request(
     state: &StandaloneEnclosureAdminRouteState,
     request: StandaloneAdminJobCancelDaemonRequest,
 ) -> Result<StandaloneAdminJobCancelResponse, (StatusCode, Json<AuthRouteError>)> {
@@ -146,11 +145,37 @@ pub(super) fn submit_admin_job_cancel_request(
             "daemon administrator job cancellation contract is not available",
         )
     })?;
-    client.cancel_job(request).map_err(|err| {
-        route_error(
+    let client = Arc::clone(client);
+    let bridge = state.daemon_bridge.clone();
+    bridge
+        .call_message(move || client.cancel_job(request).map_err(|err| err.message))
+        .await
+        .map_err(admin_daemon_bridge_error)
+}
+
+fn admin_daemon_bridge_error(
+    error: crate::daemon_bridge::DaemonBridgeError,
+) -> (StatusCode, Json<AuthRouteError>) {
+    match error {
+        crate::daemon_bridge::DaemonBridgeError::Client(error) => route_error(
             StatusCode::BAD_GATEWAY,
-            "daemon_admin_job_cancel_failed",
-            err.message,
-        )
-    })
+            "daemon_admin_job_failed",
+            error.message,
+        ),
+        crate::daemon_bridge::DaemonBridgeError::Busy => route_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "daemon_admin_job_busy",
+            "daemon control capacity is saturated; retry shortly",
+        ),
+        crate::daemon_bridge::DaemonBridgeError::Deadline => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "daemon_admin_job_timeout",
+            "daemon administrator job request exceeded its deadline; retry shortly",
+        ),
+        crate::daemon_bridge::DaemonBridgeError::Join(message) => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "daemon_admin_job_unavailable",
+            message,
+        ),
+    }
 }

@@ -109,6 +109,7 @@ pub(crate) struct StandaloneEnclosureAdminRouteState {
     auth_store: LocalAuthStore,
     local_user_provider: Arc<dyn LocalUserAuthorityProvider>,
     enclosure_admin_client: Option<Arc<dyn StandaloneEnclosureAdminClient>>,
+    daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
 }
 
 #[derive(Clone)]
@@ -125,6 +126,7 @@ impl StandaloneEnclosureAdminRouteState {
             enclosure_admin_client: Some(Arc::new(
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             )),
+            daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
         }
     }
 }
@@ -389,7 +391,9 @@ async fn admin_job_status(
     let request = StandaloneAdminJobStatusDaemonRequest {
         job_id: required_field("job_id", job_id)?,
     };
-    submit_admin_job_status_request(&state, request).map(Json)
+    submit_admin_job_status_request(&state, request)
+        .await
+        .map(Json)
 }
 
 async fn cancel_admin_job(
@@ -400,7 +404,9 @@ async fn cancel_admin_job(
 ) -> Result<Json<StandaloneAdminJobCancelResponse>, (StatusCode, Json<AuthRouteError>)> {
     require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
     let request = validate_cancel_admin_job_request(job_id, request)?;
-    submit_admin_job_cancel_request(&state, request).map(Json)
+    submit_admin_job_cancel_request(&state, request)
+        .await
+        .map(Json)
 }
 
 fn require_local_administrator(
@@ -2510,6 +2516,7 @@ mod tests {
             local_user_provider: Arc::new(FixedLocalUserProvider { current_user }),
             enclosure_admin_client: enclosure_admin_client
                 .map(|client| client as Arc<dyn StandaloneEnclosureAdminClient>),
+            daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
         }
     }
 

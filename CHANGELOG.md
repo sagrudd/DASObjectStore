@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.54 - 2026-07-12
+
+- Route Web administrator job status and cancellation through the bounded
+  daemon bridge, preserving typed overload/deadline responses and cancellation
+  priority across the Web and daemon boundaries.
+
 ## 0.71.53 - 2026-07-12
 
 - Route standalone remote-authentication pairing, approval, and exchange
