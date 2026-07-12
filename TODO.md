@@ -356,6 +356,10 @@ completion.
     placement through destination verification and explicit retirement; actual
     copy workers and profile adapters remain. Add atomic schema-versioned
     checkpoint save/load with strict source-retention invariants.
+  - [x] Add a daemon folder-to-folder migration worker that verifies the
+    source, reserves destination capacity, streams through the bounded folder
+    backend, verifies the finalized destination, and leaves source retirement
+    pending; retries retain failed staged data and reservations safely.
 - [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
   - [x] The core migration state machine and atomic checkpoints retain source

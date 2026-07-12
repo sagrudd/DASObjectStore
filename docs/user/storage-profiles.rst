@@ -202,4 +202,8 @@ placement remains retained through verification and is released only after an
 explicit retirement confirmation. The state machine does not itself copy files
 or mutate stores; it now has atomic schema-versioned checkpoint save/load with
 strict source-retention invariants, while daemon workers and profile adapters
-remain required.
+remain required. The daemon now has a folder-to-folder worker for local
+validation: it verifies the source, reserves destination capacity, streams and
+durably finalizes the object, verifies the destination checksum, and stops at
+``retirement_pending``. Failed finalization does not silently delete staged
+data or release its reservation, so an operator or retry worker can recover it.

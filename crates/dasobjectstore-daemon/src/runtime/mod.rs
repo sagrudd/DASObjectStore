@@ -10,6 +10,7 @@ mod folder_backend;
 mod folder_paths;
 mod ingest_files;
 mod local_admin;
+mod migration_worker;
 mod object_browser;
 mod object_download;
 mod performance_policy;
@@ -69,6 +70,7 @@ pub use local_admin::{
     LocalGroupAdministrationRequest, LocalGroupAdministrationResponse, LocalGroupCommandPlanner,
     SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
 };
+pub use migration_worker::{copy_folder_object, FolderMigrationError};
 pub use object_browser::{
     query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,
     ObjectBrowserMetadataReadError, ObjectBrowserQueryError,

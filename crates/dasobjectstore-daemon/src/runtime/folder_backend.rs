@@ -197,6 +197,13 @@ impl FolderBackend {
         let _ = fs::remove_file(temporary_path);
         let _ = self.ledger.release(reservation_id);
     }
+
+    pub(crate) fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError> {
+        self.ledger
+            .release(reservation_id)
+            .map(|_| ())
+            .map_err(|error| BackendError::InvalidRequest(format!("capacity release: {error:?}")))
+    }
 }
 
 impl ObjectStoreBackend for FolderBackend {

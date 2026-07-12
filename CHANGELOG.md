@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.24 - 2026-07-12
+
+- Add a daemon folder-to-folder migration worker with source verification,
+  bounded destination admission, durable finalization, and retirement-pending
+  safety semantics.
+
 ## 0.72.23 - 2026-07-12
 
 - Add a strict Mnemosyne adapter envelope for product-owned storage-policy
