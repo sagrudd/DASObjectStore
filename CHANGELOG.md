@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.6 - 2026-07-12
+
+- Harden folder private namespace permissions to owner-only directories and
+  payload files without changing user-selected roots.
+
 ## 0.72.5 - 2026-07-12
 
 - Declare static local failure-domain ceilings in profile capability discovery,

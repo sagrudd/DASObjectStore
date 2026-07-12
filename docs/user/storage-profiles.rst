@@ -34,6 +34,12 @@ before rename and failed validation leaves the reservation recoverable.
 Catalogue registration and user-facing profile creation still require the
 subsequent daemon contract and explicit adoption workflow.
 
+The private ``.dasobjectstore`` namespace and its object/staging descendants
+are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized
+payload files use ``0600``. The user-selected folder root is never chmod'ed;
+group-based tools must use daemon APIs rather than traversing private payloads
+directly.
+
 Per-user host mode derives state beneath ``XDG_STATE_HOME`` or
 ``$HOME/.local/state/dasobjectstore``. Runtime sockets use
 ``XDG_RUNTIME_DIR/dasobjectstore`` when provided; offline folder operations may

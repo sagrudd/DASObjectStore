@@ -77,9 +77,9 @@ impl FolderBackend {
         let namespace = root.join(NAMESPACE);
         let objects_root = namespace.join(OBJECTS_DIR);
         let staging_root = namespace.join(STAGING_DIR);
-        ensure_directory(&namespace)?;
-        ensure_directory(&objects_root)?;
-        ensure_directory(&staging_root)?;
+        ensure_private_directory(&namespace)?;
+        ensure_private_directory(&objects_root)?;
+        ensure_private_directory(&staging_root)?;
         Ok(Self {
             root,
             objects_root,
@@ -224,11 +224,14 @@ impl ObjectStoreBackend for FolderBackend {
     ) -> Result<BackendObjectRecord, BackendError> {
         validate_object_key(key)?;
         let temporary_path = self.temporary_path(reservation_id)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary_path)
-            .map_err(io_error)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary_path).map_err(io_error)?;
         let mut hasher = Sha256::new();
         let mut buffer = [0_u8; 64 * 1024];
         let result = (|| {
@@ -647,6 +650,18 @@ fn ensure_directory(path: &Path) -> Result<(), BackendError> {
     }
 }
 
+fn ensure_private_directory(path: &Path) -> Result<(), BackendError> {
+    ensure_directory(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(path).map_err(io_error)?.permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(path, permissions).map_err(io_error)?;
+    }
+    Ok(())
+}
+
 fn ensure_safe_parent(root: &Path, parent: &Path) -> Result<(), BackendError> {
     let relative = parent.strip_prefix(root).map_err(|_| {
         BackendError::InvalidRequest("object parent escaped backend root".to_string())
@@ -654,7 +669,7 @@ fn ensure_safe_parent(root: &Path, parent: &Path) -> Result<(), BackendError> {
     let mut current = root.to_path_buf();
     for component in relative.components() {
         current.push(component.as_os_str());
-        ensure_directory(&current)?;
+        ensure_private_directory(&current)?;
     }
     Ok(())
 }
@@ -709,6 +724,18 @@ mod tests {
             finalized.location,
             ".dasobjectstore/objects/sample/run/data.txt"
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(root.join(&finalized.location))
+                    .expect("finalized metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
         let mut read = String::new();
         backend
             .read(&key)
@@ -923,6 +950,31 @@ mod tests {
         let error = FolderBackend::open(&root, manifest(), CapacityPolicy::default(), 0)
             .expect_err("folder backend must be bounded");
         assert!(format!("{error:?}").contains("finite logical capacity"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_backend_private_namespace_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = unique_root();
+        let _backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        for path in [
+            root.join(".dasobjectstore"),
+            root.join(".dasobjectstore/objects"),
+            root.join(".dasobjectstore/staging"),
+        ] {
+            assert_eq!(
+                fs::metadata(path)
+                    .expect("namespace metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        let _ = fs::remove_dir_all(root);
     }
 
     fn manifest() -> ObjectStoreManifest {

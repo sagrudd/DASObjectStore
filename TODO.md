@@ -233,6 +233,9 @@ completion.
     recovery.
   - [ ] Add a deterministic mutation race fixture before enabling resumable
     adoption; generic stream staging still cannot promise source-file stability.
+  - [x] Tighten private namespace/object/staging directories to Unix ``0700``
+    and payload files to ``0600`` without changing the user-selected root;
+    local permission regression coverage passes on macOS.
 - [ ] Add read-only inspection followed by resumable adoption/reconciliation;
   report unmanaged drift without silently accepting it as authoritative.
   - [x] Add a read-only `FolderBackend::inspect_user_tree` report for unmanaged
