@@ -918,8 +918,9 @@ list until every temporary size-budget exception has been removed.
 - [~] Replace synchronous daemon Unix-socket calls in Axum handlers with an
   async bridge and bounded blocking pool. The identified browser, activity,
   remote-auth, administrator, and archive paths now have deadlines, bounded
-  permits, typed overload/degraded responses, and a best-effort circuit breaker;
-  strict cancellation propagation and a single-probe half-open circuit remain.
+  permits, typed overload/degraded responses, and a circuit breaker with a
+  single half-open probe; strict cancellation propagation remains open because
+  the synchronous Unix transport cannot yet interrupt a blocked child call.
 - [x] Route ObjectStore file and folder download authorization/location lookups
   through the shared bounded daemon bridge; preserve typed `429`/`503`
   overload/deadline responses and release control capacity before payload

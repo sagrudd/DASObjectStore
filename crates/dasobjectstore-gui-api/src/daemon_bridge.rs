@@ -17,6 +17,7 @@ pub(crate) struct DaemonBridge {
     deadline: Duration,
     consecutive_failures: Arc<AtomicUsize>,
     open_until: Arc<Mutex<Option<Instant>>>,
+    probe_in_flight: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -35,6 +36,7 @@ impl DaemonBridge {
             deadline: DEFAULT_DEADLINE,
             consecutive_failures: Arc::new(AtomicUsize::new(0)),
             open_until: Arc::new(Mutex::new(None)),
+            probe_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -50,6 +52,7 @@ impl DaemonBridge {
             deadline,
             consecutive_failures: Arc::new(AtomicUsize::new(0)),
             open_until: Arc::new(Mutex::new(None)),
+            probe_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -110,15 +113,24 @@ impl DaemonBridge {
         match *open_until {
             Some(deadline) if Instant::now() < deadline => true,
             Some(_) => {
-                *open_until = None;
-                self.consecutive_failures.store(0, Ordering::Release);
-                false
+                if self
+                    .probe_in_flight
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    *open_until = None;
+                    self.consecutive_failures.store(0, Ordering::Release);
+                    false
+                } else {
+                    true
+                }
             }
-            None => false,
+            None => self.probe_in_flight.load(Ordering::Acquire),
         }
     }
 
     fn record_failure(&self) {
+        self.probe_in_flight.store(false, Ordering::Release);
         let failures = self.consecutive_failures.fetch_add(1, Ordering::AcqRel) + 1;
         if failures >= CIRCUIT_FAILURE_THRESHOLD {
             *self.open_until.lock().expect("daemon bridge circuit lock") =
@@ -128,7 +140,14 @@ impl DaemonBridge {
 
     fn reset_circuit(&self) {
         self.consecutive_failures.store(0, Ordering::Release);
+        self.probe_in_flight.store(false, Ordering::Release);
         *self.open_until.lock().expect("daemon bridge circuit lock") = None;
+    }
+
+    #[cfg(test)]
+    fn force_cooldown_elapsed(&self) {
+        *self.open_until.lock().expect("daemon bridge circuit lock") =
+            Some(Instant::now() - Duration::from_millis(1));
     }
 }
 
@@ -188,5 +207,47 @@ mod tests {
         }
         let result: Result<(), _> = bridge.call(|| Ok(())).await;
         assert!(matches!(result, Err(DaemonBridgeError::CircuitOpen)));
+    }
+
+    #[tokio::test]
+    async fn permits_only_one_half_open_probe_after_cooldown() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(100));
+        for _ in 0..3 {
+            let result: Result<(), _> = bridge
+                .call(
+                    || -> Result<(), super::StandaloneObjectBrowserClientError> {
+                        panic!("simulated blocking worker failure")
+                    },
+                )
+                .await;
+            assert!(matches!(result, Err(DaemonBridgeError::Join(_))));
+        }
+        bridge.force_cooldown_elapsed();
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let probe = {
+            let bridge = bridge.clone();
+            tokio::spawn(async move {
+                bridge
+                    .call(move || {
+                        entered_sender.send(()).expect("probe entered signal");
+                        release_receiver
+                            .blocking_recv()
+                            .expect("probe release signal");
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(1), entered_receiver)
+            .await
+            .expect("probe starts")
+            .expect("probe entered");
+        assert!(matches!(
+            bridge.call(|| Ok(())).await,
+            Err(DaemonBridgeError::CircuitOpen)
+        ));
+        release_sender.send(()).expect("release probe");
+        assert!(probe.await.expect("probe joins").is_ok());
     }
 }

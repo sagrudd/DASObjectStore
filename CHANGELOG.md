@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.61 - 2026-07-12
+
+- Add single-probe half-open semantics to the daemon bridge circuit breaker so
+  cooldown recovery cannot stampede a stalled daemon.
+
 ## 0.71.60 - 2026-07-12
 
 - Add a bounded best-effort daemon bridge circuit breaker: repeated transport
