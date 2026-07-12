@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.16 - 2026-07-12
+
+- Align Debian package-asset regression expectations with the authoritative
+  dependency contract, restoring a green workspace test baseline.
+- Synchronize the checked-in product manifest version with the workspace
+  release version.
+
 ## 0.72.15 - 2026-07-12
 
 - Add a shared, bounded `StoragePolicyTemplate` contract for product-owned

@@ -19,6 +19,8 @@ const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const MAKEFILE: &str = include_str!("../../../Makefile");
+const DEBIAN_RUNTIME_DEPENDENCIES: &str =
+    "Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin, awscli";
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -121,10 +123,7 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(PAM_SERVICE, "account required pam_unix.so");
     assert_contains(BUILD_DEB, "etc/pam.d");
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
-    assert_contains(
-        BUILD_DEB,
-        "Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin",
-    );
+    assert_contains(BUILD_DEB, DEBIAN_RUNTIME_DEPENDENCIES);
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
     assert_contains(BUILD_DEB, "docker-buildx");
     assert_contains(
@@ -200,10 +199,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
-    assert_contains(
-        BUILD_DEB,
-        "Depends: ca-certificates, acl, libpam0g, docker.io, docker-buildx | docker-buildx-plugin",
-    );
+    assert_contains(BUILD_DEB, DEBIAN_RUNTIME_DEPENDENCIES);
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
 }
 

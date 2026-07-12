@@ -103,6 +103,11 @@ completion.
   storage reconciliation/helpers modules; the guard now passes against the
   reviewed baseline. The request-handler façade is now also below budget;
   no production exceptions remain.
+  - [x] Keep package-asset regression tests aligned with the authoritative
+    Debian dependency contract, including `udisks2` and `awscli`, so the local
+    workspace test baseline does not mask packaging drift.
+  - [x] Keep the checked-in product manifest version synchronized with the
+    workspace package version so Mnemosyne contract tests detect real drift.
   - [x] Remove stale daemon and GUI ``home_aggregator.rs`` entries after the
     module-size guard confirmed those modules are below budget; no GUI
     exceptions remain.
