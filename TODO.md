@@ -262,6 +262,9 @@ list until every temporary size-budget exception has been removed.
     the top-level runner.
   - [x] Extract SSD residency budgeting, bounded batch planning, and admission
     boundary tests into `crates/dasobjectstore-cli/src/run/performance_residency.rs`.
+  - [x] Extract live SSD-read/HDD-write rate accounting and its focused
+    regression tests into `crates/dasobjectstore-cli/src/run/performance_rates.rs`;
+    preserve shared counters across worker clones and sync-time accounting.
   - [ ] Extract the remaining performance execution engine (scenario runners,
     disk scheduler, copy primitives, and measurement helpers) before removing
     the CLI runner exception.

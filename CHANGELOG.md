@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.6 - 2026-07-12
+
+- Extract CLI performance live-rate accounting into a dedicated module with
+  focused coverage for idle gaps and HDD-only sync time.
+- Refresh the store-contents tree regression assertions to match its explicit
+  file/directory labels.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign
