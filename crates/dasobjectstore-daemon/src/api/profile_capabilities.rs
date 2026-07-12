@@ -50,6 +50,8 @@ pub struct DeploymentProfileCapabilities {
     pub protection_policies: Vec<ProtectionPolicy>,
     pub backend_operations: BackendCapabilities,
     pub requirements: ProfileRequirements,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_distinct_local_failure_domains: Option<u8>,
     pub services: ProfileServices,
     #[serde(default)]
     pub warnings: Vec<String>,
@@ -93,6 +95,17 @@ impl ObjectStoreCapabilityDiscoveryResponse {
                     ),
                 );
             }
+            if descriptor.availability != ProfileAvailability::Unavailable
+                && descriptor
+                    .max_distinct_local_failure_domains
+                    .is_none_or(|domains| domains == 0)
+            {
+                return Err(
+                    ObjectStoreCapabilityValidationError::InvalidFailureDomainCeiling(
+                        descriptor.profile,
+                    ),
+                );
+            }
         }
         Ok(())
     }
@@ -104,6 +117,7 @@ pub enum ObjectStoreCapabilityValidationError {
     DuplicateProfile(DeploymentProfile),
     MissingHostMode(DeploymentProfile),
     MissingUnavailableReason(DeploymentProfile),
+    InvalidFailureDomainCeiling(DeploymentProfile),
 }
 
 impl Display for ObjectStoreCapabilityValidationError {
@@ -134,6 +148,11 @@ impl Display for ObjectStoreCapabilityValidationError {
                 "unavailable profile {} must include a reason",
                 profile.name()
             ),
+            Self::InvalidFailureDomainCeiling(profile) => write!(
+                formatter,
+                "profile {} must declare a positive local failure-domain ceiling",
+                profile.name()
+            ),
         }
     }
 }
@@ -160,6 +179,11 @@ mod tests {
                 stable_device_identity_required: profile == DeploymentProfile::Drive,
                 single_machine: true,
             },
+            max_distinct_local_failure_domains: Some(if profile == DeploymentProfile::Appliance {
+                3
+            } else {
+                1
+            }),
             services: ProfileServices {
                 managed_ingress: true,
                 hierarchical_manifest: true,
@@ -184,6 +208,14 @@ mod tests {
         };
         response.validate().expect("catalogue validates");
         assert!(response.profiles[1].requirements.dedicated_ssd_required);
+        assert_eq!(
+            response.profiles[1].max_distinct_local_failure_domains,
+            Some(1)
+        );
+        assert_eq!(
+            response.profiles[2].max_distinct_local_failure_domains,
+            Some(3)
+        );
         assert!(!response.profiles[2].requirements.bounded_capacity_required);
     }
 

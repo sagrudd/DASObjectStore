@@ -294,7 +294,9 @@ completion.
   appliance logic.
   - [x] Add a versioned static profile-capability catalogue DTO with separate
     backend-operation, service, host-mode, protection, and requirement fields;
-    runtime store readiness and provisioning routes remain separate.
+    runtime store readiness and provisioning routes remain separate. The
+    catalogue states a static local failure-domain ceiling (folder/drive 1,
+    appliance 3), not current redundancy or external replication.
 - [ ] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
 - [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/

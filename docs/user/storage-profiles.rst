@@ -134,4 +134,7 @@ modes and protection policies, backend operations, service capabilities, and
 requirements such as bounded capacity or dedicated SSD media. It does not
 contain mount paths, device IDs, credentials, free-space observations, or a
 claim that a configured store is healthy; runtime readiness remains a separate
-store-inventory contract.
+store-inventory contract. It also states only the static local failure-domain
+ceiling: folder and drive are one domain, while appliance may represent up to
+three local copies. This is not a current placement or external-replication
+promise.

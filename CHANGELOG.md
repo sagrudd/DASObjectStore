@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.5 - 2026-07-12
+
+- Declare static local failure-domain ceilings in profile capability discovery,
+  without implying current placement or external replication.
+
 ## 0.72.4 - 2026-07-12
 
 - Add a versioned static profile-capability catalogue for product adapters,
