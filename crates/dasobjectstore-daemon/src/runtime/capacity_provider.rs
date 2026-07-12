@@ -6,6 +6,7 @@
 use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
 use crate::runtime::capacity_persistence::{load_capacity_ledger, save_capacity_ledger};
 use crate::runtime::service::DaemonServiceRuntimeError;
+use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::CapacityReservationLedger;
 use dasobjectstore_object_service::{default_store_registry_path, read_store_registry};
 use std::collections::HashMap;
@@ -50,6 +51,26 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         &self,
         request: CapacityAdmissionRequest,
     ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError>;
+
+    fn commit(
+        &self,
+        _store_id: &StoreId,
+        _reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Err(unavailable(
+            "capacity reservation commit provider is not configured",
+        ))
+    }
+
+    fn release(
+        &self,
+        _store_id: &StoreId,
+        _reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Err(unavailable(
+            "capacity reservation release provider is not configured",
+        ))
+    }
 }
 
 pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
@@ -93,6 +114,33 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
 
     fn ledger_path(&self, store_id: &str) -> PathBuf {
         self.ledger_directory.join(format!("{store_id}.json"))
+    }
+
+    fn policy_for_store(
+        &self,
+        store_id: &StoreId,
+    ) -> Result<dasobjectstore_core::store::CapacityPolicy, DaemonServiceRuntimeError> {
+        read_store_registry(&self.store_registry_path)
+            .map_err(DaemonServiceRuntimeError::ObjectService)?
+            .into_iter()
+            .find(|definition| definition.store_id == store_id.clone())
+            .map(|definition| definition.policy.capacity)
+            .ok_or_else(|| unavailable(format!("unknown object store {store_id}")))
+    }
+
+    fn ledger_for_store<'a>(
+        &'a self,
+        ledgers: &'a mut HashMap<String, CapacityReservationLedger>,
+        store_id: &StoreId,
+        policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<&'a mut CapacityReservationLedger, DaemonServiceRuntimeError> {
+        if !ledgers.contains_key(store_id.as_str()) {
+            let ledger = self.load_or_initialize(store_id.as_str(), policy)?;
+            ledgers.insert(store_id.as_str().to_string(), ledger);
+        }
+        ledgers
+            .get_mut(store_id.as_str())
+            .ok_or_else(|| unavailable("capacity ledger disappeared during lookup"))
     }
 
     fn load_or_initialize(
@@ -199,6 +247,62 @@ where
             )));
         }
         Ok(response)
+    }
+
+    fn commit(
+        &self,
+        store_id: &StoreId,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut ledgers = self
+            .ledgers
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        ledger
+            .update_policy(policy)
+            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
+        let before = ledger.snapshot();
+        ledger.commit(reservation_id).map_err(|error| {
+            unavailable(format!("capacity reservation commit failed: {error:?}"))
+        })?;
+        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+            *ledger = CapacityReservationLedger::from_snapshot(before)
+                .map_err(|restore| unavailable(format!("capacity rollback failed: {restore:?}")))?;
+            return Err(unavailable(format!(
+                "capacity ledger persistence failed: {error}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn release(
+        &self,
+        store_id: &StoreId,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut ledgers = self
+            .ledgers
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        ledger
+            .update_policy(policy)
+            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
+        let before = ledger.snapshot();
+        ledger.release(reservation_id).map_err(|error| {
+            unavailable(format!("capacity reservation release failed: {error:?}"))
+        })?;
+        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+            *ledger = CapacityReservationLedger::from_snapshot(before)
+                .map_err(|restore| unavailable(format!("capacity rollback failed: {restore:?}")))?;
+            return Err(unavailable(format!(
+                "capacity ledger persistence failed: {error}"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -323,6 +427,13 @@ mod tests {
                 .reserved_bytes(),
             100
         );
+        let store_id = StoreId::new("codex").expect("store id");
+        provider
+            .commit(&store_id, "upload-1")
+            .expect("reservation commits");
+        let committed = load_capacity_ledger(&ledger_path).expect("committed ledger reload");
+        assert_eq!(committed.reserved_bytes(), 0);
+        assert_eq!(committed.used_bytes(), 100);
 
         let direct = provider
             .admit(request(
@@ -331,6 +442,12 @@ mod tests {
             ))
             .expect("direct admitted");
         assert_eq!(direct.ssd_available_bytes, None);
+        provider
+            .release(&store_id, "upload-2")
+            .expect("reservation releases");
+        let released = load_capacity_ledger(&ledger_path).expect("released ledger reload");
+        assert_eq!(released.reserved_bytes(), 0);
+        assert_eq!(released.used_bytes(), 100);
         let _ = std::fs::remove_dir_all(root);
     }
 }

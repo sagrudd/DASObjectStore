@@ -129,6 +129,9 @@ probe, or a failed persistence write remains unavailable rather than being
 admitted with guessed usage.
 The provider also requires the requested copy count to match the daemon's
 store policy; callers cannot reduce redundancy through the admission request.
+Reservations have explicit daemon-owned ``commit`` and ``release`` lifecycle
+operations. A failed durable update restores the prior ledger snapshot; upload
+workers must retain the reservation ID until their catalogue outcome is known.
 The core ledger has a concurrent reservation regression: simultaneous callers
 contending for a bounded quota cannot overbook logical capacity. Crash/restart
 reservation persistence, multipart expiry, dedupe accounting, and full-disk

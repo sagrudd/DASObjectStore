@@ -908,6 +908,9 @@ route and typed client contract are in place, and the packaged daemon now
 injects a registry-backed provider with persisted ledgers and ``statvfs``
 probes. Ingest/S3/multipart reservation completion, catalogue accounting, and
 stale-reservation expiry remain open.
+The provider also exposes durable commit/release lifecycle operations with
+rollback on persistence failure; transfer-job reservation ownership remains
+the next integration slice.
 
 ## Milestone 28: Folder ObjectStore Profile
 
