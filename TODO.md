@@ -298,6 +298,10 @@ list until every temporary size-budget exception has been removed.
     - [x] Extract shared performance scenario job, pending-queue, and active
       HDD-write state into `crates/dasobjectstore-cli/src/run/performance_execution.rs`;
       preserve FIFO backpressure and live TUI/report state coverage.
+    - [x] Extract the SSD-only performance scenario into
+      `crates/dasobjectstore-cli/src/run/performance_ssd_only.rs`; preserve
+      bounded SSD residency batching, write-before-readback ordering, and TUI
+      log suppression regressions.
   - [x] Move Store contents tree/du rendering and aggregation helpers beside
     the `store_read` handlers, keeping output contracts and tests unchanged.
   - [x] Extract daemon storage authorization, telemetry access, and browser

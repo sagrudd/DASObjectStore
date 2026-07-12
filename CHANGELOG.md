@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.16 - 2026-07-12
+
+- Extract the SSD-only performance scenario into a focused execution module,
+  preserving bounded residency batches and SSD write/readback telemetry.
+
 ## 0.71.15 - 2026-07-12
 
 - Extract shared CLI performance job, queue, and active HDD-write state into a
