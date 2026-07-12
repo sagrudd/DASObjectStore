@@ -174,6 +174,7 @@ impl CapacityPolicy {
 pub struct CapacityAdmissionInput {
     pub requested_bytes: u64,
     pub copy_count: u8,
+    pub requires_ssd_staging: bool,
     pub used_bytes: u64,
     pub reserved_bytes: u64,
     pub backend_free_bytes: u64,
@@ -182,6 +183,7 @@ pub struct CapacityAdmissionInput {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CapacityAdmission {
+    pub requires_ssd_staging: bool,
     pub logical_available_bytes: Option<u64>,
     pub backend_available_bytes: u64,
     pub ssd_available_bytes: u64,
@@ -191,7 +193,11 @@ pub struct CapacityAdmission {
 
 impl CapacityAdmission {
     pub fn strictest_available_bytes(&self) -> Option<u64> {
-        let mut available = self.backend_available_bytes.min(self.ssd_available_bytes);
+        let mut available = if self.requires_ssd_staging {
+            self.backend_available_bytes.min(self.ssd_available_bytes)
+        } else {
+            self.backend_available_bytes
+        };
         if let Some(logical) = self.logical_available_bytes {
             available = available.min(logical);
         }
@@ -220,11 +226,15 @@ pub fn evaluate_capacity_admission(
         .backend_free_bytes
         .saturating_sub(policy.backend_reserve_bytes);
     let admission = CapacityAdmission {
+        requires_ssd_staging: input.requires_ssd_staging,
         logical_available_bytes,
         backend_available_bytes,
         ssd_available_bytes: input.ssd_free_bytes,
         required_backend_bytes,
-        required_ssd_bytes: input.requested_bytes,
+        required_ssd_bytes: input
+            .requires_ssd_staging
+            .then_some(input.requested_bytes)
+            .unwrap_or(0),
     };
     if logical_available_bytes.is_some_and(|available| input.requested_bytes > available) {
         return Err(CapacityAdmissionError::LogicalQuota {
@@ -236,7 +246,7 @@ pub fn evaluate_capacity_admission(
             available_bytes: backend_available_bytes,
         });
     }
-    if input.requested_bytes > input.ssd_free_bytes {
+    if input.requires_ssd_staging && input.requested_bytes > input.ssd_free_bytes {
         return Err(CapacityAdmissionError::SsdStaging {
             available_bytes: input.ssd_free_bytes,
         });
@@ -954,6 +964,7 @@ mod tests {
             CapacityAdmissionInput {
                 requested_bytes: 200,
                 copy_count: 2,
+                requires_ssd_staging: true,
                 used_bytes: 100,
                 reserved_bytes: 50,
                 backend_free_bytes: 1_000,
@@ -970,6 +981,7 @@ mod tests {
             CapacityAdmissionInput {
                 requested_bytes: 600,
                 copy_count: 1,
+                requires_ssd_staging: true,
                 used_bytes: 0,
                 reserved_bytes: 0,
                 backend_free_bytes: 2_000,
@@ -983,6 +995,40 @@ mod tests {
                 available_bytes: 500
             }
         );
+    }
+
+    #[test]
+    fn direct_admission_bypasses_only_ssd_constraint() {
+        let admission = evaluate_capacity_admission(
+            &CapacityPolicy::bounded(1_000, 100),
+            CapacityAdmissionInput {
+                requested_bytes: 200,
+                copy_count: 1,
+                requires_ssd_staging: false,
+                used_bytes: 0,
+                reserved_bytes: 0,
+                backend_free_bytes: 500,
+                ssd_free_bytes: 0,
+            },
+        )
+        .expect("direct admission ignores SSD free space");
+        assert_eq!(admission.required_ssd_bytes, 0);
+        assert_eq!(admission.strictest_available_bytes(), Some(400));
+
+        let error = evaluate_capacity_admission(
+            &CapacityPolicy::bounded(100, 0),
+            CapacityAdmissionInput {
+                requested_bytes: 200,
+                copy_count: 1,
+                requires_ssd_staging: false,
+                used_bytes: 0,
+                reserved_bytes: 0,
+                backend_free_bytes: 500,
+                ssd_free_bytes: 0,
+            },
+        )
+        .expect_err("direct admission still enforces logical quota");
+        assert!(matches!(error, CapacityAdmissionError::LogicalQuota { .. }));
     }
 
     #[test]

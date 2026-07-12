@@ -65,6 +65,11 @@ before an upload and commits or releases the reservation after durable
 finalization. Existing appliance policies remain explicitly unbounded until an
 operator performs a compatibility-aware capacity migration.
 
+Admission explicitly records whether SSD staging is required. External ingress
+must derive this as true; policy-permitted direct server-local ingress may set
+it false and bypass only the SSD-free constraint. Logical quota, backend reserve,
+copy amplification, and backend capacity remain mandatory in both routes.
+
 Quota reductions never delete data. The core ledger can enter an explicit
 ``over_quota`` pressure state while preserving reads and existing reservations;
 new reservations are rejected until usage is remediated. Deletion accounting

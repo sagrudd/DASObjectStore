@@ -108,6 +108,7 @@ impl CapacityAdmissionResponse {
         let input = CapacityAdmissionInput {
             requested_bytes: request.requested_bytes,
             copy_count: request.copy_count,
+            requires_ssd_staging: request.requires_ssd_staging,
             ..input
         };
         let result = evaluate_capacity_admission(policy, input);
@@ -210,6 +211,7 @@ mod tests {
         CapacityAdmissionInput {
             requested_bytes: 100,
             copy_count: 2,
+            requires_ssd_staging: true,
             used_bytes: 100,
             reserved_bytes: 20,
             backend_free_bytes: 1_000,
@@ -311,6 +313,7 @@ mod tests {
                 CapacityAdmissionInput {
                     backend_free_bytes: u64::MAX,
                     ssd_free_bytes: u64::MAX,
+                    requires_ssd_staging: true,
                     ..overflow
                 },
             )
@@ -327,9 +330,14 @@ mod tests {
         let response = CapacityAdmissionResponse::evaluate(
             &request,
             &CapacityPolicy::bounded(1_000, 100),
-            input(),
+            CapacityAdmissionInput {
+                ssd_free_bytes: 0,
+                ..input()
+            },
         )
         .expect("direct request evaluates");
+        assert_eq!(response.decision, CapacityAdmissionDecision::Admitted);
+        assert_eq!(response.reason, None);
         assert_eq!(response.ssd_available_bytes, None);
         assert_eq!(response.required_ssd_bytes, 0);
     }
