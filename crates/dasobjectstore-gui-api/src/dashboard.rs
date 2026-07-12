@@ -21,12 +21,12 @@ pub use redesign::{
     ActiveUsersSummaryView, AddEnclosureAffordanceView, CapacitySummaryView, CpuUsageSummaryView,
     CreateObjectStoreAffordanceView, CreateObjectStoreDefaultsView, CreateObjectStoreFieldView,
     DasEnclosureCardView, DasEnclosureDetailView, DashboardHealthStateView, DiskIoDeviceView,
-    DiskIoSummaryView, DriveCountSummaryView, EnclosureConnectionView, EnclosureDriveSlotView,
-    EnclosuresPageView, HealthSummaryView, HomeDashboardView, MemoryStressStateView,
-    MemoryStressView, ObjectServiceStatusView, ObjectStoreCardView, ObjectStoresPageView,
-    SmartWarningView, SmartWarningsSummaryView, StorageGroupView, StoreClassOptionView,
-    TelemetryCardStateView, TelemetryWindowControlView, TelemetryWindowOptionView,
-    ThroughputDayView, ThroughputSummaryView, WriterPolicyReadinessView,
+    DiskIoMissingDataView, DiskIoSummaryView, DriveCountSummaryView, EnclosureConnectionView,
+    EnclosureDriveSlotView, EnclosuresPageView, HealthSummaryView, HomeDashboardView,
+    MemoryStressStateView, MemoryStressView, ObjectServiceStatusView, ObjectStoreCardView,
+    ObjectStoresPageView, SmartWarningView, SmartWarningsSummaryView, StorageGroupView,
+    StoreClassOptionView, TelemetryCardStateView, TelemetryWindowControlView,
+    TelemetryWindowOptionView, ThroughputDayView, ThroughputSummaryView, WriterPolicyReadinessView,
     REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
 

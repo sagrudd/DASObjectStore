@@ -496,6 +496,10 @@ pub struct DiskIoSummaryResponse {
     pub sample_age_seconds: Option<u64>,
     #[serde(default)]
     pub per_disk: Vec<DiskIoDeviceResponse>,
+    #[serde(default)]
+    pub collection_quality: Option<String>,
+    #[serde(default)]
+    pub missing_data: Vec<DiskIoMissingDataResponse>,
     pub state: String,
     pub message: Option<String>,
 }
@@ -517,6 +521,13 @@ pub struct DiskIoDeviceResponse {
     pub missing_reason: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct DiskIoMissingDataResponse {
+    pub path: String,
+    pub reason: String,
+    pub detail: Option<String>,
+}
+
 impl Default for DiskIoSummaryResponse {
     fn default() -> Self {
         Self {
@@ -529,6 +540,8 @@ impl Default for DiskIoSummaryResponse {
             sample_timestamp_utc: None,
             sample_age_seconds: None,
             per_disk: Vec::new(),
+            collection_quality: None,
+            missing_data: Vec::new(),
             state: "unavailable".to_string(),
             message: Some("Disk IO telemetry is not available yet.".to_string()),
         }

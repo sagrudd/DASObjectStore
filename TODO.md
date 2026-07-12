@@ -1644,8 +1644,7 @@ list until every temporary size-budget exception has been removed.
     mapped device identity, in the Home Disk IO card; mixed valid/missing disks
     retain valid totals while showing an elevated diagnostic.
   - [x] Carry sample timestamp/age and per-disk identity/rates through the Home
-    wire view; full collection-quality/missing-data status remains a follow-up
-    field for the dashboard contract.
+    wire view, along with collection quality and raw missing-data markers.
 - [ ] Make the Home throughput chart explicitly distinguish retained Disk IO
   samples, legacy throughput-file fallback, no observed IO, and telemetry
   collection failure. Preserve chart gaps and show a linked diagnostic rather

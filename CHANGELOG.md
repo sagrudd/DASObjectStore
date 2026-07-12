@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.69 - 2026-07-12
+
+- Carry Home Disk IO collection quality and raw missing-data markers alongside
+  the per-disk diagnostics, with optional fields for legacy clients.
+
 ## 0.71.68 - 2026-07-12
 
 - Add per-disk Home Disk IO rows with mapped identity, rates, missing reasons,

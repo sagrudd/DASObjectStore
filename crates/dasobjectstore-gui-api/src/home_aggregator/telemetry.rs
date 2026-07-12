@@ -3,8 +3,8 @@
 use super::{format_tib, mib_per_second, percent_basis_points, percent_u8};
 use crate::dashboard::{
     ActiveUsersSummaryView, CapacitySummaryView, CpuUsageSummaryView, DashboardWarning,
-    DiskIoDeviceView, DiskIoSummaryView, MemoryStressStateView, MemoryStressView,
-    TelemetryCardStateView,
+    DiskIoDeviceView, DiskIoMissingDataView, DiskIoSummaryView, MemoryStressStateView,
+    MemoryStressView, TelemetryCardStateView,
 };
 use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
 use dasobjectstore_daemon::{
@@ -152,6 +152,18 @@ pub(super) fn disk_io_summary(
             parse_utc_timestamp_seconds(&latest.timestamp_utc)
                 .map(|sample| generated.saturating_sub(sample) as u64)
         });
+    let collection_quality = Some(telemetry_collection_quality_label(
+        latest.collection_quality,
+    ));
+    let missing_data = latest
+        .missing_data
+        .iter()
+        .map(|marker| DiskIoMissingDataView {
+            path: marker.path.clone(),
+            reason: telemetry_missing_reason_label(marker.reason).to_string(),
+            detail: marker.detail.clone(),
+        })
+        .collect::<Vec<_>>();
     if saw_value {
         return Some(DiskIoSummaryView {
             available: true,
@@ -163,6 +175,8 @@ pub(super) fn disk_io_summary(
             sample_timestamp_utc: Some(latest.timestamp_utc.clone()),
             sample_age_seconds,
             per_disk: per_disk.clone(),
+            collection_quality: collection_quality.clone(),
+            missing_data: missing_data.clone(),
             state: if missing_diagnostics.is_empty() {
                 TelemetryCardStateView::Nominal
             } else {
@@ -204,6 +218,8 @@ pub(super) fn disk_io_summary(
             sample_timestamp_utc: Some(latest.timestamp_utc.clone()),
             sample_age_seconds,
             per_disk: per_disk.clone(),
+            collection_quality: collection_quality.clone(),
+            missing_data: missing_data.clone(),
             state: TelemetryCardStateView::Unavailable,
             message: Some(message),
         })
@@ -231,6 +247,17 @@ fn telemetry_missing_reason_label(reason: ApplianceTelemetryMissingReason) -> &'
         ApplianceTelemetryMissingReason::NotConfigured => "not configured",
         ApplianceTelemetryMissingReason::Unknown => "unknown reason",
     }
+}
+
+fn telemetry_collection_quality_label(
+    quality: dasobjectstore_daemon::ApplianceTelemetryCollectionQuality,
+) -> String {
+    match quality {
+        dasobjectstore_daemon::ApplianceTelemetryCollectionQuality::Complete => "complete",
+        dasobjectstore_daemon::ApplianceTelemetryCollectionQuality::Partial => "partial",
+        dasobjectstore_daemon::ApplianceTelemetryCollectionQuality::Unavailable => "unavailable",
+    }
+    .to_string()
 }
 
 pub(super) fn cpu_usage_summary(
@@ -388,7 +415,7 @@ mod tests {
             "samples": [{
                 "timestamp_utc": "2026-07-09T18:00:00Z",
                 "collection_quality": "partial",
-                "missing_data": [],
+                "missing_data": [{"path": "disks.hdd-a.io", "reason": "first_sample_warmup", "detail": "awaiting second sample"}],
                 "cpu": {"usage_percent": null, "load_average_1m": null, "load_average_5m": null, "load_average_15m": null, "logical_core_count": null, "missing_reason": "daemon_startup"},
                 "memory": {"total_bytes": null, "available_bytes": null, "used_percent": null, "swap_total_bytes": null, "swap_used_bytes": null, "missing_reason": "collector_unavailable"},
                 "enclosures": [],
@@ -409,6 +436,12 @@ mod tests {
             Some("2026-07-09T18:00:00Z")
         );
         assert_eq!(summary.sample_age_seconds, Some(0));
+        assert_eq!(summary.collection_quality.as_deref(), Some("partial"));
+        assert_eq!(summary.missing_data[0].path, "disks.hdd-a.io");
+        assert_eq!(
+            summary.missing_data[0].detail.as_deref(),
+            Some("awaiting second sample")
+        );
         assert_eq!(summary.per_disk.len(), 1);
         assert_eq!(summary.per_disk[0].device_name.as_deref(), Some("sda"));
         assert_eq!(

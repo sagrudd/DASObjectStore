@@ -659,6 +659,8 @@ fn telemetry_disk_io_summary(
         sample_timestamp_utc: None,
         sample_age_seconds: None,
         per_disk: Vec::new(),
+        collection_quality: None,
+        missing_data: Vec::new(),
         state: TelemetryCardStateView::Nominal,
         message: None,
     })
