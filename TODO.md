@@ -228,6 +228,10 @@ completion.
     client request ID; rejected requests leave the ledger unchanged while
     admitted logical versions create a transactional reservation. Transport
     route integration remains open.
+  - [x] Add an authenticated, read-only daemon capacity-admission transport
+    route with typed client plumbing, stable API errors, and fail-closed
+    orchestration when live ledger/probe state is unavailable; live registry,
+    filesystem probes, and ingest/S3/multipart reservation wiring remain open.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.

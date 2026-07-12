@@ -975,6 +975,7 @@ impl DaemonApiRequest {
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::ProfileCapabilities(_) => "profile_capabilities",
+            Self::CapacityAdmission(_) => "capacity_admission",
             Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
             Self::ObjectBrowser(_) => "object_browser",
             Self::ObjectDownload(_) => "object_download",
@@ -1005,6 +1006,7 @@ mod tests {
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+        CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
         CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
         DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
@@ -1109,6 +1111,134 @@ mod tests {
         response.validate().expect("capability response validates");
         assert_eq!(response.profiles.len(), 3);
         assert_eq!(response.profiles[0].profile, DeploymentProfile::Folder);
+    }
+
+    #[test]
+    fn capacity_admission_requires_authorized_reader() {
+        let root = temp_root("capacity-admission-unauthorized");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "codex",
+            Some("readers"),
+            Some("writers"),
+            false,
+        );
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("guest")
+            .with_groups(["users"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::CapacityAdmission(CapacityAdmissionRequest {
+                    store_id: "codex".to_string(),
+                    requested_bytes: 4096,
+                    copy_count: 2,
+                    ingress_origin: crate::api::DaemonIngressOrigin::RemoteS3,
+                    client_request_id: Some("request-1".to_string()),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn authorized_reader_receives_capacity_admission_from_provider() {
+        let root = temp_root("capacity-admission-authorized");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "codex",
+            Some("readers"),
+            Some("writers"),
+            false,
+        );
+        let expected = CapacityAdmissionResponse {
+            store_id: StoreId::new("codex").expect("store id"),
+            decision: CapacityAdmissionDecision::Admitted,
+            reason: None,
+            requested_bytes: 4096,
+            copy_count: 2,
+            requires_ssd_staging: true,
+            logical_limit_bytes: Some(1_000_000),
+            used_bytes: 10,
+            reserved_bytes: 20,
+            logical_available_bytes: Some(999_970),
+            backend_free_bytes: 2_000_000,
+            backend_available_bytes: 2_000_000,
+            ssd_available_bytes: Some(500_000),
+            required_backend_bytes: 8192,
+            required_ssd_bytes: 4096,
+            copy_amplification_basis_points: 20_000,
+            warning_threshold_basis_points: 8_000,
+            critical_threshold_basis_points: 9_500,
+            message: None,
+        };
+        let service = FakeService {
+            capacity_admission_response: Some(expected.clone()),
+            ..FakeService::default()
+        };
+        let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"))
+            .with_registry_paths(store_registry, subobject_registry);
+        let actor = DaemonLocalActor::new(1001)
+            .with_username("reader")
+            .with_groups(["readers"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::CapacityAdmission(CapacityAdmissionRequest {
+                    store_id: "codex".to_string(),
+                    requested_bytes: 4096,
+                    copy_count: 2,
+                    ingress_origin: crate::api::DaemonIngressOrigin::RemoteS3,
+                    client_request_id: Some("request-1".to_string()),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert_eq!(response, DaemonApiResponse::CapacityAdmission(expected));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn capacity_admission_fails_closed_when_provider_is_unavailable() {
+        let root = temp_root("capacity-admission-unavailable");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry_with_read_policy(&root, "codex", None, Some("writers"), true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry);
+        let actor = DaemonLocalActor::new(1001).with_username("reader");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::CapacityAdmission(CapacityAdmissionRequest {
+                    store_id: "codex".to_string(),
+                    requested_bytes: 4096,
+                    copy_count: 2,
+                    ingress_origin: crate::api::DaemonIngressOrigin::RemoteS3,
+                    client_request_id: Some("request-1".to_string()),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "capacity_admission_unavailable"
+        ));
+        cleanup(&root);
     }
 
     #[test]
@@ -3493,6 +3623,7 @@ mod tests {
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
+        capacity_admission_response: Option<CapacityAdmissionResponse>,
     }
 
     impl DaemonServiceOrchestrator for FakeService {
@@ -3550,6 +3681,17 @@ mod tests {
                 1,
                 0,
             ))
+        }
+
+        fn capacity_admission(
+            &self,
+            _request: CapacityAdmissionRequest,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            self.capacity_admission_response.clone().ok_or(
+                DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: "capacity admission provider is not configured".to_string(),
+                },
+            )
         }
 
         fn remote_easyconnect_aws_cli_upload_job(

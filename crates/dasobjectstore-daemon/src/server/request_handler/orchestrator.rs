@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
 
 pub trait DaemonServiceOrchestrator {
     fn status(
@@ -17,6 +18,18 @@ pub trait DaemonServiceOrchestrator {
         request: DaemonServiceProvisionRequest,
         accepted_at_utc: &str,
     ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError>;
+
+    /// Evaluate capacity using daemon-owned observations. Until a live
+    /// ledger/probe provider is installed, fail closed instead of fabricating
+    /// an admission decision from client-supplied values.
+    fn capacity_admission(
+        &self,
+        _request: CapacityAdmissionRequest,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "capacity admission provider is not configured".to_string(),
+        })
+    }
 
     fn remote_easyconnect_aws_cli_upload_job(
         &self,

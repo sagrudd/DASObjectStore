@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.36 - 2026-07-12
+
+- Expose an authenticated, read-only capacity-admission daemon route with
+  typed client plumbing and fail-closed unavailable-provider errors.
+
 ## 0.72.35 - 2026-07-12
 
 - Add read-only CLI profile-capability discovery with human and JSON output.

@@ -11,32 +11,32 @@ pub use unix_socket::UnixSocketDaemonTransport;
 use crate::api::{
     ApplianceTelemetryRequest, ApplianceTelemetryResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
-    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-    CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest,
-    DaemonHealthSummaryResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest,
-    DaemonJobCancelResponse, DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest,
-    DaemonJobStatusResponse, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
-    DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-    DaemonServiceStatusResponse, DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse,
-    IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
-    IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest,
-    ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
-    ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    CapacityAdmissionRequest, CapacityAdmissionResponse, CreateLocalGroupRequest,
+    CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
+    DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest, DaemonHealthSummaryResponse,
+    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
+    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
+    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, IngestJobStatusRequest,
+    IngestJobStatusResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
+    ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
+    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
+    ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
+    PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
+    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -362,6 +362,16 @@ where
         }
     }
 
+    pub fn capacity_admission(
+        &self,
+        request: CapacityAdmissionRequest,
+    ) -> Result<CapacityAdmissionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CapacityAdmission(request))? {
+            DaemonApiResponse::CapacityAdmission(response) => Ok(response),
+            response => Err(unexpected("capacity_admission", response)),
+        }
+    }
+
     pub fn update_object_store_ingest_policy(
         &self,
         request: UpdateObjectStoreIngestPolicyRequest,
@@ -555,6 +565,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
+        DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",
         DaemonApiResponse::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
@@ -589,24 +600,24 @@ mod tests {
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplianceTelemetryWindow,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-        CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestConflictPolicy,
-        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent, DaemonJobId,
-        DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
-        DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
-        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, DaemonSsdPressure, ObjectBrowserPageRequest,
-        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
-        ObjectFolderDownloadResponse, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        CapacityAdmissionRequest, CapacityAdmissionResponse, CreateLocalGroupRequest,
+        CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
+        DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind, DaemonEndpointValidation,
+        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonJobCancelRequest,
+        DaemonJobCancelResponse, DaemonJobEvent, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
+        DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+        DaemonJobStatusResponse, DaemonJobSummary, DaemonServiceLifecycleRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+        DaemonSsdPressure, ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
+        ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+        RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, StoreInventoryResponse,
+        SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -637,6 +648,57 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::StoreInventory(_)]
+        ));
+    }
+
+    #[test]
+    fn capacity_admission_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::CapacityAdmission(
+                CapacityAdmissionResponse {
+                    store_id: StoreId::new("codex").expect("store id"),
+                    decision: crate::api::CapacityAdmissionDecision::Admitted,
+                    reason: None,
+                    requested_bytes: 4096,
+                    copy_count: 2,
+                    requires_ssd_staging: true,
+                    logical_limit_bytes: Some(1_000_000),
+                    used_bytes: 0,
+                    reserved_bytes: 0,
+                    logical_available_bytes: Some(1_000_000),
+                    backend_free_bytes: 2_000_000,
+                    backend_available_bytes: 2_000_000,
+                    ssd_available_bytes: Some(500_000),
+                    required_backend_bytes: 8192,
+                    required_ssd_bytes: 4096,
+                    copy_amplification_basis_points: 20_000,
+                    warning_threshold_basis_points: 8_000,
+                    critical_threshold_basis_points: 9_500,
+                    message: None,
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .capacity_admission(CapacityAdmissionRequest {
+                store_id: "codex".to_string(),
+                requested_bytes: 4096,
+                copy_count: 2,
+                ingress_origin: crate::api::DaemonIngressOrigin::RemoteS3,
+                client_request_id: Some("request-1".to_string()),
+            })
+            .expect("capacity admission response");
+
+        assert_eq!(
+            response.decision,
+            crate::api::CapacityAdmissionDecision::Admitted
+        );
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::CapacityAdmission(_)]
         ));
     }
 

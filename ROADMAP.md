@@ -903,6 +903,11 @@ Exit criteria: ``folder`` requires a finite quota; drive/appliance ``unlimited``
 means backend-bounded; no concurrent ingress can overbook the same capacity;
 quota reduction never deletes data.
 
+Current delivery note: the authenticated read-only capacity-admission daemon
+route and typed client contract are now in place, but the route fails closed
+until live ledger, filesystem probes, and ingest/S3/multipart reservation
+orchestration are installed.
+
 ## Milestone 28: Folder ObjectStore Profile
 
 Goal: manage one bounded directory with hierarchical files, portable manifests,

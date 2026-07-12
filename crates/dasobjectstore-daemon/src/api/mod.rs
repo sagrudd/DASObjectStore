@@ -189,6 +189,7 @@ pub enum DaemonApiRequest {
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
+    CapacityAdmission(CapacityAdmissionRequest),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyRequest),
     ObjectBrowser(ObjectBrowserRequest),
     ObjectDownload(ObjectDownloadRequest),
@@ -245,6 +246,10 @@ impl DaemonApiRequest {
                 .validate()
                 .map_err(create_object_store_validation_error),
             Self::ProfileCapabilities(_) => Ok(()),
+            Self::CapacityAdmission(request) => request
+                .validate()
+                .map(|_| ())
+                .map_err(capacity_admission_validation_error),
             Self::UpdateObjectStoreIngestPolicy(request) => request
                 .validate()
                 .map(|_| ())
@@ -320,6 +325,7 @@ pub enum DaemonApiResponse {
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
+    CapacityAdmission(CapacityAdmissionResponse),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyResponse),
     ObjectBrowser(ObjectBrowserResponse),
     ObjectDownload(ObjectDownloadResponse),
@@ -418,6 +424,25 @@ fn endpoint_inventory_validation_error(
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: ENDPOINT_RECORD_CONFIRMATION,
             }
+        }
+    }
+}
+
+fn capacity_admission_validation_error(
+    err: CapacityAdmissionValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        CapacityAdmissionValidationError::InvalidStoreId => {
+            DaemonRequestValidationError::UnsafeLocalName {
+                field: "store_id",
+                value: "invalid store id".to_string(),
+            }
+        }
+        CapacityAdmissionValidationError::InvalidCopyCount => {
+            DaemonRequestValidationError::InvalidCopyCount { copies: 0 }
+        }
+        CapacityAdmissionValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
         }
     }
 }
@@ -646,12 +671,13 @@ impl DaemonApiErrorResponse {
 mod tests {
     use super::{
         ApplianceTelemetryRequest, ApplianceTelemetryWindow, AssignLocalUserToLocalGroupRequest,
-        CreateLocalGroupRequest, CreateObjectStoreRequest, DaemonApiRequest, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestConflictPolicy,
-        DaemonIngressOrigin, DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest,
-        DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, DaemonSsdPressure,
-        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
+        CapacityAdmissionRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonApiRequest, DaemonEndpointKind, DaemonEndpointValidation,
+        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonIngressOrigin,
+        DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest,
+        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceStatusRequest, DaemonSsdPressure, ObjectBrowserPageRequest,
+        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
         ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
         PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
@@ -673,6 +699,24 @@ mod tests {
         let encoded = serde_json::to_value(request).expect("request serializes");
 
         assert_eq!(encoded["command"], "store_inventory");
+    }
+
+    #[test]
+    fn capacity_admission_command_uses_stable_shape() {
+        let request = DaemonApiRequest::CapacityAdmission(CapacityAdmissionRequest {
+            store_id: "codex".to_string(),
+            requested_bytes: 4096,
+            copy_count: 2,
+            ingress_origin: DaemonIngressOrigin::RemoteS3,
+            client_request_id: Some("request-1".to_string()),
+        });
+
+        request.validate().expect("capacity request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+
+        assert_eq!(encoded["command"], "capacity_admission");
+        assert_eq!(encoded["payload"]["store_id"], "codex");
+        assert_eq!(encoded["payload"]["ingress_origin"], "remote_s3");
     }
 
     #[test]
