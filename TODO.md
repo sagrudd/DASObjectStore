@@ -55,18 +55,17 @@ completion.
   during blocked or saturated ingest.
 - [ ] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
   appliance acceptance gaps without fabricating continuity.
-- [ ] Remove temporary production module-size exceptions through owned,
-  test-preserving splits; keep dispatcher and public façades narrow.
-  Current exceptions: GUI Web ``api.rs``. The gate
-  closes only when the exception file is empty. The
-  previously unexcepted
+- [x] Remove temporary production module-size exceptions through owned,
+  test-preserving splits; keep dispatcher and public façades narrow. The
+  exception file is empty and the module-size guard passes. The previously
+  unexcepted
   daemon ``server/request_handler/storage.rs`` violation has been split into
   storage reconciliation/helpers modules; the guard now passes against the
   reviewed baseline. The request-handler façade is now also below budget;
-  continue removing the remaining listed exceptions.
+  no production exceptions remain.
   - [x] Remove stale daemon and GUI ``home_aggregator.rs`` entries after the
-    module-size guard confirmed those modules are below budget; retain only
-    the one currently reported Web exception.
+    module-size guard confirmed those modules are below budget; no GUI
+    exceptions remain.
   - [x] Split GUI API product workspace view models and bootstrap projections
     into `crates/dasobjectstore-gui-api/src/workspaces_product.rs`; preserve
     public JSON types and workspace-route contracts.

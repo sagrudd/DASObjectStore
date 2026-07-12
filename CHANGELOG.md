@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.40 - 2026-07-12
+
+- Split the Web API administration request/response contracts into a focused
+  module so all production modules pass the enforced size guard without
+  exceptions.
+
 ## 0.71.39 - 2026-07-12
 
 - Split shared Web API request/response contracts into a dedicated module,
