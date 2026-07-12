@@ -265,6 +265,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract live SSD-read/HDD-write rate accounting and its focused
     regression tests into `crates/dasobjectstore-cli/src/run/performance_rates.rs`;
     preserve shared counters across worker clones and sync-time accounting.
+  - [x] Extract bounded asynchronous SSD settlement and queue-drain completion
+    into `crates/dasobjectstore-cli/src/run/performance_settle.rs`; add coverage
+    that `finish` drains every accepted settlement job.
   - [ ] Extract the remaining performance execution engine (scenario runners,
     disk scheduler, copy primitives, and measurement helpers) before removing
     the CLI runner exception.

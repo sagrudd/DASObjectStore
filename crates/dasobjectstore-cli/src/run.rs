@@ -22,6 +22,7 @@ mod performance_plan;
 mod performance_rates;
 mod performance_report;
 mod performance_residency;
+mod performance_settle;
 mod performance_tui;
 mod performance_workload;
 mod probe;
@@ -41,6 +42,7 @@ use self::performance_residency::{
     performance_ssd_can_admit_payload, performance_ssd_residency_budget,
     plan_ssd_residency_batches, validate_performance_payload_fits_ssd,
 };
+use self::performance_settle::{PerformanceSsdSettler, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY};
 use self::probe::run_probe;
 
 use self::command_handlers::{
@@ -201,98 +203,6 @@ static UPLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
 thread_local! {
     static PERFORMANCE_SYNC_ALL_CALLS: RefCell<u32> = const { RefCell::new(0) };
 }
-const PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY: usize = 8;
-
-struct PerformanceSsdSettleJob {
-    path: PathBuf,
-    file: File,
-}
-
-struct PerformanceSsdSettler {
-    sender: Option<mpsc::SyncSender<PerformanceSsdSettleJob>>,
-    handle: Option<thread::JoinHandle<Result<(), CliError>>>,
-    completed: Arc<AtomicU32>,
-}
-
-impl PerformanceSsdSettler {
-    fn start(capacity: usize) -> Self {
-        let (sender, receiver) = mpsc::sync_channel::<PerformanceSsdSettleJob>(capacity);
-        let completed = Arc::new(AtomicU32::new(0));
-        let worker_completed = Arc::clone(&completed);
-        let handle = thread::spawn(move || -> Result<(), CliError> {
-            loop {
-                check_performance_cancelled()?;
-                let job = match receiver.recv() {
-                    Ok(job) => job,
-                    Err(_) => break,
-                };
-                performance_sync_all(&job.file).map_err(|err| {
-                    CliError::CommandFailed(format!(
-                        "performance-test SSD settle failed for {}: {err}",
-                        job.path.display()
-                    ))
-                })?;
-                worker_completed.fetch_add(1, Ordering::SeqCst);
-            }
-            Ok(())
-        });
-        Self {
-            sender: Some(sender),
-            handle: Some(handle),
-            completed,
-        }
-    }
-
-    fn submit(&self, path: PathBuf, file: File) -> Result<(), CliError> {
-        let sender = self.sender.as_ref().ok_or_else(|| {
-            CliError::CommandFailed("performance-test SSD settler is closed".to_string())
-        })?;
-        let mut pending = Some(PerformanceSsdSettleJob { path, file });
-        loop {
-            check_performance_cancelled()?;
-            let job = pending.take().expect("pending SSD settle job");
-            match sender.try_send(job) {
-                Ok(()) => return Ok(()),
-                Err(mpsc::TrySendError::Full(job)) => {
-                    pending = Some(job);
-                    thread::sleep(Duration::from_millis(50));
-                }
-                Err(mpsc::TrySendError::Disconnected(_)) => {
-                    return Err(CliError::CommandFailed(
-                        "performance-test SSD settler stopped early".to_string(),
-                    ));
-                }
-            }
-        }
-    }
-
-    fn finish(mut self) -> Result<u32, CliError> {
-        drop(self.sender.take());
-        self.join_worker()?;
-        Ok(self.completed.load(Ordering::SeqCst))
-    }
-
-    fn join_worker(&mut self) -> Result<(), CliError> {
-        if let Some(handle) = self.handle.take() {
-            match handle.join() {
-                Ok(result) => result,
-                Err(_) => Err(CliError::CommandFailed(
-                    "performance-test SSD settler panicked".to_string(),
-                )),
-            }
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Drop for PerformanceSsdSettler {
-    fn drop(&mut self) {
-        drop(self.sender.take());
-        let _ = self.join_worker();
-    }
-}
-
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
     match cli.command() {
         Some(Command::Probe(args)) => run_probe(args, writer),
@@ -6962,6 +6872,27 @@ mod tests {
             "copy should report the final media settling phase"
         );
         fs::remove_dir_all(root).expect("cleanup benchmark fixture");
+    }
+
+    #[test]
+    fn performance_ssd_settler_drains_all_accepted_jobs_before_finish() {
+        let root = temp_root("performance-ssd-settler-drain");
+        fs::create_dir_all(&root).expect("create settler fixture");
+        let settler = PerformanceSsdSettler::start(1);
+
+        for index in 0..3 {
+            let path = root.join(format!("payload-{index}.bin"));
+            fs::write(&path, [index as u8; 32]).expect("write payload fixture");
+            settler
+                .submit(
+                    path.clone(),
+                    File::open(&path).expect("open payload fixture"),
+                )
+                .expect("submit payload");
+        }
+
+        assert_eq!(settler.finish().expect("finish settler"), 3);
+        fs::remove_dir_all(root).expect("cleanup settler fixture");
     }
 
     #[test]

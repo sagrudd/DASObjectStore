@@ -13,6 +13,11 @@ agreement before landing.
 - Refresh the store-contents tree regression assertions to match its explicit
   file/directory labels.
 
+## 0.71.7 - 2026-07-12
+
+- Extract bounded asynchronous SSD settlement and queue-drain completion into a
+  dedicated CLI performance module with multi-job regression coverage.
+
 ## 0.71.4 - 2026-07-12
 
 - Re-baseline the roadmap, requirements, architecture, and active TODO campaign
