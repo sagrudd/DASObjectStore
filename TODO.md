@@ -57,14 +57,16 @@ completion.
   appliance acceptance gaps without fabricating continuity.
 - [ ] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow.
-  Current exceptions: CLI ``run.rs``; daemon ``ingest_files.rs`` and
-  ``remote_upload.rs``; GUI API ``auth_routes.rs``,
-  ``home_aggregator.rs``, and ``workspaces.rs``; GUI Web ``api.rs``. The gate
-  closes only when the exception file is empty. The previously unexcepted
+  Current exceptions: GUI API ``auth_routes.rs`` and ``workspaces.rs``; GUI
+  Web ``api.rs``. The gate closes only when the exception file is empty. The
+  previously unexcepted
   daemon ``server/request_handler/storage.rs`` violation has been split into
   storage reconciliation/helpers modules; the guard now passes against the
   reviewed baseline. The request-handler façade is now also below budget;
   continue removing the remaining listed exceptions.
+  - [x] Remove stale daemon and GUI ``home_aggregator.rs`` entries after the
+    module-size guard confirmed those modules are below budget; retain only
+    the three currently reported GUI exceptions.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 
@@ -206,7 +208,7 @@ list until every temporary size-budget exception has been removed.
   from the home-dashboard assembly façade.
 - [x] Add CI enforcement for a 1,000 production-line module budget, with a
   reviewed temporary baseline exception list.
-- [ ] Replace temporary size-budget exceptions by splitting the CLI runner and
+- [x] Replace temporary size-budget exceptions by splitting the CLI runner and
   CLI argument contracts into command-family modules; keep dispatcher-only
   roots and move tests beside their owning modules.
   - [x] Extract the ingest files/directive parser and its conflict-policy

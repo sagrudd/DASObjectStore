@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.34 - 2026-07-12
+
+- Remove stale daemon and GUI module-size exception entries after guard
+  validation; the reviewed baseline now lists only the three active GUI
+  exceptions.
+
 ## 0.71.33 - 2026-07-12
 
 - Move Object export/put disk-root mapping validation beside its command
