@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.51 - 2026-07-12
+
+- Bound folder archive generation to two concurrent blocking workers, retaining
+  archive permits until tar streams finish and returning typed overload errors
+  when archive capacity is saturated.
+
 ## 0.71.50 - 2026-07-12
 
 - Route ObjectStore file and folder download lookups through the bounded GUI

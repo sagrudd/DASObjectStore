@@ -25,10 +25,17 @@ use dasobjectstore_daemon::{
 use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::{mpsc, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
+
+const MAX_ARCHIVE_WORKERS: usize = 2;
+
+fn archive_worker_semaphore() -> &'static Arc<Semaphore> {
+    static ARCHIVE_WORKERS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    ARCHIVE_WORKERS.get_or_init(|| Arc::new(Semaphore::new(MAX_ARCHIVE_WORKERS)))
+}
 
 pub fn standalone_object_browser_router(auth_store: LocalAuthStore) -> Router {
     standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState::system(
@@ -282,8 +289,21 @@ async fn object_store_folder_download(
 
     let headers = object_folder_download_headers(&download)?;
     let archive_download = download.clone();
+    let archive_permit = archive_worker_semaphore()
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            route_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "archive_worker_busy",
+                "folder archive capacity is saturated; retry shortly",
+            )
+        })?;
     let (sender, receiver) = mpsc::channel::<Result<Bytes, io::Error>>(4);
-    tokio::task::spawn_blocking(move || stream_folder_archive(archive_download, sender));
+    tokio::task::spawn_blocking(move || {
+        let _archive_permit = archive_permit;
+        stream_folder_archive(archive_download, sender);
+    });
     let body = Body::from_stream(ReceiverStream::new(receiver));
     let mut response = Response::new(body);
     *response.headers_mut() = headers;
@@ -673,7 +693,17 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::Semaphore;
     use tower::ServiceExt;
+
+    #[test]
+    fn archive_worker_capacity_is_bounded() {
+        let workers = Semaphore::new(1);
+        let permit = workers.try_acquire().expect("first worker admitted");
+        assert!(workers.try_acquire().is_err());
+        drop(permit);
+        assert!(workers.try_acquire().is_ok());
+    }
 
     #[tokio::test]
     async fn object_browser_route_requires_session() {
