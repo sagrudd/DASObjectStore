@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.45 - 2026-07-12
+
+- Add durable capacity-reservation timestamps, schema-v1 compatibility, and a
+  caller-scheduled stale-reservation expiry sweep with rollback-safe provider
+  persistence.
+
 ## 0.72.44 - 2026-07-12
 
 - Deliver the Mnemosyne footer contract with local wordmark/partial assets,

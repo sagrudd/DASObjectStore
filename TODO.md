@@ -237,7 +237,7 @@ completion.
     and SSD free space, atomically persists admitted reservations, and fails
     closed for missing bounded ledgers or probe/persistence errors; configured
     copy counts remain daemon-authoritative. S3/multipart completion and
-    stale-reservation expiry remain open.
+    stale-reservation scheduling remain open.
   - [x] Add explicit provider commit/release lifecycle operations with
     snapshot rollback when durable persistence fails; transfer workers still
     need to carry reservation IDs through their completion/failure paths.
@@ -245,8 +245,9 @@ completion.
     the reservation ID, admit before invoking the byte-transfer adapter, and
     commit or release the reservation after transfer and catalogue completion;
     admission rejection is persisted as a failed daemon job and provider
-    lifecycle failures remain fail-closed. Multipart, catalogue accounting,
-    and stale-reservation expiry remain separate follow-up work.
+    lifecycle failures remain fail-closed. Multipart and catalogue accounting
+    remain separate follow-up work; explicit stale-reservation maintenance is
+    available below.
   - [x] Wire local file ingest through the same daemon provider boundary: each
     non-skipped file reserves its size with the verified ingress origin before
     source/staging or direct-HDD work, commits after durable metadata settlement,
@@ -274,11 +275,20 @@ completion.
     ledger; eight workers contend for a bounded quota and cannot overbook it.
   - [x] Add a schema-versioned, strict capacity-ledger snapshot/restore
     contract that preserves used bytes and outstanding reservations across a
-    restart boundary; daemon file persistence and stale-reservation expiry
-    remain open.
+    restart boundary; daemon file persistence is complete and legacy snapshots
+    remain loadable. Explicit stale-reservation expiry is now covered below;
+    lease policy and scheduling remain open.
   - [x] Add daemon atomic JSON persistence around that snapshot contract with
     file and directory ``fsync``/rename ordering plus corrupt-state rejection;
-    stale-reservation expiry and live-store registry wiring remain open.
+    live-store registry wiring remains open. Durable reservation timestamps,
+    deterministic expiry, legacy-snapshot retention, and provider persistence
+    rollback tests are now in place; no background scheduler is enabled until
+    a lease/renewal policy is approved.
+  - [x] Add durable reservation creation timestamps with schema-v2 emission,
+    schema-v1 compatibility, deterministic boundary expiry, and a provider
+    maintenance API that atomically persists reclaimed bytes. Unknown-age
+    legacy reservations are retained; automatic expiry and renewal remain
+    intentionally disabled pending an approved lease policy.
     Crash/restart persistence, multipart expiry, dedupe, and full-filesystem
     fixtures remain open.
 

@@ -2,6 +2,7 @@
 
 use dasobjectstore_core::store::{
     CapacityLedgerError, CapacityReservationLedger, CapacityReservationLedgerSnapshot,
+    CapacityReservationLedgerSnapshotV2,
 };
 use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};
@@ -53,7 +54,7 @@ pub fn save_capacity_ledger(
             message: "capacity ledger path has no parent".to_string(),
         })?;
     fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
-    let snapshot = ledger.snapshot();
+    let snapshot = ledger.snapshot_with_expiry();
     let bytes = serde_json::to_vec_pretty(&snapshot).map_err(|error| {
         CapacityLedgerPersistenceError::Serialize {
             path: path.to_path_buf(),
@@ -87,8 +88,34 @@ pub fn load_capacity_ledger(
 ) -> Result<CapacityReservationLedger, CapacityLedgerPersistenceError> {
     let path = path.as_ref();
     let file = File::open(path).map_err(|error| io_error(path, error))?;
+    let value: serde_json::Value = serde_json::from_reader(file).map_err(|error| {
+        CapacityLedgerPersistenceError::Deserialize {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
+    })?;
+    let schema_version = value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+        .ok_or_else(|| CapacityLedgerPersistenceError::Deserialize {
+            path: path.to_path_buf(),
+            message: "capacity ledger schema_version is missing or invalid".to_string(),
+        })?;
+    if schema_version == dasobjectstore_core::store::CAPACITY_LEDGER_EXPIRY_SNAPSHOT_SCHEMA_VERSION
+    {
+        let snapshot: CapacityReservationLedgerSnapshotV2 =
+            serde_json::from_value(value).map_err(|error| {
+                CapacityLedgerPersistenceError::Deserialize {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                }
+            })?;
+        return CapacityReservationLedger::from_snapshot_with_expiry(snapshot)
+            .map_err(CapacityLedgerPersistenceError::Ledger);
+    }
     let snapshot: CapacityReservationLedgerSnapshot =
-        serde_json::from_reader(file).map_err(|error| {
+        serde_json::from_value(value).map_err(|error| {
             CapacityLedgerPersistenceError::Deserialize {
                 path: path.to_path_buf(),
                 message: error.to_string(),
@@ -108,7 +135,9 @@ fn io_error(path: &Path, error: std::io::Error) -> CapacityLedgerPersistenceErro
 #[cfg(test)]
 mod tests {
     use super::{load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError};
-    use dasobjectstore_core::store::{CapacityPolicy, CapacityReservationLedger};
+    use dasobjectstore_core::store::{
+        CapacityPolicy, CapacityReservationLedger, CapacityReservationLedgerSnapshot,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -155,6 +184,29 @@ mod tests {
             error,
             CapacityLedgerPersistenceError::Deserialize { .. }
         ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn loads_schema_v1_snapshot_without_expiring_unknown_age_reservations() {
+        let root = root("legacy");
+        let path = root.join("ledger.json");
+        fs::create_dir_all(&root).expect("root creates");
+        let snapshot = CapacityReservationLedgerSnapshot {
+            schema_version: dasobjectstore_core::store::CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION,
+            policy: CapacityPolicy::bounded(1_000, 0),
+            used_bytes: 10,
+            reservations: [("legacy".to_string(), 20)].into_iter().collect(),
+        };
+        fs::write(
+            &path,
+            serde_json::to_vec(&snapshot).expect("legacy snapshot serializes"),
+        )
+        .expect("legacy snapshot writes");
+
+        let restored = load_capacity_ledger(&path).expect("legacy snapshot loads");
+        assert_eq!(restored.reservation_bytes("legacy"), Some(20));
+        assert_eq!(restored.reserved_bytes(), 20);
         let _ = fs::remove_dir_all(root);
     }
 }

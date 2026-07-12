@@ -912,14 +912,18 @@ quota reduction never deletes data.
 Current delivery note: the authenticated read-only capacity-admission daemon
 route and typed client contract are in place, and the packaged daemon now
 injects a registry-backed provider with persisted ledgers and ``statvfs``
-probes. Ingest/S3/multipart reservation completion, catalogue accounting, and
-stale-reservation expiry remain open.
+probes. Ingest/S3/multipart reservation completion and catalogue accounting
+remain open; explicit stale-reservation maintenance is now delivered below.
 The provider also exposes durable commit/release lifecycle operations with
 rollback on persistence failure. The daemon-owned remote S3 transfer worker
 now retains the job ID as the reservation ID, admits before invoking the typed
 byte-transfer adapter, and commits or releases after transfer and catalogue
 completion; rejection is persisted as a failed job. Local ingest, multipart,
-catalogue accounting, and stale-reservation expiry remain open.
+catalogue accounting remain open. Stale reservations now carry durable
+creation timestamps in schema-v2 ledger snapshots (legacy v1 snapshots remain
+loadable), and the provider exposes an atomic caller-scheduled expiry sweep.
+Unknown-age legacy reservations are retained; automatic scheduling and renewal
+remain open until a lease policy is approved.
 Local file ingest now uses the same provider boundary for each non-skipped
 object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.

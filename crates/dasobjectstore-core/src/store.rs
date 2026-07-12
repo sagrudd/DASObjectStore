@@ -1,7 +1,6 @@
 //! Store classes and policy.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
@@ -282,231 +281,12 @@ impl Display for CapacityPolicyValidationError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LogicalObjectVersionCharge {
-    logical_size_bytes: u64,
-}
-
-impl LogicalObjectVersionCharge {
-    /// Charge one logical object version at its full logical size. Physical
-    /// copy amplification and staging are intentionally not part of this
-    /// logical quota primitive; admission reports those separately.
-    pub const fn new(logical_size_bytes: u64) -> Self {
-        Self { logical_size_bytes }
-    }
-
-    pub const fn logical_size_bytes(&self) -> u64 {
-        self.logical_size_bytes
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CapacityReservationLedger {
-    policy: CapacityPolicy,
-    used_bytes: u64,
-    reservations: HashMap<String, u64>,
-}
-
-pub const CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CapacityReservationLedgerSnapshot {
-    pub schema_version: u32,
-    pub policy: CapacityPolicy,
-    pub used_bytes: u64,
-    pub reservations: BTreeMap<String, u64>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CapacityPressureState {
-    Unbounded,
-    Normal,
-    Warning,
-    Critical,
-    OverQuota,
-}
-
-impl CapacityReservationLedger {
-    pub fn new(policy: CapacityPolicy, used_bytes: u64) -> Result<Self, CapacityLedgerError> {
-        if let Some(error) = policy.validation_error() {
-            return Err(CapacityLedgerError::InvalidPolicy(error));
-        }
-        Ok(Self {
-            policy,
-            used_bytes,
-            reservations: HashMap::new(),
-        })
-    }
-
-    pub fn used_bytes(&self) -> u64 {
-        self.used_bytes
-    }
-
-    pub fn reserved_bytes(&self) -> u64 {
-        self.reservations.values().copied().sum()
-    }
-
-    pub fn reservation_bytes(&self, reservation_id: &str) -> Option<u64> {
-        self.reservations.get(reservation_id).copied()
-    }
-
-    pub fn policy(&self) -> &CapacityPolicy {
-        &self.policy
-    }
-
-    pub fn snapshot(&self) -> CapacityReservationLedgerSnapshot {
-        CapacityReservationLedgerSnapshot {
-            schema_version: CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION,
-            policy: self.policy.clone(),
-            used_bytes: self.used_bytes,
-            reservations: self
-                .reservations
-                .iter()
-                .map(|(id, bytes)| (id.clone(), *bytes))
-                .collect(),
-        }
-    }
-
-    pub fn from_snapshot(
-        snapshot: CapacityReservationLedgerSnapshot,
-    ) -> Result<Self, CapacityLedgerError> {
-        if snapshot.schema_version != CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION {
-            return Err(CapacityLedgerError::InvalidSnapshotSchema {
-                schema_version: snapshot.schema_version,
-            });
-        }
-        let mut ledger = Self::new(snapshot.policy, snapshot.used_bytes)?;
-        for (reservation_id, bytes) in snapshot.reservations {
-            ledger.reserve(reservation_id, bytes)?;
-        }
-        Ok(ledger)
-    }
-
-    /// Replace capacity policy without deleting data. Lowering a limit below
-    /// current usage is allowed so operators can remediate an over-quota store;
-    /// subsequent reservations remain rejected until usage falls below policy.
-    pub fn update_policy(&mut self, policy: CapacityPolicy) -> Result<(), CapacityLedgerError> {
-        if let Some(error) = policy.validation_error() {
-            return Err(CapacityLedgerError::InvalidPolicy(error));
-        }
-        self.policy = policy;
-        Ok(())
-    }
-
-    pub fn pressure_state(&self) -> CapacityPressureState {
-        let Some(limit) = self.policy.logical_limit_bytes else {
-            return CapacityPressureState::Unbounded;
-        };
-        let effective_limit = limit.saturating_sub(self.policy.backend_reserve_bytes);
-        let usage = self.used_bytes.saturating_add(self.reserved_bytes());
-        if usage > effective_limit {
-            return CapacityPressureState::OverQuota;
-        }
-        let basis_points = (u128::from(usage) * 10_000 / u128::from(effective_limit)) as u64;
-        if basis_points >= u64::from(self.policy.critical_threshold_basis_points) {
-            CapacityPressureState::Critical
-        } else if basis_points >= u64::from(self.policy.warning_threshold_basis_points) {
-            CapacityPressureState::Warning
-        } else {
-            CapacityPressureState::Normal
-        }
-    }
-
-    pub fn available_bytes(&self) -> Option<u64> {
-        self.policy.logical_limit_bytes.map(|limit| {
-            limit
-                .saturating_sub(self.policy.backend_reserve_bytes)
-                .saturating_sub(self.used_bytes)
-                .saturating_sub(self.reserved_bytes())
-        })
-    }
-
-    pub fn reserve(
-        &mut self,
-        reservation_id: impl Into<String>,
-        bytes: u64,
-    ) -> Result<(), CapacityLedgerError> {
-        let reservation_id = reservation_id.into();
-        if reservation_id.trim().is_empty() || self.reservations.contains_key(&reservation_id) {
-            return Err(CapacityLedgerError::InvalidReservationId);
-        }
-        let outstanding = self
-            .used_bytes
-            .checked_add(self.reserved_bytes())
-            .and_then(|value| value.checked_add(bytes))
-            .ok_or(CapacityLedgerError::Overflow)?;
-        if let Some(limit) = self.policy.logical_limit_bytes {
-            let admitted_limit = limit.saturating_sub(self.policy.backend_reserve_bytes);
-            if outstanding > admitted_limit {
-                return Err(CapacityLedgerError::InsufficientCapacity {
-                    available_bytes: admitted_limit
-                        .saturating_sub(self.used_bytes.saturating_add(self.reserved_bytes())),
-                });
-            }
-        }
-        self.reservations.insert(reservation_id, bytes);
-        Ok(())
-    }
-
-    /// Reserve a complete logical object version. Two versions with the same
-    /// content still consume two logical charges; deduplication and physical
-    /// placement are evaluated by separate backend/admission contracts.
-    pub fn reserve_object_version(
-        &mut self,
-        reservation_id: impl Into<String>,
-        charge: LogicalObjectVersionCharge,
-    ) -> Result<(), CapacityLedgerError> {
-        self.reserve(reservation_id, charge.logical_size_bytes)
-    }
-
-    pub fn commit(&mut self, reservation_id: &str) -> Result<(), CapacityLedgerError> {
-        let bytes = self
-            .reservations
-            .remove(reservation_id)
-            .ok_or(CapacityLedgerError::UnknownReservation)?;
-        self.used_bytes = self
-            .used_bytes
-            .checked_add(bytes)
-            .ok_or(CapacityLedgerError::Overflow)?;
-        Ok(())
-    }
-
-    pub fn debit_used_bytes(&mut self, bytes: u64) -> Result<(), CapacityLedgerError> {
-        if bytes > self.used_bytes {
-            return Err(CapacityLedgerError::UsedBytesUnderflow {
-                used_bytes: self.used_bytes,
-                requested_bytes: bytes,
-            });
-        }
-        self.used_bytes -= bytes;
-        Ok(())
-    }
-
-    pub fn release(&mut self, reservation_id: &str) -> Result<u64, CapacityLedgerError> {
-        self.reservations
-            .remove(reservation_id)
-            .ok_or(CapacityLedgerError::UnknownReservation)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CapacityLedgerError {
-    InvalidPolicy(CapacityPolicyValidationError),
-    InvalidSnapshotSchema {
-        schema_version: u32,
-    },
-    InvalidReservationId,
-    UnknownReservation,
-    UsedBytesUnderflow {
-        used_bytes: u64,
-        requested_bytes: u64,
-    },
-    InsufficientCapacity {
-        available_bytes: u64,
-    },
-    Overflow,
-}
+pub use crate::capacity::{
+    CapacityLedgerError, CapacityPressureState, CapacityReservationLedger,
+    CapacityReservationLedgerSnapshot, CapacityReservationLedgerSnapshotV2,
+    LogicalObjectVersionCharge, CAPACITY_LEDGER_EXPIRY_SNAPSHOT_SCHEMA_VERSION,
+    CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION,
+};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ExportPolicy {
@@ -1064,6 +844,57 @@ mod tests {
         assert_eq!(restored.reserved_bytes(), 200);
         assert_eq!(restored.reservation_bytes("in-flight"), Some(200));
         assert_eq!(restored.policy(), ledger.policy());
+    }
+
+    #[test]
+    fn stale_reservations_expire_deterministically_without_debiting_usage() {
+        let mut ledger =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 25), 100)
+                .expect("ledger policy is valid");
+        ledger
+            .reserve_at_unix_seconds("expired", 200, 100)
+            .expect("expired reservation fits");
+        ledger
+            .reserve_at_unix_seconds("active", 300, 190)
+            .expect("active reservation fits");
+
+        let expired = ledger.expire_reservations(200, 100);
+        assert_eq!(expired, vec![("expired".to_string(), 200)]);
+        assert_eq!(ledger.used_bytes(), 100);
+        assert_eq!(ledger.reserved_bytes(), 300);
+        assert_eq!(ledger.reservation_bytes("expired"), None);
+        assert_eq!(ledger.reservation_bytes("active"), Some(300));
+
+        let boundary = ledger.expire_reservations(290, 100);
+        assert_eq!(boundary, vec![("active".to_string(), 300)]);
+        assert_eq!(ledger.reserved_bytes(), 0);
+
+        let mut restored_source =
+            super::CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 0)
+                .expect("restored source policy");
+        restored_source
+            .reserve_at_unix_seconds("persisted", 40, 400)
+            .expect("persisted reservation");
+        let restored = super::CapacityReservationLedger::from_snapshot_with_expiry(
+            restored_source.snapshot_with_expiry(),
+        )
+        .expect("expiry snapshot restores");
+        assert_eq!(restored.reservation_bytes("persisted"), Some(40));
+    }
+
+    #[test]
+    fn legacy_snapshot_reservations_are_retained_without_age_metadata() {
+        let snapshot = super::CapacityReservationLedgerSnapshot {
+            schema_version: super::CAPACITY_LEDGER_SNAPSHOT_SCHEMA_VERSION,
+            policy: CapacityPolicy::bounded(1_000, 0),
+            used_bytes: 10,
+            reservations: [("legacy".to_string(), 20)].into_iter().collect(),
+        };
+        let mut ledger = super::CapacityReservationLedger::from_snapshot(snapshot)
+            .expect("legacy snapshot restores");
+
+        assert!(ledger.expire_reservations(u64::MAX, 0).is_empty());
+        assert_eq!(ledger.reservation_bytes("legacy"), Some(20));
     }
 
     #[test]

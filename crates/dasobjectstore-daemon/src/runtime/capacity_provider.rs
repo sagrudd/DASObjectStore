@@ -205,6 +205,44 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             Err(error) => Err(unavailable(format!("capacity ledger load failed: {error}"))),
         }
     }
+
+    /// Reclaim only reservations with durable creation timestamps older than
+    /// the caller-supplied lease window. Legacy reservations without age
+    /// metadata are retained, so upgrades cannot reclaim an active transfer
+    /// whose start time is unknown. The caller owns scheduling and lease
+    /// policy; no background expiry is started implicitly by the provider.
+    pub fn expire_stale_reservations(
+        &self,
+        store_id: &StoreId,
+        now_unix_seconds: u64,
+        max_age_seconds: u64,
+    ) -> Result<u64, DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut ledgers = self
+            .ledgers
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        let before = ledger.clone();
+        ledger
+            .update_policy(policy)
+            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
+        let reclaimed_bytes = ledger
+            .expire_reservations(now_unix_seconds, max_age_seconds)
+            .into_iter()
+            .map(|(_, bytes)| bytes)
+            .sum();
+        if reclaimed_bytes == 0 {
+            return Ok(0);
+        }
+        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+            *ledger = before;
+            return Err(unavailable(format!(
+                "capacity ledger persistence failed: {error}"
+            )));
+        }
+        Ok(reclaimed_bytes)
+    }
 }
 
 impl<P> CapacityAdmissionProvider for FileBackedCapacityAdmissionProvider<P>
@@ -250,7 +288,7 @@ where
                 .get_mut(store_id.as_str())
                 .expect("ledger inserted before lookup")
         };
-        let before = ledger.snapshot();
+        let before = ledger.clone();
         ledger
             .update_policy(definition.policy.capacity.clone())
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
@@ -281,8 +319,7 @@ where
             Err(error) => return Err(unavailable(format!("capacity admission failed: {error}"))),
         };
         if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-            *ledger = CapacityReservationLedger::from_snapshot(before)
-                .map_err(|restore| unavailable(format!("capacity rollback failed: {restore:?}")))?;
+            *ledger = before;
             return Err(unavailable(format!(
                 "capacity ledger persistence failed: {error}"
             )));
@@ -319,16 +356,15 @@ where
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
         let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        let before = ledger.clone();
         ledger
             .update_policy(policy)
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
-        let before = ledger.snapshot();
         ledger.commit(reservation_id).map_err(|error| {
             unavailable(format!("capacity reservation commit failed: {error:?}"))
         })?;
         if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-            *ledger = CapacityReservationLedger::from_snapshot(before)
-                .map_err(|restore| unavailable(format!("capacity rollback failed: {restore:?}")))?;
+            *ledger = before;
             return Err(unavailable(format!(
                 "capacity ledger persistence failed: {error}"
             )));
@@ -347,16 +383,15 @@ where
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
         let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        let before = ledger.clone();
         ledger
             .update_policy(policy)
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
-        let before = ledger.snapshot();
         ledger.release(reservation_id).map_err(|error| {
             unavailable(format!("capacity reservation release failed: {error:?}"))
         })?;
         if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-            *ledger = CapacityReservationLedger::from_snapshot(before)
-                .map_err(|restore| unavailable(format!("capacity rollback failed: {restore:?}")))?;
+            *ledger = before;
             return Err(unavailable(format!(
                 "capacity ledger persistence failed: {error}"
             )));
@@ -507,6 +542,69 @@ mod tests {
         let released = load_capacity_ledger(&ledger_path).expect("released ledger reload");
         assert_eq!(released.reserved_bytes(), 0);
         assert_eq!(released.used_bytes(), 100);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn provider_expiry_reclaims_only_stale_durable_reservations() {
+        let root = root("expiry");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let ledger_path = ledger_dir.join("codex.json");
+        let mut ledger =
+            CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
+        ledger
+            .reserve_at_unix_seconds("stale", 100, 100)
+            .expect("stale reservation");
+        ledger
+            .reserve_at_unix_seconds("active", 200, 190)
+            .expect("active reservation");
+        save_capacity_ledger(&ledger_path, &ledger).expect("ledger seed");
+
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path.clone(),
+            ledger_dir.clone(),
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        );
+        let store_id = StoreId::new("codex").expect("store id");
+        assert_eq!(
+            provider
+                .expire_stale_reservations(&store_id, 200, 100)
+                .expect("expiry succeeds"),
+            100
+        );
+        let restored = load_capacity_ledger(&ledger_path).expect("ledger reload");
+        assert_eq!(restored.reserved_bytes(), 200);
+        assert_eq!(restored.reservation_bytes("stale"), None);
+        assert_eq!(restored.reservation_bytes("active"), Some(200));
+
+        let restarted = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        );
+        assert_eq!(
+            restarted
+                .expire_stale_reservations(&store_id, 290, 100)
+                .expect("boundary expiry succeeds"),
+            200
+        );
+        assert_eq!(
+            load_capacity_ledger(&ledger_path)
+                .expect("final ledger reload")
+                .reserved_bytes(),
+            0
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
