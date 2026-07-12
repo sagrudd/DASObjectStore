@@ -305,8 +305,11 @@ completion.
   - [x] Add the macOS-safe `FolderBackend` staging/finalization path with
     in-flight SHA-256, private same-filesystem temporary files, file and
     directory sync, atomic rename, capacity reservation commit, and focused
-    read/verify/enumerate/remove tests; catalogue transaction wiring remains
-    open.
+    read/verify/enumerate/remove tests; finalized adoption and verified removal
+    now update the private catalogue transactionally. Removal persists the
+    catalogue deletion before unlinking the payload, preserving payload and
+    logical accounting when the catalogue write fails and restoring the record
+    if unlinking fails.
   - [x] Run the folder backend regression against the dedicated generated-data
     root `/Users/stephen/.dasobjectstore-codex-validation` on macOS; the test
     removes only its uniquely named child after completion.
@@ -357,6 +360,7 @@ completion.
     idempotent conflict-checked commits and file/directory fsync+rename; folder
     adoption commits the finalized record before its Complete checkpoint.
     Malformed/future-schema/wrong-store/conflict recovery tests are covered;
+    verified removal debits logical usage and removes the catalogue record;
     shared SQLite/object-service catalogue integration remains open. Folder
     reopen now derives used-byte accounting from the durable catalogue and
     rejects conflicting supplied accounting before filesystem use.

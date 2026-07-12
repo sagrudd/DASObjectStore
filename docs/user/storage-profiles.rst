@@ -79,8 +79,11 @@ Quota reductions never delete data. The core ledger can enter an explicit
 new reservations are rejected until usage is remediated. Deletion accounting
 and daemon/backend policy wiring remain part of the capacity integration gate.
 Verified folder deletion now debits the logical ledger only after stable-file
-validation and removes no hard-linked or changed object; repair and catalogue
-transaction integration remain separate gates.
+validation and removes no hard-linked or changed object. The private folder
+catalogue is updated before payload unlinking; catalogue failures leave the
+payload and accounting untouched, while unlink failures restore the catalogue
+record so retries remain authoritative. Shared SQLite/object-service catalogue
+integration remains a separate gate.
 Folder staging also requires the copied byte count to equal its reservation,
 so logical usage cannot drift from the payload size.
 The core ledger also exposes a schema-versioned snapshot/restore boundary for

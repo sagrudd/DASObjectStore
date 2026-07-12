@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.52 - 2026-07-13
+
+- Keep bounded-folder catalogue visibility and logical usage coherent after
+  verified removal; catalogue failure leaves the payload and accounting
+  untouched, while payload failure restores the catalogue record.
+
 ## 0.72.51 - 2026-07-13
 
 - Restore bounded-folder logical usage from the durable catalogue on reopen and

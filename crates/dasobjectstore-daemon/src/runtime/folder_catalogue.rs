@@ -89,6 +89,14 @@ impl FolderCatalogue {
         Ok(())
     }
 
+    pub fn remove(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
+        let mut next = self.records.clone();
+        next.remove(&catalogue_key(key));
+        self.persist(&next)?;
+        self.records = next;
+        Ok(())
+    }
+
     fn persist(&self, records: &BTreeMap<String, BackendObjectRecord>) -> Result<(), BackendError> {
         let parent = self.path.parent().ok_or_else(|| {
             BackendError::InvalidRequest("folder catalogue path has no parent".to_string())

@@ -565,13 +565,27 @@ impl ObjectStoreBackend for FolderBackend {
 
     fn remove(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
         let path = self.object_path(key)?;
-        let (_, size_bytes) = hash_stable_file(&path)?;
+        let (checksum, size_bytes) = hash_stable_file(&path)?;
         if size_bytes > self.ledger.used_bytes() {
             return Err(BackendError::InvalidRequest(
                 "folder capacity accounting is below object size".to_string(),
             ));
         }
-        fs::remove_file(&path).map_err(io_error)?;
+        let record = self.record_for_path(key.clone(), &path, checksum, size_bytes)?;
+        // Remove the durable catalogue record first. If persistence fails, the
+        // payload and logical accounting remain untouched. If payload removal
+        // then fails, restore the record before returning so a retry remains
+        // authoritative and fail-closed.
+        self.catalogue.remove(key)?;
+        if let Err(error) = fs::remove_file(&path).map_err(io_error) {
+            let restore_error = self.catalogue.commit_records([record]);
+            return Err(match restore_error {
+                Ok(()) => error,
+                Err(restore_error) => BackendError::InvalidRequest(format!(
+                    "folder payload removal failed ({error}) and catalogue restore failed ({restore_error})"
+                )),
+            });
+        }
         self.ledger
             .debit_used_bytes(size_bytes)
             .map_err(|error| BackendError::InvalidRequest(format!("capacity debit: {error:?}")))?;
@@ -1016,10 +1030,42 @@ mod tests {
         );
         backend.remove(&key).expect("removes object");
         assert_eq!(backend.capacity().used_bytes, 0);
+        assert!(backend.catalogue_records().is_empty());
         assert!(backend
             .enumerate(None)
             .expect("enumerates empty")
             .is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_keeps_payload_and_accounting_when_catalogue_remove_fails() {
+        let root = unique_root();
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        let key = BackendObjectKey {
+            object_id: "sample/data.txt".to_string(),
+            version: 1,
+        };
+        backend.reserve("upload-1", 4).expect("reserves capacity");
+        let staged = backend
+            .stage("upload-1", &key, &mut Cursor::new(b"data".to_vec()))
+            .expect("stages object");
+        let finalized = backend.finalize(staged).expect("finalizes object");
+        backend
+            .catalogue
+            .commit_records([finalized.clone()])
+            .expect("catalogue record commits");
+
+        let catalogue_path = root.join(".dasobjectstore/catalogue.json");
+        fs::remove_file(&catalogue_path).expect("catalogue removes");
+        fs::create_dir(&catalogue_path).expect("catalogue failure fixture creates");
+        assert!(backend.remove(&key).is_err(), "catalogue removal fails");
+        assert!(root.join(&finalized.location).is_file());
+        assert_eq!(backend.capacity().used_bytes, 4);
+        assert_eq!(backend.catalogue_records(), vec![finalized]);
+
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1185,10 +1231,16 @@ mod tests {
         assert!(
             FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 1,).is_err()
         );
-        let reopened = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
-            .expect("folder backend reopens from catalogue");
+        let mut reopened =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend reopens from catalogue");
         assert_eq!(reopened.capacity().used_bytes, 9);
         assert_eq!(reopened.catalogue_records(), records);
+        reopened
+            .remove(&records[0].key)
+            .expect("removes adopted object");
+        assert_eq!(reopened.capacity().used_bytes, 0);
+        assert!(reopened.catalogue_records().is_empty());
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(checkpoint_path.parent().expect("checkpoint parent"));
     }
