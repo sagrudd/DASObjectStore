@@ -41,9 +41,12 @@ completion.
 
 ### Gate 0: Re-baseline and close release-critical appliance debt
 
-- [ ] Reconcile every unchecked item in historical Milestones 12 and 19-24
+- [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or
   superseded; remove stale claims that the product is complete through M18.
+  Historical checklists now cross-reference the active campaign gates; hardware
+  acceptance, public upload authentication, and future design-language work
+  remain explicitly open rather than being presented as delivered.
 - [ ] Finish daemon-owned remote upload completion so provider success is not
   reported before SSD-first ingest, checksum, placement, and catalogue commit.
   Resolve and document the public paired-session completion authentication
@@ -52,15 +55,17 @@ completion.
   collision/malformed-key reporting, provider progress, and restart recovery.
   - [x] Add a versioned provider-independent per-key manifest/resume planner
     with safe key normalization, collision/malformed-key outcomes, atomic
-    durable checkpoints, cancellation-safe in-progress state, and restart
-    tests; provider transfer wiring and appliance progress acceptance remain.
+    durable in-progress checkpoints and restart-planner tests; stable manifest
+    rediscovery, true byte-range restart, and appliance/provider acceptance
+    remain.
   - [x] Integrate manifest checkpoints into the Garage transfer path, replace
     aggregate `aws s3 sync` with safe per-key downloads, and expose per-key
     progress through the daemon job stream; interrupted clients leave durable
-    in-progress checkpoints for restart.
+    in-progress checkpoints while stable manifest rediscovery and true
+    byte-range restart remain open.
   - [x] Add explicit administrator cancellation tokens for an active
     reconciliation job; cancellation is checked between provider transfers and
-    leaves the durable in-progress manifest available for restart.
+    leaves the durable in-progress manifest available for later rediscovery.
   - [ ] Complete appliance/provider soak acceptance (blocked while the
     DASServer, Garage appliance, and deployment credentials are unavailable).
 - [ ] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
@@ -904,7 +909,12 @@ list until every temporary size-budget exception has been removed.
   ObjectStore browser listing: cap blocking workers, return typed `429`/`503`
   overload/deadline responses, and retain a bridge permit until a timed-out
   synchronous socket call actually returns.
-- [ ] Give control, query, and cancellation requests reserved daemon capacity and priority over new ingest work. Bound every queue and return an explicit overload/degraded response instead of allowing an ingest to monopolize the socket or request workers.
+- [x] Give control, query, and cancellation requests reserved daemon capacity
+  and priority over new ingest work. The Unix listener has independently bounded
+  routine-control, priority-cancellation, and ingest lanes (8/2/2); saturated
+  lanes return the typed `server_busy` response. Async HTTP bridging,
+  deadlines, circuit breaking, and appliance soak acceptance remain separate
+  follow-up items.
 - [ ] Replace synchronous daemon Unix-socket calls in Axum handlers with an async bridge and bounded blocking pool. Apply per-route deadlines, cancellation propagation, and a circuit breaker so a stalled daemon produces a quick typed `503`/`429` response without exhausting HTTP accept/runtime threads.
 - [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
@@ -1288,16 +1298,20 @@ list until every temporary size-budget exception has been removed.
   S3/object-service keys missing from the ObjectBrowser catalogue; report
   collisions, malformed keys, and inaccessible objects without silently
   overwriting metadata. ``store repair STORE --reconcile-s3 --apply`` now
-  performs a safe SSD-first Garage import and catalogue registration; remaining
-  work is resumable per-key manifests, collision reporting, and non-Garage
-  providers.
+  performs a safe SSD-first Garage import and catalogue registration with
+  per-key manifests, collision reporting, and durable checkpoints; remaining
+  work is stable cross-job manifest rediscovery, byte-range continuation,
+  non-Garage providers, and appliance acceptance.
 - [~] Make `store repair --reconcile-s3` terminate naturally with a persisted
   terminal job state and final CLI response. Garage reconciliation now forwards
   normal coalesced SSD/HDD ingest events, preserves existing live metadata
   rather than attempting an unsafe filtered rebuild, records success/failure
   terminal Repair jobs, and marks interrupted nonterminal jobs failed on daemon
-  restart. Remaining work is byte-level Garage download progress, cancellation,
-  and resumable recovery rather than a new transfer after daemon restart.
+  restart. Garage now also reports per-key progress and checks administrator
+  cancellation between provider transfers while preserving in-progress
+  checkpoints. Remaining work is cancellation during a blocked provider copy,
+  true byte-level/range resume, stable rediscovery after restart, and appliance
+  acceptance rather than a new transfer after daemon restart.
 - [ ] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
@@ -1526,7 +1540,7 @@ list until every temporary size-budget exception has been removed.
 - [x] Add platform collectors for CPU and memory usage on supported Linux
   appliance hosts, with unit tests using fixture `/proc` or command-output data
   rather than relying on live host state.
-- [ ] Add per-enclosure disk capacity collection for every disk physically
+- [~] Add per-enclosure disk capacity collection for every disk physically
   associated with known DAS enclosures:
   - [x] Collect capacity for managed HDD roots declared by
     `.dasobjectstore/device.env`, preserving disk ID, label, mount path, role,
@@ -1538,7 +1552,7 @@ list until every temporary size-budget exception has been removed.
     every disk physically associated with a known DAS enclosure carries the
     authoritative enclosure association in each sample.
     Blocked until the physical enclosure/bay registry is implemented.
-- [ ] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
+- [~] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
   read operations/s, write operations/s, queue or await signals where available,
   and explicit missing-counter reasons when the host cannot provide a metric:
   - [x] Add Linux `/proc/diskstats` parsing and managed-HDD marker matching for

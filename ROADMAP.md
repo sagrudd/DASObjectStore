@@ -50,9 +50,10 @@ historical checklists remain below and in TODO as evidence.
 ### Open technical debt
 
 The active baseline still has release-relevant gaps: provider upload completion
-is not yet an atomic catalogue transaction; Garage reconciliation now uses a
-durable provider-independent manifest/resume worker with per-key progress and
-administrator cancellation checkpoints, while non-Garage providers and
+is not yet an atomic catalogue transaction; Garage reconciliation now uses
+durable provider-independent manifest/checkpoint planning plus a per-key Garage
+transfer worker with progress and administrator cancellation checks between
+provider transfers, while stable byte-range resume, non-Garage providers, and
 appliance soak acceptance remain open; control/Web capacity is not fully
 reserved under ingest; telemetry device mapping and appliance acceptance remain
 incomplete; and UI/design work remains. The module-size guard now passes with no
@@ -886,9 +887,9 @@ Goal: close current daemon ownership, upload completion, reconciliation,
 availability, telemetry, module-size, packaging, and soak-test gaps.
 
 Exit criteria: uploads are not complete before catalogue finalization; control
-requests retain bounded capacity under ingest; temporary module exceptions have
-owners and removal plans; appliance-only acceptance blockers are recorded and
-repeatable.
+requests retain bounded capacity under ingest; no temporary production module
+exceptions remain and the guard passes; appliance-only acceptance blockers are
+recorded and repeatable.
 
 ## Milestone 27: Universal Capacity and Reservation Policy
 

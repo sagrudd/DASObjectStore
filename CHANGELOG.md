@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.49 - 2026-07-12
+
+- Rebaseline historical TODO/roadmap claims around reconciliation, module-size
+  exceptions, and control-plane capacity; document the current Garage
+  checkpoint/cancellation limits and the remaining appliance/byte-range gaps.
+
 ## 0.71.48 - 2026-07-12
 
 - Add the first bounded async GUI-to-daemon bridge for ObjectStore browser

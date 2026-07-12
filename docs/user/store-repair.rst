@@ -59,6 +59,13 @@ replace unrelated catalogue state. Export/protection should remain disabled
 for recovered entries until a subsequent hash-verification workflow has
 completed.
 
+Each apply records a durable per-key manifest in the private SSD staging tree.
+Administrator cancellation is checked between provider transfers and leaves
+the in-progress checkpoint intact. A later invocation does not yet discover
+older job manifests automatically or continue a partial ``aws s3 cp`` at byte
+range level; retain the staging tree and use the recorded job evidence until
+stable rediscovery and true byte-level resume are delivered.
+
 If a repair reports partial duplicates, keep the source media and the payload
 files intact and investigate the corresponding ingest job before retrying.
 
