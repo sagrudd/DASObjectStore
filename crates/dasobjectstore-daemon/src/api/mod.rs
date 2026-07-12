@@ -34,7 +34,7 @@ pub use appliance_telemetry::{
 };
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
-    CapacityAdmissionResponse, CapacityAdmissionValidationError,
+    CapacityAdmissionReservationError, CapacityAdmissionResponse, CapacityAdmissionValidationError,
 };
 pub use disk_mutation::{
     DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError,

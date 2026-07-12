@@ -220,6 +220,10 @@ completion.
     and outstanding reservations from the live reservation ledger while taking
     backend/SSD free-space observations from daemon probes; caller-supplied
     usage cannot override the ledger.
+  - [x] Add an atomic daemon evaluate-and-reserve helper keyed by the validated
+    client request ID; rejected requests leave the ledger unchanged while
+    admitted logical versions create a transactional reservation. Transport
+    route integration remains open.
   - [x] Extend the daemon decision DTO with raw backend free space, policy
     thresholds, and copy-amplification basis points so adapters can render the
     observed block reason without recomputing physical policy.

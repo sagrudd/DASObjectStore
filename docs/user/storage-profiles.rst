@@ -98,6 +98,9 @@ reservation mutation and live S3/multipart route wiring remain follow-up work.
 The response also carries raw backend free space, configured warning/critical
 thresholds, and copy-amplification basis points so presentation adapters can
 show the daemon's decision without rebuilding capacity policy locally.
+The daemon also exposes an evaluate-and-reserve helper that uses the validated
+client request ID as the reservation key; rejected requests do not mutate the
+ledger. HTTP/S3/multipart transport routes still need to call this primitive.
 
 Portable manifests identify a profile with a versioned backend reference:
 folder manifests store a canonical root identity, drive manifests store stable

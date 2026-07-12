@@ -7,8 +7,8 @@
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::ingress::IngressOrigin;
 use dasobjectstore_core::store::{
-    evaluate_capacity_admission, CapacityAdmissionError, CapacityAdmissionInput, CapacityPolicy,
-    CapacityReservationLedger,
+    evaluate_capacity_admission, CapacityAdmissionError, CapacityAdmissionInput,
+    CapacityLedgerError, CapacityPolicy, CapacityReservationLedger, LogicalObjectVersionCharge,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -68,6 +68,38 @@ impl Display for CapacityAdmissionValidationError {
 }
 
 impl std::error::Error for CapacityAdmissionValidationError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CapacityAdmissionReservationError {
+    InvalidRequest(CapacityAdmissionValidationError),
+    MissingReservationId,
+    Rejected(CapacityAdmissionResponse),
+    Reservation(CapacityLedgerError),
+}
+
+impl Display for CapacityAdmissionReservationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequest(error) => write!(formatter, "invalid admission request: {error}"),
+            Self::MissingReservationId => {
+                formatter.write_str("client_request_id is required for reservation")
+            }
+            Self::Rejected(response) => write!(
+                formatter,
+                "capacity admission rejected: {}",
+                response
+                    .message
+                    .as_deref()
+                    .unwrap_or("capacity policy rejected request")
+            ),
+            Self::Reservation(error) => {
+                write!(formatter, "capacity reservation failed: {error:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CapacityAdmissionReservationError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -133,6 +165,39 @@ impl CapacityAdmissionResponse {
                 ssd_free_bytes,
             },
         )
+    }
+
+    /// Evaluate and reserve one logical object version while the ledger is
+    /// exclusively borrowed by the daemon. Rejections never mutate the
+    /// ledger; an admitted request uses its client request ID as the durable
+    /// reservation key.
+    pub fn evaluate_and_reserve(
+        request: &CapacityAdmissionRequest,
+        policy: &CapacityPolicy,
+        ledger: &mut CapacityReservationLedger,
+        backend_free_bytes: u64,
+        ssd_free_bytes: u64,
+    ) -> Result<Self, CapacityAdmissionReservationError> {
+        request
+            .validate()
+            .map_err(CapacityAdmissionReservationError::InvalidRequest)?;
+        let reservation_id = request
+            .client_request_id
+            .as_deref()
+            .ok_or(CapacityAdmissionReservationError::MissingReservationId)?;
+        let response =
+            Self::evaluate_with_ledger(request, policy, ledger, backend_free_bytes, ssd_free_bytes)
+                .map_err(CapacityAdmissionReservationError::InvalidRequest)?;
+        if response.decision == CapacityAdmissionDecision::Rejected {
+            return Err(CapacityAdmissionReservationError::Rejected(response));
+        }
+        ledger
+            .reserve_object_version(
+                reservation_id.to_string(),
+                LogicalObjectVersionCharge::new(request.requested_bytes),
+            )
+            .map_err(CapacityAdmissionReservationError::Reservation)?;
+        Ok(response)
     }
 
     pub fn evaluate(
@@ -416,6 +481,61 @@ mod tests {
         assert_eq!(response.reserved_bytes, 100);
         assert_eq!(response.logical_available_bytes, Some(200));
         assert_eq!(response.decision, CapacityAdmissionDecision::Admitted);
+    }
+
+    #[test]
+    fn evaluate_and_reserve_is_atomic_for_admitted_and_rejected_requests() {
+        let policy = CapacityPolicy::bounded(1_000, 0);
+        let mut ledger =
+            CapacityReservationLedger::new(policy.clone(), 700).expect("ledger policy is valid");
+        let response = CapacityAdmissionResponse::evaluate_and_reserve(
+            &request(),
+            &policy,
+            &mut ledger,
+            1_000,
+            500,
+        )
+        .expect("admitted request reserves");
+        assert_eq!(response.decision, CapacityAdmissionDecision::Admitted);
+        assert_eq!(ledger.reservation_bytes("request-1"), Some(100));
+
+        let mut rejected_request = request();
+        rejected_request.client_request_id = Some("rejected".to_string());
+        rejected_request.requested_bytes = 300;
+        let error = CapacityAdmissionResponse::evaluate_and_reserve(
+            &rejected_request,
+            &policy,
+            &mut ledger,
+            1_000,
+            500,
+        )
+        .expect_err("logical quota rejects request");
+        assert!(matches!(
+            error,
+            CapacityAdmissionReservationError::Rejected(response)
+                if response.reason == Some(CapacityAdmissionRejectionReason::LogicalQuota)
+        ));
+        assert_eq!(ledger.reservation_bytes("rejected"), None);
+    }
+
+    #[test]
+    fn evaluate_and_reserve_requires_client_request_id() {
+        let mut request = request();
+        request.client_request_id = None;
+        let policy = CapacityPolicy::bounded(1_000, 0);
+        let mut ledger =
+            CapacityReservationLedger::new(policy.clone(), 0).expect("ledger policy is valid");
+        assert_eq!(
+            CapacityAdmissionResponse::evaluate_and_reserve(
+                &request,
+                &policy,
+                &mut ledger,
+                1_000,
+                500,
+            ),
+            Err(CapacityAdmissionReservationError::MissingReservationId)
+        );
+        assert_eq!(ledger.reserved_bytes(), 0);
     }
 
     #[test]
