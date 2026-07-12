@@ -19,6 +19,22 @@ evidence and detailed source tasks.
 - Keep persistent metadata, CLI behavior, and compatibility-impacting changes
   documented before merging implementation.
 
+## Current External Blockers (2026-07-12)
+
+- DASServer/Garage hardware, appliance credentials, and deployment access are
+  unavailable while travelling. This blocks appliance/provider soak, package
+  install/reboot/remount/device replacement/full-disk acceptance, packaged
+  telemetry-loop verification, and real-world multi-HDD/S3 performance runs.
+  Continue with macOS unit/contract tests and the dedicated generated-data root
+  instead; do not retry SSH or appliance commands until access is restored.
+- The public paired-session HTTPS completion authentication contract is not
+  approved. Daemon-side completion authorization is tested, but no public
+  bearer/renewal-token semantics should be exposed without the security
+  decision.
+- Folder one-root adoption semantics and native-versus-provider-backed S3
+  gateway choice remain product decisions listed above; implementation should
+  not infer them from a path or profile name.
+
 ## Market and Mnemosyne Integration Campaign
 
 Work one campaign gate at a time. A checked campaign item must meet the

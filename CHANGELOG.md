@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.89 - 2026-07-12
+
+- Record the current DASServer/Garage access and unresolved public-auth/profile
+  decisions in TODO so automation can skip repeated blockers and drain local
+  work safely.
+
 ## 0.71.88 - 2026-07-12
 
 - Reject drive manifests without stable device identity or with a system-root
