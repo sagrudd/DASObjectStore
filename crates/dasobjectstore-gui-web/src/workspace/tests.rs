@@ -33,21 +33,21 @@ use super::{
     enclosures_workspace_api_path, endpoints_workspace_api_path,
     home_dashboard_api_path_with_window, home_dashboard_attention, home_dashboard_metrics,
     home_throughput_chart_max_tib, home_throughput_chart_points, home_throughput_chart_polyline,
-    home_workspace_api_path, object_browser_download_disabled_reason,
-    object_browser_file_download_available, object_browser_file_summaries,
-    object_browser_folder_download_available, object_browser_folder_summaries,
-    object_browser_initial_endpoint, object_browser_placement_summary,
-    object_browser_placement_summary_state, object_store_bucket_default,
-    object_store_card_summaries, object_store_configure_review_from_values,
-    object_store_create_confirmation_matches, object_store_create_review_from_values,
-    object_store_creation_fields_ready, objectstores_workspace_api_path,
-    primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
-    subobject_registry_preview_from_values, users_groups_summary_cards,
-    users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, RemoteUploadSelectedFile,
-    RemoteUploadSelectionSummary, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
-    BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
-    HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
-    REMOTE_UPLOAD_WORKSPACE_ROUTE,
+    home_throughput_source_class, home_throughput_source_label, home_workspace_api_path,
+    object_browser_download_disabled_reason, object_browser_file_download_available,
+    object_browser_file_summaries, object_browser_folder_download_available,
+    object_browser_folder_summaries, object_browser_initial_endpoint,
+    object_browser_placement_summary, object_browser_placement_summary_state,
+    object_store_bucket_default, object_store_card_summaries,
+    object_store_configure_review_from_values, object_store_create_confirmation_matches,
+    object_store_create_review_from_values, object_store_creation_fields_ready,
+    objectstores_workspace_api_path, primary_navigation_for_host, remote_upload_folder_count,
+    remote_upload_workspace_api_path, subobject_registry_preview_from_values,
+    users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
+    EnclosureWizardState, RemoteUploadSelectedFile, RemoteUploadSelectionSummary, WorkspacePage,
+    ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+    ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
+    PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
 };
 use super::{
     local_group_assignment_fields_ready, local_group_create_fields_ready, local_group_display_name,
@@ -1837,15 +1837,20 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     assert!(source.contains("<div class=\"dos-metric-grid\">"));
     assert!(source.contains("home_dashboard_metrics(view).into_iter().map(render_metric_card)"));
     assert!(source.contains("render_home_throughput_chart(view)"));
-    assert!(source.contains("<section class=\"dos-card dos-home-chart-card\""));
+    assert!(source.contains("class=\"dos-card dos-home-chart-card\""));
+    assert!(source.contains("data-throughput-source"));
     assert!(source.contains("<div class=\"dos-home-chart-frame\">"));
     assert!(source.contains("class=\"dos-home-throughput-chart\""));
     assert!(source.contains("viewBox={format!"));
     assert!(source.contains("HOME_THROUGHPUT_CHART_WIDTH"));
     assert!(source.contains("HOME_THROUGHPUT_CHART_HEIGHT"));
-    assert!(source.contains("<polyline class=\"dos-chart-line\" points={polyline} />"));
+    assert!(source.contains("class={format!(\"dos-chart-line {source_class}\")}"));
     assert!(source.contains("class=\"dos-chart-point\""));
     assert!(source.contains("class=\"dos-chart-empty\""));
+    assert!(source.contains("dos-home-chart-badges"));
+    assert!(source.contains("dos-telemetry-source"));
+    assert!(source.contains("dos-chart-line {source_class}"));
+    assert!(source.contains("dos-chart-message"));
     assert!(source.contains("dos-home-telemetry-toolbar"));
     assert!(source.contains("dos-window-segments"));
 
@@ -1858,6 +1863,10 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     assert!(css.contains(".dos-window-segments {\n  display: flex;\n  flex-wrap: wrap;"));
     assert!(css.contains(".dos-window-segment {\n  min-height: 32px;"));
     assert!(css.contains(".dos-home-chart-card {\n  min-height: 280px;"));
+    assert!(css.contains(".dos-home-chart-badges {\n  display: flex;"));
+    assert!(css.contains(".dos-telemetry-source-daemon {"));
+    assert!(css.contains(".dos-telemetry-source-unavailable {"));
+    assert!(css.contains(".dos-chart-line.dos-telemetry-source-legacy {"));
     assert!(css.contains(".dos-home-chart-frame {\n  height: 210px;\n  overflow: hidden;"));
     assert!(css.contains(
         ".dos-home-throughput-chart {\n  display: block;\n  width: 100%;\n  height: 210px;"
@@ -1872,6 +1881,22 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
         ".dos-metric-grid,\n  .dos-store-grid,\n  .dos-activity-grid,\n  .dos-activity-queues,"
     ));
     assert!(css.contains("grid-template-columns: 1fr;"));
+}
+
+#[test]
+fn home_throughput_source_contract_has_distinct_visual_states() {
+    assert_eq!(
+        home_throughput_source_label("daemon_disk_io"),
+        "Daemon telemetry"
+    );
+    assert_eq!(
+        home_throughput_source_class("legacy_file"),
+        "dos-telemetry-source-legacy"
+    );
+    assert_eq!(
+        home_throughput_source_class("unavailable"),
+        "dos-telemetry-source-unavailable"
+    );
 }
 
 #[test]

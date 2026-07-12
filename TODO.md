@@ -1654,6 +1654,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Add explicit `source` and optional `message` fields to throughput
     summaries: daemon disk-IO retention, legacy throughput-file fallback, and
     unavailable state are distinguishable while legacy payloads decode safely.
+  - [x] Render the provenance as a visible Home chart badge and source-specific
+    line treatment (solid daemon, amber legacy fallback, fixture/unavailable
+    dashed states), retaining the optional diagnostic message; preserving
+    invalid-sample gaps and linked failure diagnostics remains open.
 - [ ] Add appliance integration coverage using managed marker, mount, sysfs,
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device

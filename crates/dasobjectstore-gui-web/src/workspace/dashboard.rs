@@ -203,6 +203,24 @@ pub fn home_throughput_chart_points(view: &HomeDashboardResponse) -> Vec<HomeThr
     throughput_chart_points(&view.throughput_7d.daily)
 }
 
+pub fn home_throughput_source_label(source: &str) -> &'static str {
+    match source {
+        "daemon_disk_io" => "Daemon telemetry",
+        "legacy_file" => "Legacy file telemetry",
+        "bootstrap_fixture" => "Bootstrap fixture",
+        _ => "Unavailable telemetry",
+    }
+}
+
+pub fn home_throughput_source_class(source: &str) -> &'static str {
+    match source {
+        "daemon_disk_io" => "dos-telemetry-source-daemon",
+        "legacy_file" => "dos-telemetry-source-legacy",
+        "bootstrap_fixture" => "dos-telemetry-source-fixture",
+        _ => "dos-telemetry-source-unavailable",
+    }
+}
+
 pub fn home_throughput_chart_polyline(points: &[HomeThroughputChartPoint]) -> String {
     points
         .iter()

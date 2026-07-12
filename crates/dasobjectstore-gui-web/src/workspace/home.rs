@@ -115,16 +115,35 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
     let max_label = home_throughput_chart_max_tib(&points);
     let polyline = home_throughput_chart_polyline(&points);
     let has_points = !points.is_empty();
+    let source_label = home_throughput_source_label(&view.throughput_7d.source);
+    let source_class = home_throughput_source_class(&view.throughput_7d.source);
 
     html! {
-        <section class="dos-card dos-home-chart-card" aria-label="Home throughput telemetry chart">
+        <section
+            class="dos-card dos-home-chart-card"
+            data-throughput-source={view.throughput_7d.source.clone()}
+            aria-label="Home throughput telemetry chart"
+        >
             <div class="dos-card-row">
                 <div>
                     <span class="dos-card-label">{ "Telemetry chart" }</span>
                     <h2>{ "Throughput" }</h2>
                 </div>
-                <span class="dos-status-pill">{ &view.telemetry_window.selected_label }</span>
+                <div class="dos-home-chart-badges">
+                    <span class="dos-status-pill">{ &view.telemetry_window.selected_label }</span>
+                    <span
+                        class={format!("dos-status-pill dos-telemetry-source {source_class}")}
+                        aria-label={format!("Throughput source: {source_label}")}
+                    >
+                        { source_label }
+                    </span>
+                </div>
             </div>
+            {
+                view.throughput_7d.message.as_deref().map(|message| html! {
+                    <p class="dos-chart-message">{ message }</p>
+                }).unwrap_or_default()
+            }
             <div class="dos-home-chart-frame">
                 <svg
                     class="dos-home-throughput-chart"
@@ -161,7 +180,10 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
                         if has_points {
                             html! {
                                 <>
-                                    <polyline class="dos-chart-line" points={polyline} />
+                                    <polyline
+                                        class={format!("dos-chart-line {source_class}")}
+                                        points={polyline}
+                                    />
                                     { for points.iter().map(|point| html! {
                                         <circle
                                             class="dos-chart-point"

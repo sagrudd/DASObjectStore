@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.72 - 2026-07-12
+
+- Make Home throughput provenance visible with source badges and distinct line
+  treatments for daemon telemetry, legacy fallback, fixtures, and unavailable
+  data while retaining diagnostics for follow-up gap handling.
+
 ## 0.71.71 - 2026-07-12
 
 - Bound idle GUI daemon socket calls with progress-aware cancellation so a
