@@ -16,7 +16,6 @@ use crate::cli::{
 mod command_handlers;
 mod connection_status;
 mod disk_lockdown;
-mod disk_prepare;
 mod health;
 mod ingest_client;
 mod ingest_local_direct;
@@ -99,10 +98,6 @@ use self::command_handlers::{run_pool_mark_clean, run_pool_mark_dirty};
 use self::disk_lockdown::{
     lockdown_das, LockdownDasError, LockdownDasRequest, LOCKDOWN_CONFIRMATION,
 };
-use self::disk_prepare::{
-    prepare_das, PrepareDasDevice, PrepareDasError, PrepareDasRequest, PrepareDasRole,
-    PrepareFilesystem,
-};
 use self::health::run_health;
 #[cfg(test)]
 use self::health::{DiskHealthSummary, HealthReport};
@@ -175,6 +170,9 @@ use dasobjectstore_daemon::{
     DiskRetireRequest as DaemonDiskRetireRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     ObjectPutRequest as DaemonObjectPutRequest,
+    PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
+    PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
+    PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
     StoreDeduplicateRequest as DaemonStoreDeduplicateRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
@@ -586,7 +584,6 @@ pub(crate) enum CliError {
     DiskDrain(DiskDrainError),
     StoreCleanup(StoreCleanupError),
     DiskLockdown(LockdownDasError),
-    DiskPrepare(PrepareDasError),
     DaemonClient(DaemonClientError),
     DiskRetirement(DiskRetirementError),
     ObjectExport(ObjectExportError),
@@ -635,7 +632,6 @@ impl Display for CliError {
             Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::StoreCleanup(err) => write!(formatter, "{err}"),
             Self::DiskLockdown(err) => write!(formatter, "{err}"),
-            Self::DiskPrepare(err) => write!(formatter, "{err}"),
             Self::DaemonClient(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
@@ -747,12 +743,6 @@ impl From<DiskRetirementError> for CliError {
 impl From<LockdownDasError> for CliError {
     fn from(err: LockdownDasError) -> Self {
         Self::DiskLockdown(err)
-    }
-}
-
-impl From<PrepareDasError> for CliError {
-    fn from(err: PrepareDasError) -> Self {
-        Self::DiskPrepare(err)
     }
 }
 

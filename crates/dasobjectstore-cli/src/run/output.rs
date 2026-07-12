@@ -1,9 +1,9 @@
 use super::connection_status::HostConnectionStatus;
 use super::disk_lockdown::LockdownDasReport;
-use super::disk_prepare::PrepareDasReport;
 use super::health::{DiskHealthSummary, HealthReport};
 use super::{CliError, StoreDeleteCommandReport};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
+use dasobjectstore_daemon::PrepareEnclosureResponse;
 use dasobjectstore_metadata::{
     DestagePriorityPolicy, DiskDrainAction, DiskDrainObjectSummary, DiskDrainPlanSummary,
     DiskReplacementPlanSummary, DiskRetirementReport, ObjectExportReport, ObjectInspectSummary,
@@ -366,10 +366,10 @@ pub(super) fn write_disk_retirement_report(
 }
 
 pub(super) fn write_prepare_das_report(
-    report: &PrepareDasReport,
+    report: &PrepareEnclosureResponse,
     writer: &mut impl Write,
 ) -> Result<(), io::Error> {
-    if report.dry_run {
+    if report.accepted.dry_run {
         writeln!(writer, "DAS preparation dry run")?;
     } else {
         writeln!(writer, "DAS preparation complete")?;
@@ -379,20 +379,31 @@ pub(super) fn write_prepare_das_report(
         "Mount root: {}",
         report.mount_root.to_string_lossy()
     )?;
-    for target in &report.targets {
-        writeln!(writer, "- {}", target.role)?;
-        writeln!(writer, "  Device: {}", target.device_path.to_string_lossy())?;
+    writeln!(writer, "- ssd")?;
+    writeln!(writer, "  Device: {}", report.ssd_device.to_string_lossy())?;
+    writeln!(
+        writer,
+        "  Mount: {}",
+        report.mount_root.join("ssd").display()
+    )?;
+    writeln!(writer, "  Filesystem: {}", report.filesystem)?;
+    for device in &report.hdd_devices {
+        writeln!(writer, "- hdd:{}", device.disk_id)?;
+        writeln!(writer, "  Device: {}", device.device_path.to_string_lossy())?;
         writeln!(
             writer,
-            "  Partition: {}",
-            target.partition_path.to_string_lossy()
+            "  Mount: {}",
+            report
+                .mount_root
+                .join("hdd")
+                .join(&device.disk_id)
+                .display()
         )?;
-        writeln!(writer, "  Mount: {}", target.mount_point.to_string_lossy())?;
-        writeln!(writer, "  Filesystem: {}", target.filesystem)?;
-        if report.dry_run {
-            for command in &target.commands {
-                writeln!(writer, "  $ {command}")?;
-            }
+        writeln!(writer, "  Filesystem: {}", report.filesystem)?;
+    }
+    if report.accepted.dry_run {
+        for command in &report.planned_commands {
+            writeln!(writer, "  $ {command}")?;
         }
     }
 

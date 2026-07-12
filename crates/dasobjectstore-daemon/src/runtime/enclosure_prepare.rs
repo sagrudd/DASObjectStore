@@ -36,8 +36,9 @@ pub(super) fn prepare_enclosure<R: ServiceCommandRunner>(
         });
     }
 
+    let mut planned_commands = Vec::new();
     for device in &devices {
-        prepare_device(runner, &request, device)?;
+        planned_commands.extend(prepare_device(runner, &request, device)?);
     }
 
     let job_id_value = format!(
@@ -58,7 +59,7 @@ pub(super) fn prepare_enclosure<R: ServiceCommandRunner>(
     let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
         .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
 
-    Ok(PrepareEnclosureResponse::accepted(
+    let mut response = PrepareEnclosureResponse::accepted(
         job_id,
         accepted_at_utc,
         request.dry_run,
@@ -68,14 +69,16 @@ pub(super) fn prepare_enclosure<R: ServiceCommandRunner>(
         request.filesystem,
         request.owner,
         request.administrator_actor,
-    ))
+    );
+    response.planned_commands = planned_commands;
+    Ok(response)
 }
 
 fn prepare_device<R: ServiceCommandRunner>(
     runner: &R,
     request: &PrepareEnclosureRequest,
     device: &Device,
-) -> Result<(), DaemonServiceRuntimeError> {
+) -> Result<Vec<String>, DaemonServiceRuntimeError> {
     let partition_path = partition_path_for(&device.device_path);
     let mount_point = mount_point_for_role(&request.mount_root, &device.role);
     let label = label_for_role(&device.role);
@@ -138,6 +141,7 @@ fn prepare_device<R: ServiceCommandRunner>(
         ));
     }
 
+    let planned_commands = commands.iter().map(Command::render).collect();
     if !request.dry_run {
         for command in commands {
             runner.run(&command.program, &command.args)?;
@@ -155,7 +159,7 @@ fn prepare_device<R: ServiceCommandRunner>(
         }
     }
 
-    Ok(())
+    Ok(planned_commands)
 }
 
 fn mkfs_command(
@@ -360,6 +364,22 @@ impl Command {
             program: program.into(),
             args,
         }
+    }
+
+    fn render(&self) -> String {
+        let mut parts = vec![self.program.clone()];
+        parts.extend(self.args.iter().map(|arg| shell_quote(arg)));
+        parts.join(" ")
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b':' | b'-' | b'_' | b'=')
+    }) {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }
 

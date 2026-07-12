@@ -77,9 +77,9 @@ completion.
   validation, command-runner injection, ext4/xfs planning, and atomic fsync'd
   role markers; keep destructive execution behind the existing confirmation
   and existing-data acknowledgement gates.
-- [ ] Route `disk prepare-das` through the daemon executor and remove normal
+- [x] Route `disk prepare-das` through the daemon executor and remove normal
   appliance preparation writes from the CLI; preserve dry-run reports,
-  confirmation behavior, and machine-readable output.
+  confirmation behavior, and machine-readable daemon response fields.
 - [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
   after storage contracts stabilize.
 

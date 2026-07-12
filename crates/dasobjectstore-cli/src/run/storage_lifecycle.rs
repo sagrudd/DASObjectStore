@@ -113,24 +113,18 @@ pub(super) fn run_disk_prepare_das(
             &ActionConfirmation::new(args.confirm()),
         )?;
     }
-    let request = PrepareDasRequest {
-        devices: prepare_das_devices(args)?,
-        mount_root: args.mount_root().to_path_buf(),
-        filesystem: prepare_filesystem(args.filesystem()),
-        owner: args.owner().map(ToOwned::to_owned),
-        dry_run: args.dry_run(),
-    };
-    let report = prepare_das(&request)?;
-    write_prepare_das_report(&report, writer)?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.prepare_enclosure(prepare_enclosure_request(args)?)?;
+    write_prepare_das_report(&response, writer)?;
     Ok(())
 }
 
-fn prepare_das_devices(args: &DiskPrepareDasArgs) -> Result<Vec<PrepareDasDevice>, CliError> {
-    let mut devices = vec![PrepareDasDevice {
-        role: PrepareDasRole::Ssd,
-        device_path: args.ssd_device().to_path_buf(),
-    }];
-    for (index, value) in args.hdd_devices().iter().enumerate() {
+fn prepare_enclosure_request(
+    args: &DiskPrepareDasArgs,
+) -> Result<DaemonPrepareEnclosureRequest, CliError> {
+    let mut hdd_devices = Vec::with_capacity(args.hdd_devices().len());
+    for value in args.hdd_devices() {
         let (disk_id, device_path) =
             value
                 .split_once('=')
@@ -145,21 +139,27 @@ fn prepare_das_devices(args: &DiskPrepareDasArgs) -> Result<Vec<PrepareDasDevice
                 value: value.clone(),
             });
         }
-        devices.push(PrepareDasDevice {
-            role: PrepareDasRole::Hdd {
-                disk_id,
-                ordinal: index + 1,
-            },
+        hdd_devices.push(DaemonPrepareEnclosureHddDevice {
+            disk_id: disk_id.as_str().to_string(),
             device_path: Path::new(device_path).to_path_buf(),
         });
     }
-    Ok(devices)
-}
 
-fn prepare_filesystem(filesystem: DiskPrepareFilesystem) -> PrepareFilesystem {
-    match filesystem {
-        DiskPrepareFilesystem::Ext4 => PrepareFilesystem::Ext4,
-    }
+    Ok(DaemonPrepareEnclosureRequest {
+        ssd_device: args.ssd_device().to_path_buf(),
+        hdd_devices,
+        mount_root: args.mount_root().to_path_buf(),
+        filesystem: match args.filesystem() {
+            DiskPrepareFilesystem::Ext4 => DaemonPrepareEnclosureFilesystem::Ext4,
+        },
+        owner: args.owner().map(ToOwned::to_owned),
+        dry_run: args.dry_run(),
+        client_request_id: None,
+        administrator_actor: None,
+        allow_format: args.allow_format(),
+        existing_data_acknowledged: args.acknowledge_existing_data(),
+        confirmation_marker: args.confirm().to_string(),
+    })
 }
 
 pub(super) fn run_disk_drain(

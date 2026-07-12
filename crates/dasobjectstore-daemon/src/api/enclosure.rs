@@ -30,13 +30,13 @@ impl PrepareEnclosureRequest {
         if self.hdd_devices.is_empty() {
             return Err(PrepareEnclosureValidationError::NoHddDevices);
         }
-        if !self.allow_format {
+        if !self.dry_run && !self.allow_format {
             return Err(PrepareEnclosureValidationError::FormatNotAllowed);
         }
-        if !self.existing_data_acknowledged {
+        if !self.dry_run && !self.existing_data_acknowledged {
             return Err(PrepareEnclosureValidationError::ExistingDataNotAcknowledged);
         }
-        if self.confirmation_marker.trim() != ENCLOSURE_PREPARE_CONFIRMATION {
+        if !self.dry_run && self.confirmation_marker.trim() != ENCLOSURE_PREPARE_CONFIRMATION {
             return Err(PrepareEnclosureValidationError::ConfirmationMismatch);
         }
         validate_optional_safe_name("owner", self.owner.as_deref())?;
@@ -100,6 +100,8 @@ pub struct PrepareEnclosureResponse {
     pub filesystem: PrepareEnclosureFilesystem,
     pub owner: Option<String>,
     pub administrator_actor: Option<String>,
+    #[serde(default)]
+    pub planned_commands: Vec<String>,
 }
 
 impl PrepareEnclosureResponse {
@@ -128,6 +130,7 @@ impl PrepareEnclosureResponse {
             filesystem,
             owner,
             administrator_actor,
+            planned_commands: Vec::new(),
         }
     }
 }
@@ -313,6 +316,19 @@ mod tests {
             request.validate(),
             Err(PrepareEnclosureValidationError::FormatNotAllowed)
         );
+    }
+
+    #[test]
+    fn dry_run_allows_missing_destructive_acknowledgements() {
+        let request = PrepareEnclosureRequest {
+            dry_run: true,
+            allow_format: false,
+            existing_data_acknowledged: false,
+            confirmation_marker: String::new(),
+            ..valid_request()
+        };
+
+        assert!(request.validate().is_ok());
     }
 
     #[test]
