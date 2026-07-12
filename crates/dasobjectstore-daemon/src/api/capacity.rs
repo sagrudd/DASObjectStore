@@ -98,10 +98,14 @@ pub struct CapacityAdmissionResponse {
     pub used_bytes: u64,
     pub reserved_bytes: u64,
     pub logical_available_bytes: Option<u64>,
+    pub backend_free_bytes: u64,
     pub backend_available_bytes: u64,
     pub ssd_available_bytes: Option<u64>,
     pub required_backend_bytes: u64,
     pub required_ssd_bytes: u64,
+    pub copy_amplification_basis_points: u32,
+    pub warning_threshold_basis_points: u16,
+    pub critical_threshold_basis_points: u16,
     pub message: Option<String>,
 }
 
@@ -157,6 +161,15 @@ impl CapacityAdmissionResponse {
         let backend_available_bytes = input
             .backend_free_bytes
             .saturating_sub(policy.backend_reserve_bytes);
+        let copy_amplification_basis_points = if request.requested_bytes == 0 {
+            0
+        } else {
+            required_backend_bytes
+                .saturating_mul(10_000)
+                .checked_div(request.requested_bytes)
+                .unwrap_or(u64::from(u32::MAX))
+                .min(u64::from(u32::MAX)) as u32
+        };
         let (decision, reason, message) = match result {
             Ok(_) => (CapacityAdmissionDecision::Admitted, None, None),
             Err(error) => (
@@ -176,6 +189,7 @@ impl CapacityAdmissionResponse {
             used_bytes: input.used_bytes,
             reserved_bytes: input.reserved_bytes,
             logical_available_bytes,
+            backend_free_bytes: input.backend_free_bytes,
             backend_available_bytes,
             ssd_available_bytes: request
                 .requires_ssd_staging()
@@ -185,6 +199,9 @@ impl CapacityAdmissionResponse {
                 .requires_ssd_staging()
                 .then_some(request.requested_bytes)
                 .unwrap_or(0),
+            copy_amplification_basis_points,
+            warning_threshold_basis_points: policy.warning_threshold_basis_points,
+            critical_threshold_basis_points: policy.critical_threshold_basis_points,
             message,
         })
     }
@@ -298,7 +315,11 @@ mod tests {
         assert_eq!(response.required_ssd_bytes, 100);
         assert_eq!(response.logical_available_bytes, Some(780));
         assert_eq!(response.backend_available_bytes, 900);
+        assert_eq!(response.backend_free_bytes, 1_000);
         assert_eq!(response.ssd_available_bytes, Some(500));
+        assert_eq!(response.copy_amplification_basis_points, 20_000);
+        assert_eq!(response.warning_threshold_basis_points, 8_000);
+        assert_eq!(response.critical_threshold_basis_points, 9_500);
     }
 
     #[test]

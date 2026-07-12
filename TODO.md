@@ -220,6 +220,9 @@ completion.
     and outstanding reservations from the live reservation ledger while taking
     backend/SSD free-space observations from daemon probes; caller-supplied
     usage cannot override the ledger.
+  - [x] Extend the daemon decision DTO with raw backend free space, policy
+    thresholds, and copy-amplification basis points so adapters can render the
+    observed block reason without recomputing physical policy.
 - [ ] Add concurrency, crash/restart, multipart expiry, quota-change, dedupe, and
   full-filesystem tests before enabling new profile writes.
 

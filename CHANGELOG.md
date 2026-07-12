@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.20 - 2026-07-12
+
+- Extend capacity admission decisions with backend free space, policy
+  thresholds, and copy-amplification observations for presentation adapters.
+
 ## 0.72.19 - 2026-07-12
 
 - Add a daemon capacity-admission helper that reads logical usage and

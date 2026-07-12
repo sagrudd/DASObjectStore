@@ -95,6 +95,9 @@ usage and outstanding reservations are read from the daemon's reservation
 ledger, while backend and SSD free-space values come from daemon-owned probes.
 The caller cannot replace those logical observations with request data. Atomic
 reservation mutation and live S3/multipart route wiring remain follow-up work.
+The response also carries raw backend free space, configured warning/critical
+thresholds, and copy-amplification basis points so presentation adapters can
+show the daemon's decision without rebuilding capacity policy locally.
 
 Portable manifests identify a profile with a versioned backend reference:
 folder manifests store a canonical root identity, drive manifests store stable
