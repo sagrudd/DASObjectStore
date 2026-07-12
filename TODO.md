@@ -189,6 +189,9 @@ completion.
     checks remain part of the inspection/reconciliation gate.
 - [ ] Add read-only inspection followed by resumable adoption/reconciliation;
   report unmanaged drift without silently accepting it as authoritative.
+  - [x] Add a read-only `FolderBackend::inspect_user_tree` report for unmanaged
+    hierarchy and unsafe entries; no adoption or authority change occurs during
+    inspection, and resumable reconciliation remains open.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
 - [ ] Add per-user host mode with XDG state/runtime paths and a user service;

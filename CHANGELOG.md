@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.85 - 2026-07-12
+
+- Add read-only folder hierarchy inspection that reports unmanaged and unsafe
+  entries without silently adopting user files.
+
 ## 0.71.84 - 2026-07-12
 
 - Harden folder backend namespace and parent traversal against symlink escapes

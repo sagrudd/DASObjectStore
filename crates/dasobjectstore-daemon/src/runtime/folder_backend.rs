@@ -27,6 +27,18 @@ pub struct FolderBackend {
     staged_reservations: HashMap<PathBuf, String>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FolderInspectionReport {
+    pub unmanaged_paths: Vec<String>,
+    pub unsafe_paths: Vec<String>,
+}
+
+impl FolderInspectionReport {
+    pub fn is_clean(&self) -> bool {
+        self.unmanaged_paths.is_empty() && self.unsafe_paths.is_empty()
+    }
+}
+
 impl FolderBackend {
     pub fn open(
         root: impl Into<PathBuf>,
@@ -77,6 +89,13 @@ impl FolderBackend {
 
     pub fn manifest(&self) -> &ObjectStoreManifest {
         &self.manifest
+    }
+
+    /// Inspect user-visible hierarchy without adopting or mutating it.
+    pub fn inspect_user_tree(&self) -> Result<FolderInspectionReport, BackendError> {
+        let mut report = FolderInspectionReport::default();
+        inspect_user_tree(&self.root, &self.root, &mut report)?;
+        Ok(report)
     }
 
     fn object_path(&self, key: &BackendObjectKey) -> Result<PathBuf, BackendError> {
@@ -301,6 +320,34 @@ fn enumerate_files(
     Ok(())
 }
 
+fn inspect_user_tree(
+    root: &Path,
+    directory: &Path,
+    report: &mut FolderInspectionReport,
+) -> Result<(), BackendError> {
+    for entry in fs::read_dir(directory).map_err(io_error)? {
+        let entry = entry.map_err(io_error)?;
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| BackendError::InvalidRequest("inspection path escaped root".to_string()))?
+            .display()
+            .to_string();
+        if relative == NAMESPACE || relative.starts_with(&format!("{NAMESPACE}/")) {
+            continue;
+        }
+        let file_type = entry.file_type().map_err(io_error)?;
+        if file_type.is_symlink() || (!file_type.is_dir() && !file_type.is_file()) {
+            report.unsafe_paths.push(relative);
+        } else if file_type.is_dir() {
+            inspect_user_tree(root, &path, report)?;
+        } else {
+            report.unmanaged_paths.push(relative);
+        }
+    }
+    Ok(())
+}
+
 fn hash_reader(reader: &mut dyn Read) -> Result<String, BackendError> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
@@ -393,6 +440,7 @@ mod tests {
     use std::fs;
     use std::io::{Cursor, Read};
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -489,6 +537,19 @@ mod tests {
     }
 
     #[test]
+    fn folder_backend_inspects_unmanaged_user_tree_without_adopting_it() {
+        let root = unique_root();
+        let backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        fs::create_dir_all(root.join("incoming/run")).expect("user hierarchy creates");
+        fs::write(root.join("incoming/run/data.txt"), b"unmanaged").expect("user file writes");
+        let report = backend.inspect_user_tree().expect("inspection succeeds");
+        assert!(!report.is_clean());
+        assert_eq!(report.unmanaged_paths, vec!["incoming/run/data.txt"]);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn folder_backend_rejects_legacy_unbounded_capacity() {
         let root = unique_root();
         let error = FolderBackend::open(&root, manifest(), CapacityPolicy::default(), 0)
@@ -510,6 +571,7 @@ mod tests {
     }
 
     fn unique_root() -> PathBuf {
+        static ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
@@ -517,9 +579,10 @@ mod tests {
         let parent = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
+        let counter = ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
         parent.join(format!(
-            "dasobjectstore-folder-backend-{}-{now}",
-            std::process::id()
+            "dasobjectstore-folder-backend-{}-{now}-{counter}",
+            std::process::id(),
         ))
     }
 }
