@@ -243,6 +243,17 @@ impl ObjectStoreBackend for FolderBackend {
             file.sync_all().map_err(io_error)?;
             let checksum = format!("sha256:{:x}", hasher.finalize());
             let size_bytes = file.metadata().map_err(io_error)?.len();
+            let reserved_bytes =
+                self.ledger
+                    .reservation_bytes(reservation_id)
+                    .ok_or_else(|| {
+                        BackendError::InvalidRequest("unknown capacity reservation".to_string())
+                    })?;
+            if size_bytes != reserved_bytes {
+                return Err(BackendError::InvalidRequest(format!(
+                    "staged object size {size_bytes} does not match reserved bytes {reserved_bytes}"
+                )));
+            }
             let record =
                 self.record_for_path(key.clone(), &temporary_path, checksum, size_bytes)?;
             self.staged_reservations
@@ -338,7 +349,21 @@ impl ObjectStoreBackend for FolderBackend {
     }
 
     fn remove(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
-        fs::remove_file(self.object_path(key)?).map_err(io_error)
+        let path = self.object_path(key)?;
+        let (_, size_bytes) = hash_stable_file(&path)?;
+        if size_bytes > self.ledger.used_bytes() {
+            return Err(BackendError::InvalidRequest(
+                "folder capacity accounting is below object size".to_string(),
+            ));
+        }
+        fs::remove_file(&path).map_err(io_error)?;
+        self.ledger
+            .debit_used_bytes(size_bytes)
+            .map_err(|error| BackendError::InvalidRequest(format!("capacity debit: {error:?}")))?;
+        if let Some(parent) = path.parent() {
+            sync_directory(parent)?;
+        }
+        Ok(())
     }
 }
 
@@ -675,6 +700,7 @@ mod tests {
             .expect("stages object");
         assert!(staged.location.contains(".dasobjectstore/staging"));
         let finalized = backend.finalize(staged).expect("finalizes object");
+        assert_eq!(backend.capacity().used_bytes, 11);
         assert_eq!(
             finalized.checksum,
             "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
@@ -707,6 +733,7 @@ mod tests {
             ".dasobjectstore/objects/sample/run/data.txt"
         );
         backend.remove(&key).expect("removes object");
+        assert_eq!(backend.capacity().used_bytes, 0);
         assert!(backend
             .enumerate(None)
             .expect("enumerates empty")
@@ -728,6 +755,28 @@ mod tests {
         assert!(backend
             .stage("upload-2", &unsafe_key, &mut Cursor::new(b"x".to_vec()))
             .is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_rejects_staged_size_mismatch_before_commit() {
+        let root = unique_root();
+        let mut backend =
+            FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+                .expect("folder backend opens");
+        let key = BackendObjectKey {
+            object_id: "mismatch.txt".to_string(),
+            version: 1,
+        };
+        backend.reserve("mismatch", 1).expect("reserves capacity");
+        assert!(backend
+            .stage("mismatch", &key, &mut Cursor::new(b"too large".to_vec()))
+            .is_err());
+        assert_eq!(backend.capacity().reserved_bytes, 1);
+        backend
+            .ledger
+            .release("mismatch")
+            .expect("caller can release rejected reservation");
         let _ = fs::remove_dir_all(root);
     }
 

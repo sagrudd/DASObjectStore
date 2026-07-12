@@ -55,6 +55,11 @@ Quota reductions never delete data. The core ledger can enter an explicit
 ``over_quota`` pressure state while preserving reads and existing reservations;
 new reservations are rejected until usage is remediated. Deletion accounting
 and daemon/backend policy wiring remain part of the capacity integration gate.
+Verified folder deletion now debits the logical ledger only after stable-file
+validation and removes no hard-linked or changed object; repair and catalogue
+transaction integration remain separate gates.
+Folder staging also requires the copied byte count to equal its reservation,
+so logical usage cannot drift from the payload size.
 
 The daemon API now has a transport-neutral capacity admission contract. It
 returns an explicit admitted/rejected decision, stable rejection reason, quota

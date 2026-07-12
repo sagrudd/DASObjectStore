@@ -176,7 +176,12 @@ completion.
   - [x] Add derived pressure states and atomic quota-policy updates to the core
     ledger. Lowering a limit preserves usage and existing reservations, marks
     the ledger ``over_quota``, and rejects only new reservations; deletion
-    accounting and daemon/backend wiring remain follow-up work.
+    accounting and daemon wiring remain follow-up work.
+  - [x] Add checked used-byte debits for verified folder deletion, with
+    underflow protection and capacity recovery tests; repair and catalogue
+    transaction wiring remain separate.
+  - [x] Require folder staging bytes to match the reservation exactly before
+    commit, preventing logical-used/accounted-size drift during adoption.
 - [ ] Add optional SubObject budgets whose reservations atomically update both
   child and parent allocations.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,

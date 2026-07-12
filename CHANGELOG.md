@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.97 - 2026-07-12
+
+- Require folder staged byte counts to match capacity reservations before
+  commit, preventing usage-accounting drift.
+
+## 0.71.96 - 2026-07-12
+
+- Add checked used-byte debits for stable folder deletion with underflow
+  protection and capacity recovery.
+
 ## 0.71.95 - 2026-07-12
 
 - Add derived capacity pressure states and non-destructive quota-policy updates

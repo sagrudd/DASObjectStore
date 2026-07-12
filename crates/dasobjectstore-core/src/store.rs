@@ -309,6 +309,10 @@ impl CapacityReservationLedger {
         self.reservations.values().copied().sum()
     }
 
+    pub fn reservation_bytes(&self, reservation_id: &str) -> Option<u64> {
+        self.reservations.get(reservation_id).copied()
+    }
+
     pub fn policy(&self) -> &CapacityPolicy {
         &self.policy
     }
@@ -391,6 +395,17 @@ impl CapacityReservationLedger {
         Ok(())
     }
 
+    pub fn debit_used_bytes(&mut self, bytes: u64) -> Result<(), CapacityLedgerError> {
+        if bytes > self.used_bytes {
+            return Err(CapacityLedgerError::UsedBytesUnderflow {
+                used_bytes: self.used_bytes,
+                requested_bytes: bytes,
+            });
+        }
+        self.used_bytes -= bytes;
+        Ok(())
+    }
+
     pub fn release(&mut self, reservation_id: &str) -> Result<u64, CapacityLedgerError> {
         self.reservations
             .remove(reservation_id)
@@ -403,7 +418,13 @@ pub enum CapacityLedgerError {
     InvalidPolicy(CapacityPolicyValidationError),
     InvalidReservationId,
     UnknownReservation,
-    InsufficientCapacity { available_bytes: u64 },
+    UsedBytesUnderflow {
+        used_bytes: u64,
+        requested_bytes: u64,
+    },
+    InsufficientCapacity {
+        available_bytes: u64,
+    },
     Overflow,
 }
 
@@ -907,6 +928,22 @@ mod tests {
         )
         .expect("large policy is valid");
         assert_eq!(ledger.pressure_state(), CapacityPressureState::Normal);
+    }
+
+    #[test]
+    fn used_bytes_can_be_debited_only_for_existing_accounting() {
+        let mut ledger = super::CapacityReservationLedger::new(CapacityPolicy::bounded(100, 0), 40)
+            .expect("capacity policy is valid");
+        ledger.debit_used_bytes(15).expect("debit fits");
+        assert_eq!(ledger.used_bytes(), 25);
+        assert_eq!(
+            ledger.debit_used_bytes(30),
+            Err(CapacityLedgerError::UsedBytesUnderflow {
+                used_bytes: 25,
+                requested_bytes: 30,
+            })
+        );
+        assert_eq!(ledger.used_bytes(), 25);
     }
 
     #[test]
