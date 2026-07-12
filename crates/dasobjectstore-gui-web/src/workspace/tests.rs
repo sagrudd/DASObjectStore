@@ -33,21 +33,22 @@ use super::{
     enclosures_workspace_api_path, endpoints_workspace_api_path,
     home_dashboard_api_path_with_window, home_dashboard_attention, home_dashboard_metrics,
     home_throughput_chart_max_tib, home_throughput_chart_points, home_throughput_chart_polyline,
-    home_throughput_source_class, home_throughput_source_label, home_workspace_api_path,
-    object_browser_download_disabled_reason, object_browser_file_download_available,
-    object_browser_file_summaries, object_browser_folder_download_available,
-    object_browser_folder_summaries, object_browser_initial_endpoint,
-    object_browser_placement_summary, object_browser_placement_summary_state,
-    object_store_bucket_default, object_store_card_summaries,
-    object_store_configure_review_from_values, object_store_create_confirmation_matches,
-    object_store_create_review_from_values, object_store_creation_fields_ready,
-    objectstores_workspace_api_path, primary_navigation_for_host, remote_upload_folder_count,
-    remote_upload_workspace_api_path, subobject_registry_preview_from_values,
-    users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
-    EnclosureWizardState, RemoteUploadSelectedFile, RemoteUploadSelectionSummary, WorkspacePage,
-    ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
-    ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
-    PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
+    home_throughput_chart_segments, home_throughput_source_class, home_throughput_source_label,
+    home_workspace_api_path, object_browser_download_disabled_reason,
+    object_browser_file_download_available, object_browser_file_summaries,
+    object_browser_folder_download_available, object_browser_folder_summaries,
+    object_browser_initial_endpoint, object_browser_placement_summary,
+    object_browser_placement_summary_state, object_store_bucket_default,
+    object_store_card_summaries, object_store_configure_review_from_values,
+    object_store_create_confirmation_matches, object_store_create_review_from_values,
+    object_store_creation_fields_ready, objectstores_workspace_api_path,
+    primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
+    subobject_registry_preview_from_values, users_groups_summary_cards,
+    users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, RemoteUploadSelectedFile,
+    RemoteUploadSelectionSummary, ThroughputDayResponse, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
+    BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
+    HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
+    REMOTE_UPLOAD_WORKSPACE_ROUTE,
 };
 use super::{
     local_group_assignment_fields_ready, local_group_create_fields_ready, local_group_display_name,
@@ -1450,7 +1451,7 @@ fn home_dashboard_live_payload_maps_to_metrics_and_attention() {
         .all(|point| point.x >= 48.0 && point.x <= 616.0));
     assert!(chart_points
         .iter()
-        .all(|point| point.y >= 24.0 && point.y <= 144.0));
+        .all(|point| { point.y.is_some_and(|y| y >= 24.0 && y <= 144.0) }));
     assert_eq!(home_throughput_chart_max_tib(&chart_points), "1.8 TiB");
     assert_eq!(
         home_throughput_chart_polyline(&chart_points),
@@ -1817,15 +1818,50 @@ fn home_dashboard_telemetry_tests_sparse_missing_and_invalid_chart_samples() {
     assert_eq!(active_users.detail, "Session telemetry is unavailable.");
 
     let chart_points = home_throughput_chart_points(&view);
-    assert_eq!(chart_points.len(), 2);
-    assert_eq!(chart_points[0].date, "2026-07-03");
-    assert_eq!(chart_points[0].ingest_tib, 0.0);
-    assert_eq!(chart_points[1].date, "2026-07-04");
-    assert_eq!(chart_points[1].ingest_tib, 0.25);
+    assert_eq!(chart_points.len(), 4);
+    assert_eq!(chart_points[0].date, "2026-07-01");
+    assert_eq!(chart_points[1].date, "2026-07-02");
+    assert_eq!(chart_points[2].date, "2026-07-03");
+    assert_eq!(chart_points[3].date, "2026-07-04");
+    assert_eq!(chart_points[0].ingest_tib, None);
+    assert_eq!(chart_points[1].ingest_tib, None);
+    assert_eq!(chart_points[2].ingest_tib, Some(0.0));
+    assert_eq!(chart_points[3].ingest_tib, Some(0.25));
     assert_eq!(home_throughput_chart_max_tib(&chart_points), "0.2 TiB");
     assert_eq!(
         home_throughput_chart_polyline(&chart_points),
-        "48.0,144.0 616.0,114.0"
+        "426.7,144.0 616.0,114.0"
+    );
+}
+
+#[test]
+fn home_throughput_chart_preserves_invalid_sample_gaps() {
+    let days = vec![
+        ThroughputDayResponse {
+            date: "2026-07-01".to_string(),
+            read_tib: "0".to_string(),
+            written_tib: "0".to_string(),
+            ingest_tib: "1.0".to_string(),
+        },
+        ThroughputDayResponse {
+            date: "2026-07-02".to_string(),
+            read_tib: "0".to_string(),
+            written_tib: "0".to_string(),
+            ingest_tib: "missing".to_string(),
+        },
+        ThroughputDayResponse {
+            date: "2026-07-03".to_string(),
+            read_tib: "0".to_string(),
+            written_tib: "0".to_string(),
+            ingest_tib: "2.0".to_string(),
+        },
+    ];
+    let points = super::throughput_chart_points(&days);
+    assert_eq!(points.len(), 3);
+    assert_eq!(points[1].ingest_tib, None);
+    assert_eq!(
+        home_throughput_chart_segments(&points),
+        vec!["48.0,84.0".to_string(), "616.0,24.0".to_string()]
     );
 }
 
@@ -1845,12 +1881,14 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     assert!(source.contains("HOME_THROUGHPUT_CHART_WIDTH"));
     assert!(source.contains("HOME_THROUGHPUT_CHART_HEIGHT"));
     assert!(source.contains("class={format!(\"dos-chart-line {source_class}\")}"));
+    assert!(source.contains("home_throughput_chart_segments"));
     assert!(source.contains("class=\"dos-chart-point\""));
     assert!(source.contains("class=\"dos-chart-empty\""));
     assert!(source.contains("dos-home-chart-badges"));
     assert!(source.contains("dos-telemetry-source"));
     assert!(source.contains("dos-chart-line {source_class}"));
     assert!(source.contains("dos-chart-message"));
+    assert!(source.contains("dos-chart-gap-message"));
     assert!(source.contains("dos-home-telemetry-toolbar"));
     assert!(source.contains("dos-window-segments"));
 
@@ -1873,7 +1911,9 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     ));
     assert!(css.contains(".dos-chart-axis {\n  stroke: #70828a;"));
     assert!(css.contains("vector-effect: non-scaling-stroke;"));
-    assert!(css.contains(".dos-chart-label,\n.dos-chart-empty {\n  fill: #56666d;"));
+    assert!(css.contains(
+        ".dos-chart-label,\n.dos-chart-empty,\n.dos-chart-gap-message {\n  fill: #56666d;"
+    ));
     assert!(css.contains("@media (max-width: 980px)"));
     assert!(css.contains(".dos-metric-grid,\n  .dos-store-grid,\n  .dos-activity-grid {\n    grid-template-columns: repeat(2, minmax(0, 1fr));"));
     assert!(css.contains("@media (max-width: 640px)"));

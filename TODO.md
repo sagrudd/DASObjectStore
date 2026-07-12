@@ -1658,6 +1658,9 @@ list until every temporary size-budget exception has been removed.
     line treatment (solid daemon, amber legacy fallback, fixture/unavailable
     dashed states), retaining the optional diagnostic message; preserving
     invalid-sample gaps and linked failure diagnostics remains open.
+  - [x] Preserve invalid daily samples as fixed-position chart gaps, split SVG
+    lines at missing intervals, and show a non-interpolating gap diagnostic;
+    the broader appliance integration fixture matrix remains open.
 - [ ] Add appliance integration coverage using managed marker, mount, sysfs,
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device

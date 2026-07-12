@@ -537,7 +537,8 @@ h2 {
 }
 
 .dos-chart-label,
-.dos-chart-empty {
+.dos-chart-empty,
+.dos-chart-gap-message {
   fill: #56666d;
   font-size: 0.76rem;
   font-weight: 680;

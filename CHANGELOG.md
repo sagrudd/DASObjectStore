@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.73 - 2026-07-12
+
+- Preserve invalid Home throughput samples as fixed-position gaps and split the
+  SVG chart into non-interpolating segments with an explicit gap diagnostic.
+
 ## 0.71.72 - 2026-07-12
 
 - Make Home throughput provenance visible with source badges and distinct line

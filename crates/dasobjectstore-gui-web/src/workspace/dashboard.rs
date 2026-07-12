@@ -194,9 +194,9 @@ pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetr
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeThroughputChartPoint {
     pub date: String,
-    pub ingest_tib: f64,
+    pub ingest_tib: Option<f64>,
     pub x: f64,
-    pub y: f64,
+    pub y: Option<f64>,
 }
 
 pub fn home_throughput_chart_points(view: &HomeDashboardResponse) -> Vec<HomeThroughputChartPoint> {
@@ -224,15 +224,34 @@ pub fn home_throughput_source_class(source: &str) -> &'static str {
 pub fn home_throughput_chart_polyline(points: &[HomeThroughputChartPoint]) -> String {
     points
         .iter()
-        .map(|point| format!("{:.1},{:.1}", point.x, point.y))
+        .filter_map(|point| point.y.map(|y| format!("{:.1},{:.1}", point.x, y)))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+pub fn home_throughput_chart_segments(points: &[HomeThroughputChartPoint]) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = Vec::new();
+    for point in points {
+        match point.y {
+            Some(y) => current.push(format!("{:.1},{:.1}", point.x, y)),
+            None if !current.is_empty() => {
+                segments.push(current.join(" "));
+                current.clear();
+            }
+            None => {}
+        }
+    }
+    if !current.is_empty() {
+        segments.push(current.join(" "));
+    }
+    segments
 }
 
 pub fn home_throughput_chart_max_tib(points: &[HomeThroughputChartPoint]) -> String {
     let max_tib = points
         .iter()
-        .map(|point| point.ingest_tib)
+        .filter_map(|point| point.ingest_tib)
         .fold(0.0_f64, f64::max);
     if max_tib < 10.0 {
         format!("{max_tib:.1} TiB")
@@ -244,30 +263,28 @@ pub fn home_throughput_chart_max_tib(points: &[HomeThroughputChartPoint]) -> Str
 pub(super) fn throughput_chart_points(
     days: &[ThroughputDayResponse],
 ) -> Vec<HomeThroughputChartPoint> {
-    let parsed = days
-        .iter()
-        .filter_map(|day| parse_tib_value(&day.ingest_tib).map(|ingest_tib| (day, ingest_tib)))
-        .collect::<Vec<_>>();
-    if parsed.is_empty() {
+    if days.is_empty() {
         return Vec::new();
     }
 
-    let max_tib = parsed
+    let max_tib = days
         .iter()
-        .map(|(_, ingest_tib)| *ingest_tib)
+        .filter_map(|day| parse_tib_value(&day.ingest_tib))
         .fold(0.0_f64, f64::max)
         .max(1.0);
-    let span = parsed.len().saturating_sub(1).max(1) as f64;
-    parsed
-        .into_iter()
+    let span = days.len().saturating_sub(1).max(1) as f64;
+    days.into_iter()
         .enumerate()
-        .map(|(index, (day, ingest_tib))| {
+        .map(|(index, day)| {
+            let ingest_tib = parse_tib_value(&day.ingest_tib);
             let x = HOME_THROUGHPUT_CHART_LEFT
                 + ((HOME_THROUGHPUT_CHART_RIGHT - HOME_THROUGHPUT_CHART_LEFT)
                     * (index as f64 / span));
-            let y = HOME_THROUGHPUT_CHART_BOTTOM
-                - ((HOME_THROUGHPUT_CHART_BOTTOM - HOME_THROUGHPUT_CHART_TOP)
-                    * (ingest_tib / max_tib));
+            let y = ingest_tib.map(|ingest_tib| {
+                HOME_THROUGHPUT_CHART_BOTTOM
+                    - ((HOME_THROUGHPUT_CHART_BOTTOM - HOME_THROUGHPUT_CHART_TOP)
+                        * (ingest_tib / max_tib))
+            });
             HomeThroughputChartPoint {
                 date: day.date.clone(),
                 ingest_tib,

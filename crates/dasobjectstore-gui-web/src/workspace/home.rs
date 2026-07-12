@@ -113,8 +113,9 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
         .map(|point| point.date.as_str())
         .unwrap_or("Awaiting telemetry");
     let max_label = home_throughput_chart_max_tib(&points);
-    let polyline = home_throughput_chart_polyline(&points);
-    let has_points = !points.is_empty();
+    let segments = home_throughput_chart_segments(&points);
+    let has_points = !segments.is_empty();
+    let has_gaps = points.iter().any(|point| point.ingest_tib.is_none());
     let source_label = home_throughput_source_label(&view.throughput_7d.source);
     let source_class = home_throughput_source_class(&view.throughput_7d.source);
 
@@ -180,15 +181,17 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
                         if has_points {
                             html! {
                                 <>
-                                    <polyline
-                                        class={format!("dos-chart-line {source_class}")}
-                                        points={polyline}
-                                    />
-                                    { for points.iter().map(|point| html! {
+                                    { for segments.iter().map(|segment| html! {
+                                        <polyline
+                                            class={format!("dos-chart-line {source_class}")}
+                                            points={segment.clone()}
+                                        />
+                                    }) }
+                                    { for points.iter().filter_map(|point| point.y.map(|y| (point, y))).map(|(point, y)| html! {
                                         <circle
                                             class="dos-chart-point"
                                             cx={format!("{:.1}", point.x)}
-                                            cy={format!("{:.1}", point.y)}
+                                            cy={format!("{:.1}", y)}
                                             r="3"
                                         />
                                     }) }
@@ -200,6 +203,15 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
                                     { "Awaiting throughput samples" }
                                 </text>
                             }
+                        }
+                    }
+                    {
+                        if has_gaps {
+                            html! { <text class="dos-chart-gap-message" x="320" y="188" text-anchor="middle">
+                                { "Gaps show intervals without valid telemetry; values are not interpolated." }
+                            </text> }
+                        } else {
+                            html! {}
                         }
                     }
                     <text class="dos-chart-label" x="8" y="28">{ max_label }</text>
