@@ -974,6 +974,7 @@ impl DaemonApiRequest {
             Self::ServiceProvision(_) => "service_provision",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
+            Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
             Self::ObjectBrowser(_) => "object_browser",
             Self::ObjectDownload(_) => "object_download",
@@ -1016,16 +1017,16 @@ mod tests {
         ObjectBrowserDelegatedActor, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
         ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
         ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
         ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
@@ -1041,6 +1042,7 @@ mod tests {
         RemoteUploadAdmissionGate,
     };
     use crate::AdminJobRegistry;
+    use dasobjectstore_core::deployment::DeploymentProfile;
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::remote_upload::{
@@ -1088,6 +1090,25 @@ mod tests {
                 .as_slice(),
             &[true]
         );
+    }
+
+    #[test]
+    fn dispatches_profile_capability_discovery_without_runtime_mutation() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+
+        let response = handler
+            .handle(DaemonApiRequest::ProfileCapabilities(
+                ObjectStoreCapabilityDiscoveryRequest::default(),
+            ))
+            .expect("capabilities handled");
+
+        let DaemonApiResponse::ProfileCapabilities(response) = response else {
+            panic!("expected profile capability response");
+        };
+        response.validate().expect("capability response validates");
+        assert_eq!(response.profiles.len(), 3);
+        assert_eq!(response.profiles[0].profile, DeploymentProfile::Folder);
     }
 
     #[test]

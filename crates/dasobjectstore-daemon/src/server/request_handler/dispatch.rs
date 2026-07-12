@@ -29,6 +29,7 @@ where
         | DaemonApiRequest::UpsertEndpointInventory(_)
         | DaemonApiRequest::CreateLocalGroup(_)
         | DaemonApiRequest::AssignLocalUserToLocalGroup(_)
+        | DaemonApiRequest::ProfileCapabilities(_)
         | DaemonApiRequest::JobList(_)
         | DaemonApiRequest::JobStatus(_)
         | DaemonApiRequest::CancelJob(_)) => service::request(handler, service_request),

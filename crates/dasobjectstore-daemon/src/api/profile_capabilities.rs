@@ -11,6 +11,76 @@ use std::fmt::{self, Display};
 
 pub const PROFILE_CAPABILITIES_SCHEMA_VERSION: &str = "dasobjectstore.profile_capabilities.v1";
 
+pub fn discover_profile_capabilities(
+    _request: &ObjectStoreCapabilityDiscoveryRequest,
+) -> ObjectStoreCapabilityDiscoveryResponse {
+    let profiles = vec![
+        descriptor(
+            DeploymentProfile::Folder,
+            ProfileAvailability::Preview,
+            vec![HostMode::PerUser, HostMode::System, HostMode::Integrated],
+            Some(1),
+            None,
+        ),
+        descriptor(
+            DeploymentProfile::Drive,
+            ProfileAvailability::Preview,
+            vec![HostMode::System, HostMode::Integrated],
+            Some(1),
+            None,
+        ),
+        descriptor(
+            DeploymentProfile::Appliance,
+            ProfileAvailability::Unavailable,
+            vec![HostMode::System, HostMode::Integrated],
+            None,
+            Some("DASServer and appliance acceptance are unavailable".to_string()),
+        ),
+    ];
+    let response = ObjectStoreCapabilityDiscoveryResponse {
+        schema_version: PROFILE_CAPABILITIES_SCHEMA_VERSION.to_string(),
+        profiles,
+    };
+    debug_assert!(response.validate().is_ok());
+    response
+}
+
+fn descriptor(
+    profile: DeploymentProfile,
+    availability: ProfileAvailability,
+    host_modes: Vec<HostMode>,
+    max_distinct_local_failure_domains: Option<u8>,
+    unavailable_reason: Option<String>,
+) -> DeploymentProfileCapabilities {
+    DeploymentProfileCapabilities {
+        profile,
+        availability,
+        unavailable_reason,
+        host_modes,
+        protection_policies: ProtectionPolicy::ALL.to_vec(),
+        backend_operations: BackendCapabilities::complete(),
+        requirements: ProfileRequirements {
+            bounded_capacity_required: profile != DeploymentProfile::Appliance,
+            dedicated_ssd_required: profile == DeploymentProfile::Drive,
+            stable_device_identity_required: profile == DeploymentProfile::Drive,
+            single_machine: true,
+        },
+        max_distinct_local_failure_domains,
+        services: ProfileServices {
+            managed_ingress: profile != DeploymentProfile::Appliance,
+            hierarchical_manifest: true,
+            s3: false,
+            web_ui: true,
+            object_browser: true,
+            reconciliation: profile != DeploymentProfile::Appliance,
+        },
+        warnings: vec![
+            "runtime readiness and provisioning require a profile-specific daemon route"
+                .to_string(),
+        ],
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ObjectStoreCapabilityDiscoveryRequest {}
 

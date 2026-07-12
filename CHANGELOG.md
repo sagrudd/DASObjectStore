@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.28 - 2026-07-12
+
+- Expose static folder/drive/appliance capability discovery through the typed
+  daemon request, response, and client boundaries.
+
 ## 0.72.27 - 2026-07-12
 
 - Add a read-only folder inspection bridge that emits resumable reconciliation

@@ -345,6 +345,9 @@ completion.
     runtime store readiness and provisioning routes remain separate. The
     catalogue states a static local failure-domain ceiling (folder/drive 1,
     appliance 3), not current redundancy or external replication.
+  - [x] Wire static profile-capability discovery through the typed daemon
+    request/response and client boundaries; runtime readiness and provisioning
+    remain separate and appliance availability stays explicitly blocked.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit

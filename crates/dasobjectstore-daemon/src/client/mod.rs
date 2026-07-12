@@ -21,7 +21,8 @@ use crate::api::{
     IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
     IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest,
     ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
+    ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
     RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
@@ -351,6 +352,16 @@ where
         }
     }
 
+    pub fn profile_capabilities(
+        &self,
+        request: ObjectStoreCapabilityDiscoveryRequest,
+    ) -> Result<ObjectStoreCapabilityDiscoveryResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileCapabilities(request))? {
+            DaemonApiResponse::ProfileCapabilities(response) => Ok(response),
+            response => Err(unexpected("profile_capabilities", response)),
+        }
+    }
+
     pub fn update_object_store_ingest_policy(
         &self,
         request: UpdateObjectStoreIngestPolicyRequest,
@@ -543,6 +554,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
+        DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
         DaemonApiResponse::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::ObjectDownload(_) => "object_download",

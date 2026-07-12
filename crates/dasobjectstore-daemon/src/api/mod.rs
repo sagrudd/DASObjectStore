@@ -104,8 +104,8 @@ pub use object_store::{
     OBJECT_STORE_CREATE_CONFIRMATION,
 };
 pub use profile_capabilities::{
-    ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
-    ObjectStoreCapabilityValidationError,
+    discover_profile_capabilities, ObjectStoreCapabilityDiscoveryRequest,
+    ObjectStoreCapabilityDiscoveryResponse, ObjectStoreCapabilityValidationError,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
@@ -188,6 +188,7 @@ pub enum DaemonApiRequest {
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
+    ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyRequest),
     ObjectBrowser(ObjectBrowserRequest),
     ObjectDownload(ObjectDownloadRequest),
@@ -243,6 +244,7 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(request) => request
                 .validate()
                 .map_err(create_object_store_validation_error),
+            Self::ProfileCapabilities(_) => Ok(()),
             Self::UpdateObjectStoreIngestPolicy(request) => request
                 .validate()
                 .map(|_| ())
@@ -317,6 +319,7 @@ pub enum DaemonApiResponse {
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
+    ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyResponse),
     ObjectBrowser(ObjectBrowserResponse),
     ObjectDownload(ObjectDownloadResponse),

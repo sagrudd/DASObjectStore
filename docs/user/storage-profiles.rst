@@ -173,6 +173,10 @@ store-inventory contract. It also states only the static local failure-domain
 ceiling: folder and drive are one domain, while appliance may represent up to
 three local copies. This is not a current placement or external-replication
 promise.
+Clients can request this catalogue through the typed daemon
+``profile_capabilities`` command. The response is deliberately static and safe
+for feature gating; runtime readiness and provisioning still require the
+profile-specific daemon workflows.
 
 Product-owned policy templates
 ------------------------------

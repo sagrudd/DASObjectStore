@@ -10,6 +10,11 @@ where
     C: DaemonClock,
 {
     match request {
+        DaemonApiRequest::ProfileCapabilities(request) => {
+            Ok(DaemonApiResponse::ProfileCapabilities(
+                crate::api::discover_profile_capabilities(&request),
+            ))
+        }
         DaemonApiRequest::ServiceStatus(request) => handler
             .service_orchestrator
             .status(request)
