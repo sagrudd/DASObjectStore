@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.71.60 - 2026-07-12
+
+- Add a bounded best-effort daemon bridge circuit breaker: repeated transport
+  deadlines/worker failures produce typed degraded responses until cooldown,
+  without tripping on normal request errors or capacity saturation.
+
 ## 0.71.59 - 2026-07-12
 
 - Route Web local-group creation and membership assignment through the bounded

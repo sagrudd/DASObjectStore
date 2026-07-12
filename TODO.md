@@ -915,7 +915,11 @@ list until every temporary size-budget exception has been removed.
   lanes return the typed `server_busy` response. Async HTTP bridging,
   deadlines, circuit breaking, and appliance soak acceptance remain separate
   follow-up items.
-- [ ] Replace synchronous daemon Unix-socket calls in Axum handlers with an async bridge and bounded blocking pool. Apply per-route deadlines, cancellation propagation, and a circuit breaker so a stalled daemon produces a quick typed `503`/`429` response without exhausting HTTP accept/runtime threads.
+- [~] Replace synchronous daemon Unix-socket calls in Axum handlers with an
+  async bridge and bounded blocking pool. The identified browser, activity,
+  remote-auth, administrator, and archive paths now have deadlines, bounded
+  permits, typed overload/degraded responses, and a best-effort circuit breaker;
+  strict cancellation propagation and a single-probe half-open circuit remain.
 - [x] Route ObjectStore file and folder download authorization/location lookups
   through the shared bounded daemon bridge; preserve typed `429`/`503`
   overload/deadline responses and release control capacity before payload

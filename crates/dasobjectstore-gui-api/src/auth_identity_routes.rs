@@ -215,6 +215,11 @@ fn remote_auth_bridge_error(
             "remote_session_busy",
             "daemon control capacity is saturated; retry shortly",
         ),
+        crate::daemon_bridge::DaemonBridgeError::CircuitOpen => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "remote_session_circuit_open",
+            "daemon control is temporarily degraded; retry shortly",
+        ),
         crate::daemon_bridge::DaemonBridgeError::Deadline => route_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "remote_session_timeout",

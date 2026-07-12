@@ -326,6 +326,11 @@ fn daemon_bridge_route_error(error: DaemonBridgeError) -> (StatusCode, Json<Auth
             "daemon_bridge_busy",
             "daemon control capacity is saturated; retry shortly",
         ),
+        DaemonBridgeError::CircuitOpen => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "daemon_bridge_circuit_open",
+            "daemon control is temporarily degraded; retry shortly",
+        ),
         DaemonBridgeError::Deadline => route_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "daemon_bridge_timeout",

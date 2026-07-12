@@ -1,20 +1,28 @@
 use crate::object_browser_routes::StandaloneObjectBrowserClientError;
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex, OnceLock,
+};
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
 const DEFAULT_PERMITS: usize = 8;
 const DEFAULT_DEADLINE: Duration = Duration::from_secs(2);
+const CIRCUIT_FAILURE_THRESHOLD: usize = 3;
+const CIRCUIT_COOLDOWN: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub(crate) struct DaemonBridge {
     permits: Arc<Semaphore>,
     deadline: Duration,
+    consecutive_failures: Arc<AtomicUsize>,
+    open_until: Arc<Mutex<Option<Instant>>>,
 }
 
 #[derive(Debug)]
 pub(crate) enum DaemonBridgeError {
     Busy,
+    CircuitOpen,
     Deadline,
     Join(String),
     Client(StandaloneObjectBrowserClientError),
@@ -25,6 +33,8 @@ impl DaemonBridge {
         Self {
             permits: Arc::new(Semaphore::new(DEFAULT_PERMITS)),
             deadline: DEFAULT_DEADLINE,
+            consecutive_failures: Arc::new(AtomicUsize::new(0)),
+            open_until: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -38,6 +48,8 @@ impl DaemonBridge {
         Self {
             permits: Arc::new(Semaphore::new(capacity)),
             deadline,
+            consecutive_failures: Arc::new(AtomicUsize::new(0)),
+            open_until: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -46,6 +58,9 @@ impl DaemonBridge {
         T: Send + 'static,
         F: FnOnce() -> Result<T, StandaloneObjectBrowserClientError> + Send + 'static,
     {
+        if self.circuit_is_open() {
+            return Err(DaemonBridgeError::CircuitOpen);
+        }
         let permit = self
             .permits
             .clone()
@@ -65,10 +80,19 @@ impl DaemonBridge {
             operation()
         });
         match tokio::time::timeout(deadline, task).await {
-            Ok(Ok(Ok(value))) => Ok(value),
+            Ok(Ok(Ok(value))) => {
+                self.reset_circuit();
+                Ok(value)
+            }
             Ok(Ok(Err(error))) => Err(DaemonBridgeError::Client(error)),
-            Ok(Err(error)) => Err(DaemonBridgeError::Join(error.to_string())),
-            Err(_) => Err(DaemonBridgeError::Deadline),
+            Ok(Err(error)) => {
+                self.record_failure();
+                Err(DaemonBridgeError::Join(error.to_string()))
+            }
+            Err(_) => {
+                self.record_failure();
+                Err(DaemonBridgeError::Deadline)
+            }
         }
     }
 
@@ -79,6 +103,32 @@ impl DaemonBridge {
     {
         self.call(move || operation().map_err(StandaloneObjectBrowserClientError::bridge_failure))
             .await
+    }
+
+    fn circuit_is_open(&self) -> bool {
+        let mut open_until = self.open_until.lock().expect("daemon bridge circuit lock");
+        match *open_until {
+            Some(deadline) if Instant::now() < deadline => true,
+            Some(_) => {
+                *open_until = None;
+                self.consecutive_failures.store(0, Ordering::Release);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn record_failure(&self) {
+        let failures = self.consecutive_failures.fetch_add(1, Ordering::AcqRel) + 1;
+        if failures >= CIRCUIT_FAILURE_THRESHOLD {
+            *self.open_until.lock().expect("daemon bridge circuit lock") =
+                Some(Instant::now() + CIRCUIT_COOLDOWN);
+        }
+    }
+
+    fn reset_circuit(&self) {
+        self.consecutive_failures.store(0, Ordering::Release);
+        *self.open_until.lock().expect("daemon bridge circuit lock") = None;
     }
 }
 
@@ -121,5 +171,22 @@ mod tests {
         release_sender.send(()).expect("release blocking call");
         tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(bridge.call(|| Ok(())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn opens_circuit_after_repeated_blocking_worker_failures() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(20));
+        for _ in 0..3 {
+            let result: Result<(), _> = bridge
+                .call(
+                    || -> Result<(), super::StandaloneObjectBrowserClientError> {
+                        panic!("simulated blocking worker failure")
+                    },
+                )
+                .await;
+            assert!(matches!(result, Err(DaemonBridgeError::Join(_))));
+        }
+        let result: Result<(), _> = bridge.call(|| Ok(())).await;
+        assert!(matches!(result, Err(DaemonBridgeError::CircuitOpen)));
     }
 }

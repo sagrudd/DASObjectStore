@@ -65,7 +65,9 @@ pub(super) async fn submit_prepare_enclosure_request(
                 .map_err(|err| err.message)
         })
         .await
-        .map_err(admin_daemon_bridge_error)
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "daemon_enclosure_prepare_failed")
+        })
 }
 
 pub(super) async fn submit_create_object_store_request(
@@ -176,16 +178,26 @@ pub(super) async fn submit_admin_job_cancel_request(
 fn admin_daemon_bridge_error(
     error: crate::daemon_bridge::DaemonBridgeError,
 ) -> (StatusCode, Json<AuthRouteError>) {
+    admin_daemon_bridge_error_with_code(error, "daemon_admin_job_failed")
+}
+
+fn admin_daemon_bridge_error_with_code(
+    error: crate::daemon_bridge::DaemonBridgeError,
+    client_error_code: &'static str,
+) -> (StatusCode, Json<AuthRouteError>) {
     match error {
-        crate::daemon_bridge::DaemonBridgeError::Client(error) => route_error(
-            StatusCode::BAD_GATEWAY,
-            "daemon_admin_job_failed",
-            error.message,
-        ),
+        crate::daemon_bridge::DaemonBridgeError::Client(error) => {
+            route_error(StatusCode::BAD_GATEWAY, client_error_code, error.message)
+        }
         crate::daemon_bridge::DaemonBridgeError::Busy => route_error(
             StatusCode::TOO_MANY_REQUESTS,
             "daemon_admin_job_busy",
             "daemon control capacity is saturated; retry shortly",
+        ),
+        crate::daemon_bridge::DaemonBridgeError::CircuitOpen => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "daemon_admin_job_circuit_open",
+            "daemon control is temporarily degraded; retry shortly",
         ),
         crate::daemon_bridge::DaemonBridgeError::Deadline => route_error(
             StatusCode::SERVICE_UNAVAILABLE,

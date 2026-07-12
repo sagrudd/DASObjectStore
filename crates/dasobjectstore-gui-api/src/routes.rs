@@ -161,6 +161,9 @@ async fn activity_workspace() -> Json<ActivityWorkspaceView> {
             crate::daemon_bridge::DaemonBridgeError::Busy => {
                 "daemon control capacity is saturated; retry shortly".to_string()
             }
+            crate::daemon_bridge::DaemonBridgeError::CircuitOpen => {
+                "daemon control is temporarily degraded; retry shortly".to_string()
+            }
             crate::daemon_bridge::DaemonBridgeError::Deadline => {
                 "daemon activity request exceeded its deadline; retry shortly".to_string()
             }
