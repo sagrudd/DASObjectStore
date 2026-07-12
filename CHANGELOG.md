@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.11 - 2026-07-12
+
+- Add atomic schema-versioned migration checkpoint save/load with strict
+  source-retention invariants.
+
 ## 0.72.10 - 2026-07-12
 
 - Add deterministic folder source-mutation regression coverage for stable-file

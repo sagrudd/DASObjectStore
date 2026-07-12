@@ -311,7 +311,8 @@ completion.
   import jobs preserving IDs, versions, hashes, provenance, and protection.
   - [x] Add a core resumable promotion state machine that retains source
     placement through destination verification and explicit retirement; actual
-    copy workers, durable checkpoints, and profile adapters remain.
+    copy workers and profile adapters remain. Add atomic schema-versioned
+    checkpoint save/load with strict source-retention invariants.
 - [ ] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
 

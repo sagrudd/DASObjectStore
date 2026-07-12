@@ -6,6 +6,11 @@
 use crate::ids::StoreId;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+pub const STORE_MIGRATION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,7 +24,9 @@ pub enum MigrationState {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StoreMigration {
+    pub schema_version: u16,
     pub migration_id: String,
     pub source_store_id: StoreId,
     pub destination_store_id: StoreId,
@@ -41,6 +48,7 @@ impl StoreMigration {
             return Err(MigrationTransitionError::SameSourceAndDestination);
         }
         Ok(Self {
+            schema_version: STORE_MIGRATION_SCHEMA_VERSION,
             migration_id,
             source_store_id,
             destination_store_id,
@@ -84,6 +92,69 @@ impl StoreMigration {
         Ok(())
     }
 
+    pub fn save_atomic(&self, path: impl AsRef<Path>) -> Result<(), MigrationPersistenceError> {
+        self.validate_persisted_state()?;
+        let path = path.as_ref();
+        let parent = path
+            .parent()
+            .ok_or_else(|| MigrationPersistenceError::Io("checkpoint has no parent".to_string()))?;
+        fs::create_dir_all(parent).map_err(io_error)?;
+        let temporary = temporary_checkpoint_path(path);
+        let payload = serde_json::to_vec_pretty(self)
+            .map_err(|error| MigrationPersistenceError::Malformed(error.to_string()))?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(io_error)?;
+        file.write_all(&payload).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        fs::rename(&temporary, path).map_err(io_error)?;
+        File::open(parent)
+            .map_err(io_error)?
+            .sync_all()
+            .map_err(io_error)
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, MigrationPersistenceError> {
+        let path = path.as_ref();
+        let file = File::open(path).map_err(io_error)?;
+        let migration: Self = serde_json::from_reader(file)
+            .map_err(|error| MigrationPersistenceError::Malformed(error.to_string()))?;
+        if migration.schema_version != STORE_MIGRATION_SCHEMA_VERSION {
+            return Err(MigrationPersistenceError::UnsupportedSchema {
+                found: migration.schema_version,
+                supported: STORE_MIGRATION_SCHEMA_VERSION,
+            });
+        }
+        migration.validate_persisted_state()?;
+        Ok(migration)
+    }
+
+    fn validate_persisted_state(&self) -> Result<(), MigrationPersistenceError> {
+        if self.migration_id.trim().is_empty() {
+            return Err(MigrationPersistenceError::InvalidState(
+                "migration_id must not be blank".to_string(),
+            ));
+        }
+        if self.source_store_id == self.destination_store_id {
+            return Err(MigrationPersistenceError::InvalidState(
+                "migration source and destination must differ".to_string(),
+            ));
+        }
+        if self.state == MigrationState::Completed && self.source_retained {
+            return Err(MigrationPersistenceError::InvalidState(
+                "completed migration must not retain source".to_string(),
+            ));
+        }
+        if self.state != MigrationState::Completed && !self.source_retained {
+            return Err(MigrationPersistenceError::InvalidState(
+                "incomplete migration must retain source".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     fn transition(
         &mut self,
         expected: MigrationState,
@@ -103,6 +174,50 @@ impl StoreMigration {
         Ok(())
     }
 }
+
+fn temporary_checkpoint_path(path: &Path) -> PathBuf {
+    let mut temporary = path.to_path_buf();
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("json");
+    temporary.set_extension(format!("{extension}.tmp"));
+    temporary
+}
+
+fn io_error(error: std::io::Error) -> MigrationPersistenceError {
+    MigrationPersistenceError::Io(error.to_string())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MigrationPersistenceError {
+    Io(String),
+    Malformed(String),
+    UnsupportedSchema { found: u16, supported: u16 },
+    InvalidState(String),
+}
+
+impl Display for MigrationPersistenceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(message) => write!(formatter, "migration checkpoint I/O failed: {message}"),
+            Self::Malformed(message) => {
+                write!(formatter, "malformed migration checkpoint: {message}")
+            }
+            Self::UnsupportedSchema { found, supported } => {
+                write!(
+                    formatter,
+                    "unsupported migration schema {found}; supported {supported}"
+                )
+            }
+            Self::InvalidState(message) => {
+                write!(formatter, "invalid migration checkpoint: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MigrationPersistenceError {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MigrationTransitionError {
@@ -192,5 +307,58 @@ mod tests {
         .expect("migration serializes");
         assert_eq!(encoded["state"], "planned");
         assert_eq!(encoded["source_retained"], true);
+    }
+
+    #[test]
+    fn saves_and_reloads_atomic_checkpoint() {
+        let (source, destination) = stores();
+        let mut migration = StoreMigration::new("migration-persist", source, destination)
+            .expect("migration creates");
+        migration.start_copy().expect("copy starts");
+        let path = checkpoint_path("persist");
+        migration.save_atomic(&path).expect("checkpoint saves");
+        let loaded = StoreMigration::load(&path).expect("checkpoint loads");
+        assert_eq!(loaded, migration);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rejects_future_schema_and_invalid_retirement_state() {
+        let path = checkpoint_path("future");
+        fs::create_dir_all(path.parent().expect("checkpoint parent")).expect("parent creates");
+        fs::write(
+            &path,
+            r#"{"schema_version":2,"migration_id":"future","source_store_id":"source","destination_store_id":"destination","state":"planned","source_retained":true}"#,
+        )
+        .expect("future checkpoint writes");
+        assert_eq!(
+            StoreMigration::load(&path),
+            Err(MigrationPersistenceError::UnsupportedSchema {
+                found: 2,
+                supported: STORE_MIGRATION_SCHEMA_VERSION,
+            })
+        );
+        let _ = fs::remove_file(path);
+
+        let (source, destination) = stores();
+        let invalid = StoreMigration {
+            schema_version: STORE_MIGRATION_SCHEMA_VERSION,
+            migration_id: "invalid".to_string(),
+            source_store_id: source,
+            destination_store_id: destination,
+            state: MigrationState::Planned,
+            source_retained: false,
+        };
+        assert!(matches!(
+            invalid.save_atomic(checkpoint_path("invalid")),
+            Err(MigrationPersistenceError::InvalidState(_))
+        ));
+    }
+
+    fn checkpoint_path(name: &str) -> PathBuf {
+        std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!("dasobjectstore-migration-{name}.json"))
     }
 }

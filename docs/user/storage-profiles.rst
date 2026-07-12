@@ -158,4 +158,6 @@ Profile promotion uses an explicit resumable state contract: planned, copying,
 destination verified, retirement pending, completed, or failed. Source
 placement remains retained through verification and is released only after an
 explicit retirement confirmation. The state machine does not itself copy files
-or mutate stores; daemon workers and durable checkpoints remain required.
+or mutate stores; it now has atomic schema-versioned checkpoint save/load with
+strict source-retention invariants, while daemon workers and profile adapters
+remain required.
