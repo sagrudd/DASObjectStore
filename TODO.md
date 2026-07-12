@@ -177,6 +177,9 @@ completion.
   child and parent allocations.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
+  - [x] Add transport-neutral daemon capacity admission request/decision DTOs
+    with stable snake_case reasons, observed-capacity fields, and direct-ingress
+    SSD fields optional; transport routes and live store-state wiring remain.
 - [ ] Add concurrency, crash/restart, multipart expiry, quota-change, dedupe, and
   full-filesystem tests before enabling new profile writes.
 

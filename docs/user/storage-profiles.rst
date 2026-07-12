@@ -51,6 +51,12 @@ before an upload and commits or releases the reservation after durable
 finalization. Existing appliance policies remain explicitly unbounded until an
 operator performs a compatibility-aware capacity migration.
 
+The daemon API now has a transport-neutral capacity admission contract. It
+returns an explicit admitted/rejected decision, stable rejection reason, quota
+and reservation observations, and optional SSD-staging observations for direct
+ingress. Live store inventory and mutation routes still need to supply the
+daemon-owned observations before this contract can authorize uploads.
+
 Portable manifests identify a profile with a versioned backend reference:
 folder manifests store a canonical root identity, drive manifests store stable
 filesystem/device identities plus an optional mount hint, and appliance

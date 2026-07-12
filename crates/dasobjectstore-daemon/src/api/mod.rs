@@ -1,6 +1,7 @@
 //! Transport-neutral daemon API contracts.
 
 mod appliance_telemetry;
+mod capacity;
 mod disk_mutation;
 mod enclosure;
 mod endpoint;
@@ -29,6 +30,10 @@ pub use appliance_telemetry::{
     ApplianceTelemetryResponse, ApplianceTelemetrySeries, ApplianceTelemetrySessionPoint,
     ApplianceTelemetrySessionSummary, ApplianceTelemetryState, ApplianceTelemetryWindow,
     ApplianceTelemetryWindowAvailability,
+};
+pub use capacity::{
+    CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
+    CapacityAdmissionResponse, CapacityAdmissionValidationError,
 };
 pub use disk_mutation::{
     DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError,
