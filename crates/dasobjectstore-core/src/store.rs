@@ -283,6 +283,24 @@ impl Display for CapacityPolicyValidationError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LogicalObjectVersionCharge {
+    logical_size_bytes: u64,
+}
+
+impl LogicalObjectVersionCharge {
+    /// Charge one logical object version at its full logical size. Physical
+    /// copy amplification and staging are intentionally not part of this
+    /// logical quota primitive; admission reports those separately.
+    pub const fn new(logical_size_bytes: u64) -> Self {
+        Self { logical_size_bytes }
+    }
+
+    pub const fn logical_size_bytes(&self) -> u64 {
+        self.logical_size_bytes
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CapacityReservationLedger {
     policy: CapacityPolicy,
     used_bytes: u64,
@@ -391,6 +409,17 @@ impl CapacityReservationLedger {
         }
         self.reservations.insert(reservation_id, bytes);
         Ok(())
+    }
+
+    /// Reserve a complete logical object version. Two versions with the same
+    /// content still consume two logical charges; deduplication and physical
+    /// placement are evaluated by separate backend/admission contracts.
+    pub fn reserve_object_version(
+        &mut self,
+        reservation_id: impl Into<String>,
+        charge: LogicalObjectVersionCharge,
+    ) -> Result<(), CapacityLedgerError> {
+        self.reserve(reservation_id, charge.logical_size_bytes)
     }
 
     pub fn commit(&mut self, reservation_id: &str) -> Result<(), CapacityLedgerError> {
@@ -850,8 +879,8 @@ mod tests {
         evaluate_capacity_admission, AcknowledgementPolicy, CapacityAdmissionError,
         CapacityAdmissionInput, CapacityBehavior, CapacityLedgerError, CapacityPolicy,
         CapacityPressureState, EnclosurePlacement, EnclosurePlacementContext, ExportPolicy,
-        IngestMode, MutabilityPolicy, PoolPolicyDefaults, RepairPolicy, RetentionPolicy,
-        StoreClass, StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
+        IngestMode, LogicalObjectVersionCharge, MutabilityPolicy, PoolPolicyDefaults, RepairPolicy,
+        RetentionPolicy, StoreClass, StorePolicy, StorePolicyOverrides, StorePolicyValidationError,
     };
 
     #[test]
@@ -873,6 +902,28 @@ mod tests {
             ledger.release("missing"),
             Err(CapacityLedgerError::UnknownReservation)
         );
+    }
+
+    #[test]
+    fn logical_object_versions_each_charge_full_size_independently() {
+        let mut ledger = super::CapacityReservationLedger::new(CapacityPolicy::bounded(250, 0), 0)
+            .expect("bounded capacity policy is valid");
+        let first = LogicalObjectVersionCharge::new(100);
+        let second = LogicalObjectVersionCharge::new(100);
+        assert_eq!(first.logical_size_bytes(), 100);
+        assert_eq!(LogicalObjectVersionCharge::new(0).logical_size_bytes(), 0);
+
+        ledger
+            .reserve_object_version("version-a", first)
+            .expect("first version fits");
+        ledger
+            .reserve_object_version("version-b", second)
+            .expect("second version fits");
+        assert_eq!(ledger.reserved_bytes(), 200);
+        ledger.commit("version-a").expect("first version commits");
+        ledger.commit("version-b").expect("second version commits");
+        assert_eq!(ledger.used_bytes(), 200);
+        assert_eq!(ledger.available_bytes(), Some(50));
     }
 
     #[test]

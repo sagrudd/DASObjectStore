@@ -35,6 +35,7 @@ pub use manifest::{
 };
 pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;
+pub use store::LogicalObjectVersionCharge;
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

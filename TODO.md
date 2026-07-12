@@ -189,6 +189,10 @@ completion.
     Daemon/S3 call-site integration remains open.
 - [ ] Charge each logical object version at full logical size even when physical
   content is deduplicated; report physical staging/replication separately.
+  - [x] Add a typed core logical-object-version charge and ledger reservation
+    entry point that always accounts the full version size independently of
+    content dedupe, copy count, or staging; daemon/catalogue call-site wiring
+    and physical telemetry remain open.
 - [ ] Define over-quota behavior: preserve reads, verified deletion, repair, and
   cleanup; reject new ingress; never delete data when a quota is lowered.
   - [x] Add derived pressure states and atomic quota-policy updates to the core

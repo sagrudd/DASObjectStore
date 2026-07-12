@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.17 - 2026-07-12
+
+- Add a typed logical object-version capacity charge so deduplicated versions
+  are still accounted at full logical size before physical placement.
+
 ## 0.72.16 - 2026-07-12
 
 - Align Debian package-asset regression expectations with the authoritative
