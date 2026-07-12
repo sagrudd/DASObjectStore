@@ -154,6 +154,26 @@ ceiling: folder and drive are one domain, while appliance may represent up to
 three local copies. This is not a current placement or external-replication
 promise.
 
+Product-owned policy templates
+------------------------------
+
+The core contract ``StoragePolicyTemplate`` is the adapter boundary for a
+Synoptikon, Mneion, Mnemosyne, standalone, or package-managed product. A
+template names its owning product and stable template ID, then carries the
+profile, host mode, protection policy, finite logical capacity, local-copy
+count, and typed ingress origin. New templates are fail-closed: IDs are
+lowercase ASCII slugs, capacity thresholds must validate, and the logical
+limit is mandatory. Folder and drive profiles cannot claim more than one
+local copy because each has one local failure domain; appliance templates may
+request up to three local copies.
+
+The template does not contain a path, credential, provider endpoint, or
+provisioning command. Its typed ingress origin exposes whether SSD-first
+staging is required, but daemon admission remains authoritative. Product
+adapters still own their defaults, authorization, provisioning, and any
+external replication policy; those adapters are not inferred from a profile
+name.
+
 Profile promotion uses an explicit resumable state contract: planned, copying,
 destination verified, retirement pending, completed, or failed. Source
 placement remains retained through verification and is released only after an

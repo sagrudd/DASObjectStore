@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod migration;
 pub mod object_type;
 pub mod placement;
+pub mod policy_template;
 pub mod protection;
 pub mod remote_upload;
 pub mod repair;
@@ -32,6 +33,7 @@ pub use manifest::{
     BackendReference, DriveMediaKind, ObjectStoreManifest, ObjectStoreManifestDecodeError,
     OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
 };
+pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;
 
 /// Current core crate version.

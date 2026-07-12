@@ -311,8 +311,14 @@ completion.
     runtime store readiness and provisioning routes remain separate. The
     catalogue states a static local failure-domain ceiling (folder/drive 1,
     appliance 3), not current redundancy or external replication.
-- [ ] Provide product-owned policy templates and adapters for Synoptikon,
+- [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
+  - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit
+    product ownership, profile, host mode, protection, bounded capacity,
+    local-copy count, and typed ingress origin. Validation is fail-closed for
+    unsafe slugs, unbounded new templates, invalid capacity, and copy counts
+    beyond the profile's local failure-domain ceiling; product defaults,
+    provisioning, and concrete adapters remain open.
 - [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
   import jobs preserving IDs, versions, hashes, provenance, and protection.
   - [x] Add a core resumable promotion state machine that retains source

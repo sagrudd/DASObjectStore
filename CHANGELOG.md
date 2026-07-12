@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.15 - 2026-07-12
+
+- Add a shared, bounded `StoragePolicyTemplate` contract for product-owned
+  profile requests, including typed ingress and local-copy validation without
+  hardcoding product defaults or provisioning behavior.
+
 ## 0.72.14 - 2026-07-12
 
 - Mark migration source-retention execution as partial: core state/checkpoints
