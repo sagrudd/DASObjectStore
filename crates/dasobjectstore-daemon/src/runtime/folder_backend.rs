@@ -474,6 +474,13 @@ fn snapshot(metadata: &Metadata) -> FileSnapshot {
 }
 
 fn hash_stable_file(path: &Path) -> Result<(String, u64), BackendError> {
+    hash_stable_file_with_hook(path, None)
+}
+
+fn hash_stable_file_with_hook(
+    path: &Path,
+    _after_read: Option<&dyn Fn()>,
+) -> Result<(String, u64), BackendError> {
     let mut file = File::open(path).map_err(io_error)?;
     let before = file.metadata().map_err(io_error)?;
     if !before.is_file() {
@@ -489,6 +496,10 @@ fn hash_stable_file(path: &Path) -> Result<(String, u64), BackendError> {
         ));
     }
     let (checksum, bytes_read) = hash_reader_count(&mut file)?;
+    #[cfg(test)]
+    if let Some(after_read) = _after_read {
+        after_read();
+    }
     let after_snapshot = snapshot(&file.metadata().map_err(io_error)?);
     if before_snapshot != after_snapshot || bytes_read != before_snapshot.len {
         return Err(BackendError::InvalidRequest(
@@ -680,7 +691,7 @@ fn io_error(error: std::io::Error) -> BackendError {
 
 #[cfg(test)]
 mod tests {
-    use super::FolderBackend;
+    use super::{hash_stable_file_with_hook, FolderBackend};
     use dasobjectstore_core::backend::{BackendObjectKey, ObjectStoreBackend};
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
@@ -974,6 +985,17 @@ mod tests {
                 0o700
             );
         }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_backend_deterministically_rejects_source_mutation_after_read() {
+        let root = unique_root();
+        fs::create_dir_all(&root).expect("test root creates");
+        let source = root.join("changing.txt");
+        fs::write(&source, b"before").expect("source writes");
+        let mutate = || fs::write(&source, b"after mutation").expect("source mutates");
+        assert!(hash_stable_file_with_hook(&source, Some(&mutate)).is_err());
         let _ = fs::remove_dir_all(root);
     }
 

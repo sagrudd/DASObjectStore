@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.10 - 2026-07-12
+
+- Add deterministic folder source-mutation regression coverage for stable-file
+  validation before adoption.
+
 ## 0.72.9 - 2026-07-12
 
 - Add a resumable profile-promotion state machine that retains source

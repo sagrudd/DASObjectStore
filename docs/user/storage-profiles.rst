@@ -28,6 +28,9 @@ records retain the same nested, relative catalogue location as finalized
 objects, while the private namespace remains hidden from user-tree inspection.
 Hard-linked user files are reported as unsafe, and file-based adoption uses a
 post-copy checksum check so a changing source is not silently accepted.
+The regression suite includes a deterministic post-read mutation hook; generic
+stream staging remains intentionally unable to promise a stable source-file
+version without the file-specific import helper.
 Managed-object enumeration and verification compare the open file identity and
 stable size/timestamps with the path after hashing; staged files are rechecked
 before rename and failed validation leaves the reservation recoverable.

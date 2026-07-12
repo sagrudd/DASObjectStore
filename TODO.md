@@ -235,8 +235,9 @@ completion.
     staged reservations recoverable after tampering; macOS tests cover stable
     checksums, path identity, hard-linked managed objects, and staged-object
     recovery.
-  - [ ] Add a deterministic mutation race fixture before enabling resumable
-    adoption; generic stream staging still cannot promise source-file stability.
+  - [x] Add a deterministic post-read mutation fixture before enabling
+    resumable adoption; generic stream staging still cannot promise
+    source-file stability without a file-specific import path.
   - [x] Tighten private namespace/object/staging directories to Unix ``0700``
     and payload files to ``0600`` without changing the user-selected root;
     local permission regression coverage passes on macOS.
