@@ -56,14 +56,15 @@ evidence and detailed source tasks.
   telemetry-loop verification, and real-world multi-HDD/S3 performance runs.
   Continue with macOS unit/contract tests and the dedicated generated-data root
   instead; do not retry SSH or appliance commands until access is restored.
-- The public paired-session HTTPS completion authentication contract is not
-  approved. Daemon-side completion authorization is tested, but no public
-  bearer/renewal-token semantics should be exposed without the security
-  decision.
-- The public HTTPS completion authentication contract remains a product/security
-  decision; the native-versus-provider-backed S3 choice is resolved below as a
-  provider-neutral adapter boundary with Garage as the local compatibility
-  provider.
+- The public paired-session HTTPS completion authentication contract is now
+  approved as a scoped-capability design. Implementation remains gated on the
+  daemon-owned service-principal, short-lived access-token, and one-time
+  completion-capability work below; renewal tokens are never storage-operation
+  bearer credentials.
+- Development self-signing is permitted only for local workspace/local-Docker
+  generated-data tests. It is explicitly rejected by appliance/production
+  listeners and must not appear in RPM/DEB contents, including keys, issuers,
+  configuration, or enablement switches.
 - The local Playwright screenshot runner now builds the WebAssembly bundle and
   completes the desktop/mobile fixture matrix. It remains a local visual
   regression signal only; appliance-host and production-browser acceptance are
@@ -83,10 +84,12 @@ completion.
 
 ### Decisions required
 
-- [ ] Approve the public HTTPS authentication contract for a paired remote
-  client to declare provider upload completion. A renewal token is currently
-  available and daemon-side write-grant authorization is tested, but treating
-  it as a bearer credential is a product/security decision.
+- [x] Approve the public HTTPS authentication contract for a paired remote
+  client to declare provider upload completion. Approved 2026-07-13: renewal
+  tokens are renewal-only; long-lived application identities exchange for
+  short-lived scoped access tokens; upload completion uses a single-use,
+  upload-bound capability; the daemon verifies provider state and atomically
+  commits the catalogue before reporting success.
 - [x] Decide whether one ``folder`` root maps one-to-one to one logical
   ObjectStore and define whether direct user edits are forbidden, detected as
   drift, or eligible only through explicit reconcile/adopt. Approved:
@@ -101,6 +104,18 @@ completion.
   of physical deduplication, with physical amplification reported separately.
   Approved: reservations and admission use logical bytes; physical replica and
   metadata amplification is reported separately.
+
+- [x] Approve long-lived application identities for unattended integrations.
+  Approved 2026-07-13: identities use rotatable asymmetric keys or
+  certificates and exchange for short-lived scoped access tokens. No
+  long-lived, broadly scoped bearer token is accepted. Service-principal
+  registration, revocation, rotation, audit, and one-time upload-completion
+  capabilities remain implementation work.
+- [x] Approve limited self-signing for software development. Approved
+  2026-07-13: explicit local workspace/local-Docker mode only, synthetic
+  validation stores and bounded rights/expiry, never appliance/production or
+  non-local listeners. Self-signing code, keys, issuers, configuration, and
+  enablement switches must never enter RPM/DEB artifacts.
 
 ### Approved architecture decisions (2026-07-13)
 
@@ -125,9 +140,11 @@ completion.
   imply appliance durability, multi-disk redundancy, SMART, repair, or
   throughput acceptance.
 - Standalone administrator authority remains local OS/sudo-derived. Paired
-  remote clients use scoped credentials; public HTTPS completion and bearer or
-  renewal-token semantics remain disabled until the separate security contract
-  is approved.
+  remote clients use scoped credentials. Long-lived application identities
+  exchange for short-lived scoped access tokens, and upload completion uses a
+  one-time capability bound to the upload and expected checksum/size. Renewal
+  tokens are never accepted as storage-operation bearer credentials. See
+  `docs/application-authentication.md`.
 - Containerised macOS validation is an explicit development gate. The
   ``deploy/local-docker`` profile may use
   ``$HOME/.dasobjectstore-codex-validation`` as a generated-data-only root,
@@ -186,14 +203,16 @@ completion.
   into this campaign as implemented, locally actionable, externally blocked, or
   superseded; remove stale claims that the product is complete through M18.
   Historical checklists now cross-reference the active campaign gates; hardware
-  acceptance, public upload authentication, and future design-language work
-  remain explicitly open rather than being presented as delivered.
+  acceptance and token-support implementation remain explicitly open rather
+  than being presented as delivered; the public authentication decision itself
+  is now recorded as approved.
 - [~] Finish daemon-owned remote upload completion so provider success is not
   reported before SSD-first ingest, checksum, placement, and catalogue commit.
-  Resolve and document the public paired-session completion authentication
-  contract before exposing the endpoint. Internal admission, transfer,
-  cancellation, and progress modules are delivered; catalogue completion and
-  public paired-session authorization remain open.
+  The public paired-session completion authentication contract is approved:
+  renewal-only sessions, short-lived scoped access, and one-time upload
+  capabilities. Internal admission, transfer, cancellation, and progress
+  modules are delivered; service-principal/token-exchange implementation,
+  catalogue completion wiring, and endpoint exposure remain open.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable
@@ -213,8 +232,9 @@ completion.
     leaves the durable in-progress manifest available for later rediscovery.
   - [x] Add a provider-independent completion-commit gate to the daemon remote
     upload worker; a successful provider transfer is not reported complete when
-    the injected manifest/catalogue handoff fails. Concrete catalogue wiring
-    and public paired-session authorization remain open.
+    the injected manifest/catalogue handoff fails. Concrete catalogue wiring,
+    service-principal/token-exchange implementation, and public endpoint wiring
+    remain open under the approved authentication contract.
   - [x] Release an admitted remote-upload capacity reservation when daemon job
     or progress setup fails before transfer execution; invalid-job regression
     coverage proves no reservation leak.
@@ -772,6 +792,29 @@ completion.
   - [x] Expose the same static capability contract through the read-only CLI
     command ``store capabilities`` with human and JSON output; no provisioning
     or runtime health is inferred locally.
+- [ ] Add daemon-owned application identity and authoritative token support for
+  unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
+  integrations.
+  - [ ] Register service principals with owner, purpose, allowed ObjectStores
+    and namespaces, operation set, ingress origin, byte/object limits, expiry,
+    and audit metadata; never expose private host paths.
+  - [ ] Implement rotatable asymmetric-key or certificate identities and a
+    short-lived access-token exchange (normally 5–15 minutes). Do not issue
+    long-lived broadly scoped bearer access tokens.
+  - [ ] Issue one-time upload-completion capabilities bound to the paired
+    session, upload ID, ObjectStore, object key, expected size/checksum,
+    audience, expiry, and nonce; verify provider state before atomic catalogue
+    commit and make retries idempotent.
+  - [ ] Add explicit expiry, revocation, rotation, replay protection, and
+    redacted audit events for every credential class.
+  - [ ] Add development self-signing only for local workspace/local-Docker
+    generated-data tests with bounded rights and expiry. Reject it for
+    appliance/production/non-local listeners and keep keys, issuers,
+    configuration, and enablement switches out of RPM/DEB artifacts; add
+    package-content regression tests.
+  - [ ] Publish versioned contract fixtures for consumer adapters and retain
+    DASObjectStore as the authority for policy, quota, placement, catalogue,
+    and health mutations.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit
@@ -2059,12 +2102,11 @@ list until every temporary size-budget exception has been removed.
   name, path, or search value.
 - [ ] Make daemon-owned upload completion atomically register each object path,
   size, checksum, lifecycle state, and readable managed/provider location in
-  the ObjectBrowser catalogue before reporting the upload as complete. Blocked
-  on a public API security decision: the remote client has a paired-session
-  renewal token but no defined HTTPS completion endpoint or approved bearer
-  authorization scheme for declaring a provider upload complete. The daemon
-  now has tested paired-session completion authorization; resume once the
-  public endpoint/authentication contract is approved.
+  the ObjectBrowser catalogue before reporting the upload as complete. The
+  approved contract uses a short-lived, single-use upload capability rather
+  than a renewal-token bearer credential. The daemon has tested paired-session
+  completion authorization; service-principal/token-exchange implementation,
+  provider verification, and public endpoint wiring remain.
 - [~] Add a guarded, resumable reconciliation operation for already-uploaded
   S3/object-service keys missing from the ObjectBrowser catalogue; report
   collisions, malformed keys, and inaccessible objects without silently

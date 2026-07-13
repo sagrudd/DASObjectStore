@@ -92,6 +92,18 @@ Integrated authentication SHALL treat Synoptikon as authoritative. Product API
 handlers SHALL reject mutating actions when required host context, entitlement,
 or role claims are absent.
 
+Unattended applications use the approved
+[Application Authentication and Authoritative Tokens](application-authentication.md)
+contract. DASObjectStore may register long-lived application identities, but
+those identities exchange for short-lived, narrowly scoped access tokens. A
+renewal token is renewal-only and is never a storage-operation bearer
+credential. Provider upload completion uses a single-use, upload-bound
+capability and daemon-side provider verification before catalogue commit.
+
+Development self-signing is limited to explicit loopback/local-Docker generated-
+data tests. It is not an application authority, is rejected by appliance and
+production listeners, and is excluded from RPM/DEB artifacts.
+
 ## Daemon-Owned Mutation Boundary
 
 `dasobjectstored` SHALL be the storage authority in standalone and

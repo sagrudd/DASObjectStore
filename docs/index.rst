@@ -15,5 +15,5 @@ Design Notes
 
 The repository also contains Markdown design notes covering architecture,
 requirements, service orchestration, Mnemosyne integration, metadata recovery,
-and platform probing. They remain source-controlled design documents rather than
-operator runbooks.
+platform probing, and application authentication and authoritative tokens.
+They remain source-controlled design documents rather than operator runbooks.

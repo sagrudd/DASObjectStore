@@ -44,9 +44,17 @@ data.
 S3 exposure is provider-neutral. Garage remains the local compatibility
 provider behind the object-service interface, while no consumer becomes a
 storage authority. Standalone administrator authority is local OS/sudo-derived;
-paired clients use scoped credentials. Public HTTPS completion and bearer or
-renewal-token semantics remain disabled until the separate security contract is
-approved.
+paired clients use scoped credentials. The approved application-authentication
+contract supports long-lived service identities, short-lived scoped access
+tokens, and one-time upload-completion capabilities; renewal tokens are never
+accepted as storage-operation bearer credentials. See
+`docs/application-authentication.md` for the full contract.
+
+Development self-signing is a local-only test aid. It is explicitly enabled,
+limited to loopback/local-Docker generated-data stores, bounded in scope and
+expiry, and rejected for appliance/production listeners. It must never appear
+in RPM or DEB contents: no development key, issuer, configuration, or
+installation switch may be packaged.
 
 The canonical macOS development path is ``deploy/local-docker``. It is a
 single-node compatibility profile with daemon-owned nested Garage lifecycle,
@@ -70,6 +78,32 @@ Market/integration readiness requires these campaign gates, in order:
 An implementation is not integration-ready merely because its route or UI is
 present. The relevant TODO must be implemented, tested, documented, committed,
 pushed, and ready for real-world validation.
+
+### Application identity and token authority
+
+The approved contract is to support long-lived application identities without
+shipping long-lived, broadly scoped bearer access tokens. The ordered delivery
+slice is:
+
+1. register daemon-owned service principals with owner, purpose, allowed
+   ObjectStores/namespaces, operations, ingress origin, optional byte limits,
+   expiry, and audit metadata;
+2. add rotatable asymmetric-key or certificate identities and a short-lived
+   access-token exchange (normally 5–15 minutes);
+3. issue single-use upload-completion capabilities bound to the upload,
+   ObjectStore, expected size/checksum, audience, expiry, and nonce;
+4. enforce daemon-side provider verification, reservation state, atomic
+   catalogue commit, idempotent retries, replay protection, revocation,
+   rotation, and audit events; and
+5. publish contract fixtures for Synoptikon, Mneion, AlleleAnchor, Mnemosyne,
+   and standalone integrations without exposing host paths or secrets.
+
+Development self-signing may be implemented only for local workspace and
+generated-data tests. It must be explicit, short-lived, loopback/local-Docker
+only, and constrained to synthetic validation stores. It is a test-build
+facility, not an application authority, and is forbidden from RPM/DEB contents
+including keys, issuers, configuration, and enablement switches. Package
+inspection tests are part of this roadmap slice.
 
 ### Current delivered baseline
 
