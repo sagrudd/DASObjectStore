@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.6 - 2026-07-13
+
+- Preserve a daemon-internal persisted profile-binding read for diagnostics when
+  a folder or drive root is missing, while capacity/backend reads remain
+  canonicalized and fail closed.
+
 ## 0.76.5 - 2026-07-13
 
 - Report daemon-derived unmanaged and unsafe folder-entry counts in profile

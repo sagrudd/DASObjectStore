@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PROFILE_BINDING_REGISTRY_SCHEMA: &str = "dasobjectstore.profile_binding_registry.v1";
@@ -45,20 +45,21 @@ impl BackendProfileBinding {
         if let Some(staging_root) = &self.ssd_staging_root {
             self.ssd_staging_root = Some(canonical_directory("ssd_staging_root", staging_root)?);
         }
-        match &self.manifest.backend {
+        match &mut self.manifest.backend {
             BackendReference::Folder { .. } => {}
             BackendReference::Drive {
                 mount_path_hint: Some(hint),
                 ..
             } => {
-                let hint = canonical_directory("mount_path_hint", hint)?;
-                if hint != self.backend_root {
+                let canonical_hint = canonical_directory("mount_path_hint", hint)?;
+                if canonical_hint != self.backend_root {
                     return Err(invalid_binding(format!(
                         "drive mount_path_hint {} does not match backend root {}",
-                        hint.display(),
+                        canonical_hint.display(),
                         self.backend_root.display()
                     )));
                 }
+                *hint = canonical_hint;
             }
             BackendReference::Drive {
                 mount_path_hint: None,
@@ -98,6 +99,21 @@ pub fn read_profile_binding(
     binding
         .map(BackendProfileBinding::validate_and_canonicalize)
         .transpose()
+}
+
+/// Read a persisted binding without requiring local roots to be mounted.
+/// Capacity probes and backend opens must continue using
+/// `read_profile_binding`, which canonicalizes and fails closed when a root is
+/// unavailable; diagnostics can use this record-level view to report drift.
+pub fn read_profile_binding_record(
+    path: impl AsRef<Path>,
+    store_id: &str,
+) -> Result<Option<BackendProfileBinding>, DaemonServiceRuntimeError> {
+    let registry = read_registry(path.as_ref())?;
+    Ok(registry
+        .bindings
+        .into_iter()
+        .find(|binding| binding.manifest.store_id.as_str() == store_id))
 }
 
 pub fn upsert_profile_binding(
@@ -174,6 +190,7 @@ fn read_registry(path: &Path) -> Result<ProfileBindingRegistryFile, DaemonServic
             .manifest
             .validate()
             .map_err(|error| invalid_binding(error.to_string()))?;
+        validate_persisted_paths(binding)?;
         if !store_ids.insert(binding.manifest.store_id.as_str()) {
             return Err(invalid_binding(format!(
                 "duplicate profile binding for store {}",
@@ -183,6 +200,58 @@ fn read_registry(path: &Path) -> Result<ProfileBindingRegistryFile, DaemonServic
     }
     validate_binding_claims(&registry.bindings)?;
     Ok(registry)
+}
+
+fn validate_persisted_paths(
+    binding: &BackendProfileBinding,
+) -> Result<(), DaemonServiceRuntimeError> {
+    validate_persisted_path("backend_root", &binding.backend_root)?;
+    if let Some(staging_root) = &binding.ssd_staging_root {
+        validate_persisted_path("ssd_staging_root", staging_root)?;
+        if paths_overlap(&binding.backend_root, staging_root) {
+            return Err(invalid_binding(format!(
+                "store {} has an SSD staging root that overlaps its backend root",
+                binding.manifest.store_id
+            )));
+        }
+    }
+    if let BackendReference::Drive {
+        mount_path_hint: Some(hint),
+        ..
+    } = &binding.manifest.backend
+    {
+        validate_persisted_path("mount_path_hint", hint)?;
+        if hint != &binding.backend_root {
+            return Err(invalid_binding(format!(
+                "drive mount_path_hint does not match persisted backend root for store {}",
+                binding.manifest.store_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_persisted_path(
+    field: &'static str,
+    path: &Path,
+) -> Result<(), DaemonServiceRuntimeError> {
+    if !path.is_absolute() {
+        return Err(invalid_binding(format!("{field} must be absolute")));
+    }
+    if path == Path::new("/") {
+        return Err(invalid_binding(format!(
+            "{field} must not be the system root"
+        )));
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(invalid_binding(format!(
+            "{field} must be normalized without '.' or '..' components"
+        )));
+    }
+    Ok(())
 }
 
 /// Validate the daemon-owned one-to-one claims made by local profiles.
@@ -590,6 +659,24 @@ mod tests {
                 .backend_root,
             fs::canonicalize(second).expect("canonical")
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn record_read_survives_missing_backend_while_canonical_read_fails_closed() {
+        let root = root("missing-backend");
+        let path = root.join("bindings.json");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend");
+        upsert_profile_binding(&path, folder_binding("store", &backend)).expect("upsert");
+        let persisted_root = fs::canonicalize(&backend).expect("canonical root");
+        fs::remove_dir_all(&backend).expect("backend removal");
+
+        let record = super::read_profile_binding_record(&path, "store")
+            .expect("record read")
+            .expect("record");
+        assert_eq!(record.backend_root, persisted_root);
+        assert!(super::read_profile_binding(&path, "store").is_err());
         let _ = fs::remove_dir_all(root);
     }
 }

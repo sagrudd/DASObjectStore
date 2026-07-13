@@ -504,6 +504,9 @@ completion.
   - [x] Include daemon-derived unmanaged/unsafe drift counts in profile
     create/adopt responses without exposing host paths; a separately
     authenticated redacted inspection transport remains open.
+  - [x] Preserve a non-canonical persisted binding read for missing/unmounted
+    roots so diagnostics can report drift; capacity probes and backend opens
+    continue to fail closed on unavailable roots.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.
