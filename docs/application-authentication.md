@@ -86,6 +86,15 @@ revocation, replay protection, audit events, and contract fixtures. Every
 credential class must support explicit expiry and revocation. Secrets and
 private keys are never written to normal logs or exported consumer manifests.
 
+## Versioned fixtures
+
+The core crate publishes non-secret JSON fixtures under
+`crates/dasobjectstore-core/fixtures/application-auth/` for adapter contract
+tests. They cover the identity, public-key descriptor, exchange request,
+scoped access token, renewal-only token, and upload-completion capability
+shapes. The exchange fixture deliberately contains only a placeholder proof;
+the daemon must perform cryptographic verification before issuing a token.
+
 The public HTTPS gateway must use TLS and the existing daemon authorization
 boundary. The exact route names and wire schema are implementation work under
 the versioned API contract; this decision does not authorize a general-purpose

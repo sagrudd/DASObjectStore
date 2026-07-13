@@ -1,0 +1,18 @@
+{
+  "schema_version": "dasobjectstore.application_auth.v1",
+  "application_id": "synoptikon-ingest",
+  "key_id": "key-1",
+  "audience": "dasobjectstore",
+  "requested_issued_at_unix_seconds": 2000,
+  "requested_expires_at_unix_seconds": 2600,
+  "scope": {
+    "store_ids": ["codex"],
+    "prefixes": ["analysis/run-1"],
+    "object_types": ["fastq"],
+    "operations": ["write"],
+    "ingress_origin": "synoptikon",
+    "max_object_bytes": 10000,
+    "max_total_bytes": 100000
+  },
+  "proof": "detached-signature-placeholder"
+}

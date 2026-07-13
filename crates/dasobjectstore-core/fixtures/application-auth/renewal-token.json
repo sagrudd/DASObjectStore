@@ -1,0 +1,9 @@
+{
+  "schema_version": "dasobjectstore.application_auth.v1",
+  "token_id": "renew-1",
+  "application_id": "synoptikon-ingest",
+  "audience": "dasobjectstore-token",
+  "issued_at_unix_seconds": 2000,
+  "expires_at_unix_seconds": 100000,
+  "nonce": "nonce-1"
+}

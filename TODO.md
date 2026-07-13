@@ -828,9 +828,11 @@ completion.
     Native DEB/RPM build scripts now explicitly compile the daemon with
     ``--no-default-features`` as an additional package-boundary safeguard.
     Daemon listener wiring and token-proof verification remain open.
-  - [ ] Publish versioned contract fixtures for consumer adapters and retain
-    DASObjectStore as the authority for policy, quota, placement, catalogue,
-    and health mutations.
+  - [x] Publish versioned, non-secret JSON contract fixtures for identity,
+    public-key descriptor, exchange request, scoped access token, renewal-only
+    token, and upload-completion capability adapters. The exchange fixture
+    carries a placeholder proof only; daemon cryptographic verification and
+    issuance remain authoritative follow-up work.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit

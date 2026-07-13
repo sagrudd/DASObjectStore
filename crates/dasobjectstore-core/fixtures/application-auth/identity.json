@@ -1,0 +1,20 @@
+{
+  "schema_version": "dasobjectstore.application_auth.v1",
+  "application_id": "synoptikon-ingest",
+  "owner": "mnemosyne",
+  "purpose": "sequencing ingest",
+  "environment": "production",
+  "credential_kind": "asymmetric_key",
+  "scope": {
+    "store_ids": ["codex"],
+    "prefixes": ["analysis"],
+    "object_types": ["fastq"],
+    "operations": ["write", "complete_upload"],
+    "ingress_origin": "synoptikon",
+    "max_object_bytes": 10000,
+    "max_total_bytes": 100000
+  },
+  "issued_at_unix_seconds": 1000,
+  "expires_at_unix_seconds": 100000,
+  "active": true
+}

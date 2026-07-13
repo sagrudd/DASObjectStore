@@ -1,0 +1,15 @@
+{
+  "schema_version": "dasobjectstore.application_auth.v1",
+  "capability_id": "cap-1",
+  "application_id": "synoptikon-ingest",
+  "session_id": "session-1",
+  "upload_id": "upload-1",
+  "store_id": "codex",
+  "object_key": "analysis/run-1.fastq",
+  "expected_size_bytes": 42,
+  "expected_checksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "audience": "dasobjectstore",
+  "issued_at_unix_seconds": 2000,
+  "expires_at_unix_seconds": 2100,
+  "nonce": "nonce-1"
+}

@@ -108,6 +108,8 @@ exchange-request contract validates active key membership, bounded proof shape,
 scope, and lifetime; daemon listener wiring, cryptographic proof verification,
 and token issuance remain open. Native DEB/RPM build scripts also compile the
 daemon with `--no-default-features`, making the package boundary explicit.
+Non-secret v1 JSON fixtures for each credential and capability shape are
+checked into the core crate for consumer adapter contract tests.
 
 ### Current delivered baseline
 

@@ -677,6 +677,49 @@ mod tests {
     }
 
     #[test]
+    fn versioned_application_auth_fixtures_round_trip_and_validate() {
+        let identity: ApplicationIdentity =
+            serde_json::from_str(include_str!("../fixtures/application-auth/identity.json"))
+                .expect("identity fixture");
+        identity.validate().expect("identity fixture validation");
+
+        let key: ApplicationKeyDescriptor =
+            serde_json::from_str(include_str!("../fixtures/application-auth/key.json"))
+                .expect("key fixture");
+        key.validate().expect("key fixture validation");
+
+        let exchange: AccessTokenExchangeRequest = serde_json::from_str(include_str!(
+            "../fixtures/application-auth/exchange-request.json"
+        ))
+        .expect("exchange fixture");
+        exchange
+            .validate_against(&identity, &key)
+            .expect("exchange fixture validation");
+
+        let access: AccessTokenClaims = serde_json::from_str(include_str!(
+            "../fixtures/application-auth/access-token.json"
+        ))
+        .expect("access fixture");
+        access
+            .validate_against(&identity)
+            .expect("access fixture validation");
+
+        let renewal: RenewalTokenClaims = serde_json::from_str(include_str!(
+            "../fixtures/application-auth/renewal-token.json"
+        ))
+        .expect("renewal fixture");
+        renewal.validate().expect("renewal fixture validation");
+
+        let completion: UploadCompletionCapability = serde_json::from_str(include_str!(
+            "../fixtures/application-auth/completion-capability.json"
+        ))
+        .expect("completion fixture");
+        completion
+            .validate()
+            .expect("completion fixture validation");
+    }
+
+    #[test]
     fn renewal_claims_carry_no_storage_scope() {
         let renewal = RenewalTokenClaims {
             schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
