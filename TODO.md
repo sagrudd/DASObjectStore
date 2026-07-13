@@ -610,6 +610,11 @@ completion.
     ownership checks remain separate.
 - [ ] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
+  - [x] Add a local fixture-matrix integration test covering programmatic
+    bounded-folder creation, explicit source-preserving adoption, checkpoint
+    reload/recovery, quota rejection, and symlink drift under the dedicated
+    generated-data root; package-created/container-mounted acceptance remains
+    deployment-gated.
 
 ### Gate 4: Dedicated SSD drive profile
 

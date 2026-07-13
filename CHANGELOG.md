@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.13 - 2026-07-13
+
+- Add a macOS folder-profile fixture matrix for adoption, recovery, quota, and
+  hostile-filesystem drift without Docker or DAS dependencies.
+
 ## 0.76.12 - 2026-07-13
 
 - Add a validated, render-only macOS `launchd` user-service plan for per-user

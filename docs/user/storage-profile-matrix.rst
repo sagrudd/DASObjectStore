@@ -45,3 +45,9 @@ S3 gateway choice, and appliance acceptance remain open campaign gates.
 The matrix must be revised when daemon-owned provisioning, product adapters, or
 real-world acceptance changes a row; it must not be used to infer hardware
 health or availability.
+
+The local fixture matrix is executable on macOS without Docker or DAS access.
+It covers bounded-folder creation, source-preserving adoption, checkpoint
+reload/recovery, quota rejection, and symlink drift using only a uniquely named
+child beneath ``$HOME/.dasobjectstore-codex-validation``. Package-created and
+container-mounted fixtures remain separate deployment gates.
