@@ -753,6 +753,9 @@ completion.
   - [x] Wire profile PUT through the daemon-owned logical capacity admission
     provider before backend staging; logical and backend reservations commit in
     order, and failures before durable finalization release both ledgers.
+    Multipart completion now assembles verified ordered parts directly through
+    this same transactional PUT lifecycle, including logical-capacity provider
+    admission; HTTP gateway wiring remains separate.
   - [x] Add a bounded provider-neutral profile range-read helper for consumers
     such as AlleleAnchor's `get/range/list` contract; it authorizes through the
     catalogue first, rejects out-of-bounds starts, and preserves the private
@@ -790,7 +793,8 @@ completion.
     injection and HTTP gateway wiring remain separate.
   - [x] Add the versioned, path-free profile-S3 multipart completion request
     and acknowledgement DTOs with the same bounded validation contract;
-    authenticated HTTP routing and runtime store dispatch remain open.
+    authenticated HTTP routing remains open; runtime completion now reuses the
+    provider-neutral assembler and transactional PUT path.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.

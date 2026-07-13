@@ -1205,7 +1205,8 @@ worker as well; multipart paths still need explicit provider injection.
 The profile S3 seam now publishes bounded multipart completion metadata
 (ordered parts, per-part SHA-256 checksums, total-size and reservation
 validation) and a streaming assembler that verifies each declared part;
-provider injection and HTTP dispatch remain.
+the assembler now feeds the same transactional PUT lifecycle, with and without
+the daemon logical-capacity provider. HTTP dispatch remains.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 the daemon socket now dispatches authenticated bounded profile-S3 list requests

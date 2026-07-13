@@ -180,6 +180,48 @@ pub fn assemble_profile_s3_multipart<'a>(
     })
 }
 
+/// Complete a multipart profile-S3 upload through the same transactional PUT
+/// lifecycle as a single-stream upload. Part metadata is verified while the
+/// ordered reader is consumed; reservations are admitted before staging and
+/// catalogue commit remains the final authoritative step.
+pub fn complete_profile_s3_multipart<'a>(
+    backend: &mut dyn ProfileS3WriteBackend,
+    completion: &ProfileS3MultipartCompletion,
+    sources: Vec<ProfileS3MultipartPartSource<'a>>,
+) -> Result<BackendObjectRecord, BackendError> {
+    let mut reader = assemble_profile_s3_multipart(completion, sources)?;
+    put_profile_object(
+        backend,
+        &completion.reservation_id,
+        &completion.key,
+        &mut reader,
+        completion.expected_size_bytes,
+    )
+}
+
+/// Complete a multipart profile-S3 upload while participating in the daemon's
+/// logical capacity admission provider. Both logical and backend reservations
+/// are released on pre-finalization failure; durable finalization preserves
+/// the existing reconciliation boundary.
+pub fn complete_profile_s3_multipart_with_capacity_provider<'a>(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    backend: &mut dyn ProfileS3WriteBackend,
+    completion: &ProfileS3MultipartCompletion,
+    sources: Vec<ProfileS3MultipartPartSource<'a>>,
+) -> Result<BackendObjectRecord, BackendError> {
+    let mut reader = assemble_profile_s3_multipart(completion, sources)?;
+    put_profile_object_with_capacity_provider(
+        capacity_provider,
+        store_id,
+        backend,
+        &completion.reservation_id,
+        &completion.key,
+        &mut reader,
+        completion.expected_size_bytes,
+    )
+}
+
 impl Read for ProfileS3MultipartReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if buffer.is_empty() || self.finished {
@@ -601,7 +643,8 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        assemble_profile_s3_multipart, checksum_string, delete_profile_object,
+        assemble_profile_s3_multipart, checksum_string, complete_profile_s3_multipart,
+        complete_profile_s3_multipart_with_capacity_provider, delete_profile_object,
         delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
         head_profile_object, list_profile_objects, list_profile_objects_page, profile_health,
         profile_s3_list_response, put_profile_object, put_profile_object_with_capacity_provider,
@@ -1004,6 +1047,92 @@ mod tests {
         let mut assembled = Vec::new();
         reader.read_to_end(&mut assembled).expect("read assembly");
         assert_eq!(assembled, b"abcde");
+    }
+
+    #[test]
+    fn multipart_completion_uses_transactional_put_lifecycle() {
+        let (mut backend, root) = backend();
+        let first = b"abc";
+        let second = b"de";
+        let completion = ProfileS3MultipartCompletion {
+            reservation_id: "multipart-commit".to_string(),
+            key: BackendObjectKey {
+                object_id: "writes/assembled.fastq".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            parts: vec![
+                ProfileS3MultipartPart {
+                    part_number: 1,
+                    size_bytes: first.len() as u64,
+                    checksum: checksum_string(&Sha256::digest(first)),
+                },
+                ProfileS3MultipartPart {
+                    part_number: 2,
+                    size_bytes: second.len() as u64,
+                    checksum: checksum_string(&Sha256::digest(second)),
+                },
+            ],
+        };
+        let record = complete_profile_s3_multipart(
+            &mut backend,
+            &completion,
+            vec![
+                ProfileS3MultipartPartSource {
+                    part: completion.parts[0].clone(),
+                    reader: Box::new(Cursor::new(first)),
+                },
+                ProfileS3MultipartPartSource {
+                    part: completion.parts[1].clone(),
+                    reader: Box::new(Cursor::new(second)),
+                },
+            ],
+        )
+        .expect("multipart commit");
+        assert_eq!(record.size_bytes, 5);
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        assert_eq!(list_profile_objects(&backend, None).unwrap().len(), 1);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn multipart_completion_with_capacity_provider_commits_both_ledgers() {
+        let (mut backend, root) = backend();
+        let provider = RecordingCapacityProvider::default();
+        let body = b"provider";
+        let completion = ProfileS3MultipartCompletion {
+            reservation_id: "multipart-provider".to_string(),
+            key: BackendObjectKey {
+                object_id: "writes/provider.fastq".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: body.len() as u64,
+            parts: vec![ProfileS3MultipartPart {
+                part_number: 1,
+                size_bytes: body.len() as u64,
+                checksum: checksum_string(&Sha256::digest(body)),
+            }],
+        };
+        complete_profile_s3_multipart_with_capacity_provider(
+            &provider,
+            "profile-s3",
+            &mut backend,
+            &completion,
+            vec![ProfileS3MultipartPartSource {
+                part: completion.parts[0].clone(),
+                reader: Box::new(Cursor::new(body)),
+            }],
+        )
+        .expect("provider multipart commit");
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:profile-s3:8:multipart-provider",
+                "commit:profile-s3:multipart-provider"
+            ]
+        );
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

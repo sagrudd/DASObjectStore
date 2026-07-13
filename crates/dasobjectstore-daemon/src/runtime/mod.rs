@@ -140,7 +140,8 @@ pub use profile_registry::{
     PROFILE_BINDING_REGISTRY_SCHEMA,
 };
 pub use profile_s3::{
-    assemble_profile_s3_multipart, delete_profile_object,
+    assemble_profile_s3_multipart, complete_profile_s3_multipart,
+    complete_profile_s3_multipart_with_capacity_provider, delete_profile_object,
     delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
     head_profile_object, list_profile_objects, list_profile_objects_page, profile_health,
     profile_s3_list_response, put_profile_object, put_profile_object_with_capacity_provider,
