@@ -305,6 +305,11 @@ completion.
     initialize its daemon ledger before atomic binding persistence; folder and
     drive registrations now reject unbounded capacity, while store-definition
     publication remains a separate ordered orchestration step.
+  - [x] Allow an explicit daemon-local store definition in the profile
+    binding request; after binding and ledger preparation succeed, the daemon
+    publishes that definition atomically to its store registry. Omitted
+    definitions remain binding-only for staged/adoption planning, and failures
+    never publish a store definition.
 - [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

@@ -58,6 +58,7 @@ where
         }
         DaemonApiRequest::RegisterProfileBinding(request) => {
             let now = handler.clock.now_utc();
+            let store_definition = request.store_definition.clone();
             if !request.dry_run {
                 handler
                     .service_orchestrator
@@ -67,9 +68,21 @@ where
                     )
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             }
-            let response =
+            let mut response =
                 register_profile_binding(request, &handler.profile_binding_registry_path, &now)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            if let Some(definition) = store_definition {
+                if !response.accepted.dry_run {
+                    upsert_store_definition(&handler.store_registry_path, definition).map_err(
+                        |error| {
+                            DaemonRequestHandlerError::ServiceRuntime(
+                                DaemonServiceRuntimeError::ObjectService(error),
+                            )
+                        },
+                    )?;
+                }
+                response.store_definition_published = !response.accepted.dry_run;
+            }
             handler.record_admin_job(daemon_job_summary_from_profile_binding(&response))?;
             Ok(DaemonApiResponse::RegisterProfileBinding(response))
         }

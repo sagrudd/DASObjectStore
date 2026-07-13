@@ -111,8 +111,9 @@ typed create/adopt binding registration transport is now available. Backend
 opening, quota-ledger initialization, and store-registry publication remain;
 the CLI exposes the same validated create/adopt workflow, and bounded
 CapacityPolicy is initialized before binding persistence. Store-definition
-publication remains
-the next ordered capacity/profile seam. The binding registry path is state-scoped
+publication is now available when an explicit daemon-local definition is
+supplied; backend opening and full create/adopt orchestration remain the next
+capacity/profile seam. The binding registry path is state-scoped
 with an explicit environment override; strict
 missing-binding rejection is deferred until local-Docker bootstrap can persist
 container-visible roots rather than host-only paths. The provider now exposes an

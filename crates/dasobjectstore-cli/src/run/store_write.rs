@@ -23,6 +23,7 @@ pub(super) fn run_store_profile_binding(
                 .capacity_limit_bytes()
                 .map(|limit| CapacityPolicy::bounded(limit, args.backend_reserve_bytes()))
                 .unwrap_or_default(),
+            store_definition: None,
             backend_root: args.backend_root().to_path_buf(),
             ssd_staging_root: args.ssd_staging_root().map(Path::to_path_buf),
             dry_run: args.dry_run(),

@@ -2,6 +2,7 @@ use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::manifest::ObjectStoreManifest;
 use dasobjectstore_core::store::CapacityPolicy;
+use dasobjectstore_object_service::StoreServiceDefinition;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -19,6 +20,9 @@ pub struct ProfileBindingRequest {
     pub operation: ProfileBindingOperation,
     pub manifest: ObjectStoreManifest,
     pub capacity: CapacityPolicy,
+    /// Optional daemon-owned registry definition to publish after binding.
+    #[serde(default)]
+    pub store_definition: Option<StoreServiceDefinition>,
     pub backend_root: PathBuf,
     #[serde(default)]
     pub ssd_staging_root: Option<PathBuf>,
@@ -38,6 +42,17 @@ impl ProfileBindingRequest {
             return Err(ProfileBindingValidationError::InvalidCapacity(
                 error.to_string(),
             ));
+        }
+        if let Some(definition) = &self.store_definition {
+            definition.policy.validate().map_err(|error| {
+                ProfileBindingValidationError::InvalidCapacity(error.to_string())
+            })?;
+            if definition.store_id != self.manifest.store_id {
+                return Err(ProfileBindingValidationError::StoreIdMismatch);
+            }
+            if definition.policy.capacity != self.capacity {
+                return Err(ProfileBindingValidationError::CapacityMismatch);
+            }
         }
         if self.manifest.deployment_profile != DeploymentProfile::Appliance
             && self.capacity.logical_limit_bytes.is_none()
@@ -76,6 +91,7 @@ pub struct ProfileBindingResponse {
     pub store_id: String,
     pub deployment_profile: DeploymentProfile,
     pub capacity: CapacityPolicy,
+    pub store_definition_published: bool,
     pub backend_root: PathBuf,
     pub ssd_staging_root: Option<PathBuf>,
     pub administrator_actor: Option<String>,
@@ -98,6 +114,7 @@ impl ProfileBindingResponse {
             store_id: request.manifest.store_id.to_string(),
             deployment_profile: request.manifest.deployment_profile,
             capacity: request.capacity,
+            store_definition_published: false,
             backend_root: request.backend_root,
             ssd_staging_root: request.ssd_staging_root,
             administrator_actor: request.administrator_actor,
@@ -110,6 +127,8 @@ pub enum ProfileBindingValidationError {
     InvalidManifest(String),
     InvalidCapacity(String),
     FiniteCapacityRequired,
+    StoreIdMismatch,
+    CapacityMismatch,
     RelativePath { field: &'static str, path: PathBuf },
     BlankClientRequestId,
     BlankAdministratorActor,
@@ -123,6 +142,12 @@ impl std::fmt::Display for ProfileBindingValidationError {
             Self::InvalidCapacity(message) => formatter.write_str(message),
             Self::FiniteCapacityRequired => {
                 formatter.write_str("bounded profile requires a finite logical capacity limit")
+            }
+            Self::StoreIdMismatch => {
+                formatter.write_str("store definition id must match manifest id")
+            }
+            Self::CapacityMismatch => {
+                formatter.write_str("store definition capacity must match profile binding capacity")
             }
             Self::RelativePath { field, path } => {
                 write!(formatter, "{field} must be absolute: {}", path.display())
@@ -179,6 +204,7 @@ mod tests {
                 },
             },
             capacity: CapacityPolicy::bounded(1024, 64),
+            store_definition: None,
             backend_root: PathBuf::from("/tmp/codex"),
             ssd_staging_root: None,
             dry_run: true,

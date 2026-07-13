@@ -577,6 +577,12 @@ fn profile_binding_validation_error(
                 message: "bounded profile requires a finite logical capacity limit".to_string(),
             }
         }
+        error @ (ProfileBindingValidationError::StoreIdMismatch
+        | ProfileBindingValidationError::CapacityMismatch) => {
+            DaemonRequestValidationError::InvalidPolicy {
+                message: error.to_string(),
+            }
+        }
         ProfileBindingValidationError::RelativePath { field, path } => {
             DaemonRequestValidationError::RelativePath { field, path }
         }
