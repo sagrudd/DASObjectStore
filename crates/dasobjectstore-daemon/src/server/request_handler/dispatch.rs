@@ -32,6 +32,7 @@ where
         | DaemonApiRequest::CreateObjectStore(_)
         | DaemonApiRequest::RegisterProfileBinding(_)
         | DaemonApiRequest::ProfileInspection(_)
+        | DaemonApiRequest::ProfileReadiness(_)
         | DaemonApiRequest::UpsertEndpointInventory(_)
         | DaemonApiRequest::CreateLocalGroup(_)
         | DaemonApiRequest::AssignLocalUserToLocalGroup(_)

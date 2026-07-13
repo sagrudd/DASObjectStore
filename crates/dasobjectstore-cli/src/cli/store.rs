@@ -35,6 +35,9 @@ pub(crate) enum StoreCommand {
     /// Inspect provider-neutral health for a bounded profile.
     #[command(name = "profile-health")]
     ProfileHealth(StoreProfileHealthArgs),
+    /// Report whether a bounded profile is ready for daemon-owned use.
+    #[command(name = "profile-readiness")]
+    ProfileReadiness(StoreProfileReadinessArgs),
     /// Render a validated per-user macOS launchd service plan without installing it.
     #[command(name = "user-service-plan")]
     UserServicePlan(StoreUserServicePlanArgs),
@@ -238,6 +241,25 @@ impl StoreProfileHealthArgs {
     pub(crate) fn store_id(&self) -> &str {
         &self.store_id
     }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileReadinessArgs {
+    /// Logical ObjectStore identifier.
+    store_id: String,
+    /// Emit the typed response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileReadinessArgs {
+    pub(crate) fn store_id(&self) -> &str {
+        &self.store_id
+    }
+
     pub(crate) fn json(&self) -> bool {
         self.json
     }
@@ -1052,6 +1074,26 @@ mod tests {
         };
         assert_eq!(health.store_id(), "generated-data");
         assert!(health.json());
+    }
+
+    #[test]
+    fn parses_profile_readiness_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-readiness",
+            "generated-data",
+            "--json",
+        ])
+        .expect("profile readiness parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileReadiness(readiness)) = args.command() else {
+            panic!("expected profile readiness command")
+        };
+        assert_eq!(readiness.store_id(), "generated-data");
+        assert!(readiness.json());
     }
 
     #[test]

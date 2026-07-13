@@ -22,6 +22,7 @@ mod profile_browser;
 mod profile_capabilities;
 mod profile_diagnostics;
 mod profile_inspection;
+mod profile_readiness;
 mod profile_s3;
 mod remote_easyconnect;
 mod service;
@@ -152,6 +153,9 @@ pub use profile_inspection::{
     ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
     PROFILE_INSPECTION_SCHEMA_VERSION,
 };
+pub use profile_readiness::{
+    ProfileReadinessRequest, ProfileReadinessResponse, PROFILE_READINESS_SCHEMA_VERSION,
+};
 pub use profile_s3::{
     ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
     ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartCompletionRequest,
@@ -253,6 +257,7 @@ pub enum DaemonApiRequest {
     ProfileS3Health(ProfileS3HealthRequest),
     ProfileDiagnostics(ProfileDiagnosticsRequest),
     ProfileInspection(ProfileInspectionRequest),
+    ProfileReadiness(ProfileReadinessRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
     CapacityStatus(CapacityStatusRequest),
@@ -311,6 +316,7 @@ impl DaemonApiRequest {
             Self::ProfileS3Health(_) => "profile_s3_health",
             Self::ProfileDiagnostics(_) => "profile_diagnostics",
             Self::ProfileInspection(_) => "profile_inspection",
+            Self::ProfileReadiness(_) => "profile_readiness",
             Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::CapacityAdmission(_) => "capacity_admission",
             Self::CapacityStatus(_) => "capacity_status",
@@ -393,6 +399,9 @@ impl DaemonApiRequest {
             Self::ProfileS3Health(request) => request.validate(),
             Self::ProfileDiagnostics(request) => request.validate(),
             Self::ProfileInspection(_) => Ok(()),
+            Self::ProfileReadiness(request) => request
+                .validate()
+                .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
                 .validate()
@@ -488,6 +497,7 @@ pub enum DaemonApiResponse {
     ProfileS3Health(ProfileS3HealthResponse),
     ProfileDiagnostics(ProfileDiagnosticsResponse),
     ProfileInspection(ProfileInspectionResponse),
+    ProfileReadiness(ProfileReadinessResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),
     CapacityStatus(CapacityStatusResponse),

@@ -104,6 +104,13 @@ and `exchange`). It accepts only the versioned path-free request DTOs; private
 keys stay with the caller's signer and all authorization, proof verification,
 confirmation, and issuance decisions remain inside `dasobjectstored`.
 
+Profile consumers can also query a daemon-authorized readiness projection. The
+versioned response combines binding-root state, folder drift findings, and the
+daemon-owned capacity status while remaining path-free; `store
+profile-readiness` exposes the same result for operators. Missing capacity or
+unreadable roots remain explicit not-ready reasons rather than optimistic
+success.
+
 Development self-signing is implemented only as a feature-gated local helper
 for workspace and generated-data tests. It is explicit, short-lived,
 loopback/local-Docker only, and constrained to synthetic validation stores. It

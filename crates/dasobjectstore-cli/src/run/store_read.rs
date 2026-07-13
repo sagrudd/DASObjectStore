@@ -126,6 +126,41 @@ pub(super) fn run_store_profile_health(
     Ok(())
 }
 
+pub(super) fn run_store_profile_readiness(
+    args: &StoreProfileReadinessArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let store_id = StoreId::new(args.store_id())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_readiness(ProfileReadinessRequest { store_id })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Profile readiness")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Profile: {}", response.deployment_profile.name())?;
+        writeln!(writer, "Root state: {:?}", response.root_state)?;
+        writeln!(writer, "Ready: {}", response.ready)?;
+        for reason in response.reasons {
+            writeln!(writer, "Reason: {reason}")?;
+        }
+        if let Some(capacity) = response.capacity {
+            writeln!(
+                writer,
+                "Capacity available: {}",
+                capacity
+                    .logical_available_bytes
+                    .map(|bytes| bytes.to_string())
+                    .unwrap_or_else(|| "unbounded".to_string())
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_user_service_plan(
     args: &StoreUserServicePlanArgs,
     writer: &mut impl Write,

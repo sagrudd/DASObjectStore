@@ -831,6 +831,10 @@ completion.
   - [x] Expose the same static capability contract through the read-only CLI
     command ``store capabilities`` with human and JSON output; no provisioning
     or runtime health is inferred locally.
+  - [x] Add a daemon-authorized, path-free profile-readiness projection that
+    combines binding-root state, folder drift, and daemon capacity admission
+    status without fabricating hardware health; expose it through the typed
+    client and ``store profile-readiness`` CLI command.
 - [ ] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.

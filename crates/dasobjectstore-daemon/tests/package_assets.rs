@@ -173,7 +173,10 @@ fn package_installs_das_owned_report_renderer_wrapper() {
 
 #[test]
 fn deb_build_installs_daemon_boundary_assets() {
-    assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(
+        BUILD_DEB,
+        "cargo build --release --no-default-features -p dasobjectstore-daemon",
+    );
     assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-remote");
     assert_contains(
         BUILD_DEB,
@@ -206,7 +209,10 @@ fn deb_build_installs_daemon_boundary_assets() {
 #[test]
 fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "rpmbuild");
-    assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-daemon");
+    assert_contains(
+        BUILD_RPM,
+        "cargo build --release --no-default-features -p dasobjectstore-daemon",
+    );
     assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");

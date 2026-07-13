@@ -490,6 +490,115 @@ where
             })?;
             Ok(DaemonApiResponse::ProfileInspection(response))
         }
+        DaemonApiRequest::ProfileReadiness(request) => {
+            let Some(actor) = actor else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_readiness_authentication_required",
+                    "profile readiness requires an authenticated daemon actor",
+                )));
+            };
+            if !actor.is_administrator()
+                && handler
+                    .authorize_endpoint_read(Some(actor), &request.store_id)
+                    .is_err()
+            {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_readiness_authorization_required",
+                    "profile readiness requires administrator authority or store read access",
+                )));
+            }
+            let binding = match read_profile_binding_record(
+                &handler.profile_binding_registry_path,
+                request.store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_binding_not_found",
+                        "no persisted profile binding exists for this ObjectStore",
+                    )))
+                }
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_readiness_unavailable",
+                        "the persisted profile binding could not be inspected",
+                    )))
+                }
+            };
+            let mut root_state = ProfileInspectionRootState::Available;
+            let mut reasons = Vec::new();
+            match fs::symlink_metadata(&binding.backend_root) {
+                Ok(metadata) if !metadata.is_dir() => {
+                    root_state = ProfileInspectionRootState::NotDirectory;
+                    reasons.push("profile backend root is not a directory".to_string());
+                }
+                Ok(_) if binding.manifest.deployment_profile == DeploymentProfile::Folder => {
+                    match FolderBackend::inspect_user_tree_at(&binding.backend_root) {
+                        Ok(report) => {
+                            if !report.unmanaged_paths.is_empty() {
+                                reasons.push(format!(
+                                    "{} unmanaged path(s) require explicit adoption",
+                                    report.unmanaged_paths.len()
+                                ));
+                            }
+                            if !report.unsafe_paths.is_empty() {
+                                reasons.push(format!(
+                                    "{} unsafe path(s) block profile readiness",
+                                    report.unsafe_paths.len()
+                                ));
+                            }
+                        }
+                        Err(_) => {
+                            root_state = ProfileInspectionRootState::Unreadable;
+                            reasons.push(
+                                "folder drift could not be read without changing the managed namespace"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    root_state = ProfileInspectionRootState::Missing;
+                    reasons.push("profile backend root is missing".to_string());
+                }
+                Err(_) => {
+                    root_state = ProfileInspectionRootState::Unreadable;
+                    reasons.push("profile backend root is unreadable".to_string());
+                }
+            }
+            let capacity = handler
+                .service_orchestrator
+                .capacity_status(crate::api::CapacityStatusRequest {
+                    store_id: request.store_id.to_string(),
+                })
+                .ok();
+            match &capacity {
+                Some(status) => {
+                    if status.admission_block_reason.is_some() {
+                        reasons.push("capacity admission is currently blocked".to_string());
+                    }
+                }
+                None => reasons.push("capacity status is unavailable".to_string()),
+            }
+            let response = ProfileReadinessResponse {
+                schema_version: crate::api::PROFILE_READINESS_SCHEMA_VERSION.to_string(),
+                store_id: binding.manifest.store_id.clone(),
+                deployment_profile: binding.manifest.deployment_profile,
+                host_mode: binding.manifest.host_mode,
+                protection: binding.manifest.protection,
+                root_state,
+                ready: reasons.is_empty(),
+                reasons,
+                capacity,
+            };
+            response.validate().map_err(|error| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation { operation: error },
+                )
+            })?;
+            Ok(DaemonApiResponse::ProfileReadiness(response))
+        }
         DaemonApiRequest::UpsertEndpointInventory(request) => {
             let now = handler.clock.now_utc();
             let response = handler

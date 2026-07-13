@@ -52,6 +52,22 @@ private keys, accept private/bearer secret fields, or bypass daemon
 authorization. Treat the JSON response as credential material and keep it in a
 trusted process boundary.
 
+Profile readiness
+-----------------
+
+Before a product starts a storage workflow, inspect the daemon-owned readiness
+projection rather than probing managed filesystem paths. It reports profile
+root state, folder drift, and capacity admission state without exposing backend
+locations or pretending that hardware-only health is available locally:
+
+.. code-block:: console
+
+   dasobjectstore store profile-readiness generated-data --json
+
+The command is read-only. A missing or unreadable root, unmanaged/unsafe folder
+entries, or unavailable/blocked capacity appears as an explicit not-ready
+reason and must be resolved through the daemon's managed workflow.
+
 Choose an ObjectStore and credential authority
 -----------------------------------------------
 

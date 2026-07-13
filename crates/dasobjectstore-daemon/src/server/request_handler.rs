@@ -17,7 +17,7 @@ use crate::api::{
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
     ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
     ProfileDiagnosticsResponse, ProfileInspectionResponse, ProfileInspectionRootState,
-    ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView,
+    ProfileReadinessResponse, ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
@@ -1047,7 +1047,7 @@ mod tests {
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
-        ProfileInspectionRequest, ProfileInspectionRootState,
+        ProfileInspectionRequest, ProfileInspectionRootState, ProfileReadinessRequest,
         RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
@@ -4155,6 +4155,52 @@ mod tests {
         assert!(!backend.exists());
         let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains(root.to_string_lossy().as_ref()));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn profile_readiness_reports_explicit_capacity_blocker_without_paths() {
+        let root = temp_root("profile-readiness");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend root");
+        let registry = root.with_extension("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:05:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
+                    "ready",
+                    backend.clone(),
+                )),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("binding registration");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
+                    store_id: StoreId::new("ready").expect("store id"),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile readiness");
+        let DaemonApiResponse::ProfileReadiness(response) = response else {
+            panic!("expected profile readiness response");
+        };
+        assert!(!response.ready);
+        assert!(response
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("capacity status is unavailable")));
+        assert!(!serde_json::to_string(&response)
+            .expect("response serializes")
+            .contains(root.to_string_lossy().as_ref()));
         cleanup(&root);
     }
 
