@@ -504,6 +504,19 @@ impl std::error::Error for ReconciliationManifestError {}
 mod tests {
     use super::*;
 
+    fn validation_root(label: &str) -> PathBuf {
+        let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(".dasobjectstore-codex-validation"))
+            })
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!("reconciliation-{label}-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("validation root");
+        root
+    }
+
     fn temp_manifest_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "dasobjectstore-reconciliation-{name}-{}.json",
@@ -615,10 +628,7 @@ mod tests {
 
     #[test]
     fn discovers_newest_incomplete_manifest_for_store_and_prefix() {
-        let root = std::env::temp_dir().join(format!(
-            "dasobjectstore-reconciliation-discovery-{}",
-            std::process::id()
-        ));
+        let root = validation_root("discovery");
         let _ = fs::remove_dir_all(&root);
         let older = root.join("older/.dasobjectstore/reconciliation-manifest.json");
         let newer = root.join("newer/.dasobjectstore/reconciliation-manifest.json");
@@ -682,10 +692,7 @@ mod tests {
 
     #[test]
     fn complete_manifests_are_not_selected_for_restart() {
-        let root = std::env::temp_dir().join(format!(
-            "dasobjectstore-reconciliation-complete-{}",
-            std::process::id()
-        ));
+        let root = validation_root("complete");
         let _ = fs::remove_dir_all(&root);
         let path = root.join("complete/.dasobjectstore/reconciliation-manifest.json");
         fs::create_dir_all(path.parent().unwrap()).expect("manifest parent");
