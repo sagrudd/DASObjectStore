@@ -664,6 +664,10 @@ completion.
   - [x] Expose the redacted profile inspection contract through the typed CLI
     as ``store profile-inspection``; output remains limited to root state and
     drift counts with no daemon-owned paths.
+  - [x] Expose catalogue-authoritative profile verification through the typed
+    daemon, authenticated Web route, and read-only CLI as ``store
+    profile-verify``; success requires payload size/checksum agreement and
+    returns no backend location.
 - [ ] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.

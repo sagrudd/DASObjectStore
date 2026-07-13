@@ -49,6 +49,10 @@ impl ProfileS3HeadRequest {
     }
 }
 
+/// Verification uses the same path-free logical key shape as HEAD while
+/// retaining a distinct contract name for callers and audit records.
+pub type ProfileS3VerifyRequest = ProfileS3HeadRequest;
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProfileS3HeadResponse {
     pub schema_version: String,
@@ -96,6 +100,29 @@ impl ProfileS3HeadResponse {
         }
         if self.store_id.as_str().trim().is_empty() {
             return Err("profile S3 response store identity must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Catalogue-authoritative verification result for one logical profile object.
+/// The daemon verifies payload bytes against the durable catalogue before
+/// returning success; no backend location is exposed to callers.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3VerifyResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub object: ProfileS3ObjectView,
+    pub verified: bool,
+}
+
+impl ProfileS3VerifyResponse {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != PROFILE_S3_SCHEMA_VERSION {
+            return Err("unsupported profile S3 schema".to_string());
+        }
+        if self.store_id.as_str().trim().is_empty() || !self.verified {
+            return Err("profile S3 verification response is not verified".to_string());
         }
         Ok(())
     }
@@ -402,6 +429,29 @@ mod tests {
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{store_id}"));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{reservation_id}"));
+    }
+
+    #[test]
+    fn verify_response_requires_verified_state_and_remains_path_free() {
+        let response = ProfileS3VerifyResponse {
+            schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+            store_id: StoreId::new("codex").expect("store id"),
+            object: ProfileS3ObjectView {
+                key: BackendObjectKey {
+                    object_id: "reads/sample.fastq".to_string(),
+                    version: 1,
+                },
+                size_bytes: 4,
+                checksum: format!("sha256:{}", "a".repeat(64)),
+            },
+            verified: true,
+        };
+        let json = serde_json::to_string(&response).expect("serialize");
+        assert!(!json.contains("location"));
+        response.validate().expect("schema");
+        let mut unverified = response;
+        unverified.verified = false;
+        assert!(unverified.validate().is_err());
     }
 
     #[test]

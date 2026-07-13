@@ -33,20 +33,21 @@ use crate::api::{
     ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileInspectionRequest,
     ProfileInspectionResponse, ProfileReadinessRequest, ProfileReadinessResponse,
     ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
-    ProfileS3ListRequest, ProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
-    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
-    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
+    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -223,11 +224,21 @@ where
 
     pub fn profile_s3_head(
         &self,
-        request: ProfileS3HeadRequest,
+        request: ProfileS3VerifyRequest,
     ) -> Result<ProfileS3HeadResponse, DaemonClientError> {
         match self.send(DaemonApiRequest::ProfileS3Head(request))? {
             DaemonApiResponse::ProfileS3Head(response) => Ok(response),
             response => Err(unexpected("profile_s3_head", response)),
+        }
+    }
+
+    pub fn profile_s3_verify(
+        &self,
+        request: ProfileS3HeadRequest,
+    ) -> Result<ProfileS3VerifyResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3Verify(request))? {
+            DaemonApiResponse::ProfileS3Verify(response) => Ok(response),
+            response => Err(unexpected("profile_s3_verify", response)),
         }
     }
 
@@ -723,6 +734,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",
+        DaemonApiResponse::ProfileS3Verify(_) => "profile_s3_verify",
         DaemonApiResponse::ProfileS3Health(_) => "profile_s3_health",
         DaemonApiResponse::ProfileDiagnostics(_) => "profile_diagnostics",
         DaemonApiResponse::ProfileInspection(_) => "profile_inspection",
@@ -779,12 +791,13 @@ mod tests {
         ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBrowserRequest, ProfileBrowserResponse, ProfileInspectionRequest,
-        ProfileInspectionResponse, ProfileInspectionRootState,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-        RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, StoreInventoryResponse,
-        SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        ProfileInspectionResponse, ProfileInspectionRootState, ProfileS3VerifyRequest,
+        ProfileS3VerifyResponse, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -882,6 +895,44 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::ProfileBrowser(_)]
+        ));
+    }
+
+    #[test]
+    fn profile_verify_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ProfileS3Verify(
+                ProfileS3VerifyResponse {
+                    schema_version: crate::api::PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id: StoreId::new("codex").expect("store id"),
+                    object: crate::api::ProfileS3ObjectView {
+                        key: dasobjectstore_core::backend::BackendObjectKey {
+                            object_id: "reads/sample.fastq".to_string(),
+                            version: 1,
+                        },
+                        size_bytes: 4,
+                        checksum: format!("sha256:{}", "a".repeat(64)),
+                    },
+                    verified: true,
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+        let response = client
+            .profile_s3_verify(ProfileS3VerifyRequest {
+                store_id: StoreId::new("codex").expect("store id"),
+                key: dasobjectstore_core::backend::BackendObjectKey {
+                    object_id: "reads/sample.fastq".to_string(),
+                    version: 1,
+                },
+            })
+            .expect("profile verify response");
+        assert!(response.verified);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ProfileS3Verify(_)]
         ));
     }
 

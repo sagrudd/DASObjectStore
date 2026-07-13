@@ -1236,7 +1236,10 @@ daemon bridge. Authenticated Web list, HEAD, and health routes now share typed
 daemon projections and never expose backend paths; a path-free profile
 diagnostics projection and authenticated Web route distinguish empty,
 synchronized, uncatalogued, and catalogue-missing states with counts and
-reconciliation timestamps. Multipart HTTP routing remains separate.
+reconciliation timestamps. Authenticated Web verification and the read-only
+``store profile-verify`` CLI now require daemon-side size/checksum agreement
+before reporting success and return no backend location. Multipart HTTP
+routing remains separate.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.

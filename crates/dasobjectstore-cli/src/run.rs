@@ -153,8 +153,8 @@ use self::storage_lifecycle::{
 use self::store_read::{
     run_store_capabilities, run_store_capacity, run_store_contents, run_store_defaults,
     run_store_list, run_store_profile_browser, run_store_profile_head, run_store_profile_health,
-    run_store_profile_inspection, run_store_profile_readiness, run_store_s3_upload,
-    run_store_user_service_plan, run_store_validate,
+    run_store_profile_inspection, run_store_profile_readiness, run_store_profile_verify,
+    run_store_s3_upload, run_store_user_service_plan, run_store_validate,
 };
 use self::store_write::{
     run_store_adopt, run_store_create, run_store_deduplicate, run_store_delete, run_store_drain,
@@ -185,7 +185,7 @@ use dasobjectstore_daemon::{
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest, ProfileBindingOperation,
     ProfileBindingRequest, ProfileBrowserRequest, ProfileInspectionRequest,
-    ProfileReadinessRequest, ProfileS3HeadRequest, ProfileS3HealthRequest,
+    ProfileReadinessRequest, ProfileS3HeadRequest, ProfileS3HealthRequest, ProfileS3VerifyRequest,
     StoreDeduplicateRequest as DaemonStoreDeduplicateRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
@@ -304,6 +304,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             }
             Some(StoreCommand::ProfileBrowser(args)) => run_store_profile_browser(args, writer),
             Some(StoreCommand::ProfileHead(args)) => run_store_profile_head(args, writer),
+            Some(StoreCommand::ProfileVerify(args)) => run_store_profile_verify(args, writer),
             Some(StoreCommand::ProfileHealth(args)) => run_store_profile_health(args, writer),
             Some(StoreCommand::ProfileReadiness(args)) => run_store_profile_readiness(args, writer),
             Some(StoreCommand::UserServicePlan(args)) => run_store_user_service_plan(args, writer),

@@ -86,6 +86,10 @@ pub(crate) fn standalone_dashboard_router_with_state(
             get(standalone_profile_s3_list).head(standalone_profile_s3_head),
         )
         .route(
+            "/api/v1/profile-s3/stores/{store_id}/verify",
+            get(standalone_profile_s3_verify),
+        )
+        .route(
             "/api/v1/profile-s3/stores/{store_id}/diagnostics",
             get(standalone_profile_s3_diagnostics),
         )

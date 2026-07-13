@@ -68,6 +68,15 @@ The command is read-only. A missing or unreadable root, unmanaged/unsafe folder
 entries, or unavailable/blocked capacity appears as an explicit not-ready
 reason and must be resolved through the daemon's managed workflow.
 
+For a catalogue-authoritative content check, ask the daemon to verify the
+recorded size and checksum against the profile payload. The CLI and
+authenticated Web projection return only logical identity and verification
+metadata; backend paths are never returned:
+
+.. code-block:: console
+
+   dasobjectstore store profile-verify generated-data reads/sample.fastq --json
+
 Choose an ObjectStore and credential authority
 -----------------------------------------------
 

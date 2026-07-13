@@ -82,10 +82,13 @@ use dasobjectstore_daemon::{
     ProfileS3HealthRequest as DaemonProfileS3HealthRequest,
     ProfileS3HealthResponse as DaemonProfileS3HealthResponse,
     ProfileS3ListRequest as DaemonProfileS3ListRequest,
-    ProfileS3ListResponse as DaemonProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
+    ProfileS3ListResponse as DaemonProfileS3ListResponse,
+    ProfileS3VerifyRequest as DaemonProfileS3VerifyRequest,
+    ProfileS3VerifyResponse as DaemonProfileS3VerifyResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -310,6 +313,46 @@ async fn standalone_profile_s3_head(
         .await
         .map(Json)
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_head_failed"))
+}
+
+async fn standalone_profile_s3_verify(
+    Path(store_id): Path<String>,
+    Query(query): Query<ProfileS3HeadQuery>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonProfileS3VerifyResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = StoreId::new(store_id).map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_store_id",
+            error.to_string(),
+        )
+    })?;
+    let object_id = query.key.ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_key",
+            "profile S3 verification requires a key query parameter",
+        )
+    })?;
+    let request = DaemonProfileS3VerifyRequest {
+        store_id,
+        key: BackendObjectKey {
+            object_id,
+            version: query.version.unwrap_or(1),
+        },
+    };
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .profile_s3_verify(request)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_verify_failed"))
 }
 
 async fn standalone_profile_s3_health(
@@ -1566,6 +1609,30 @@ mod tests {
                     .uri(
                         "/api/v1/profile-s3/stores/generated-data/objects?key=reads%2Fsample.fastq",
                     )
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_verify_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-verify-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profile-s3/stores/generated-data/verify?key=reads%2Fsample.fastq")
                     .body(Body::empty())
                     .expect("request builds"),
             )

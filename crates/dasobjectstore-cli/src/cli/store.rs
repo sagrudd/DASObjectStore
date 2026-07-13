@@ -32,6 +32,9 @@ pub(crate) enum StoreCommand {
     /// Inspect one catalogue-authoritative profile object without reading payload bytes.
     #[command(name = "profile-head")]
     ProfileHead(StoreProfileHeadArgs),
+    /// Verify one catalogue-authoritative profile object against its payload.
+    #[command(name = "profile-verify")]
+    ProfileVerify(StoreProfileHeadArgs),
     /// Inspect provider-neutral health for a bounded profile.
     #[command(name = "profile-health")]
     ProfileHealth(StoreProfileHealthArgs),
@@ -1074,6 +1077,31 @@ mod tests {
         };
         assert_eq!(health.store_id(), "generated-data");
         assert!(health.json());
+    }
+
+    #[test]
+    fn parses_profile_verify_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-verify",
+            "generated-data",
+            "reads/sample.fastq",
+            "--version",
+            "2",
+            "--json",
+        ])
+        .expect("profile verify parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileVerify(verify)) = args.command() else {
+            panic!("expected profile verify command")
+        };
+        assert_eq!(verify.store_id(), "generated-data");
+        assert_eq!(verify.key(), "reads/sample.fastq");
+        assert_eq!(verify.version(), 2);
+        assert!(verify.json());
     }
 
     #[test]

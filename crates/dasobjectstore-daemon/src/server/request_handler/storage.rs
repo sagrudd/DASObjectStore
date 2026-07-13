@@ -516,6 +516,79 @@ where
                 },
             }))
         }
+        DaemonApiRequest::ProfileS3Verify(request) => {
+            let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        "profile S3 requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_unavailable",
+                    "profile S3 is available for bounded folder profiles only",
+                )));
+            }
+            let capacity = match read_store_registry(&handler.store_registry_path) {
+                Ok(definitions) => definitions
+                    .into_iter()
+                    .find(|definition| definition.store_id == store_id)
+                    .map(|definition| definition.policy.capacity),
+                Err(_) => None,
+            };
+            let Some(capacity) = capacity else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_unavailable",
+                    "profile S3 capacity policy is unavailable",
+                )));
+            };
+            let backend =
+                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let object = match verify_profile_object(&backend, &request.key) {
+                Ok(object) => object,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_verify_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileS3Verify(
+                ProfileS3VerifyResponse {
+                    schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    object: ProfileS3ObjectView {
+                        key: object.key,
+                        size_bytes: object.size_bytes,
+                        checksum: object.checksum,
+                    },
+                    verified: true,
+                },
+            ))
+        }
         DaemonApiRequest::ProfileS3Health(request) => {
             let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
                 Ok(store_id) => store_id,
