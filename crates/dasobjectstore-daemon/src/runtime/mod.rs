@@ -2,6 +2,7 @@
 
 mod admin_jobs;
 mod appliance_telemetry;
+mod application_identity_registry;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
@@ -48,6 +49,12 @@ pub use appliance_telemetry::{
     APPLIANCE_TELEMETRY_SCHEMA_VERSION, DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT,
     DEFAULT_LOCAL_GROUP_PATH, DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH,
     DEFAULT_STANDALONE_AUTH_ROOT,
+};
+pub use application_identity_registry::{
+    application_identity_registry_path, deactivate_application_identity,
+    default_application_identity_registry_path, list_application_identities,
+    read_application_identity, upsert_application_identity, APPLICATION_IDENTITY_REGISTRY_ENV,
+    APPLICATION_IDENTITY_REGISTRY_FILE_NAME, APPLICATION_IDENTITY_REGISTRY_SCHEMA,
 };
 pub use capacity_persistence::{
     load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError,

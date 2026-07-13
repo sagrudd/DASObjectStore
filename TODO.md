@@ -799,9 +799,11 @@ completion.
     renewal-token, and upload-completion capability contracts with fail-closed
     scope/lifetime validation. Daemon registration, cryptographic custody, and
     exchange wiring remain open.
-  - [ ] Register service principals with owner, purpose, allowed ObjectStores
-    and namespaces, operation set, ingress origin, byte/object limits, expiry,
-    and audit metadata; never expose private host paths.
+  - [~] Build service-principal registration. The daemon-owned, atomic
+    path-free identity registry now persists validated owner, purpose,
+    ObjectStore/namespace scope, operation set, ingress origin, byte/object
+    limits, expiry, active state, and deterministic application IDs without
+    secrets or host paths; authenticated API wiring and audit metadata remain.
   - [ ] Implement rotatable asymmetric-key or certificate identities and a
     short-lived access-token exchange (normally 5–15 minutes). Do not issue
     long-lived broadly scoped bearer access tokens.
