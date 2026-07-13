@@ -624,6 +624,9 @@ completion.
   - [x] Expose the render-only plan through `store user-service-plan` with
     explicit path overrides, environment fallbacks, and JSON output; the CLI
     remains side-effect free and deployment installation remains separate.
+  - [x] Fail closed when an existing per-user state directory is not owned by
+    the current user; missing state remains allowed for first-run render-only
+    planning, and no service-manager side effects are introduced.
 - [ ] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
   - [x] Add a local fixture-matrix integration test covering programmatic

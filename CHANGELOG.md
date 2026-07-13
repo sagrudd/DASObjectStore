@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.18 - 2026-07-13
+
+- Fail closed when an existing per-user service state directory is owned by a
+  different user while preserving render-only first-run planning.
+
 ## 0.76.17 - 2026-07-13
 
 - Expose bounded folder catalogue browsing through the daemon-owned CLI

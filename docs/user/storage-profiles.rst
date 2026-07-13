@@ -296,8 +296,10 @@ XDG inputs; otherwise ``HOME``, ``XDG_STATE_HOME``, and ``XDG_RUNTIME_DIR`` are
 read from the environment. Add ``--json`` for an adapter-friendly envelope.
 The command only prints the plist and derived state directory: it does not
 write a LaunchAgents file, invoke ``launchctl``, create directories, or start
-``dasobjectstored``. Deployment code remains responsible for ownership checks,
-installation, and lifecycle operations.
+``dasobjectstored``. Deployment code remains responsible for creating the
+directory, installation, and lifecycle operations. If the derived state directory already
+exists, it must be owned by the invoking user; otherwise the render-only plan
+fails closed without changing the directory.
 
 Operators can inspect the daemon-owned live ledger and filesystem observations
 with ``dasobjectstore store capacity <store-id>`` (or ``--json`` for an

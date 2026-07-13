@@ -2,6 +2,8 @@
 
 use dasobjectstore_core::deployment::HostMode;
 use std::fmt::{self, Display};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 const APP_DIR: &str = "dasobjectstore";
@@ -50,6 +52,7 @@ pub fn user_service_plan(
     config_path: impl Into<PathBuf>,
     label: impl Into<String>,
 ) -> Result<UserServicePlan, FolderHostPathError> {
+    validate_user_service_state_owner(&paths.state_dir)?;
     let plan = UserServicePlan {
         label: label.into(),
         executable: executable.into(),
@@ -58,6 +61,49 @@ pub fn user_service_plan(
     };
     plan.launchd_plist()?;
     Ok(plan)
+}
+
+/// Verify that an existing per-user state directory belongs to the current
+/// user. Missing state is allowed so a first-run plan remains render-only;
+/// installation code is responsible for creating it with the correct owner.
+pub fn validate_user_service_state_owner(path: &Path) -> Result<(), FolderHostPathError> {
+    #[cfg(unix)]
+    {
+        validate_user_service_state_owner_with_uid(path, unsafe { libc::geteuid() })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn validate_user_service_state_owner_with_uid(
+    path: &Path,
+    expected_uid: u32,
+) -> Result<(), FolderHostPathError> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(FolderHostPathError::StateDirectoryUnreadable {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(FolderHostPathError::StateDirectoryNotDirectory(
+            path.to_path_buf(),
+        ));
+    }
+    if metadata.uid() != expected_uid {
+        return Err(FolderHostPathError::StateDirectoryNotOwned {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
 }
 
 impl FolderHostPaths {
@@ -151,6 +197,9 @@ pub enum FolderHostPathError {
     SocketPathTooLong(PathBuf),
     InvalidServiceLabel(String),
     RelativePath { field: &'static str, path: PathBuf },
+    StateDirectoryUnreadable { path: PathBuf, message: String },
+    StateDirectoryNotDirectory(PathBuf),
+    StateDirectoryNotOwned { path: PathBuf },
 }
 
 impl Display for FolderHostPathError {
@@ -176,6 +225,21 @@ impl Display for FolderHostPathError {
             Self::RelativePath { field, path } => {
                 write!(formatter, "{field} must be absolute: {}", path.display())
             }
+            Self::StateDirectoryUnreadable { path, message } => write!(
+                formatter,
+                "per-user state directory {} is unreadable: {message}",
+                path.display()
+            ),
+            Self::StateDirectoryNotDirectory(path) => write!(
+                formatter,
+                "per-user state path is not a directory: {}",
+                path.display()
+            ),
+            Self::StateDirectoryNotOwned { path } => write!(
+                formatter,
+                "per-user state directory is not owned by the current user: {}",
+                path.display()
+            ),
         }
     }
 }
@@ -330,5 +394,20 @@ mod tests {
             ),
             Err(FolderHostPathError::InvalidServiceLabel(_))
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_state_directory_must_be_owned_by_current_user() {
+        let root =
+            std::env::temp_dir().join(format!("dasobjectstore-state-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("state directory");
+        assert!(validate_user_service_state_owner(&root).is_ok());
+        let current_uid = unsafe { libc::geteuid() };
+        assert!(matches!(
+            validate_user_service_state_owner_with_uid(&root, current_uid.saturating_add(1)),
+            Err(FolderHostPathError::StateDirectoryNotOwned { .. })
+        ));
+        std::fs::remove_dir_all(root).ok();
     }
 }

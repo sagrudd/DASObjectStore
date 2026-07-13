@@ -75,7 +75,8 @@ pub use folder_catalogue::{
     FolderCatalogue, FolderCatalogueBrowserEntry, FolderCatalogueBrowserQuery,
 };
 pub use folder_paths::{
-    folder_host_paths, user_service_plan, FolderHostPathError, FolderHostPaths, UserServicePlan,
+    folder_host_paths, user_service_plan, validate_user_service_state_owner, FolderHostPathError,
+    FolderHostPaths, UserServicePlan,
 };
 pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
