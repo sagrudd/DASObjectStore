@@ -186,8 +186,19 @@ pub struct RemoteUploadWorkspaceResponse {
     pub schema_version: String,
     pub generated_at_utc: String,
     pub actor: RemoteUploadActorResponse,
+    #[serde(default)]
+    pub ingress_policy: RemoteUploadIngressPolicyResponse,
     pub stores: Vec<RemoteUploadObjectStoreResponse>,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct RemoteUploadIngressPolicyResponse {
+    pub browser_ingress_origin: String,
+    pub browser_landing_mode: String,
+    pub paired_agent_ingress_origin: String,
+    pub paired_agent_landing_mode: String,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

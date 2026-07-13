@@ -2203,9 +2203,10 @@ non-destructive close, and restores focus to its trigger when closed.
   opens the remote-upload pane or a target-scoped workspace. Its visible title
   must be `Upload to {ObjectStore display name}` and its context must show the
   selected store’s writer group, object type, capacity/warnings, and ingress
-  policy before file selection. The current action selects the exact store and
-  opens the target-scoped pane; richer title/context detail remains in the
-  surrounding target-pane task.
+  policy before file selection. The action selects the exact store and opens
+  the target-scoped pane; the pane now renders the target name, writer group,
+  object type, used/free capacity, and paired-agent ingress policy before the
+  dropzone.
 - [ ] Change `RemoteUploadPageProps`, the Web state in `src/app.rs`, and the
   remote-upload API contract so a target store ID is required. The server must
   reject a missing, unauthorised, non-writable, or disabled target; do not rely
@@ -2220,6 +2221,9 @@ non-destructive close, and restores focus to its trigger when closed.
   authorized target is present. If no writable store exists, show an explanatory
   empty state with a route/action back to ObjectStores; do not show an active
   dropzone beside a store catalogue.
+  - [x] Render target title/context and the file dropzone only after the
+    target-scoped response contains an authorized writable store; include
+    writer group, object type, capacity, and paired-agent landing policy.
 - [ ] Keep all existing remote-agent pairing, path privacy, S3 credential,
   SSD-first ingress, daemon job, cancellation, and renewal behaviour. This is
   a presentation/context refactor, not permission or transfer-policy

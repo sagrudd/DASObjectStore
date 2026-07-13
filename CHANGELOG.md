@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.61 - 2026-07-13
+
+- Show target-scoped remote-upload title, writer/capacity context, and paired
+  agent ingress policy before file selection.
+
 ## 0.72.60 - 2026-07-13
 
 - Add writable ObjectStore upload actions that carry the selected target into

@@ -91,11 +91,17 @@ pub(super) fn render_remote_upload_workspace(
         .iter()
         .filter(|store| store.upload_allowed)
         .count();
+    let target_name = view
+        .stores
+        .iter()
+        .find(|store| store.upload_allowed)
+        .map(|store| store.display_name.as_str())
+        .unwrap_or("No writable ObjectStore selected");
     html! {
         <div class="dos-store-grid">
             <section class="dos-card dos-wide-card" data-state="ready">
                 <span class="dos-card-label">{ "Current session" }</span>
-                <h2>{ format!("{} ObjectStore(s) visible", view.stores.len()) }</h2>
+                <h2>{ format!("Upload to {target_name}") }</h2>
                 <p>{ format!("{} store(s) are ready for upload by {}. Upload execution remains delegated to the paired dasobjectstore-remote process.", ready_count, view.actor.username) }</p>
                 <div class="dos-card-row">
                     <span class="dos-status-pill">{ if view.actor.sudo_administrator { "administrator" } else { "standard user" } }</span>
@@ -120,20 +126,12 @@ pub(super) fn render_remote_upload_selection_panel(
         .iter()
         .filter(|store| store.upload_allowed)
         .collect::<Vec<_>>();
-    let effective_store_id = (*selected_store).clone();
     let selected_target = ready_stores
         .iter()
-        .find(|store| store.store_id == effective_store_id)
+        .find(|store| store.store_id == *selected_store)
         .copied();
     let summary = RemoteUploadSelectionSummary::from_files(&selected_files);
     let ready_for_handoff = selected_target.is_some() && summary.file_count > 0;
-    let on_store_change = {
-        let selected_store = selected_store.clone();
-        Callback::from(move |event: Event| {
-            let input: HtmlSelectElement = event.target_unchecked_into();
-            selected_store.set(input.value());
-        })
-    };
     let on_file_input = {
         let selected_files = selected_files.clone();
         Callback::from(move |event: Event| {
@@ -170,14 +168,7 @@ pub(super) fn render_remote_upload_selection_panel(
                 <span class="dos-status-pill">{ if ready_for_handoff { "ready to confirm" } else { "waiting" } }</span>
             </div>
             <div class="dos-remote-upload-grid">
-                <div class="dos-form-field">
-                    <span>{ "Target ObjectStore" }</span>
-                    <select onchange={on_store_change} value={effective_store_id.clone()} disabled={ready_stores.is_empty()}>
-                        { for ready_stores.iter().map(|store| html! {
-                            <option value={store.store_id.clone()}>{ format!("{} · {}", store.display_name, store.object_type) }</option>
-                        }) }
-                    </select>
-                </div>
+                { render_remote_upload_target_context(selected_target, &view.ingress_policy) }
                 { if selected_target.is_some() { html! {
                     <label class="dos-remote-upload-dropzone" ondrop={on_drop} ondragover={on_drag_over}>
                         <strong>{ "Drop files or folders here" }</strong>
@@ -202,6 +193,24 @@ pub(super) fn render_remote_upload_selection_panel(
                 </button>
             </div>
         </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_remote_upload_target_context(
+    selected_target: Option<&RemoteUploadObjectStoreResponse>,
+    ingress_policy: &RemoteUploadIngressPolicyResponse,
+) -> Html {
+    let Some(store) = selected_target else {
+        return html! { <p class="dos-empty-state">{ "Select a writable ObjectStore from ObjectStores before choosing files." }</p> };
+    };
+    html! {
+        <div class="dos-remote-upload-target-context" data-target-store-id={store.store_id.clone()}>
+            <strong>{ format!("Upload to {}", store.display_name) }</strong>
+            <span>{ format!("writer group: {} · object type: {}", store.writer_group.as_deref().unwrap_or("not reported"), store.object_type) }</span>
+            <span>{ format!("capacity: {} used; {} free", store.capacity.used_tib, store.capacity.free_tib) }</span>
+            <span>{ format!("ingress: {} → {}", ingress_policy.paired_agent_ingress_origin, ingress_policy.paired_agent_landing_mode) }</span>
+        </div>
     }
 }
 

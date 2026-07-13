@@ -59,7 +59,11 @@ The server filters the response to the requested target and rejects a missing,
 read-only, locked, non-S3, missing-writer-group, or unauthorized target. The
 browser does not render a file dropzone until the target is present, and it
 never silently selects the first writable store. The daemon derives the bucket
-from the paired session grant.
+from the paired session grant. Before file selection, the target pane repeats
+the display name, writer group, object type, used/free capacity, and the
+paired-agent ingress origin and landing mode. This makes the storage and
+placement contract visible at the point where the user authorizes a handoff;
+the browser still cannot choose disks or bypass daemon admission.
 
 The same rule applies to ``dasobjectstore-remote upload``:
 
