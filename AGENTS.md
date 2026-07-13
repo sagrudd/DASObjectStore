@@ -7,6 +7,11 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - Commit after each user prompt that results in repository changes.
 - Push regularly after meaningful commits, especially when work completes a
   prompt or leaves the repository in a useful review state.
+- If another process has unrelated worktree edits, treat those paths as
+  read-only isolation boundaries: continue only in untouched files, never
+  stage, overwrite, reset, stash, or reformat the unrelated paths, and commit
+  only the non-overlapping slice. Report a blocker only when integration with
+  those edits is required.
 - Keep commits focused and reviewable.
 - Avoid unrelated formatting, renames, dependency changes, or cleanup while
   implementing a scoped request.

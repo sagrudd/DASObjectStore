@@ -18,6 +18,10 @@ evidence and detailed source tasks.
 - Update this file when tasks are completed, split, or superseded.
 - Keep persistent metadata, CLI behavior, and compatibility-impacting changes
   documented before merging implementation.
+- If another process has unrelated worktree edits, treat those paths as
+  read-only isolation boundaries: continue locally actionable work only in
+  untouched files, leave the edits untouched, and record the boundary; stop
+  only when the active slice overlaps or must integrate with them.
 
 ## Current External Blockers (2026-07-12)
 
