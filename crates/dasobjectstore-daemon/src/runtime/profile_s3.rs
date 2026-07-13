@@ -95,6 +95,46 @@ pub fn get_profile_object(
     backend.read(key)
 }
 
+/// Read a bounded byte range from a catalogue-authoritative profile object.
+/// The backend contract currently exposes a streaming full-object reader, so
+/// this compatibility seam discards the prefix while preserving the same
+/// private-path and authority boundaries. Provider-native range operations can
+/// be added below this seam without changing consumers.
+pub fn get_profile_object_range(
+    backend: &dyn ProfileS3ReadBackend,
+    key: &BackendObjectKey,
+    offset: u64,
+    length: u64,
+) -> Result<Box<dyn Read + Send>, BackendError> {
+    let object = head_profile_object(backend, key)?;
+    if offset > object.size_bytes {
+        return Err(BackendError::InvalidRequest(format!(
+            "profile object range starts at {offset}, beyond object size {}",
+            object.size_bytes
+        )));
+    }
+    let mut reader = backend.read(key)?;
+    discard_prefix(&mut reader, offset)?;
+    Ok(Box::new(reader.take(length)))
+}
+
+fn discard_prefix(reader: &mut dyn Read, mut remaining: u64) -> Result<(), BackendError> {
+    let mut buffer = [0_u8; 64 * 1024];
+    while remaining != 0 {
+        let requested = remaining.min(buffer.len() as u64) as usize;
+        let read = reader.read(&mut buffer[..requested]).map_err(|error| {
+            BackendError::Io(format!("profile object range prefix read failed: {error}"))
+        })?;
+        if read == 0 {
+            return Err(BackendError::InvalidRequest(
+                "profile object ended before requested range".to_string(),
+            ));
+        }
+        remaining -= read as u64;
+    }
+    Ok(())
+}
+
 /// Store one profile-backed S3 object through the daemon-owned transactional
 /// backend lifecycle. The caller must provide the S3 Content-Length; unknown
 /// length and multipart assembly are separate protocol layers. Hashing occurs
@@ -141,7 +181,8 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        get_profile_object, head_profile_object, list_profile_objects, put_profile_object,
+        get_profile_object, get_profile_object_range, head_profile_object, list_profile_objects,
+        put_profile_object,
     };
     use crate::runtime::{DriveBackend, DriveRuntimeGuard, FolderBackend};
     use dasobjectstore_core::backend::{
@@ -255,6 +296,13 @@ mod tests {
             .read_to_string(&mut body)
             .expect("read body");
         assert_eq!(body, "reads");
+        let mut range = String::new();
+        get_profile_object_range(&backend, &key, 1, 3)
+            .expect("range")
+            .read_to_string(&mut range)
+            .expect("read range");
+        assert_eq!(range, "ead");
+        assert!(get_profile_object_range(&backend, &key, 6, 1).is_err());
         let missing = BackendObjectKey {
             object_id: "reads/missing.fastq".to_string(),
             version: 1,

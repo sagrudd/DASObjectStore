@@ -65,7 +65,9 @@ checked against the in-flight SHA-256 stage. The backend then performs its
 durable fsync/rename finalization and catalogue commit. A failed stage or
 finalization releases its reservation; a durable payload whose catalogue commit
 fails is retained for safe reconciliation rather than silently deleted. This
-adapter is not an HTTP gateway and does not implement multipart completion.
+adapter also exposes bounded range reads for consumers that need resumable
+object access. It is not an HTTP gateway and does not implement multipart
+completion.
 
 The private ``.dasobjectstore`` namespace and its object/staging descendants
 are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized

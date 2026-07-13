@@ -696,6 +696,11 @@ completion.
     fsync/rename finalization, and catalogue commit; failed staging/finalization
     releases reservations without exposing private paths. HTTP gateway and
     multipart wiring remain separate.
+  - [x] Add a bounded provider-neutral profile range-read helper for consumers
+    such as AlleleAnchor's `get/range/list` contract; it authorizes through the
+    catalogue first, rejects out-of-bounds starts, and preserves the private
+    path boundary. Provider-native range optimization remains an implementation
+    detail below this seam.
 - [ ] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic.

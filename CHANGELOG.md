@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.21 - 2026-07-13
+
+- Add a bounded provider-neutral profile range-read adapter for consumers that
+  need resumable object access while preserving catalogue authority.
+
 ## 0.76.20 - 2026-07-13
 
 - Add a provider-neutral profile S3 PUT adapter with known-length quota
