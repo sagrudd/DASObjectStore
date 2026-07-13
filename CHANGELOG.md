@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.1 - 2026-07-13
+
+- Fail closed when a non-dry-run profile binding has no daemon capacity
+  provider for durable ledger initialization.
+
 ## 0.76.0 - 2026-07-13
 
 - Publish an explicitly supplied daemon-local store definition only after

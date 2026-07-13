@@ -309,7 +309,8 @@ completion.
     binding request; after binding and ledger preparation succeed, the daemon
     publishes that definition atomically to its store registry. Omitted
     definitions remain binding-only for staged/adoption planning, and failures
-    never publish a store definition.
+    never publish a store definition. Non-dry-run profile mutations also fail
+    closed when no daemon capacity provider is configured.
 - [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

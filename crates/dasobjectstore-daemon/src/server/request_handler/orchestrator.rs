@@ -10,7 +10,9 @@ pub trait DaemonServiceOrchestrator {
         _store_id: &StoreId,
         _policy: dasobjectstore_core::store::CapacityPolicy,
     ) -> Result<(), DaemonServiceRuntimeError> {
-        Ok(())
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "profile capacity provider is not configured".to_string(),
+        })
     }
 
     fn status(
