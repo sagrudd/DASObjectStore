@@ -1065,10 +1065,10 @@ mod tests {
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
-        admin_job_registry_path, read_application_identity, read_profile_binding,
-        remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
-        upsert_profile_binding, BackendProfileBinding, DaemonIngestFilesRuntimeError,
-        DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
+        admin_job_registry_path, read_application_audit_events, read_application_identity,
+        read_profile_binding, remote_easyconnect_pairing_store_path,
+        remote_easyconnect_session_store_path, upsert_profile_binding, BackendProfileBinding,
+        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
         FileBackedRemoteEasyconnectPairedSessionStore, LocalAdminRuntimeError,
         LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
         RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
@@ -3845,6 +3845,11 @@ mod tests {
         assert!(!serialized.contains("spoofed-request-actor"));
         assert!(!serialized.contains("private_key"));
         assert!(registry.exists());
+        let audit = read_application_audit_events(root.join("application-audit.json"))
+            .expect("identity audit event");
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].operation, "register_identity");
+        assert_eq!(audit[0].administrator_actor.as_deref(), Some("root"));
         cleanup(&root);
     }
 
@@ -3913,6 +3918,11 @@ mod tests {
         assert!(!serialized.contains("spoofed-request-actor"));
         assert!(!serialized.contains("private_key"));
         assert!(registry.exists());
+        let audit = read_application_audit_events(root.join("application-audit.json"))
+            .expect("key audit event");
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].operation, "register_key");
+        assert_eq!(audit[0].key_id.as_deref(), Some("key-1"));
         cleanup(&root);
     }
 

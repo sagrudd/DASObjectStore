@@ -862,8 +862,9 @@ completion.
     path-free identity registry now persists validated owner, purpose,
     ObjectStore/namespace scope, operation set, ingress origin, byte/object
     limits, expiry, active state, and deterministic application IDs without
-    secrets or host paths; authenticated local-administrator API wiring is now
-    present, while audit metadata and cryptographic custody remain.
+    secrets or host paths; authenticated local-administrator API wiring and
+    redacted registration audit events are now present, while cryptographic
+    custody remains.
   - [~] Implement rotatable asymmetric-key or certificate identities and a
     short-lived access-token exchange (normally 5–15 minutes). Public key and
     certificate descriptors now have a versioned, daemon-owned rotation
@@ -892,7 +893,8 @@ completion.
     a confirmation-bound, path-free revocation request/response contract is
     now published and wired through authenticated administrator dispatch to
     atomic identity/key deactivation; redacted, reason-digest audit events are
-    now persisted atomically, while mTLS/public endpoint wiring remains.
+    now persisted atomically for registration, rotation, revocation, and
+    completion paths, while mTLS/public endpoint wiring remains.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
