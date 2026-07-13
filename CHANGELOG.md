@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.78 - 2026-07-13
+
+- Wire local file ingest through the shared bounded daemon resource gate before
+  source enumeration, with automatic release on completion or failure.
+
 ## 0.72.77 - 2026-07-13
 
 - Add the typed Web client contract and path helper for the authenticated

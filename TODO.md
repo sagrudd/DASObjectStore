@@ -1316,6 +1316,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Add a transactional daemon resource gate for CPU, memory, socket-worker,
     and I/O-worker reservations with fail-closed over-budget admission and
     automatic lease release; runtime policy injection and live telemetry remain.
+  - [x] Wire packaged local file ingest through the shared resource gate before
+    source enumeration, preserving automatic release on dry-run, failure, and
+    successful settlement; dynamic policy injection remains.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
   - [x] Surface the optional daemon ingest admission action, limiting reason,

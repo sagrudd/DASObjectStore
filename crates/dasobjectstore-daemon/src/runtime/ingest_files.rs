@@ -40,6 +40,7 @@ mod pipeline_events;
 mod pipeline_state;
 mod pipeline_workers;
 mod progress;
+mod resource_gate;
 mod scheduling;
 mod source_classification;
 
@@ -198,6 +199,11 @@ impl LocalFileIngestExecutor {
                 managed_disk_roots.len()
             )));
         }
+        let _resource_lease = resource_gate::reserve_ingest_resources().map_err(|error| {
+            DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "ingest resource admission rejected: {error:?}"
+            ))
+        })?;
         ensure_live_metadata_for_ingest(
             &self.live_sqlite_path,
             &endpoint.store,

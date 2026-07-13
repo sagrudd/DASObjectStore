@@ -937,6 +937,10 @@ overbooking CPU, memory, socket-worker, or I/O-worker budgets and releases
 leases automatically on scope exit. Runtime policy injection and host telemetry
 remain open.
 
+Packaged local file ingest now acquires a bounded shared resource lease before
+source enumeration and releases it on every completion/error path; dynamic
+policy injection remains open.
+
 The TUI now renders an optional daemon admission action, limiting reason, and
 worker schedule alongside live ingest telemetry; Web bridging and host-level
 availability counters remain open.
