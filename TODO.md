@@ -1367,6 +1367,12 @@ list until every temporary size-budget exception has been removed.
     bounded daemon bridge worker is blocked; bridge capacity is retained until
     that worker releases. Full appliance I/O saturation, static/login soak,
     and accept queue measurements remain hardware/deployment acceptance work.
+  - [x] Add deterministic local coverage that acquires all four static-asset
+    read permits and proves requests fail fast with HTTP 503, then recover with
+    the documented no-cache index response; the same fixture proves local
+    login remains HTTP 200 while an unrelated daemon bridge worker is blocked.
+    Full static/login soak, saturated-I/O fixtures, and accept-queue
+    measurements remain hardware/deployment acceptance work.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [x] Document operator triage for an ingest-pressure incident, including SSD
   pressure, queue/verification indicators, safe daemon throttle/pause/resume

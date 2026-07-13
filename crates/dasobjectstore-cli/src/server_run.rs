@@ -305,13 +305,14 @@ fn write_json_config(
 
 #[cfg(test)]
 mod tests {
-    use super::{run, standalone_router};
+    use super::{run, standalone_router, static_asset_read_permits, STATIC_ASSET_READ_PERMITS};
     use crate::server_cli::ServerCli;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use clap::Parser;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
 
@@ -368,6 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_router_serves_product_mount_and_api() {
+        let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-web");
         write_web_asset(
             &root,
@@ -424,7 +426,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn static_asset_lane_fails_fast_when_all_read_permits_are_busy() {
+        let _asset_guard = static_asset_test_guard().await;
+        let root = temp_root("server-run-web-saturated");
+        let auth_root = temp_root("server-run-web-saturated-auth");
+        write_web_asset(&root, "index.html", "<!doctype html>");
+
+        let permits = static_asset_read_permits()
+            .clone()
+            .acquire_many_owned(STATIC_ASSET_READ_PERMITS as u32)
+            .await
+            .expect("all static asset permits acquired");
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/products/dasobjectstore/")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("saturated response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        drop(permits);
+
+        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/products/dasobjectstore/")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("released response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
+
+        cleanup(&auth_root);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn standalone_router_mounts_local_auth_when_configured() {
+        let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-auth-web");
         let auth_root = temp_root("server-run-auth-state");
         write_web_asset(&root, "index.html", "<!doctype html>");
@@ -450,6 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn standalone_router_rejects_asset_traversal() {
+        let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-web-traversal");
         let auth_root = temp_root("server-run-web-traversal-auth");
         write_web_asset(&root, "index.html", "<!doctype html>");
@@ -498,6 +542,14 @@ mod tests {
             "dasobjectstore-server-run-{label}-{}-{unique}",
             std::process::id()
         ))
+    }
+
+    async fn static_asset_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
+            .lock()
+            .await
     }
 
     fn cleanup(root: &Path) {

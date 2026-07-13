@@ -928,9 +928,11 @@ Current delivery note: daemon-independent health/liveness and degraded Activity
 responses are covered, including a local bridge-saturation regression for both
 health surfaces. Standalone static asset reads now use an async bounded
 lane with explicit no-cache index/unfingerprinted and immutable fingerprinted
-asset cache headers. The authenticated dashboard status route now retains a
-last-successful snapshot and reports stale/retry metadata, while cold starts
-fail closed. Appliance soak and telemetry freshness remain open.
+asset cache headers; a deterministic permit-saturation test proves the lane
+fails fast and recovers. Local standalone login remains independent of an
+unrelated saturated daemon bridge. The authenticated dashboard status route
+now retains a last-successful snapshot and reports stale/retry metadata, while
+cold starts fail closed. Appliance soak and telemetry freshness remain open.
 
 The daemon API also exposes a typed ingest admission decision combining
 source-read pressure/error backpressure with adaptive worker scheduling. It

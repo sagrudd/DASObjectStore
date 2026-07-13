@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.92 - 2026-07-13
+
+- Add deterministic static-asset permit saturation coverage proving the
+  bounded Web lane fails fast and recovers, and prove standalone local login
+  remains available while an unrelated daemon bridge worker is blocked.
+
 ## 0.72.91 - 2026-07-13
 
 - Extend the local bridge-saturation regression to prove both daemon-independent

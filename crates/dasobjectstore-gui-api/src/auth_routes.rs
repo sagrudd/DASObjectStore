@@ -745,6 +745,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_login_remains_available_while_unrelated_daemon_bridge_is_saturated() {
+        let root = temp_root("login-while-daemon-saturated");
+        let auth_store = registered_auth_store(&root);
+        let app = test_auth_router(auth_store, vec![("admin", "secret")]);
+        let bridge = crate::daemon_bridge::DaemonBridge::with_capacity_and_deadline(
+            1,
+            std::time::Duration::from_secs(1),
+        );
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let worker = tokio::spawn(async move {
+            bridge
+                .call_message(move || {
+                    entered_sender.send(()).expect("saturation signal sent");
+                    let _ = release_receiver.blocking_recv();
+                    Ok::<_, String>(())
+                })
+                .await
+        });
+        entered_receiver.await.expect("daemon bridge saturated");
+
+        let response = post_json_response(
+            app,
+            "/api/login",
+            &LoginRequest {
+                username: "admin".to_string(),
+                password: "secret".to_string(),
+                session_ttl_seconds: Some(3_600),
+            },
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+
+        release_sender.send(()).expect("daemon worker released");
+        worker
+            .await
+            .expect("daemon worker joins")
+            .expect("daemon call succeeds");
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn remote_authenticate_rejects_invalid_request_before_authentication() {
         let root = temp_root("remote-authenticate-validation");
         let state = StandaloneAuthRouteState {
