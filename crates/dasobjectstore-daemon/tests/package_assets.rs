@@ -86,6 +86,23 @@ fn package_auth_guard_rejects_development_self_signing_payloads() {
         String::from_utf8_lossy(&rejected.stderr)
     );
 
+    let binary_marker = root.join("binary-marker");
+    std::fs::create_dir_all(&binary_marker).expect("create binary marker payload");
+    std::fs::write(
+        binary_marker.join("dasobjectstored"),
+        b"\0DASOBJECTSTORE_ENABLE_DEVELOPMENT_SELF_SIGNING=true\0",
+    )
+    .expect("write binary marker payload");
+    let binary_rejected = std::process::Command::new("bash")
+        .arg(&guard)
+        .arg(&binary_marker)
+        .output()
+        .expect("run package guard for binary marker payload");
+    assert!(
+        !binary_rejected.status.success(),
+        "binary package marker accepted"
+    );
+
     std::fs::remove_dir_all(root).expect("remove package auth fixture");
 }
 

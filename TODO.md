@@ -926,7 +926,9 @@ completion.
     Native DEB/RPM build scripts now explicitly compile the daemon with
     ``--no-default-features`` as an additional package-boundary safeguard;
     ``package_assets`` executes the shared payload guard against safe and
-    forbidden fixture trees so marker/path regressions fail in CI.
+    forbidden fixture trees so marker/path regressions fail in CI. The guard
+    also scans compiled payload members for development enablement markers and
+    private-key PEM material while allowing the public auth contract.
     The daemon socket exchange now verifies registered key proofs; the
     canonical versioned HTTPS exchange route is published and dispatched by
     the standalone Web API. Listener authentication and mTLS verification

@@ -117,8 +117,10 @@ loopback/local-Docker only, and constrained to synthetic validation stores. It
 is a test-build facility, not an application authority, and is forbidden from
 RPM/DEB contents including keys, issuers, configuration, and enablement
 switches. The package-asset test executes the shared payload guard against
-safe and forbidden fixture trees, covering marker/path regressions without
-building a package locally. The core
+safe and forbidden fixture trees, covering marker/path and compiled-payload
+regressions without building a package locally; private-key PEM material and
+development enablement markers are rejected while the public contract remains
+allowed. The core
 exchange-request contract validates active key membership, bounded proof shape,
 scope, and lifetime. Core issuance now requires an explicit proof verifier
 implementation and rejects unverified proofs. The daemon now ships a
