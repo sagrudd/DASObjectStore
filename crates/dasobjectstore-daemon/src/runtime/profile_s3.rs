@@ -613,6 +613,12 @@ mod tests {
             .read_to_string(&mut range)
             .expect("read range");
         assert_eq!(range, "ead");
+        let mut offset_range = String::new();
+        get_profile_object_range(&backend, &key, 2, 1)
+            .expect("offset range")
+            .read_to_string(&mut offset_range)
+            .expect("read offset range");
+        assert_eq!(offset_range, "a");
         assert!(get_profile_object_range(&backend, &key, 6, 1).is_err());
         let missing = BackendObjectKey {
             object_id: "reads/missing.fastq".to_string(),
