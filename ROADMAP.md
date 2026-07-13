@@ -932,6 +932,11 @@ source-read pressure/error backpressure with adaptive worker scheduling. It
 reports run/throttle/block and the limiting schedule reason; live host resource
 reservations, telemetry, and runtime call-site wiring remain open.
 
+A transactional resource gate now prevents concurrent daemon jobs from
+overbooking CPU, memory, socket-worker, or I/O-worker budgets and releases
+leases automatically on scope exit. Runtime policy injection and host telemetry
+remain open.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.

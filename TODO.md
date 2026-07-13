@@ -1311,6 +1311,9 @@ list until every temporary size-budget exception has been removed.
     pressure backpressure with adaptive worker scheduling and reports run,
     throttle, or block plus the limiting reason and schedule snapshot. Runtime
     resource reservations, live host telemetry, and call-site wiring remain.
+  - [x] Add a transactional daemon resource gate for CPU, memory, socket-worker,
+    and I/O-worker reservations with fail-closed over-budget admission and
+    automatic lease release; runtime policy injection and live telemetry remain.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
 - [ ] Add an authenticated, daemon-owned emergency `ingest pause/throttle/resume` operation that safely stops new source reads while preserving staged data, in-flight checksum/durability rules, and a responsive WebUI. Do not require a service restart or raw process priority changes during an incident.

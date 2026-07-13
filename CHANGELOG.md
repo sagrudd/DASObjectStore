@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.75 - 2026-07-13
+
+- Add a transactional daemon ingest resource gate for CPU, memory, socket
+  workers, and I/O workers with automatic lease release.
+
 ## 0.72.74 - 2026-07-13
 
 - Add a daemon ingest admission contract combining source-read backpressure and

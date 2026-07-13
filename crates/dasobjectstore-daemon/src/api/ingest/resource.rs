@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonIngestResourcePolicy {
@@ -66,6 +67,172 @@ pub struct DaemonIngestSystemSafetyReserve {
     pub memory_bytes: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonIngestResourceReservation {
+    pub cpu_cores: u16,
+    pub memory_bytes: u64,
+    pub socket_workers: u16,
+    pub io_workers: u16,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonIngestResourceBudget {
+    pub cpu_cores: u16,
+    pub memory_bytes: u64,
+    pub socket_workers: u16,
+    pub io_workers: u16,
+}
+
+impl DaemonIngestResourceBudget {
+    pub fn from_policy(policy: DaemonIngestResourcePolicy, available_cpu_cores: u16) -> Self {
+        let cpu_cores = available_cpu_cores
+            .saturating_sub(policy.system_safety_reserve.cpu_cores)
+            .max(1);
+        let memory_bytes = policy
+            .memory_budget_bytes
+            .saturating_sub(policy.system_safety_reserve.memory_bytes);
+        let socket_workers = policy
+            .worker_counts
+            .scan
+            .saturating_add(policy.worker_counts.finalization)
+            .max(1);
+        let io_workers = policy
+            .worker_counts
+            .source_read
+            .saturating_add(policy.worker_counts.ssd_stage)
+            .saturating_add(policy.worker_counts.hdd_write)
+            .max(1);
+        Self {
+            cpu_cores,
+            memory_bytes,
+            socket_workers,
+            io_workers,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DaemonIngestResourceUsage(DaemonIngestResourceReservation);
+
+#[derive(Clone, Debug)]
+pub struct DaemonIngestResourceGate {
+    budget: DaemonIngestResourceBudget,
+    usage: Arc<Mutex<DaemonIngestResourceUsage>>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum DaemonIngestResourceReservationError {
+    BudgetExceeded {
+        resource: &'static str,
+        requested: u64,
+        available: u64,
+    },
+}
+
+#[derive(Debug)]
+pub struct DaemonIngestResourceLease {
+    gate: DaemonIngestResourceGate,
+    reservation: DaemonIngestResourceReservation,
+}
+
+impl DaemonIngestResourceGate {
+    pub fn new(budget: DaemonIngestResourceBudget) -> Self {
+        Self {
+            budget,
+            usage: Arc::new(Mutex::new(DaemonIngestResourceUsage(
+                DaemonIngestResourceReservation::default(),
+            ))),
+        }
+    }
+
+    pub fn try_reserve(
+        &self,
+        reservation: DaemonIngestResourceReservation,
+    ) -> Result<DaemonIngestResourceLease, DaemonIngestResourceReservationError> {
+        let mut usage = self.usage.lock().expect("ingest resource gate lock");
+        check_resource(
+            "cpu_cores",
+            u64::from(usage.0.cpu_cores),
+            u64::from(reservation.cpu_cores),
+            u64::from(self.budget.cpu_cores),
+        )?;
+        check_resource(
+            "memory_bytes",
+            usage.0.memory_bytes,
+            reservation.memory_bytes,
+            self.budget.memory_bytes,
+        )?;
+        check_resource(
+            "socket_workers",
+            u64::from(usage.0.socket_workers),
+            u64::from(reservation.socket_workers),
+            u64::from(self.budget.socket_workers),
+        )?;
+        check_resource(
+            "io_workers",
+            u64::from(usage.0.io_workers),
+            u64::from(reservation.io_workers),
+            u64::from(self.budget.io_workers),
+        )?;
+        usage.0.cpu_cores = usage.0.cpu_cores.saturating_add(reservation.cpu_cores);
+        usage.0.memory_bytes = usage
+            .0
+            .memory_bytes
+            .saturating_add(reservation.memory_bytes);
+        usage.0.socket_workers = usage
+            .0
+            .socket_workers
+            .saturating_add(reservation.socket_workers);
+        usage.0.io_workers = usage.0.io_workers.saturating_add(reservation.io_workers);
+        drop(usage);
+        Ok(DaemonIngestResourceLease {
+            gate: self.clone(),
+            reservation,
+        })
+    }
+
+    #[cfg(test)]
+    fn usage(&self) -> DaemonIngestResourceReservation {
+        self.usage.lock().expect("ingest resource gate lock").0
+    }
+}
+
+impl Drop for DaemonIngestResourceLease {
+    fn drop(&mut self) {
+        let mut usage = self.gate.usage.lock().expect("ingest resource gate lock");
+        usage.0.cpu_cores = usage.0.cpu_cores.saturating_sub(self.reservation.cpu_cores);
+        usage.0.memory_bytes = usage
+            .0
+            .memory_bytes
+            .saturating_sub(self.reservation.memory_bytes);
+        usage.0.socket_workers = usage
+            .0
+            .socket_workers
+            .saturating_sub(self.reservation.socket_workers);
+        usage.0.io_workers = usage
+            .0
+            .io_workers
+            .saturating_sub(self.reservation.io_workers);
+    }
+}
+
+fn check_resource(
+    resource: &'static str,
+    used: u64,
+    requested: u64,
+    budget: u64,
+) -> Result<(), DaemonIngestResourceReservationError> {
+    let available = budget.saturating_sub(used);
+    if requested > available {
+        return Err(DaemonIngestResourceReservationError::BudgetExceeded {
+            resource,
+            requested,
+            available,
+        });
+    }
+    Ok(())
+}
+
 impl Default for DaemonIngestSystemSafetyReserve {
     fn default() -> Self {
         let cpu_cores = std::thread::available_parallelism()
@@ -76,5 +243,73 @@ impl Default for DaemonIngestSystemSafetyReserve {
             cpu_cores,
             memory_bytes: 512 * 1024 * 1024,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reservation() -> DaemonIngestResourceReservation {
+        DaemonIngestResourceReservation {
+            cpu_cores: 1,
+            memory_bytes: 100,
+            socket_workers: 1,
+            io_workers: 2,
+        }
+    }
+
+    #[test]
+    fn resource_gate_rejects_overlapping_reservations_without_overbooking() {
+        let gate = DaemonIngestResourceGate::new(DaemonIngestResourceBudget {
+            cpu_cores: 1,
+            memory_bytes: 150,
+            socket_workers: 1,
+            io_workers: 2,
+        });
+        let lease = gate.try_reserve(reservation()).expect("first reservation");
+        let error = gate
+            .try_reserve(reservation())
+            .expect_err("second reservation exceeds every budget");
+        assert_eq!(
+            error,
+            DaemonIngestResourceReservationError::BudgetExceeded {
+                resource: "cpu_cores",
+                requested: 1,
+                available: 0,
+            }
+        );
+        assert_eq!(gate.usage(), reservation());
+        drop(lease);
+        assert_eq!(gate.usage(), DaemonIngestResourceReservation::default());
+    }
+
+    #[test]
+    fn resource_gate_releases_memory_and_io_on_lease_drop() {
+        let gate = DaemonIngestResourceGate::new(DaemonIngestResourceBudget {
+            cpu_cores: 2,
+            memory_bytes: 200,
+            socket_workers: 2,
+            io_workers: 4,
+        });
+        let first = gate.try_reserve(reservation()).expect("first reservation");
+        let error = gate
+            .try_reserve(DaemonIngestResourceReservation {
+                cpu_cores: 1,
+                memory_bytes: 101,
+                socket_workers: 1,
+                io_workers: 2,
+            })
+            .expect_err("memory is fully reserved");
+        assert_eq!(
+            error,
+            DaemonIngestResourceReservationError::BudgetExceeded {
+                resource: "memory_bytes",
+                requested: 101,
+                available: 100,
+            }
+        );
+        drop(first);
+        assert!(gate.try_reserve(reservation()).is_ok());
     }
 }

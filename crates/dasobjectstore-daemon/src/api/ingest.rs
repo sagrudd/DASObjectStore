@@ -26,7 +26,10 @@ pub use backpressure::{
     DaemonSourceReadPriority,
 };
 pub use resource::{
-    DaemonIngestResourcePolicy, DaemonIngestSystemSafetyReserve, DaemonIngestWorkerCounts,
+    DaemonIngestResourceBudget, DaemonIngestResourceGate, DaemonIngestResourceLease,
+    DaemonIngestResourcePolicy, DaemonIngestResourceReservation,
+    DaemonIngestResourceReservationError, DaemonIngestSystemSafetyReserve,
+    DaemonIngestWorkerCounts,
 };
 pub use scheduling::{
     DaemonIngestAdaptiveSchedulerInput, DaemonIngestAdaptiveSchedulingLimit,
