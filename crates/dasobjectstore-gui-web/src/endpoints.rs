@@ -271,7 +271,7 @@ fn render_endpoints_state(
     match state {
         ApiLoadState::Loading => html! {
             <div class="dos-store-grid">
-                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref) }
+                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref, true) }
                 { render_endpoint_state_message(
                     "Loading",
                     "Loading endpoint inventory",
@@ -291,18 +291,22 @@ fn render_endpoints_state(
         }
         ApiLoadState::Empty(message) => html! {
             <div class="dos-store-grid">
-                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref) }
+                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref, true) }
                 { render_endpoint_state_message("Inventory", "No endpoints reported yet", message) }
             </div>
         },
-        ApiLoadState::PermissionDenied(message) => render_endpoint_state_message(
-            "Permission denied",
-            "Endpoint inventory requires an authenticated session",
-            message,
-        ),
-        ApiLoadState::TransportError(message) => {
-            render_endpoint_state_message("Error", "Unable to load endpoint inventory", message)
-        }
+        ApiLoadState::PermissionDenied(message) => html! {
+            <div class="dos-store-grid">
+                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref, false) }
+                { render_endpoint_state_message("Permission denied", "Endpoint inventory requires an authenticated session", message) }
+            </div>
+        },
+        ApiLoadState::TransportError(message) => html! {
+            <div class="dos-store-grid">
+                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref, false) }
+                { render_endpoint_state_message("Error", "Unable to load endpoint inventory", message) }
+            </div>
+        },
     }
 }
 
@@ -320,7 +324,7 @@ fn render_endpoint_inventory(
             <div class="dos-metric-grid">
                 { for endpoint_inventory_summary_cards(view).into_iter().map(render_endpoint_metric_card) }
             </div>
-            { render_endpoint_toolbar(pane_mode.clone(), form_state.clone(), add_endpoint_trigger_ref.clone()) }
+            { render_endpoint_toolbar(pane_mode.clone(), form_state.clone(), add_endpoint_trigger_ref.clone(), true) }
             <div class="dos-card dos-wide-card dos-endpoint-inventory" data-section="endpoint-inventory">
                 <div class="dos-table-wrap">
                     <table class="dos-table dos-dense-table dos-endpoints-table">
@@ -366,6 +370,7 @@ fn render_endpoint_toolbar(
     pane_mode: UseStateHandle<TaskPaneMode>,
     form_state: UseStateHandle<EndpointUpsertFormState>,
     add_endpoint_trigger_ref: NodeRef,
+    enabled: bool,
 ) -> Html {
     let open_add = Callback::from(move |_| {
         form_state.set(EndpointUpsertFormState::default());
@@ -374,7 +379,7 @@ fn render_endpoint_toolbar(
     html! {
         <section class="dos-card dos-wide-card dos-endpoints-toolbar" data-section="endpoints-toolbar">
             <div><span class="dos-card-label">{ "Endpoint inventory" }</span><h2>{ "Storage endpoints" }</h2><p>{ "Inspect registered endpoints; add and edit operations open in a contextual task pane." }</p></div>
-            <button type="button" class="dos-auth-submit" ref={add_endpoint_trigger_ref} onclick={open_add}>{ "Add endpoint" }</button>
+            <button type="button" class="dos-auth-submit" ref={add_endpoint_trigger_ref} onclick={open_add} disabled={!enabled}>{ if enabled { "Add endpoint" } else { "Endpoint actions unavailable" } }</button>
         </section>
     }
 }

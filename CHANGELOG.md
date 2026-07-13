@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.64 - 2026-07-13
+
+- Update screenshot fixtures and workflow assertions for users-first Local
+  Access and endpoint inventory/task panes.
+
 ## 0.72.63 - 2026-07-13
 
 - Refactor Endpoints into an inventory-first table with contextual add/edit

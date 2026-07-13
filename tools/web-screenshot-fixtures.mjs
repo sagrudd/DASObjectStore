@@ -45,6 +45,12 @@ export const authenticatedPages = [
     readySelector: "[data-panel='reporting']",
   },
   {
+    name: "endpoints",
+    selector: "button[data-page='endpoints']",
+    pageSelector: "section[data-page='endpoints']",
+    readySelector: "[data-section='endpoint-inventory']",
+  },
+  {
     name: "users-groups",
     selector: "button[data-page='users-groups']",
     pageSelector: "section[data-page='users-groups']",

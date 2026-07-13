@@ -17,6 +17,7 @@ const artifactDir = join(repoRoot, "target", "web-screenshots");
 const publicBase = "/products/dasobjectstore/";
 const apiBase = "/products/dasobjectstore/api";
 const apiV1Base = "/products/dasobjectstore/api/v1";
+let visualEndpoint = null;
 
 async function main() {
   await buildWebDist();
@@ -216,6 +217,9 @@ async function assertWorkflowContract(page, pageName, role) {
     case "users-groups":
       await assertUsersGroupsWorkflow(page, role);
       break;
+    case "endpoints":
+      await assertEndpointsWorkflow(page, role);
+      break;
     case "activity":
       await assertActivityWorkflow(page);
       break;
@@ -287,35 +291,73 @@ async function assertObjectStoreWorkflow(page, role) {
 }
 
 async function assertUsersGroupsWorkflow(page, role) {
-  const createCard = page.locator("[data-action='create_local_group']");
-  const assignCard = page.locator("[data-action='assign_local_user_to_group']");
-  const createPreview = createCard.getByRole("button", { name: "Dry-run preview" });
-  const assignPreview = assignCard.getByRole("button", { name: "Dry-run preview" });
+  const inventory = page.locator("[data-section='users-inventory']");
+  await inventory.waitFor();
+  const addButton = page.getByRole("button", { name: "Add user", exact: true });
+  const groupsButton = page.getByRole("button", { name: "Manage groups", exact: true });
 
   if (!role.administrator) {
-    await createCard.getByText("Admin only").waitFor();
-    await assignCard.getByText("Admin only").waitFor();
-    await expectDisabled(createPreview, "non-admin group creation preview must be disabled");
-    await expectDisabled(assignPreview, "non-admin group assignment preview must be disabled");
+    await expectDisabled(addButton, "non-admin Add user must be disabled");
+    await expectDisabled(groupsButton, "non-admin group management must be disabled");
+    if (await page.locator(".dos-task-pane").count() !== 0) {
+      throw new Error("Local Access task pane must be closed for viewers");
+    }
     return;
   }
 
-  await createCard.getByLabel("Group name").fill("mnemosyne-writers");
-  await expectEnabled(createPreview, "admin group creation preview must be enabled");
-  await createPreview.click();
-  await createCard.getByText("Job local-group-dry-run-visual").waitFor();
-  await createCard.getByPlaceholder("confirm local group administration").fill("confirm local group administration");
-  await createCard.getByRole("button", { name: "Submit group creation" }).click();
-  await createCard.getByText("Job local-group-apply-visual").waitFor();
+  await expectEnabled(addButton, "admin Add user must be enabled");
+  await addButton.click();
+  const pane = page.locator(".dos-task-pane[role='dialog']");
+  await pane.waitFor();
+  for (const step of ["identify-user", "qualification", "groups", "review"]) {
+    await pane.locator(`[data-step='${step}']`).waitFor();
+  }
+  await pane.getByLabel("OS-recognized/local user").selectOption({ label: role.username });
+  await pane.getByLabel("I confirm this existing local user is qualified for DASObjectStore access.").check();
+  await pane.getByLabel(/Bioinformatics \(bioinformatics\)/).check();
+  await pane.getByRole("button", { name: "Review and apply" }).click();
+  await pane.getByText(/Job local-group-assign-apply-visual/).waitFor();
+  await page.keyboard.press("Escape");
+  await expectHidden(pane, "Escape must close the Local Access task pane");
+  await expectEnabled(groupsButton, "admin group management must be enabled");
+  await groupsButton.click();
+  await page.getByRole("dialog").getByText("Create access group").waitFor();
+}
 
-  await assignCard.getByLabel("Username").fill("stephen");
-  await assignCard.getByLabel("Group").selectOption("bioinformatics");
-  await expectEnabled(assignPreview, "admin group assignment preview must be enabled");
-  await assignPreview.click();
-  await assignCard.getByText("Job local-group-assign-dry-run-visual").waitFor();
-  await assignCard.getByPlaceholder("confirm local group administration").fill("confirm local group administration");
-  await assignCard.getByRole("button", { name: "Submit group assignment" }).click();
-  await assignCard.getByText("Job local-group-assign-apply-visual").waitFor();
+async function assertEndpointsWorkflow(page, role) {
+  const inventory = page.locator("[data-section='endpoint-inventory']");
+  await inventory.waitFor();
+  const addButton = page.getByRole("button", { name: "Add endpoint", exact: true });
+  if (!role.administrator) {
+    await expectEnabled(addButton, "endpoint inventory remains visible to viewers");
+    await addButton.click();
+    await page.getByRole("dialog").waitFor();
+    await page.keyboard.press("Escape");
+    return;
+  }
+
+  await addButton.click();
+  const pane = page.locator(".dos-task-pane[role='dialog']");
+  await pane.waitFor();
+  await pane.getByLabel("Endpoint ID").fill("visual-endpoint");
+  await pane.getByLabel("Display name").fill("Visual endpoint");
+  await pane.getByLabel("Object-service URL").fill("https://endpoint.example.test:9443");
+  if (await pane.getByLabel("Attach an ObjectStore/governance binding to this endpoint record.").count()) {
+    await pane.getByLabel("Attach an ObjectStore/governance binding to this endpoint record.").check();
+    await pane.getByLabel("Binding ID").fill("visual-binding");
+    await pane.getByLabel("Governance domain").fill("local");
+    await pane.getByLabel("ObjectStore ID").fill("zymo-fecal-2025-05");
+  }
+  if (await pane.getByLabel("Confirmation phrase").count() !== 0) {
+    throw new Error("dry-run endpoint review must not show a confirmation phrase");
+  }
+  await pane.getByLabel("Dry run only").uncheck();
+  await pane.getByLabel("Confirmation phrase").fill("record endpoint inventory");
+  await pane.getByRole("button", { name: "Record endpoint" }).click();
+  await expectHidden(pane, "successful endpoint update must close the task pane");
+  await inventory.getByText("Visual endpoint").waitFor();
+  await inventory.getByRole("button", { name: "Edit" }).first().click();
+  await page.getByRole("dialog").getByLabel("Endpoint ID").waitFor();
 }
 
 async function assertActivityWorkflow(page) {
@@ -347,6 +389,12 @@ async function expectEnabled(locator, message) {
 
 async function expectDisabled(locator, message) {
   if (await locator.isEnabled()) {
+    throw new Error(message);
+  }
+}
+
+async function expectHidden(locator, message) {
+  if (await locator.count() !== 0 && await locator.isVisible()) {
     throw new Error(message);
   }
 }
@@ -466,6 +514,9 @@ function apiResponse(pathname, method, request, body = {}) {
   if (pathname === `${apiV1Base}/workspaces/activity`) {
     return activityWorkspace();
   }
+  if (pathname === `${apiV1Base}/workspaces/endpoints` && method === "GET") {
+    return endpointsWorkspace();
+  }
   if (pathname === `${apiV1Base}/workspaces/users-groups`) {
     return usersGroupsWorkspace(role);
   }
@@ -486,6 +537,9 @@ function apiResponse(pathname, method, request, body = {}) {
   }
   if (pathname === `${apiV1Base}/workspaces/users-groups/local-groups/members` && method === "POST") {
     return localGroupAdminResponse("assign_local_user_to_group", body.group_name || "bioinformatics", body.username || "stephen", body);
+  }
+  if (pathname === `${apiV1Base}/workspaces/endpoints/upsert` && method === "POST") {
+    return endpointInventoryUpsertResponse(body);
   }
   if (pathname.startsWith(`${apiV1Base}/workspaces/admin/jobs/`)) {
     return adminJobStatusResponse(pathname);
@@ -760,6 +814,70 @@ function activityCategory(kind, label, description) {
   return { kind, label, description };
 }
 
+function endpointsWorkspace() {
+  const endpoint = visualEndpoint || {
+    endpoint_id: "nas-staging",
+    display_name: "NAS staging",
+    kind: "dasobjectstore_nfs",
+    manager_product_id: "dasobjectstore",
+    object_service_url: "https://nas.example.test:9443",
+    validation: {
+      state: "validated",
+      checked_at_utc: "2026-07-09T00:00:00Z",
+      message: "fixture",
+    },
+    active_bindings: [{
+      binding_id: "binding-1",
+      governance_domain: "local",
+      store_id: "zymo-fecal-2025-05",
+      readiness: "ready",
+    }],
+    warnings: [],
+  };
+  return {
+    inventory: {
+      schema_version: "dasobjectstore.endpoint_inventory.v1",
+      endpoint_count: 1,
+      degraded_endpoint_count: 0,
+      binding_count: 1,
+      endpoints: [endpoint],
+      warnings: [],
+    },
+  };
+}
+
+function endpointInventoryUpsertResponse(body) {
+  visualEndpoint = {
+    endpoint_id: body.endpoint_id || "visual-endpoint",
+    display_name: body.display_name || "Visual endpoint",
+    kind: body.kind || "dasobjectstore_nfs",
+    manager_product_id: body.manager_product_id || "dasobjectstore",
+    object_service_url: body.object_service_url || "https://endpoint.example.test:9443",
+    validation: {
+      state: body.validation?.state || "pending_validation",
+      checked_at_utc: body.validation?.checked_at_utc || null,
+      message: body.validation?.message || null,
+    },
+    active_bindings: body.active_bindings || [],
+    warnings: [],
+  };
+  return {
+    accepted: {
+      job_id: "endpoint-validation-visual",
+      kind: "endpoint_validation",
+      accepted_at_utc: "2026-07-13T00:00:00Z",
+      dry_run: Boolean(body.dry_run),
+    },
+    endpoint_id: body.endpoint_id || "visual-endpoint",
+    display_name: body.display_name || "Visual endpoint",
+    kind: body.kind || "dasobjectstore_nfs",
+    validation_state: body.validation?.state || "pending_validation",
+    registry_path: "/opt/dasobjectstore/endpoints.json",
+    administrator_actor: "visual-admin",
+    client_request_id: body.client_request_id || null,
+  };
+}
+
 function usersGroupsWorkspace(role = roles[1]) {
   const canAdmin = role.administrator;
   return {
@@ -783,6 +901,9 @@ function usersGroupsWorkspace(role = roles[1]) {
         created_at_unix_seconds: 1_783_411_200,
         registered_at_unix_seconds: 1_783_411_200,
         active_session_count: 1,
+        qualification_state: canAdmin ? "qualified" : "registered",
+        groups: canAdmin ? ["sudo", "bioinformatics"] : [],
+        sudo_administrator: canAdmin,
       },
     ],
     groups: [

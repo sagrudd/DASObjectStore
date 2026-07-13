@@ -34,6 +34,12 @@ evidence and detailed source tasks.
 - Folder one-root adoption semantics and native-versus-provider-backed S3
   gateway choice remain product decisions listed above; implementation should
   not infer them from a path or profile name.
+- The local Playwright screenshot runner now reaches the fixture server but
+  timed out waiting for the authenticated ``.dos-topbar`` in this environment;
+  Rust/Yew, wasm, JavaScript syntax, and source-contract checks pass. Treat
+  desktop/mobile artifact execution as environment-gated until the local Web
+  asset/bootstrap runtime is available; do not claim visual acceptance from
+  this run.
 
 ## Market and Mnemosyne Integration Campaign
 
@@ -2247,6 +2253,9 @@ non-destructive close, and restores focus to its trigger when closed.
   - [x] Update the Web Interface and Local Access documentation for the
     users-first table and task-pane workflow; Playwright artifact execution
     remains environment-gated.
+  - [x] Replace the legacy screenshot fixture users/groups selectors and add
+    endpoint inventory/upsert fixture responses plus users-first workflow
+    assertions; full Playwright artifact execution remains environment-gated.
 - [ ] Add focused component/API tests for: footer content on login and each
   authenticated shell state; one decorative partial mark only; keyboard open,
   Escape close, and focus return for every task pane; Local Access per-user
@@ -2256,7 +2265,7 @@ non-destructive close, and restores focus to its trigger when closed.
   closed and open Local Access, Endpoints, and target-scoped Remote Upload
   workflows. Assert no overlap, horizontal overflow, hidden primary form,
   unreadable footer text, or visible upload dropzone before target selection.
-- [ ] Update `docs/user/web-interface.rst` and `docs/user/remote-upload.rst`
+- [x] Update `docs/user/web-interface.rst` and `docs/user/remote-upload.rst`
   with the task-pane interaction, Local Access qualification flow, endpoint
   inventory/add-edit workflow, and ObjectStore-first upload flow. State that
   the browser never creates OS users or mutates managed storage directly.
