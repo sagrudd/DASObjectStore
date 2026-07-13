@@ -2398,11 +2398,13 @@ non-destructive close, and restores focus to its trigger when closed.
     not expose a dropzone before an explicitly authorized writable target and
     does not silently select the first writable store; visual artifact
     execution remains environment-gated.
-- [ ] Add focused component/API tests for: footer content on login and each
+- [x] Add focused component/API tests for: footer content on login and each
   authenticated shell state; one decorative partial mark only; keyboard open,
   Escape close, and focus return for every task pane; Local Access per-user
   memberships/qualification; endpoint add/edit prefill and confirmation gate;
-  and remote-upload rejection without an explicit target.
+  and remote-upload rejection without an explicit target. Source/component
+  contracts plus existing footer/API route tests cover these boundaries;
+  runtime visual artifact execution remains environment-gated.
 - [ ] Add desktop and 390 px mobile visual/DOM regression coverage for the
   closed and open Local Access, Endpoints, and target-scoped Remote Upload
   workflows. Assert no overlap, horizontal overflow, hidden primary form,

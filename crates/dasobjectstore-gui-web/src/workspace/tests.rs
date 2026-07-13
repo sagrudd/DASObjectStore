@@ -2692,6 +2692,82 @@ fn endpoints_component_contract_is_inventory_first_and_task_pane_scoped() {
     }
 }
 
+#[test]
+fn milestone_24_component_contracts_cover_footer_and_task_pane_boundaries() {
+    let app = authenticated_workspace_source();
+    let widgets = include_str!("../components/widgets.rs");
+    let footer = include_str!("../components/footer.rs");
+    let users = include_str!("users_groups.rs");
+    let endpoints = include_str!("../endpoints.rs");
+    let remote_upload = include_str!("remote_upload.rs");
+
+    for marker in [
+        "StableState::Disconnected",
+        "StableState::Connected",
+        "<DasObjectStoreFooter",
+        "class=\"dos-app-shell\"",
+    ] {
+        assert!(
+            app.contains(marker),
+            "missing shell/footer marker: {marker}"
+        );
+    }
+    assert_eq!(
+        footer
+            .matches("class=\"dos-product-footer__partial\"")
+            .count(),
+        1,
+        "footer must render one decorative partial mark"
+    );
+    for marker in [
+        "Self::Closed",
+        "    Create,",
+        "    Edit(String),",
+        "    Review,",
+        "event.key() == \"Escape\"",
+        "pane.focus()",
+        "trigger.focus()",
+        "aria-modal=\"true\"",
+    ] {
+        assert!(
+            widgets.contains(marker),
+            "missing TaskPane contract marker: {marker}"
+        );
+    }
+    for (source, markers) in [
+        (
+            users,
+            &[
+                "qualification_state",
+                "groups",
+                "data-step=\"review\"",
+                "return_focus_to",
+            ] as &[&str],
+        ),
+        (
+            endpoints,
+            &[
+                "TaskPaneMode::Create",
+                "TaskPaneMode::Edit",
+                "endpoint_form_state_from_item",
+                "confirmation_phrase",
+            ] as &[&str],
+        ),
+        (
+            remote_upload,
+            &[
+                "props.target_store_id.clone()",
+                "selected_target.is_some()",
+                "Select a writable ObjectStore from ObjectStores before choosing files.",
+            ] as &[&str],
+        ),
+    ] {
+        for marker in markers {
+            assert!(source.contains(marker), "missing workflow marker: {marker}");
+        }
+    }
+}
+
 fn users_groups_workspace_fixture() -> UsersGroupsWorkspaceResponse {
     UsersGroupsWorkspaceResponse {
         host_mode: "standalone".to_string(),

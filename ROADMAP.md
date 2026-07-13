@@ -909,6 +909,11 @@ Enclosure wizard selectors now live in the feature-owned `styles/enclosures.css`
 sheet; shared form/review primitives remain in the base sheet with ownership
 tests.
 
+Milestone 24.5 now has focused source/component coverage for footer mounting and
+decorative-mark ownership, TaskPane keyboard/focus boundaries, Local Access
+qualification, endpoint add/edit confirmation, and target-scoped upload
+gating; browser visual artifacts remain environment-gated.
+
 The target-scoped Remote Upload Web boundary now requires a concrete
 ObjectStore ID in page props and percent-encodes it in the workspace route;
 the authenticated shell renders an explicit target-required state instead of

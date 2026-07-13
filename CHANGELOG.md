@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.111 - 2026-07-13
+
+- Add focused Web source/component contracts for Mnemosyne footer mounting,
+  TaskPane keyboard/focus boundaries, Local Access, endpoint editing, and
+  target-scoped Remote Upload gating.
+
 ## 0.72.110 - 2026-07-13
 
 - Add guarded drive migration/reopen coverage for authoritative catalogue
