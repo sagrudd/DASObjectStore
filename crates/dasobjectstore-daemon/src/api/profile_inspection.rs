@@ -28,6 +28,17 @@ pub enum ProfileInspectionRootState {
     Unreadable,
 }
 
+impl ProfileInspectionRootState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Missing => "missing",
+            Self::NotDirectory => "not_directory",
+            Self::Unreadable => "unreadable",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProfileInspectionResponse {
     pub schema_version: String,

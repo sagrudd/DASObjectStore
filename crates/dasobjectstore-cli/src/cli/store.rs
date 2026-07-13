@@ -23,6 +23,9 @@ pub(crate) enum StoreCommand {
     /// Register a daemon-owned folder or drive profile binding from a manifest.
     #[command(name = "profile-binding")]
     ProfileBinding(StoreProfileBindingArgs),
+    /// Inspect a daemon-owned profile without exposing host paths.
+    #[command(name = "profile-inspection")]
+    ProfileInspection(StoreProfileInspectionArgs),
     /// Inspect objects and aggregate folder sizes in a store.
     #[command(alias = "objects", alias = "list-contents")]
     Contents(StoreContentsArgs),
@@ -115,6 +118,24 @@ impl StoreProfileBindingArgs {
     }
     pub(crate) fn confirm(&self) -> &str {
         &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileInspectionArgs {
+    /// Logical ObjectStore identifier.
+    store_id: String,
+    /// Emit the redacted inspection response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileInspectionArgs {
+    pub(crate) fn store_id(&self) -> &str {
+        &self.store_id
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -784,6 +805,26 @@ mod tests {
         assert_eq!(binding.operation(), StoreProfileBindingOperation::Adopt);
         assert!(binding.dry_run());
         assert!(binding.json());
+    }
+
+    #[test]
+    fn parses_profile_inspection_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-inspection",
+            "generated-data",
+            "--json",
+        ])
+        .expect("profile inspection parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileInspection(inspection)) = args.command() else {
+            panic!("expected profile inspection command")
+        };
+        assert_eq!(inspection.store_id(), "generated-data");
+        assert!(inspection.json());
     }
 
     #[test]

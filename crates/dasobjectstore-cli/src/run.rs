@@ -12,8 +12,8 @@ use crate::cli::{
     StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs,
     StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
     StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBindingOperation,
-    StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
-    SubobjectCreateArgs,
+    StoreProfileInspectionArgs, StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs,
+    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod command_handlers;
 mod connection_status;
@@ -148,7 +148,7 @@ use self::storage_lifecycle::{
 };
 use self::store_read::{
     run_store_capabilities, run_store_capacity, run_store_contents, run_store_defaults,
-    run_store_list, run_store_s3_upload, run_store_validate,
+    run_store_list, run_store_profile_inspection, run_store_s3_upload, run_store_validate,
 };
 use self::store_write::{
     run_store_adopt, run_store_create, run_store_deduplicate, run_store_delete, run_store_drain,
@@ -178,13 +178,13 @@ use dasobjectstore_daemon::{
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest, ProfileBindingOperation,
-    ProfileBindingRequest, StoreDeduplicateRequest as DaemonStoreDeduplicateRequest,
-    StoreDeleteCommandReport, StoreDeleteRequest as DaemonStoreDeleteRequest,
-    StoreDrainRequest as DaemonStoreDrainRequest, StoreInventoryRequest,
-    StoreRepairRequest as DaemonStoreRepairRequest, StoreVerifyRequest as DaemonStoreVerifyRequest,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UnixSocketDaemonTransport,
-    UpdateObjectStoreIngestPolicyRequest, DEFAULT_DAEMON_STATE_DIR,
-    OBJECT_STORE_CREATE_CONFIRMATION,
+    ProfileBindingRequest, ProfileInspectionRequest,
+    StoreDeduplicateRequest as DaemonStoreDeduplicateRequest, StoreDeleteCommandReport,
+    StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
+    StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
+    StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
+    DEFAULT_DAEMON_STATE_DIR, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
@@ -292,6 +292,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Store(args)) => match args.command() {
             Some(StoreCommand::Adopt(args)) => run_store_adopt(args, writer),
             Some(StoreCommand::ProfileBinding(args)) => run_store_profile_binding(args, writer),
+            Some(StoreCommand::ProfileInspection(args)) => {
+                run_store_profile_inspection(args, writer)
+            }
             Some(StoreCommand::Contents(args)) => run_store_contents(args, writer),
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Drain(args)) => run_store_drain(args, writer),

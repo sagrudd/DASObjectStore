@@ -590,6 +590,9 @@ completion.
     from `FolderBackend`; folder-profile catalogue records now reload from the
     private snapshot, while repair/lifecycle/S3 and shared catalogue
     integration remain open.
+  - [x] Expose the redacted profile inspection contract through the typed CLI
+    as ``store profile-inspection``; output remains limited to root state and
+    drift counts with no daemon-owned paths.
 - [ ] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.

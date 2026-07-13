@@ -2,6 +2,36 @@
 
 use super::*;
 
+pub(super) fn run_store_profile_inspection(
+    args: &StoreProfileInspectionArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let store_id = StoreId::new(args.store_id())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_inspection(ProfileInspectionRequest { store_id })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Profile inspection")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Profile: {}", response.deployment_profile.name())?;
+        writeln!(writer, "Root state: {}", response.root_state.as_str())?;
+        writeln!(
+            writer,
+            "Unmanaged entries: {}",
+            response.unmanaged_path_count
+        )?;
+        writeln!(writer, "Unsafe entries: {}", response.unsafe_path_count)?;
+        for warning in response.warnings {
+            writeln!(writer, "Warning: {warning}")?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_contents(
     args: &StoreContentsArgs,
     writer: &mut impl Write,
