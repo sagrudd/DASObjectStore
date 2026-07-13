@@ -12,12 +12,19 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const APPLICATION_IDENTITY_REGISTRY_SCHEMA: &str =
     "dasobjectstore.application_identity_registry.v1";
 pub const APPLICATION_IDENTITY_REGISTRY_FILE_NAME: &str = "application-identities.json";
 pub const APPLICATION_IDENTITY_REGISTRY_ENV: &str = "DASOBJECTSTORE_APPLICATION_IDENTITIES_PATH";
+
+static APPLICATION_IDENTITY_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn registry_lock() -> &'static Mutex<()> {
+    APPLICATION_IDENTITY_REGISTRY_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 pub fn default_application_identity_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
     state_dir
@@ -52,6 +59,9 @@ impl Default for ApplicationIdentityRegistryFile {
 pub fn list_application_identities(
     path: impl AsRef<Path>,
 ) -> Result<Vec<ApplicationIdentity>, DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application identity registry lock poisoned");
     Ok(read_registry(path.as_ref())?.identities)
 }
 
@@ -59,6 +69,9 @@ pub fn read_application_identity(
     path: impl AsRef<Path>,
     application_id: &str,
 ) -> Result<Option<ApplicationIdentity>, DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application identity registry lock poisoned");
     Ok(read_registry(path.as_ref())?
         .identities
         .into_iter()
@@ -72,6 +85,9 @@ pub fn upsert_application_identity(
     path: impl AsRef<Path>,
     identity: ApplicationIdentity,
 ) -> Result<(), DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application identity registry lock poisoned");
     identity
         .validate()
         .map_err(|error| invalid_identity(error.to_string()))?;
@@ -98,6 +114,9 @@ pub fn deactivate_application_identity(
     path: impl AsRef<Path>,
     application_id: &str,
 ) -> Result<bool, DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application identity registry lock poisoned");
     let path = path.as_ref();
     let mut registry = read_registry(path)?;
     let Some(identity) = registry
@@ -303,6 +322,28 @@ mod tests {
             .expect("read")
             .expect("alpha");
         assert!(!alpha.active);
+    }
+
+    #[test]
+    fn concurrent_upserts_preserve_all_identities() {
+        let path = root("concurrent-upserts").join("identities.json");
+        let left_path = path.clone();
+        let left = std::thread::spawn(move || {
+            upsert_application_identity(&left_path, identity("left")).expect("write left")
+        });
+        let right_path = path.clone();
+        let right = std::thread::spawn(move || {
+            upsert_application_identity(&right_path, identity("right")).expect("write right")
+        });
+        left.join().expect("left joins");
+        right.join().expect("right joins");
+
+        let ids = list_application_identities(&path)
+            .expect("list identities")
+            .into_iter()
+            .map(|identity| identity.application_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["left", "right"]);
     }
 
     #[test]

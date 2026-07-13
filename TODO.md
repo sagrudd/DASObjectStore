@@ -902,7 +902,9 @@ completion.
     limits, expiry, active state, and deterministic application IDs without
     secrets or host paths; authenticated local-administrator API wiring and
     redacted registration audit events are now present, while cryptographic
-    custody remains.
+    custody remains. Registry read-modify-write operations are serialized in
+    the daemon and covered by a concurrent-upsert regression so authenticated
+    administrator requests cannot lose identities.
   - [~] Implement rotatable asymmetric-key or certificate identities and a
     short-lived access-token exchange (normally 5–15 minutes). Public key and
     certificate descriptors now have a versioned, daemon-owned rotation

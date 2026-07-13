@@ -102,7 +102,9 @@ The packaged CLI now provides a request-file bridge for these daemon-owned
 operations (`application-auth register-identity`, `register-key`, `revoke`,
 and `exchange`). It accepts only the versioned path-free request DTOs; private
 keys stay with the caller's signer and all authorization, proof verification,
-confirmation, and issuance decisions remain inside `dasobjectstored`.
+confirmation, and issuance decisions remain inside `dasobjectstored`. Registry
+read-modify-write operations are serialized in the daemon so concurrent
+administrator requests cannot lose service-principal updates.
 
 Profile consumers can also query a daemon-authorized readiness projection. The
 versioned response combines binding-root state, folder drift findings, and the
