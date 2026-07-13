@@ -1114,6 +1114,7 @@ fn object_stores_live_payload_maps_to_card_summaries() {
     assert!(summaries[0].capacity.contains("12.5 TiB used"));
     assert_eq!(summaries[0].writer_group, "bioinformatics");
     assert_eq!(summaries[0].endpoint, "s3_bucket");
+    assert!(summaries[0].upload_allowed);
     assert_eq!(summaries[0].warning_count, 1);
 }
 

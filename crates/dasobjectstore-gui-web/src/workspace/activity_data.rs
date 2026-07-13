@@ -183,6 +183,7 @@ pub struct ObjectStoreCardSummary {
     pub objects: String,
     pub writer_group: String,
     pub endpoint: String,
+    pub upload_allowed: bool,
     pub warning_count: usize,
     pub last_ingested: String,
     pub writer_policy: String,

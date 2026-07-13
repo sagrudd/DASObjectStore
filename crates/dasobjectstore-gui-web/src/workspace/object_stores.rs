@@ -105,6 +105,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 browser_prefix,
                 browser_search,
                 browser_sort,
+                props.on_upload_target.clone(),
             ) }
         </section>
     }
@@ -123,6 +124,7 @@ pub(super) fn render_object_stores_state(
     browser_prefix: UseStateHandle<String>,
     browser_search: UseStateHandle<String>,
     browser_sort: UseStateHandle<String>,
+    on_upload_target: Callback<String>,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
@@ -148,6 +150,7 @@ pub(super) fn render_object_stores_state(
                 browser_prefix,
                 browser_search,
                 browser_sort,
+                on_upload_target,
             )
         }
         ApiLoadState::Empty(message) => html! {
@@ -182,13 +185,14 @@ pub(super) fn render_object_store_inventory(
     browser_prefix: UseStateHandle<String>,
     browser_search: UseStateHandle<String>,
     browser_sort: UseStateHandle<String>,
+    on_upload_target: Callback<String>,
 ) -> Html {
     html! {
         <div class="dos-store-grid">
             { render_object_store_create_card(Some(view), create_state, api_base_path.clone()) }
             { render_subobject_create_card(view, subobject_state, api_base_path.clone()) }
             { render_object_store_configure_card(view, configure_state, api_base_path.clone()) }
-            { for object_store_card_summaries(view).into_iter().map(render_object_store_card) }
+            { for object_store_card_summaries(view).into_iter().map(|store| render_object_store_card(store, on_upload_target.clone())) }
             { render_object_browser_panel(
                 view,
                 &*browser_state,

@@ -482,6 +482,11 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                     .as_deref()
                     .unwrap_or("endpoint pending")
                     .to_string(),
+                upload_allowed: store.writeable.unwrap_or(false)
+                    && matches!(
+                        store.endpoint_export_mode.as_deref(),
+                        Some("s3" | "s3_bucket")
+                    ),
                 warning_count: store.warnings.len(),
                 last_ingested: store
                     .last_ingested_at_utc

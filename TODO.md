@@ -2198,12 +2198,14 @@ non-destructive close, and restores focus to its trigger when closed.
   `crates/dasobjectstore-gui-web/src/workspace.rs`. A generic remote-upload
   page must not be reachable as an unscoped primary workspace; target-scoped
   entry from ObjectStores remains open.
-- [ ] Add an `Upload` action to each writable, authorized ObjectStore row/card
+- [x] Add an `Upload` action to each writable, authorized ObjectStore row/card
   in `src/workspace/object_stores.rs`. The action selects that exact store and
   opens the remote-upload pane or a target-scoped workspace. Its visible title
   must be `Upload to {ObjectStore display name}` and its context must show the
   selected store’s writer group, object type, capacity/warnings, and ingress
-  policy before file selection.
+  policy before file selection. The current action selects the exact store and
+  opens the target-scoped pane; richer title/context detail remains in the
+  surrounding target-pane task.
 - [ ] Change `RemoteUploadPageProps`, the Web state in `src/app.rs`, and the
   remote-upload API contract so a target store ID is required. The server must
   reject a missing, unauthorised, non-writable, or disabled target; do not rely

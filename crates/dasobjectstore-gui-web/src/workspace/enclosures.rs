@@ -904,7 +904,8 @@ pub(super) fn render_enclosures_state_message(label: &str, title: &str, message:
 }
 
 #[cfg(target_arch = "wasm32")]
-#[derive(Clone, Debug, Eq, PartialEq, Properties)]
+#[derive(Clone, Debug, PartialEq, Properties)]
 pub struct ObjectStoresPageProps {
     pub api_base_path: String,
+    pub on_upload_target: Callback<String>,
 }

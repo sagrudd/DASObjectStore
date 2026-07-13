@@ -453,7 +453,16 @@ struct AuthenticatedWorkspaceProps {
 #[function_component(AuthenticatedWorkspace)]
 fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
     let active_page = use_state(|| WorkspacePage::Home);
+    let remote_upload_target = use_state(|| None::<String>);
     let navigation = primary_navigation_for_host(props.host);
+    let on_upload_target = {
+        let active_page = active_page.clone();
+        let remote_upload_target = remote_upload_target.clone();
+        Callback::from(move |store_id: String| {
+            remote_upload_target.set(Some(store_id));
+            active_page.set(WorkspacePage::RemoteUpload);
+        })
+    };
 
     html! {
         <section class="dos-workspace-shell">
@@ -496,7 +505,10 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                     <EnclosuresPage api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::ObjectStores => html! {
-                    <ObjectStoresPage api_base_path={props.api_base_path.clone()} />
+                    <ObjectStoresPage
+                        api_base_path={props.api_base_path.clone()}
+                        on_upload_target={on_upload_target.clone()}
+                    />
                 },
                 WorkspacePage::Activity => html! {
                     <ActivityPage api_base_path={props.api_base_path.clone()} />
@@ -504,7 +516,7 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                 WorkspacePage::RemoteUpload => html! {
                     <RemoteUploadPage
                         api_base_path={props.api_base_path.clone()}
-                        target_store_id={None::<String>}
+                        target_store_id={(*remote_upload_target).clone()}
                     />
                 },
                 WorkspacePage::Endpoints => html! {
