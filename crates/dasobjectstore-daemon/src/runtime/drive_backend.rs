@@ -7,6 +7,7 @@
 //! a stale mount directory.
 
 use super::folder_backend::{FolderBackend, FolderCapacitySnapshot, FolderInspectionReport};
+use super::folder_catalogue::{FolderCatalogueBrowserEntry, FolderCatalogueBrowserQuery};
 use dasobjectstore_core::backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
     ObjectStoreBackend,
@@ -84,6 +85,17 @@ impl DriveBackend {
     pub fn inspect_user_tree(&self) -> Result<FolderInspectionReport, BackendError> {
         self.guard()?;
         self.folder.inspect_user_tree()
+    }
+
+    /// Return the folder-compatible browser projection only while the drive
+    /// identity guard is valid. The projection does not invent placement or
+    /// lifecycle metadata for this single-device failure domain.
+    pub fn browser_entries(
+        &self,
+        query: &FolderCatalogueBrowserQuery,
+    ) -> Result<Vec<FolderCatalogueBrowserEntry>, BackendError> {
+        self.guard()?;
+        self.folder.browser_entries(query)
     }
 
     pub(crate) fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError> {
@@ -167,6 +179,7 @@ impl ObjectStoreBackend for DriveBackend {
 #[cfg(test)]
 mod tests {
     use super::{DriveBackend, DriveRuntimeGuard};
+    use crate::runtime::folder_catalogue::FolderCatalogueBrowserQuery;
     use dasobjectstore_core::backend::{BackendObjectKey, ObjectStoreBackend};
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
@@ -265,6 +278,47 @@ mod tests {
                 .count(),
             0
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn drive_browser_projection_requires_a_valid_guard() {
+        let root = unique_root();
+        let guard_state = Arc::new(FakeGuard(AtomicBool::new(true)));
+        let guard: Arc<dyn DriveRuntimeGuard> = guard_state.clone();
+        let mut backend = DriveBackend::open(
+            &root,
+            manifest(),
+            CapacityPolicy::bounded(1024, 1),
+            0,
+            guard,
+        )
+        .expect("drive backend opens");
+        let key = BackendObjectKey {
+            object_id: "nested/run.txt".to_string(),
+            version: 1,
+        };
+        backend.reserve("drive-browser", 5).expect("reserves");
+        let staged = backend
+            .stage("drive-browser", &key, &mut Cursor::new(b"hello".to_vec()))
+            .expect("stages");
+        backend.finalize(staged).expect("finalizes");
+        let entries = backend
+            .browser_entries(&FolderCatalogueBrowserQuery {
+                prefix: Some("nested/".to_string()),
+                limit: 10,
+                ..FolderCatalogueBrowserQuery::default()
+            })
+            .expect("browser projection");
+        // Finalization alone does not make an object authoritative in the
+        // profile catalogue; the shared adoption/catalogue transaction does.
+        // In particular, the projection must not fall back to payload walks.
+        assert!(entries.is_empty());
+
+        guard_state.0.store(false, Ordering::SeqCst);
+        assert!(backend
+            .browser_entries(&FolderCatalogueBrowserQuery::default())
+            .is_err());
         let _ = fs::remove_dir_all(root);
     }
 

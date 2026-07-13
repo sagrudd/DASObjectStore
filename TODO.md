@@ -448,6 +448,10 @@ completion.
   - [x] Expose drive capacity and read-only user-tree inspection through the
     guarded profile boundary; SMART/NVMe telemetry and daemon inventory remain
     hardware-dependent.
+  - [x] Expose the same bounded, profile-neutral catalogue browser projection
+    through the drive guard. It never walks private payloads, keeps the single
+    device failure-domain boundary explicit, and fails closed on guard drift;
+    catalogue transaction handoff and Web exposure remain shared-profile work.
 - [ ] Add Linux package, reboot/remount, device replacement, full-disk,
   corruption, and performance acceptance coverage.
 

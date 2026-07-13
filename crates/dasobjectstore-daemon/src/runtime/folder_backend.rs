@@ -1,6 +1,8 @@
 //! Local bounded folder backend implementation.
 
-use super::folder_catalogue::FolderCatalogue;
+use super::folder_catalogue::{
+    FolderCatalogue, FolderCatalogueBrowserEntry, FolderCatalogueBrowserQuery,
+};
 use super::reconciliation::{
     plan_reconciliation, ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
     ReconciliationObject, ReconciliationPlan,
@@ -133,6 +135,15 @@ impl FolderBackend {
 
     pub fn catalogue_records(&self) -> Vec<BackendObjectRecord> {
         self.catalogue.records()
+    }
+
+    /// Return a guarded, profile-neutral browser projection over the durable
+    /// private catalogue. This never walks payload files or user-visible data.
+    pub fn browser_entries(
+        &self,
+        query: &FolderCatalogueBrowserQuery,
+    ) -> Result<Vec<FolderCatalogueBrowserEntry>, BackendError> {
+        self.catalogue.browser_entries(query)
     }
 
     /// Inspect user-visible hierarchy without adopting or mutating it.

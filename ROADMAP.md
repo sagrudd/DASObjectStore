@@ -1036,6 +1036,10 @@ Goal: manage one dedicated SSD filesystem with the same logical contracts.
 Exit criteria: mount/device identity, non-rotational validation, reserve,
 capacity, SMART/NVMe telemetry, ingress, S3, Web operation, replacement, and
 import/export are tested; the UI states honestly that this is one failure domain.
+The guarded drive backend now exposes the same bounded, profile-neutral
+catalogue projection as the folder profile without inventing placement rows;
+mount/device, SMART/NVMe, and shared catalogue acceptance remain hardware or
+contract gated.
 
 ## Milestone 30: Profile-Aware Product and Mnemosyne Integration
 
