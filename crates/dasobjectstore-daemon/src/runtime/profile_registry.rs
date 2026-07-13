@@ -116,6 +116,7 @@ pub fn upsert_profile_binding(
     } else {
         registry.bindings.push(binding);
     }
+    validate_binding_claims(&registry.bindings)?;
     registry.bindings.sort_by(|left, right| {
         left.manifest
             .store_id
@@ -160,7 +161,113 @@ fn read_registry(path: &Path) -> Result<ProfileBindingRegistryFile, DaemonServic
             )));
         }
     }
+    validate_binding_claims(&registry.bindings)?;
     Ok(registry)
+}
+
+/// Validate the daemon-owned one-to-one claims made by local profiles.
+///
+/// Portable manifests identify a backend, while this registry binds that
+/// identity to local paths.  Claims are therefore checked here, where the
+/// daemon can prevent two stores from sharing a root, staging tree, or device
+/// identity before any capacity ledger is published.
+fn validate_binding_claims(
+    bindings: &[BackendProfileBinding],
+) -> Result<(), DaemonServiceRuntimeError> {
+    for binding in bindings {
+        if let Some(staging_root) = &binding.ssd_staging_root {
+            if paths_overlap(&binding.backend_root, staging_root) {
+                return Err(invalid_binding(format!(
+                    "store {} has an SSD staging root that overlaps its backend root",
+                    binding.manifest.store_id
+                )));
+            }
+        }
+    }
+
+    for (index, left_binding) in bindings.iter().enumerate() {
+        for right_binding in bindings.iter().skip(index + 1) {
+            if left_binding.manifest.store_id == right_binding.manifest.store_id {
+                continue;
+            }
+            let left_staging = left_binding.ssd_staging_root.as_deref();
+            let right_staging = right_binding.ssd_staging_root.as_deref();
+            if paths_overlap(&left_binding.backend_root, &right_binding.backend_root)
+                || left_staging
+                    .is_some_and(|staging| paths_overlap(staging, &right_binding.backend_root))
+                || right_staging
+                    .is_some_and(|staging| paths_overlap(&left_binding.backend_root, staging))
+                || left_staging
+                    .zip(right_staging)
+                    .is_some_and(|(left, right)| paths_overlap(left, right))
+            {
+                return Err(invalid_binding(format!(
+                    "stores {} and {} claim overlapping backend or staging roots",
+                    left_binding.manifest.store_id, right_binding.manifest.store_id
+                )));
+            }
+
+            match (
+                &left_binding.manifest.backend,
+                &right_binding.manifest.backend,
+            ) {
+                (
+                    BackendReference::Folder {
+                        root_identity: left_identity,
+                    },
+                    BackendReference::Folder {
+                        root_identity: right_identity,
+                    },
+                ) if left_identity == right_identity => {
+                    return Err(invalid_binding(format!(
+                        "stores {} and {} claim the same folder identity",
+                        left_binding.manifest.store_id, right_binding.manifest.store_id
+                    )));
+                }
+                (
+                    BackendReference::Drive {
+                        filesystem_identity: left_filesystem,
+                        device_identity: left_device,
+                        ..
+                    },
+                    BackendReference::Drive {
+                        filesystem_identity: right_filesystem,
+                        device_identity: right_device,
+                        ..
+                    },
+                ) if left_filesystem == right_filesystem
+                    || left_device.is_some() && left_device == right_device =>
+                {
+                    let identity = if left_filesystem == right_filesystem {
+                        "filesystem identity"
+                    } else {
+                        "device identity"
+                    };
+                    return Err(invalid_binding(format!(
+                        "stores {} and {} claim the same drive {identity}",
+                        left_binding.manifest.store_id, right_binding.manifest.store_id
+                    )));
+                }
+                (
+                    BackendReference::Appliance { pool_id: left_pool },
+                    BackendReference::Appliance {
+                        pool_id: right_pool,
+                    },
+                ) if left_pool == right_pool => {
+                    return Err(invalid_binding(format!(
+                        "stores {} and {} claim the same appliance pool",
+                        left_binding.manifest.store_id, right_binding.manifest.store_id
+                    )));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
 }
 
 fn write_registry(
@@ -294,6 +401,18 @@ mod tests {
         }
     }
 
+    fn drive_binding(store_id: &str, root: &Path) -> BackendProfileBinding {
+        let mut binding = folder_binding(store_id, root);
+        binding.manifest.deployment_profile = DeploymentProfile::Drive;
+        binding.manifest.backend = BackendReference::Drive {
+            filesystem_identity: format!("fsid:{store_id}"),
+            device_identity: Some(format!("device:{store_id}")),
+            media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
+            mount_path_hint: Some(root.to_path_buf()),
+        };
+        binding
+    }
+
     #[test]
     fn round_trips_binding_and_canonicalizes_roots() {
         let root = root("roundtrip");
@@ -372,6 +491,85 @@ mod tests {
         duplicate["bindings"] = serde_json::json!([first.clone(), first]);
         fs::write(&path, duplicate.to_string()).expect("duplicate registry");
         assert!(read_registry(&path).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_cross_store_overlapping_backend_and_staging_roots() {
+        let root = root("claims");
+        let path = root.join("bindings.json");
+        let first = root.join("first");
+        let first_staging = root.join("staging");
+        let nested = first_staging.join("nested");
+        fs::create_dir_all(&first).expect("first");
+        fs::create_dir_all(&first_staging).expect("staging");
+        fs::create_dir_all(&nested).expect("nested");
+
+        let mut first_binding = folder_binding("first", &first);
+        first_binding.ssd_staging_root = Some(first_staging.clone());
+        upsert_profile_binding(&path, first_binding).expect("first binding");
+
+        assert!(upsert_profile_binding(&path, folder_binding("nested", &nested)).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_duplicate_drive_identity_but_allows_distinct_mounts() {
+        let root = root("drive-claims");
+        let path = root.join("bindings.json");
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(&first).expect("first");
+        fs::create_dir_all(&second).expect("second");
+        let first_binding = drive_binding("first", &first);
+        upsert_profile_binding(&path, first_binding).expect("first binding");
+
+        let mut duplicate = drive_binding("second", &second);
+        duplicate.manifest.backend = BackendReference::Drive {
+            filesystem_identity: "fsid:first".to_string(),
+            device_identity: Some("device:second".to_string()),
+            media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
+            mount_path_hint: Some(second.clone()),
+        };
+        assert!(upsert_profile_binding(&path, duplicate).is_err());
+
+        let mut duplicate_device = drive_binding("second", &second);
+        duplicate_device.manifest.backend = BackendReference::Drive {
+            filesystem_identity: "fsid:second".to_string(),
+            device_identity: Some("device:first".to_string()),
+            media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
+            mount_path_hint: Some(second.clone()),
+        };
+        assert!(upsert_profile_binding(&path, duplicate_device).is_err());
+
+        let mut distinct = drive_binding("second", &second);
+        distinct.manifest.backend = BackendReference::Drive {
+            filesystem_identity: "fsid:second".to_string(),
+            device_identity: Some("device:second".to_string()),
+            media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
+            mount_path_hint: Some(second),
+        };
+        upsert_profile_binding(&path, distinct).expect("distinct drive binding");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn permits_idempotent_same_store_replacement() {
+        let root = root("replacement");
+        let path = root.join("bindings.json");
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(&first).expect("first");
+        fs::create_dir_all(&second).expect("second");
+        upsert_profile_binding(&path, folder_binding("store", &first)).expect("first binding");
+        upsert_profile_binding(&path, folder_binding("store", &second)).expect("replacement");
+        assert_eq!(
+            read_profile_binding(&path, "store")
+                .expect("read")
+                .expect("binding")
+                .backend_root,
+            fs::canonicalize(second).expect("canonical")
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

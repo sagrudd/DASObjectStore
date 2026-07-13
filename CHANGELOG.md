@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.2 - 2026-07-13
+
+- Reject profile bindings that overlap another store's backend or staging root,
+  and reject duplicate folder, drive, or appliance identities in the daemon
+  registry while permitting an idempotent same-store replacement.
+
 ## 0.76.1 - 2026-07-13
 
 - Fail closed when a non-dry-run profile binding has no daemon capacity

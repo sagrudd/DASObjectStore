@@ -489,6 +489,10 @@ completion.
   - [x] Enforce a finite logical capacity limit when opening a folder backend;
     idempotent directory/namespace creation is covered locally, while package
     hooks and explicit adopt/reconcile semantics remain open.
+  - [x] Make daemon profile binding claims one-to-one: backend and SSD staging
+    roots may not overlap across stores, folder identities may not be reused,
+    and same-store replacement remains idempotent; package hooks and explicit
+    adopt/reconcile semantics remain open.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.
@@ -590,6 +594,10 @@ completion.
   - [x] Reject missing drive device identity and `/` system-root mount hints in
     the portable manifest validator; live mount/claim probing and override
     authorization remain open.
+  - [x] Reject duplicate filesystem/device identities and overlapping local
+    roots in the daemon profile registry without disclosing host paths in drive
+    identity errors; live mount probing and an explicit administrator override
+    remain open.
 - [ ] Implement reserve, pressure, capacity, SMART/NVMe health, endurance,
   mount-loss, replacement, import/export, and read-only degraded behavior.
 - [ ] Reuse folder hierarchy/manifest/S3 semantics while making the single-
