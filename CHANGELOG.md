@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.25 - 2026-07-13
+
+- Make provider-neutral profile catalogue listings deterministic by sorting
+  logical object IDs and versions before projection.
+
 ## 0.76.24 - 2026-07-13
 
 - Reject duplicate managed-HDD telemetry marker identities before producing

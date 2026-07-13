@@ -66,7 +66,13 @@ pub fn list_profile_objects(
     prefix: Option<&str>,
 ) -> Result<Vec<ProfileS3Object>, BackendError> {
     let prefix = prefix.unwrap_or_default();
-    backend.records().map(|records| {
+    backend.records().map(|mut records| {
+        records.sort_by(|left, right| {
+            left.key
+                .object_id
+                .cmp(&right.key.object_id)
+                .then(left.key.version.cmp(&right.key.version))
+        });
         records
             .into_iter()
             .filter(|record| record.key.object_id.starts_with(prefix))
@@ -595,9 +601,23 @@ mod tests {
             .commit_batch(std::slice::from_ref(&finalized))
             .expect("catalogue commit");
 
+        let second_key = BackendObjectKey {
+            object_id: "reads/aaa.fastq".to_string(),
+            version: 1,
+        };
+        backend.reserve("profile-s3-upload-2", 3).expect("reserve");
+        let staged = backend
+            .stage("profile-s3-upload-2", &second_key, &mut &b"aaa"[..])
+            .expect("stage");
+        let finalized = backend.finalize(staged).expect("finalize");
+        backend
+            .commit_batch(std::slice::from_ref(&finalized))
+            .expect("catalogue commit");
+
         let listed = list_profile_objects(&backend, Some("reads/")).expect("list");
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].key, key);
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].key, second_key);
+        assert_eq!(listed[1].key, key);
         let headed = head_profile_object(&backend, &key).expect("head");
         assert_eq!(headed.size_bytes, 5);
         assert!(headed.checksum.starts_with("sha256:"));
