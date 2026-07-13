@@ -72,6 +72,11 @@ The same projection is available to authenticated Web clients at
 ``/api/v1/profile-readiness/stores/{store_id}``; it uses the daemon bridge and
 does not expose managed paths or credentials.
 
+Products can discover the versioned profile catalogue through the authenticated
+Web route ``/api/v1/profile-capabilities``. This is static capability
+discovery only; use profile readiness and daemon provisioning workflows for
+runtime decisions.
+
 For a catalogue-authoritative content check, ask the daemon to verify the
 recorded size and checksum against the profile payload. The CLI and
 authenticated Web projection return only logical identity and verification

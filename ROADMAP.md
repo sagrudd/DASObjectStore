@@ -1243,6 +1243,9 @@ routing remains separate.
 The same path-free profile-readiness projection is now available through the
 authenticated Web route ``/api/v1/profile-readiness/stores/{store_id}``, using
 the bounded daemon bridge and preserving explicit not-ready reasons.
+Static profile-capability discovery is also available through authenticated
+Web at ``/api/v1/profile-capabilities``; the response remains a versioned
+catalogue and never implies provisioning or live hardware health.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.

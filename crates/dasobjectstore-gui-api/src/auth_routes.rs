@@ -71,6 +71,8 @@ use dasobjectstore_daemon::{
     DaemonLocalAdminCommand, DaemonRuntimeConfig,
     IngestControlRequest as DaemonIngestControlRequest,
     IngestControlResponse as DaemonIngestControlResponse,
+    ObjectStoreCapabilityDiscoveryRequest as DaemonProfileCapabilitiesRequest,
+    ObjectStoreCapabilityDiscoveryResponse as DaemonProfileCapabilitiesResponse,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
@@ -405,6 +407,23 @@ async fn standalone_profile_readiness(
         .await
         .map(Json)
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_readiness_failed"))
+}
+
+async fn standalone_profile_capabilities(
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonProfileCapabilitiesResponse>, (StatusCode, Json<AuthRouteError>)> {
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .profile_capabilities(DaemonProfileCapabilitiesRequest::default())
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_capabilities_failed"))
 }
 
 async fn standalone_profile_s3_diagnostics(
@@ -1684,6 +1703,30 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/profile-readiness/stores/generated-data")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_capabilities_requires_a_local_session() {
+        let root = temp_root("standalone-profile-capabilities-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profile-capabilities")
                     .body(Body::empty())
                     .expect("request builds"),
             )

@@ -102,6 +102,10 @@ pub(crate) fn standalone_dashboard_router_with_state(
             get(standalone_profile_readiness),
         )
         .route(
+            "/api/v1/profile-capabilities",
+            get(standalone_profile_capabilities),
+        )
+        .route(
             "/api/v1/dashboard/enclosures",
             get(standalone_enclosures_dashboard),
         )

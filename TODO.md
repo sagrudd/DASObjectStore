@@ -842,6 +842,10 @@ completion.
   - [x] Expose the same readiness projection through the authenticated Web
     route ``/api/v1/profile-readiness/stores/{store_id}``; the route remains
     read-only and daemon-backed.
+  - [x] Expose the static profile-capability catalogue through the
+    authenticated Web route ``/api/v1/profile-capabilities``; it remains
+    versioned discovery only and does not imply runtime readiness or
+    provisioning.
 - [ ] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.
