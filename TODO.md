@@ -521,7 +521,8 @@ completion.
   - [x] Commit migration destination records through the same authority before
     marking the destination verified; folder reopen tests prove catalogue and
     logical usage (`used_bytes`) survive restart, while provider/appliance
-    adapters remain.
+    adapters remain. Guarded drive migration/reopen tests now prove the same
+    authority handoff for the dedicated SSD profile.
 - [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
   - [x] The core migration state machine and atomic checkpoints retain source

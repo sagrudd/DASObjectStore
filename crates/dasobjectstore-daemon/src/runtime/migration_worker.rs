@@ -414,6 +414,29 @@ mod tests {
         .expect("folder object copies to drive");
         assert_eq!(migration.state, MigrationState::RetirementPending);
         assert_eq!(destination.capacity().used_bytes, 11);
+        assert_eq!(
+            destination
+                .catalogue_records()
+                .expect("drive catalogue")
+                .len(),
+            1
+        );
+        let reopened = DriveBackend::open(
+            &destination_root,
+            drive_manifest("drive-store"),
+            CapacityPolicy::bounded(1_000, 0),
+            0,
+            Arc::new(TestDriveGuard(AtomicBool::new(true))),
+        )
+        .expect("drive reopens from authoritative catalogue");
+        assert_eq!(reopened.capacity().used_bytes, 11);
+        assert_eq!(
+            reopened
+                .catalogue_records()
+                .expect("reopened drive catalogue")
+                .len(),
+            1
+        );
         let _ = fs::remove_dir_all(source_root);
         let _ = fs::remove_dir_all(destination_root);
     }

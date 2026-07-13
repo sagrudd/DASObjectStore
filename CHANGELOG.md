@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.110 - 2026-07-13
+
+- Add guarded drive migration/reopen coverage for authoritative catalogue
+  records and logical usage restoration.
+
 ## 0.72.109 - 2026-07-13
 
 - Strengthen migration reopen coverage to assert authoritative logical usage is
