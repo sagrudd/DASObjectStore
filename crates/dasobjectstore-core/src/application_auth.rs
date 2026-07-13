@@ -188,6 +188,79 @@ pub struct AccessTokenClaims {
     pub scope: ApplicationScope,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccessTokenExchangeRequest {
+    pub schema_version: String,
+    pub application_id: String,
+    pub key_id: String,
+    pub audience: String,
+    pub requested_issued_at_unix_seconds: u64,
+    pub requested_expires_at_unix_seconds: u64,
+    pub scope: ApplicationScope,
+    /// Opaque proof bytes supplied by the authenticated key/certificate
+    /// exchange. The core contract validates shape only; cryptographic
+    /// verification belongs to the daemon authority.
+    pub proof: String,
+}
+
+impl AccessTokenExchangeRequest {
+    pub fn validate_against(
+        &self,
+        identity: &ApplicationIdentity,
+        key: &ApplicationKeyDescriptor,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        validate_schema(&self.schema_version)?;
+        validate_slug("application_id", &self.application_id)?;
+        validate_slug("key_id", &self.key_id)?;
+        validate_text("audience", &self.audience)?;
+        validate_opaque_proof(&self.proof)?;
+        validate_lifetime(
+            self.requested_issued_at_unix_seconds,
+            self.requested_expires_at_unix_seconds,
+        )?;
+        identity.validate()?;
+        key.validate()?;
+        if !identity.active {
+            return Err(ApplicationAuthValidationError::InactiveIdentity);
+        }
+        if !key.active {
+            return Err(ApplicationAuthValidationError::InactiveKey);
+        }
+        if self.application_id != identity.application_id
+            || key.application_id != identity.application_id
+        {
+            return Err(ApplicationAuthValidationError::IdentityMismatch);
+        }
+        if self.key_id != key.key_id {
+            return Err(ApplicationAuthValidationError::KeyMismatch);
+        }
+        if self.requested_issued_at_unix_seconds < identity.issued_at_unix_seconds
+            || self.requested_expires_at_unix_seconds > identity.expires_at_unix_seconds
+            || self.requested_issued_at_unix_seconds < key.issued_at_unix_seconds
+            || self.requested_expires_at_unix_seconds > key.expires_at_unix_seconds
+        {
+            return Err(ApplicationAuthValidationError::LifetimeOutsideIdentity);
+        }
+        let max_ttl = if identity.environment == ApplicationEnvironment::Development {
+            MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS
+        } else {
+            MAX_ACCESS_TOKEN_TTL_SECONDS
+        };
+        if self.requested_expires_at_unix_seconds - self.requested_issued_at_unix_seconds > max_ttl
+        {
+            return Err(ApplicationAuthValidationError::TokenTtlTooLong {
+                max_seconds: max_ttl,
+            });
+        }
+        self.scope.validate()?;
+        if !identity.scope.contains(&self.scope) {
+            return Err(ApplicationAuthValidationError::ScopeNotContained);
+        }
+        Ok(())
+    }
+}
+
 impl AccessTokenClaims {
     pub fn validate_against(
         &self,
@@ -316,6 +389,8 @@ pub enum ApplicationAuthValidationError {
     LifetimeOutsideIdentity,
     TokenTtlTooLong { max_seconds: u64 },
     InactiveIdentity,
+    InactiveKey,
+    KeyMismatch,
     IdentityMismatch,
     ScopeNotContained,
     Invalid(String),
@@ -337,6 +412,8 @@ impl Display for ApplicationAuthValidationError {
                 write!(formatter, "token TTL exceeds {max_seconds} seconds")
             }
             Self::InactiveIdentity => formatter.write_str("application identity is inactive"),
+            Self::InactiveKey => formatter.write_str("application key is inactive"),
+            Self::KeyMismatch => formatter.write_str("application token key mismatch"),
             Self::IdentityMismatch => formatter.write_str("token application identity mismatch"),
             Self::ScopeNotContained => {
                 formatter.write_str("token scope exceeds its application identity")
@@ -362,6 +439,18 @@ fn validate_text(field: &'static str, value: &str) -> Result<(), ApplicationAuth
     }
     if value.chars().any(|character| character.is_control()) || value.len() > 256 {
         return Err(ApplicationAuthValidationError::UnsafeField(field));
+    }
+    Ok(())
+}
+
+fn validate_opaque_proof(value: &str) -> Result<(), ApplicationAuthValidationError> {
+    if value.trim().is_empty()
+        || value.len() > 16_384
+        || value.chars().any(|character| character.is_control())
+    {
+        return Err(ApplicationAuthValidationError::Invalid(
+            "exchange proof must be present and bounded".to_string(),
+        ));
     }
     Ok(())
 }
@@ -546,6 +635,45 @@ mod tests {
                 max_seconds: MAX_ACCESS_TOKEN_TTL_SECONDS
             })
         );
+    }
+
+    #[test]
+    fn exchange_request_requires_active_key_and_short_scoped_proof() {
+        let identity = identity();
+        let key = ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: "key-1".to_string(),
+            algorithm: ApplicationKeyAlgorithm::EcdsaP256Sha256,
+            public_key_fingerprint: format!("sha256:{}", "b".repeat(64)),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        };
+        let request = AccessTokenExchangeRequest {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: key.key_id.clone(),
+            audience: "dasobjectstore".to_string(),
+            requested_issued_at_unix_seconds: 2_000,
+            requested_expires_at_unix_seconds: 2_600,
+            scope: identity.scope.clone(),
+            proof: "base64-signature".to_string(),
+        };
+        request.validate_against(&identity, &key).expect("exchange");
+        let mut inactive = key.clone();
+        inactive.active = false;
+        assert_eq!(
+            request.validate_against(&identity, &inactive),
+            Err(ApplicationAuthValidationError::InactiveKey)
+        );
+        let mut blank_proof = request.clone();
+        blank_proof.proof.clear();
+        assert!(matches!(
+            blank_proof.validate_against(&identity, &key),
+            Err(ApplicationAuthValidationError::Invalid(message))
+                if message.contains("exchange proof")
+        ));
     }
 
     #[test]

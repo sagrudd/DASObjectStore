@@ -103,8 +103,10 @@ for workspace and generated-data tests. It is explicit, short-lived,
 loopback/local-Docker only, and constrained to synthetic validation stores. It
 is a test-build facility, not an application authority, and is forbidden from
 RPM/DEB contents including keys, issuers, configuration, and enablement
-switches. Package inspection tests are part of this roadmap slice; daemon
-listener wiring and token-proof verification remain open.
+switches. Package inspection tests are part of this roadmap slice. The core
+exchange-request contract validates active key membership, bounded proof shape,
+scope, and lifetime; daemon listener wiring, cryptographic proof verification,
+and token issuance remain open.
 
 ### Current delivered baseline
 

@@ -25,11 +25,12 @@ pub mod subobject_capacity;
 pub mod utc;
 
 pub use application_auth::{
-    AccessTokenClaims, ApplicationAuthValidationError, ApplicationCredentialKind,
-    ApplicationEnvironment, ApplicationIdentity, ApplicationKeyAlgorithm, ApplicationKeyDescriptor,
-    ApplicationOperation, ApplicationScope, RenewalTokenClaims, UploadCompletionCapability,
-    APPLICATION_AUTH_SCHEMA_VERSION, MAX_ACCESS_TOKEN_TTL_SECONDS,
-    MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS, MAX_UPLOAD_COMPLETION_TTL_SECONDS,
+    AccessTokenClaims, AccessTokenExchangeRequest, ApplicationAuthValidationError,
+    ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
+    ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
+    RenewalTokenClaims, UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION,
+    MAX_ACCESS_TOKEN_TTL_SECONDS, MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS,
+    MAX_UPLOAD_COMPLETION_TTL_SECONDS,
 };
 pub use backend::{
     catalogue_logical_used_bytes, BackendCapabilities, BackendError, BackendHealth,
