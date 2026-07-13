@@ -2176,22 +2176,22 @@ non-destructive close, and restores focus to its trigger when closed.
 
 ### 24.3 Endpoints: inventory first, add/edit only in a contextual pane
 
-- [ ] Refactor `crates/dasobjectstore-gui-web/src/endpoints.rs` so the endpoint
+- [x] Refactor `crates/dasobjectstore-gui-web/src/endpoints.rs` so the endpoint
   inventory is the primary table/list. Add a page-level `Add endpoint` action
   and a row-level `Edit` action. Remove the always-visible
   `render_endpoint_upsert_card` form from loading, empty, and populated
   inventory states.
-- [ ] Implement add/edit as a `TaskPane` with explicit sections in this order:
+- [x] Implement add/edit as a `TaskPane` with explicit sections in this order:
   endpoint identity and display name; endpoint kind and service URL;
   validation state/evidence; optional ObjectStore/governance binding; then
   review and submit. Pre-fill edit fields from the selected endpoint. Keep
   binding fields hidden until binding is intentionally enabled.
-- [ ] Preserve the current authenticated daemon/API upsert contract, dry-run
+- [x] Preserve the current authenticated daemon/API upsert contract, dry-run
   behaviour, and high-impact live confirmation. The inventory view must not
   expose the confirmation phrase. Show it only in the live-update review step,
   with the endpoint ID, URL, binding, and impact summary visible immediately
   above it.
-- [ ] On success, close the pane or show a success state and refresh/update the
+- [x] On success, close the pane or show a success state and refresh/update the
   corresponding row. On failure, keep the pane open with editable values and
   an inline error. Loading, empty, permission-denied, and transport-error
   states must still have a clear inventory heading and the appropriate action

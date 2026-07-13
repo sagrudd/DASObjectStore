@@ -9,6 +9,7 @@ fn workspace_component_source() -> String {
         include_str!("object_store_configure.rs"),
         include_str!("subobjects.rs"),
         include_str!("users_groups.rs"),
+        include_str!("../endpoints.rs"),
         include_str!("activity.rs"),
         include_str!("bioinformatics.rs"),
     ]
@@ -22,6 +23,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/object-browser.css"),
         include_str!("../../styles/activity.css"),
         include_str!("../../styles/local-access.css"),
+        include_str!("../../styles/endpoints.css"),
         include_str!("../../styles.css"),
     ]
     .concat()
@@ -2532,6 +2534,38 @@ fn local_access_component_contract_is_users_first_and_task_pane_scoped() {
         assert!(
             css.contains(selector),
             "missing Local Access style: {selector}"
+        );
+    }
+}
+
+#[test]
+fn endpoints_component_contract_is_inventory_first_and_task_pane_scoped() {
+    let source = workspace_component_source();
+    for marker in [
+        "data-section=\"endpoints-toolbar\"",
+        "data-section=\"endpoint-inventory\"",
+        "data-section=\"endpoint-identity\"",
+        "data-section=\"endpoint-binding\"",
+        "data-section=\"endpoint-review\"",
+        "Add endpoint",
+        "Edit",
+        "endpoint_form_state_from_item",
+        "refresh_endpoints_workspace",
+        "return_focus_to",
+    ] {
+        assert!(
+            source.contains(marker),
+            "missing Endpoints marker: {marker}"
+        );
+    }
+    assert!(source.contains("TaskPaneMode::Create"));
+    assert!(source.contains("TaskPaneMode::Edit"));
+    assert!(!source.contains("render_endpoint_upsert_card(form_state, api_base_path)"));
+    let css = web_styles_source();
+    for selector in [".dos-endpoints-toolbar", ".dos-endpoints-table"] {
+        assert!(
+            css.contains(selector),
+            "missing Endpoints style: {selector}"
         );
     }
 }

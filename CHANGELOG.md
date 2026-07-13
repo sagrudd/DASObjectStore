@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.63 - 2026-07-13
+
+- Refactor Endpoints into an inventory-first table with contextual add/edit
+  task panes and live-update review gating.
+
 ## 0.72.62 - 2026-07-13
 
 - Make Local Access users-first with per-user qualification/group authority,

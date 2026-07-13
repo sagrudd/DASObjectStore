@@ -1,0 +1,26 @@
+/* Endpoints owns inventory/table and contextual pane layout. */
+.dos-endpoints-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.dos-endpoints-table th,
+.dos-endpoints-table td {
+  vertical-align: top;
+}
+
+.dos-endpoints-table td small {
+  display: block;
+  margin-top: 3px;
+  color: #69777f;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 640px) {
+  .dos-endpoints-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

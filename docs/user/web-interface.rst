@@ -752,11 +752,14 @@ Endpoint validation states are ``draft``, ``pending_validation``,
 unknown, draft, and pending states generate visible warnings.
 
 Standalone administrator sessions can submit endpoint inventory creation or
-updates from the ``Endpoints`` page. The form records endpoint identity, kind,
-object-service URL, validation state, optional validation timestamp/message,
-manager product ID, and optional active ObjectStore/governance-domain binding
-controls. It shows the daemon acceptance result inline and reports
-permission-denied responses without editing browser-side state.
+updates from the ``Endpoints`` page. The inventory table is the primary
+surface: ``Add endpoint`` opens a contextual task pane and each row exposes an
+``Edit`` action that pre-fills the pane from the selected endpoint. The pane
+separates endpoint identity/service details, validation evidence, optional
+ObjectStore/governance binding, and a final review. The confirmation phrase is
+only shown for a live update in that review; it is never present in the
+inventory table. Successful daemon acceptance closes the pane and refreshes the
+inventory, while errors keep the pane open with editable values and context.
 
 The form submits to ``POST /api/v1/workspaces/endpoints/upsert``. The route
 requires the same standalone session headers as other Web administrator routes

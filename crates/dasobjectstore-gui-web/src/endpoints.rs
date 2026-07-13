@@ -148,6 +148,8 @@ use crate::api::{
     EndpointValidationUpsertRequest, EndpointsWorkspaceResponse,
 };
 #[cfg(target_arch = "wasm32")]
+use crate::components::{TaskPane, TaskPaneMode};
+#[cfg(target_arch = "wasm32")]
 use crate::workspace::ApiLoadState;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{HtmlInputElement, HtmlSelectElement};
@@ -223,6 +225,8 @@ pub fn endpoints_workspace(props: &EndpointsWorkspaceProps) -> Html {
     let api_path = endpoints_workspace_api_path(&props.api_base_path);
     let endpoints_state = use_state(|| ApiLoadState::<EndpointsWorkspaceResponse>::Loading);
     let form_state = use_state(EndpointUpsertFormState::default);
+    let pane_mode = use_state(|| TaskPaneMode::Closed);
+    let add_endpoint_trigger_ref = use_node_ref();
 
     {
         let api_path = api_path.clone();
@@ -250,7 +254,7 @@ pub fn endpoints_workspace(props: &EndpointsWorkspaceProps) -> Html {
                 <h1>{ "Endpoints" }</h1>
                 <span>{ "DAS, NAS/NFS, S3-compatible, and Mnemosyne-governed storage endpoints." }</span>
             </header>
-            { render_endpoints_state(&*endpoints_state, form_state, props.api_base_path.clone()) }
+            { render_endpoints_state(&*endpoints_state, endpoints_state.clone(), form_state, pane_mode, add_endpoint_trigger_ref, props.api_base_path.clone()) }
         </section>
     }
 }
@@ -258,13 +262,16 @@ pub fn endpoints_workspace(props: &EndpointsWorkspaceProps) -> Html {
 #[cfg(target_arch = "wasm32")]
 fn render_endpoints_state(
     state: &ApiLoadState<EndpointsWorkspaceResponse>,
+    endpoints_state: UseStateHandle<ApiLoadState<EndpointsWorkspaceResponse>>,
     form_state: UseStateHandle<EndpointUpsertFormState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    add_endpoint_trigger_ref: NodeRef,
     api_base_path: String,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
             <div class="dos-store-grid">
-                { render_endpoint_upsert_card(form_state, api_base_path) }
+                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref) }
                 { render_endpoint_state_message(
                     "Loading",
                     "Loading endpoint inventory",
@@ -273,11 +280,18 @@ fn render_endpoints_state(
             </div>
         },
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_endpoint_inventory(view, form_state, api_base_path)
+            render_endpoint_inventory(
+                view,
+                endpoints_state,
+                form_state,
+                pane_mode,
+                add_endpoint_trigger_ref,
+                api_base_path,
+            )
         }
         ApiLoadState::Empty(message) => html! {
             <div class="dos-store-grid">
-                { render_endpoint_upsert_card(form_state, api_base_path) }
+                { render_endpoint_toolbar(pane_mode, form_state, add_endpoint_trigger_ref) }
                 { render_endpoint_state_message("Inventory", "No endpoints reported yet", message) }
             </div>
         },
@@ -295,7 +309,10 @@ fn render_endpoints_state(
 #[cfg(target_arch = "wasm32")]
 fn render_endpoint_inventory(
     view: &EndpointsWorkspaceResponse,
+    endpoints_state: UseStateHandle<ApiLoadState<EndpointsWorkspaceResponse>>,
     form_state: UseStateHandle<EndpointUpsertFormState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    add_endpoint_trigger_ref: NodeRef,
     api_base_path: String,
 ) -> Html {
     html! {
@@ -303,9 +320,25 @@ fn render_endpoint_inventory(
             <div class="dos-metric-grid">
                 { for endpoint_inventory_summary_cards(view).into_iter().map(render_endpoint_metric_card) }
             </div>
-            <div class="dos-store-grid">
-                { render_endpoint_upsert_card(form_state, api_base_path) }
-                { for endpoint_card_summaries(view).into_iter().map(render_endpoint_card) }
+            { render_endpoint_toolbar(pane_mode.clone(), form_state.clone(), add_endpoint_trigger_ref.clone()) }
+            <div class="dos-card dos-wide-card dos-endpoint-inventory" data-section="endpoint-inventory">
+                <div class="dos-table-wrap">
+                    <table class="dos-table dos-dense-table dos-endpoints-table">
+                        <thead><tr><th>{ "Endpoint" }</th><th>{ "Kind / service" }</th><th>{ "Validation" }</th><th>{ "Bindings" }</th><th>{ "Action" }</th></tr></thead>
+                        <tbody>{ for view.inventory.endpoints.iter().map(|item| {
+                            let endpoint = item.clone();
+                            let endpoint_for_form = endpoint.clone();
+                            let endpoint_id = endpoint.endpoint_id.clone();
+                            let form_state = form_state.clone();
+                            let pane_mode = pane_mode.clone();
+                            let edit = Callback::from(move |_| {
+                                form_state.set(endpoint_form_state_from_item(&endpoint_for_form));
+                                pane_mode.set(TaskPaneMode::Edit(endpoint_id.clone()));
+                            });
+                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.endpoint_id.clone() }</small></td><td>{ format!("{} · {}", endpoint.kind, endpoint.object_service_url) }</td><td>{ endpoint.validation.state.clone() }<small>{ endpoint.validation.message.clone().unwrap_or_else(|| "no validation message".to_string()) }</small></td><td>{ endpoint.active_bindings.len() }</td><td><button type="button" class="dos-secondary-action" onclick={edit}>{ "Edit" }</button></td></tr> }
+                        }) }</tbody>
+                    </table>
+                </div>
                 if view.inventory.endpoints.is_empty() {
                     { render_endpoint_state_message(
                         "Inventory",
@@ -323,7 +356,102 @@ fn render_endpoint_inventory(
                     </section>
                 }
             </div>
+            { render_endpoint_task_pane(view, endpoints_state, form_state, pane_mode, add_endpoint_trigger_ref, api_base_path) }
         </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_endpoint_toolbar(
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    form_state: UseStateHandle<EndpointUpsertFormState>,
+    add_endpoint_trigger_ref: NodeRef,
+) -> Html {
+    let open_add = Callback::from(move |_| {
+        form_state.set(EndpointUpsertFormState::default());
+        pane_mode.set(TaskPaneMode::Create);
+    });
+    html! {
+        <section class="dos-card dos-wide-card dos-endpoints-toolbar" data-section="endpoints-toolbar">
+            <div><span class="dos-card-label">{ "Endpoint inventory" }</span><h2>{ "Storage endpoints" }</h2><p>{ "Inspect registered endpoints; add and edit operations open in a contextual task pane." }</p></div>
+            <button type="button" class="dos-auth-submit" ref={add_endpoint_trigger_ref} onclick={open_add}>{ "Add endpoint" }</button>
+        </section>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn endpoint_form_state_from_item(
+    item: &crate::api::EndpointInventoryItemResponse,
+) -> EndpointUpsertFormState {
+    let binding = item.active_bindings.first();
+    EndpointUpsertFormState {
+        endpoint_id: item.endpoint_id.clone(),
+        display_name: item.display_name.clone(),
+        kind: item.kind.clone(),
+        object_service_url: item.object_service_url.clone(),
+        validation_state: item.validation.state.clone(),
+        checked_at_utc: item.validation.checked_at_utc.clone().unwrap_or_default(),
+        validation_message: item.validation.message.clone().unwrap_or_default(),
+        manager_product_id: item.manager_product_id.clone(),
+        binding_enabled: binding.is_some(),
+        binding_id: binding
+            .map(|binding| binding.binding_id.clone())
+            .unwrap_or_default(),
+        governance_domain: binding
+            .map(|binding| binding.governance_domain.clone())
+            .unwrap_or_else(|| "local".to_string()),
+        store_id: binding
+            .map(|binding| binding.store_id.clone())
+            .unwrap_or_default(),
+        binding_readiness: binding
+            .map(|binding| binding.readiness.clone())
+            .unwrap_or_else(|| "ready".to_string()),
+        dry_run: true,
+        confirmation_phrase: String::new(),
+        submitting: false,
+        submitted: None,
+        error: None,
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn refresh_endpoints_workspace(
+    api_base_path: String,
+    endpoints_state: UseStateHandle<ApiLoadState<EndpointsWorkspaceResponse>>,
+) {
+    let path = endpoints_workspace_api_path(&api_base_path);
+    wasm_bindgen_futures::spawn_local(async move {
+        endpoints_state.set(match crate::api::get_endpoints_workspace(&path).await {
+            Ok(view) => ApiLoadState::success(view),
+            Err(error) if error.is_permission_denied() => {
+                ApiLoadState::permission_denied(error.message)
+            }
+            Err(error) => ApiLoadState::transport_error(error.message),
+        });
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_endpoint_task_pane(
+    _view: &EndpointsWorkspaceResponse,
+    endpoints_state: UseStateHandle<ApiLoadState<EndpointsWorkspaceResponse>>,
+    form_state: UseStateHandle<EndpointUpsertFormState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    add_endpoint_trigger_ref: NodeRef,
+    api_base_path: String,
+) -> Html {
+    let mode = (*pane_mode).clone();
+    if matches!(mode, TaskPaneMode::Closed) {
+        return Html::default();
+    }
+    let on_close = {
+        let pane_mode = pane_mode.clone();
+        Callback::<()>::from(move |_| pane_mode.set(TaskPaneMode::Closed))
+    };
+    html! {
+        <TaskPane mode={mode} title={if matches!(*pane_mode, TaskPaneMode::Create) { "Add endpoint".to_string() } else { "Edit endpoint".to_string() }} selected_context={Some(form_state.endpoint_id.clone())} return_focus_to={Some(add_endpoint_trigger_ref)} on_close={on_close}>
+            { render_endpoint_upsert_card(form_state, api_base_path, endpoints_state, pane_mode) }
+        </TaskPane>
     }
 }
 
@@ -342,25 +470,11 @@ fn render_endpoint_metric_card(metric: (String, String, String)) -> Html {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_endpoint_card(endpoint: EndpointCardSummary) -> Html {
-    html! {
-        <section class="dos-card dos-store-card" data-endpoint-id={endpoint.id.clone()}>
-            <div class="dos-card-row">
-                <span class="dos-card-label">{ endpoint.kind.clone() }</span>
-                <span class="dos-status-pill">{ endpoint.validation.clone() }</span>
-            </div>
-            <strong>{ endpoint.name }</strong>
-            <p>{ endpoint.object_service_url }</p>
-            <p>{ format!("{} · {} · checked {}", endpoint.manager_product_id, endpoint.bindings, endpoint.checked_at) }</p>
-            <p>{ format!("{} warning(s) · {}", endpoint.warning_count, endpoint.id) }</p>
-        </section>
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 fn render_endpoint_upsert_card(
     form_state: UseStateHandle<EndpointUpsertFormState>,
     api_base_path: String,
+    endpoints_state: UseStateHandle<ApiLoadState<EndpointsWorkspaceResponse>>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
 ) -> Html {
     let state = (*form_state).clone();
     let fields_ready = endpoint_upsert_fields_ready(
@@ -380,6 +494,8 @@ fn render_endpoint_upsert_card(
     let submit = {
         let form_state = form_state.clone();
         let api_base_path = api_base_path.clone();
+        let endpoints_state = endpoints_state.clone();
+        let pane_mode = pane_mode.clone();
         Callback::from(move |_| {
             let mut pending = (*form_state).clone();
             pending.submitting = true;
@@ -389,6 +505,8 @@ fn render_endpoint_upsert_card(
 
             let form_state = form_state.clone();
             let api_base_path = api_base_path.clone();
+            let endpoints_state = endpoints_state.clone();
+            let pane_mode = pane_mode.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let request = endpoint_upsert_request_from_state(&pending);
                 let result =
@@ -399,6 +517,10 @@ fn render_endpoint_upsert_card(
                     Ok(response) => {
                         next.submitted = Some(response);
                         next.error = None;
+                        form_state.set(next);
+                        pane_mode.set(TaskPaneMode::Closed);
+                        refresh_endpoints_workspace(api_base_path, endpoints_state);
+                        return;
                     }
                     Err(error) => {
                         next.submitted = None;
@@ -417,6 +539,8 @@ fn render_endpoint_upsert_card(
             <p>{ "Record a validated storage endpoint through dasobjectstored. The daemon persists the registry and Activity receives an endpoint-validation job." }</p>
             <span class="dos-status-pill">{ if state.dry_run { "Dry run" } else { "Live update" } }</span>
             <div class="dos-objectstore-form">
+                <section class="dos-task-pane__section" data-section="endpoint-identity">
+                <span class="dos-card-label">{ "Endpoint identity and service" }</span>
                 <div class="dos-form-grid">
                     { endpoint_text_field("Endpoint ID", state.endpoint_id.clone(), {
                         let form_state = form_state.clone();
@@ -500,7 +624,8 @@ fn render_endpoint_upsert_card(
                         })
                     }) }
                 </div>
-                <section class="dos-risk-review">
+                </section>
+                <section class="dos-risk-review dos-task-pane__section" data-section="endpoint-binding">
                     <span class="dos-card-label">{ "Active binding" }</span>
                     <label>
                         <input
@@ -563,7 +688,7 @@ fn render_endpoint_upsert_card(
                         </div>
                     }
                 </section>
-                <section class="dos-plan-result">
+                <section class="dos-plan-result dos-task-pane__section" data-section="endpoint-review">
                     <span class="dos-card-label">{ "Submission review" }</span>
                     <p>{ endpoint_upsert_review_from_values(
                         &state.endpoint_id,
@@ -592,6 +717,7 @@ fn render_endpoint_upsert_card(
                             <span>{ "Dry run only" }</span>
                         </label>
                     </div>
+                    if !state.dry_run {
                     <label class="dos-form-field">
                         <span>{ "Confirmation phrase" }</span>
                         <input
@@ -607,6 +733,7 @@ fn render_endpoint_upsert_card(
                             }}
                         />
                     </label>
+                    }
                     if let Some(error) = &state.error {
                         <div class="dos-auth-error" role="alert">{ error.clone() }</div>
                     }
