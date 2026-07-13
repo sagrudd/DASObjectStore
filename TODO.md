@@ -2136,37 +2136,43 @@ non-destructive close, and restores focus to its trigger when closed.
 
 ### 24.2 Local Access: users first, qualification and groups in one task flow
 
-- [ ] Refactor `crates/dasobjectstore-gui-web/src/workspace/users_groups.rs` so
+- [x] Refactor `crates/dasobjectstore-gui-web/src/workspace/users_groups.rs` so
   the primary content is a comparable **Users** table/structured list, not the
   permanent `create_local_group` and `assign_local_user_to_group` dashed form
   cards. Each row must show: local user, registration/qualification state,
   current access or tenant groups, administrator state where applicable, and a
   scoped action. Keep group policy in a secondary Groups section/tab rather
-  than presenting it as a competing dashboard card.
-- [ ] Add one primary `Add user` action in the Local Access page header or
+  than presenting it as a competing dashboard card. The Users table is now
+  primary and the former permanent mutation cards are gone.
+- [x] Add one primary `Add user` action in the Local Access page header or
   users-table toolbar. It opens a `TaskPane` above the existing table and has
   this sequence: (1) select/identify an existing local user, (2) record or
   select the access qualification the appliance policy requires, (3) select
   one or more access/tenant groups, and (4) review and apply. The pane title,
-  labels, and review must identify the user being changed.
-- [ ] Do **not** create Unix/OS users from the browser. `Add user` means adding
+  labels, and review must identify the user being changed. The pane supports
+  one or more selected groups and reports contextual partial failures.
+- [x] Do **not** create Unix/OS users from the browser. `Add user` means adding
   or qualifying an already OS-recognised/local-account user for
   DASObjectStore access. Preserve daemon-side authorization and the existing
   local-group action routes. If the current workspace DTO cannot show each
   user’s memberships/qualification, extend the daemon/API contract and
   `UsersGroupsWorkspaceResponse` with an authoritative per-user mapping; do
-  not infer all users’ memberships from `current_user`.
-- [ ] Move group creation behind a secondary action inside the Add-user flow or
+  not infer all users’ memberships from `current_user`. The response now
+  carries per-user qualification state, groups, and sudo-derived administrator
+  state from the server-side local authority provider.
+- [x] Move group creation behind a secondary action inside the Add-user flow or
   the Groups context. Creating a group must refresh/select the new group in the
   user task flow. Mapping a user to a group must not be represented as an
-  independent dashboard object or permanent form card.
-- [ ] Preserve the existing policy and safety semantics: non-administrators see
+  independent dashboard object or permanent form card. It now opens from the
+  secondary Groups context in a task pane.
+- [x] Preserve the existing policy and safety semantics: non-administrators see
   the table and a clearly explained disabled/unavailable action; administrator
   submissions still go through the daemon-backed create/assign routes; success
   updates the source table; failures remain in the task pane with the user and
   target group context. Do not introduce confirmation phrases or acknowledgement
   checkboxes for ordinary group assignment unless the daemon policy marks that
-  action consequential.
+  action consequential. The current daemon contract still requires the
+  existing action-time acknowledgement marker, which remains in the pane review.
 
 ### 24.3 Endpoints: inventory first, add/edit only in a contextual pane
 
@@ -2236,6 +2242,11 @@ non-destructive close, and restores focus to its trigger when closed.
   Local Access assertions still expect separate dry-run preview controls that
   no longer match the current Yew screen; replace them with the canonical
   users-table/task-pane assertions and fixture data that matches the live DTOs.
+  - [x] Add host-side source/contract coverage for the users-first inventory,
+    per-user authority fields, target pane steps, and non-admin action gating.
+  - [x] Update the Web Interface and Local Access documentation for the
+    users-first table and task-pane workflow; Playwright artifact execution
+    remains environment-gated.
 - [ ] Add focused component/API tests for: footer content on login and each
   authenticated shell state; one decorative partial mark only; keyboard open,
   Escape close, and focus return for every task pane; Local Access per-user

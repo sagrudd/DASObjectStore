@@ -242,13 +242,40 @@ async fn users_groups_workspace(
     let mut warnings = warnings;
     warnings.extend(groups_snapshot.warnings);
 
-    Ok(Json(UsersGroupsWorkspaceView::standalone(
+    let mut view = UsersGroupsWorkspaceView::standalone(
         current_user,
         users,
         groups_snapshot.path.display().to_string(),
         groups_snapshot.groups,
         warnings,
-    )))
+    );
+    let mut qualification_warnings = Vec::new();
+    for user in &mut view.users {
+        match state.local_user_provider.local_user(&user.username) {
+            Ok(authority) => {
+                user.qualification_state = "qualified".to_string();
+                user.groups = authority.groups;
+                user.sudo_administrator = authority.sudo_administrator;
+            }
+            Err(error) => {
+                user.qualification_state = if user.registered {
+                    "registered".to_string()
+                } else {
+                    "unqualified".to_string()
+                };
+                qualification_warnings.push(DashboardWarning {
+                    code: "local_user_qualification_unavailable".to_string(),
+                    message: format!(
+                        "Local authority for {} could not be qualified: {}",
+                        user.username, error
+                    ),
+                });
+            }
+        }
+    }
+    view.warnings.extend(qualification_warnings);
+
+    Ok(Json(view))
 }
 
 fn actor_local_user_for_workspace(
@@ -1116,6 +1143,9 @@ mod tests {
         assert_eq!(encoded["host_mode"], "standalone");
         assert_eq!(encoded["users"][0]["username"], "admin");
         assert_eq!(encoded["users"][0]["registered"], true);
+        assert!(encoded["users"][0]["qualification_state"].is_string());
+        assert!(encoded["users"][0]["groups"].is_array());
+        assert!(encoded["users"][0]["sudo_administrator"].is_boolean());
         assert_eq!(
             encoded["capabilities"]["product_local_user_registration"],
             true
@@ -1155,6 +1185,9 @@ mod tests {
 
         assert_eq!(encoded["current_user"]["username"], "stephen");
         assert_eq!(encoded["current_user"]["sudo_administrator"], true);
+        assert_eq!(encoded["users"][0]["qualification_state"], "qualified");
+        assert_eq!(encoded["users"][0]["groups"][0], "sudo");
+        assert_eq!(encoded["users"][0]["sudo_administrator"], true);
         assert_eq!(
             encoded["capabilities"]["administrator_actions_enabled"],
             true

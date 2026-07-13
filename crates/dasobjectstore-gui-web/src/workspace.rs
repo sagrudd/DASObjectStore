@@ -30,14 +30,6 @@ use crate::mount::FrontendHost;
 #[cfg(target_arch = "wasm32")]
 use gloo_timers::callback::{Interval, Timeout};
 #[cfg(target_arch = "wasm32")]
-use prosopikon_core::{
-    LocalAccessGroupRecord, LocalAccessMembershipRecord, LocalAccessPrincipalRecord,
-};
-#[cfg(target_arch = "wasm32")]
-use prosopikon_yew::{
-    LocalAccessGroupSelector, LocalAccessMembershipList, LocalAccessUserSelector,
-};
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 #[cfg(target_arch = "wasm32")]
 use web_sys::{

@@ -21,6 +21,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/home.css"),
         include_str!("../../styles/object-browser.css"),
         include_str!("../../styles/activity.css"),
+        include_str!("../../styles/local-access.css"),
         include_str!("../../styles.css"),
     ]
     .concat()
@@ -158,7 +159,7 @@ fn home_refresh_preserves_a_successful_snapshot_when_transport_fails() {
     assert_eq!(degraded.state_name(), "transport-error");
 }
 use super::{
-    local_group_assignment_fields_ready, local_group_create_fields_ready, local_group_display_name,
+    local_group_create_fields_ready, local_group_display_name,
     users_groups_view_with_group_assignment, users_groups_view_with_writer_group,
 };
 use crate::api::{
@@ -495,11 +496,6 @@ fn users_groups_summary_surfaces_authority_and_writer_policy() {
 fn users_groups_forms_gate_required_fields_before_acknowledgement() {
     assert!(local_group_create_fields_ready("mnemosyne-writers"));
     assert!(!local_group_create_fields_ready(" "));
-    assert!(local_group_assignment_fields_ready(
-        "stephen",
-        "mnemosyne-writers"
-    ));
-    assert!(!local_group_assignment_fields_ready("stephen", " "));
 }
 
 #[test]
@@ -2490,6 +2486,56 @@ fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
     assert!(css.contains(".dos-remote-upload-grid,\n  .dos-remote-upload-summary"));
 }
 
+#[test]
+fn local_access_component_contract_is_users_first_and_task_pane_scoped() {
+    let source = workspace_component_source();
+
+    for marker in [
+        "data-section=\"users-toolbar\"",
+        "data-section=\"users-inventory\"",
+        "data-section=\"groups-context\"",
+        "data-step=\"identify-user\"",
+        "data-step=\"qualification\"",
+        "data-step=\"groups\"",
+        "data-step=\"review\"",
+        "Review and apply",
+        "the browser never creates operating-system accounts",
+        "dos-users-table",
+    ] {
+        assert!(
+            source.contains(marker),
+            "missing Local Access marker: {marker}"
+        );
+    }
+    for header in [
+        "Qualification",
+        "Access groups",
+        "Administrator",
+        "Sessions",
+    ] {
+        assert!(
+            source.contains(&format!("{header}")),
+            "missing users table header: {header}"
+        );
+    }
+    assert!(source.contains("disabled={!view.capabilities.administrator_actions_enabled}"));
+    assert!(source.contains("TaskPaneMode::Closed"));
+    assert!(source.contains("TaskPaneMode::Create"));
+    assert!(source.contains("return_focus_to"));
+    assert!(!source.contains("data-action=\"assign_local_user_to_group\""));
+    let css = web_styles_source();
+    for selector in [
+        ".dos-users-toolbar",
+        ".dos-users-table",
+        ".dos-task-pane__section",
+    ] {
+        assert!(
+            css.contains(selector),
+            "missing Local Access style: {selector}"
+        );
+    }
+}
+
 fn users_groups_workspace_fixture() -> UsersGroupsWorkspaceResponse {
     UsersGroupsWorkspaceResponse {
         host_mode: "standalone".to_string(),
@@ -2506,6 +2552,9 @@ fn users_groups_workspace_fixture() -> UsersGroupsWorkspaceResponse {
             created_at_unix_seconds: 1,
             registered_at_unix_seconds: Some(2),
             active_session_count: 1,
+            qualification_state: "qualified".to_string(),
+            groups: vec!["sudo".to_string(), "mnemosyne".to_string()],
+            sudo_administrator: true,
         }],
         groups: vec![
             LocalGroupMembershipResponse {

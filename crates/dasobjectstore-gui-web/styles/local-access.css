@@ -1,0 +1,48 @@
+/* Local Access owns users-first inventory and task-pane presentation. */
+.dos-users-toolbar,
+.dos-groups-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.dos-users-toolbar .dos-job-actions,
+.dos-groups-context .dos-job-actions {
+  flex: 0 0 auto;
+}
+
+.dos-users-table th,
+.dos-users-table td {
+  vertical-align: top;
+}
+
+.dos-users-table td small {
+  display: block;
+  margin-top: 3px;
+  color: #69777f;
+  font-size: 0.78rem;
+}
+
+.dos-task-pane__section {
+  display: grid;
+  gap: 10px;
+  padding: 18px 0;
+  border-bottom: 1px solid #e1e7ea;
+}
+
+.dos-task-pane__section:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .dos-users-toolbar,
+  .dos-groups-context {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dos-users-toolbar .dos-job-actions {
+    width: 100%;
+  }
+}

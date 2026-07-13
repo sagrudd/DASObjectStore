@@ -579,6 +579,12 @@ pub struct StandaloneUserAccountView {
     pub created_at_unix_seconds: i64,
     pub registered_at_unix_seconds: Option<i64>,
     pub active_session_count: usize,
+    #[serde(default)]
+    pub qualification_state: String,
+    #[serde(default)]
+    pub groups: Vec<String>,
+    #[serde(default)]
+    pub sudo_administrator: bool,
 }
 
 impl From<UserSummary> for StandaloneUserAccountView {
@@ -589,6 +595,13 @@ impl From<UserSummary> for StandaloneUserAccountView {
             created_at_unix_seconds: user.created_at_unix_seconds,
             registered_at_unix_seconds: user.registered_at_unix_seconds,
             active_session_count: user.active_session_count,
+            qualification_state: if user.registered {
+                "registered".to_string()
+            } else {
+                "unregistered".to_string()
+            },
+            groups: Vec::new(),
+            sudo_administrator: false,
         }
     }
 }
@@ -938,6 +951,9 @@ mod tests {
                 created_at_unix_seconds: 10,
                 registered_at_unix_seconds: Some(20),
                 active_session_count: 1,
+                qualification_state: "registered".to_string(),
+                groups: Vec::new(),
+                sudo_administrator: false,
             }]
         );
         assert_eq!(

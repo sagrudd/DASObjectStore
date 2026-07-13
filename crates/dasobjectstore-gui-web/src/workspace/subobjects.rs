@@ -438,7 +438,3 @@ pub const LOCAL_GROUP_ADMIN_CONFIRMATION: &str = "confirm local group administra
 pub fn local_group_create_fields_ready(group_name: &str) -> bool {
     !group_name.trim().is_empty()
 }
-
-pub fn local_group_assignment_fields_ready(username: &str, group_name: &str) -> bool {
-    !username.trim().is_empty() && !group_name.trim().is_empty()
-}

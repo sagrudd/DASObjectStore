@@ -155,7 +155,8 @@ The primary navigation is:
    Standalone appliance identity and writer-policy view. It is shown in primary
    navigation when the DASObjectStore host mode uses local-user authentication
    and reports OS authority, product-local browser users, local groups, writer
-   groups, administrator readiness, and warnings.
+   groups, administrator readiness, and warnings. The page is users-first: the
+   inventory table is the primary surface and group policy is secondary.
 
 ``Bioinformatics``
    Workflow-readiness view for common sequencing and analysis object families.
@@ -165,6 +166,32 @@ The primary navigation is:
 
 Regardless of labels, storage mutation must still be submitted to
 ``dasobjectstored`` and must use the same job model as CLI and API operations.
+
+Local Access Workflow
+----------------------
+
+The Local Access page does not create operating-system accounts. Its Users
+table combines product registration with the authoritative host qualification
+snapshot for each listed account: qualification state, current OS groups,
+sudo-derived administrator state, active sessions, and the scoped action
+available to the signed-in administrator. A read-only session can inspect the
+table but cannot open mutation actions.
+
+An administrator selects ``Add user`` (or a row's ``Qualify`` action) to open a
+task pane. The pane identifies the existing local account, shows its current
+qualification, records the administrator's qualification acknowledgement,
+allows one or more writer/tenant groups to be selected, and presents a review
+before applying. Each selected group is submitted through the existing
+daemon-backed group-assignment contract; the browser never writes group files
+or managed storage. The pane remains the contextual surface for errors and
+accepted daemon job identifiers, and refreshes the Users inventory after a
+successful or partially successful operation.
+
+Group creation is a secondary action in the Groups context. It uses the same
+daemon authorization and action-time confirmation as the CLI; it is not a
+permanent dashboard form beside the Users table. OS discovery failures are
+shown as an explicit qualification state or warning rather than inferred from
+the current browser user.
 
 Implementation Boundaries
 -------------------------
