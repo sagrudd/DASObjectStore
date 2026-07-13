@@ -1204,7 +1204,8 @@ Garage S3 reconciliation now passes its controller-owned provider into that
 worker as well; multipart paths still need explicit provider injection.
 The profile S3 seam now publishes bounded multipart completion metadata
 (ordered parts, per-part SHA-256 checksums, total-size and reservation
-validation); stream assembly, provider injection, and HTTP dispatch remain.
+validation) and a streaming assembler that verifies each declared part;
+provider injection and HTTP dispatch remain.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 authenticated HTTP routing and runtime store dispatch remain separate.

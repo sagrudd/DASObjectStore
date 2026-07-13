@@ -780,12 +780,12 @@ completion.
     open.
   - [x] Add the provider-neutral multipart completion metadata contract with
     bounded part count, strict ordering, per-part checksums, overflow-safe
-    total-size validation, and reservation identity; stream assembly and HTTP
-    gateway wiring remain separate.
+    total-size validation, and reservation identity; bounded ordered stream
+    assembly now verifies each part's declared size/checksum; provider
+    injection and HTTP gateway wiring remain separate.
   - [x] Add the versioned, path-free profile-S3 multipart completion request
     and acknowledgement DTOs with the same bounded validation contract;
-    authenticated HTTP routing, stream assembly, and runtime store dispatch
-    remain open.
+    authenticated HTTP routing and runtime store dispatch remain open.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.

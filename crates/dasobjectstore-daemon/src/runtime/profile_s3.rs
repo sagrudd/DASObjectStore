@@ -12,6 +12,7 @@ use dasobjectstore_core::backend::{
     BackendObjectRecord, ObjectCatalogueAuthority, ObjectStoreBackend,
 };
 use dasobjectstore_core::ids::StoreId;
+use sha2::{Digest, Sha256};
 use std::io::Read;
 
 pub const PROFILE_S3_MAX_KEYS: usize = 1_000;
@@ -77,6 +78,21 @@ pub struct ProfileS3MultipartCompletion {
     pub parts: Vec<ProfileS3MultipartPart>,
 }
 
+/// A provider-neutral multipart source. The reader is consumed in strict
+/// metadata order and never exposes provider or filesystem paths.
+pub struct ProfileS3MultipartPartSource<'a> {
+    pub part: ProfileS3MultipartPart,
+    pub reader: Box<dyn Read + Send + 'a>,
+}
+
+pub struct ProfileS3MultipartReader<'a> {
+    sources: Vec<ProfileS3MultipartPartSource<'a>>,
+    index: usize,
+    remaining: u64,
+    hasher: Sha256,
+    finished: bool,
+}
+
 impl ProfileS3MultipartCompletion {
     /// Validate the provider-neutral completion metadata before assembling
     /// parts into a daemon-owned staged stream. Reservation admission and
@@ -133,6 +149,92 @@ impl ProfileS3MultipartCompletion {
         }
         Ok(())
     }
+}
+
+/// Assemble ordered multipart sources as one bounded reader. Each source must
+/// provide exactly its declared byte count and SHA-256 checksum; a mismatch
+/// fails before the caller can finalize or commit the object. The caller can
+/// pass this reader directly to the normal profile PUT lifecycle.
+pub fn assemble_profile_s3_multipart<'a>(
+    completion: &ProfileS3MultipartCompletion,
+    sources: Vec<ProfileS3MultipartPartSource<'a>>,
+) -> Result<ProfileS3MultipartReader<'a>, BackendError> {
+    completion.validate()?;
+    if sources.len() != completion.parts.len()
+        || sources
+            .iter()
+            .zip(&completion.parts)
+            .any(|(source, expected)| source.part != *expected)
+    {
+        return Err(BackendError::InvalidRequest(
+            "multipart sources do not match completion metadata".to_string(),
+        ));
+    }
+    let remaining = sources[0].part.size_bytes;
+    Ok(ProfileS3MultipartReader {
+        sources,
+        index: 0,
+        remaining,
+        hasher: Sha256::new(),
+        finished: false,
+    })
+}
+
+impl Read for ProfileS3MultipartReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() || self.finished {
+            return Ok(0);
+        }
+        loop {
+            if self.remaining == 0 {
+                let digest = self.hasher.clone().finalize();
+                let checksum = checksum_string(&digest);
+                if checksum != self.sources[self.index].part.checksum {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "multipart part checksum mismatch",
+                    ));
+                }
+                let mut extra = [0_u8; 1];
+                let extra_read = self.sources[self.index].reader.read(&mut extra)?;
+                if extra_read != 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "multipart part exceeded declared size",
+                    ));
+                }
+                self.index += 1;
+                if self.index == self.sources.len() {
+                    self.finished = true;
+                    return Ok(0);
+                }
+                self.remaining = self.sources[self.index].part.size_bytes;
+                self.hasher = Sha256::new();
+                continue;
+            }
+            let requested = self.remaining.min(buffer.len() as u64) as usize;
+            let read = self.sources[self.index]
+                .reader
+                .read(&mut buffer[..requested])?;
+            if read == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "multipart part ended before declared size",
+                ));
+            }
+            self.hasher.update(&buffer[..read]);
+            self.remaining -= read as u64;
+            return Ok(read);
+        }
+    }
+}
+
+fn checksum_string(bytes: &[u8]) -> String {
+    let encoded = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("sha256:{encoded}")
 }
 
 /// Project an authoritative runtime page into the versioned daemon transport
@@ -499,11 +601,12 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_profile_object, delete_profile_object_with_capacity_provider, get_profile_object,
-        get_profile_object_range, head_profile_object, list_profile_objects,
-        list_profile_objects_page, profile_health, profile_s3_list_response, put_profile_object,
-        put_profile_object_with_capacity_provider, verify_profile_object,
-        ProfileS3MultipartCompletion, ProfileS3MultipartPart, PROFILE_S3_MAX_KEYS,
+        assemble_profile_s3_multipart, checksum_string, delete_profile_object,
+        delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
+        head_profile_object, list_profile_objects, list_profile_objects_page, profile_health,
+        profile_s3_list_response, put_profile_object, put_profile_object_with_capacity_provider,
+        verify_profile_object, ProfileS3MultipartCompletion, ProfileS3MultipartPart,
+        ProfileS3MultipartPartSource, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -516,7 +619,8 @@ mod tests {
     use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
     use dasobjectstore_core::protection::ProtectionPolicy;
     use dasobjectstore_core::store::CapacityPolicy;
-    use std::io::Read;
+    use sha2::{Digest, Sha256};
+    use std::io::{Cursor, Read};
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::sync::{
@@ -857,6 +961,86 @@ mod tests {
         invalid = completion.clone();
         invalid.expected_size_bytes = 8;
         assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn multipart_assembly_streams_ordered_sources_and_checksums_each_part() {
+        let first = b"abc";
+        let second = b"de";
+        let completion = ProfileS3MultipartCompletion {
+            reservation_id: "multipart-assembly".to_string(),
+            key: BackendObjectKey {
+                object_id: "writes/assembled.fastq".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            parts: vec![
+                ProfileS3MultipartPart {
+                    part_number: 1,
+                    size_bytes: first.len() as u64,
+                    checksum: checksum_string(&Sha256::digest(first)),
+                },
+                ProfileS3MultipartPart {
+                    part_number: 2,
+                    size_bytes: second.len() as u64,
+                    checksum: checksum_string(&Sha256::digest(second)),
+                },
+            ],
+        };
+        let mut reader = assemble_profile_s3_multipart(
+            &completion,
+            vec![
+                ProfileS3MultipartPartSource {
+                    part: completion.parts[0].clone(),
+                    reader: Box::new(Cursor::new(first)),
+                },
+                ProfileS3MultipartPartSource {
+                    part: completion.parts[1].clone(),
+                    reader: Box::new(Cursor::new(second)),
+                },
+            ],
+        )
+        .expect("assembly");
+        let mut assembled = Vec::new();
+        reader.read_to_end(&mut assembled).expect("read assembly");
+        assert_eq!(assembled, b"abcde");
+    }
+
+    #[test]
+    fn multipart_assembly_rejects_checksum_and_declared_size_drift() {
+        let completion = ProfileS3MultipartCompletion {
+            reservation_id: "multipart-drift".to_string(),
+            key: BackendObjectKey {
+                object_id: "writes/drift.fastq".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 3,
+            parts: vec![ProfileS3MultipartPart {
+                part_number: 1,
+                size_bytes: 3,
+                checksum: format!("sha256:{}", "a".repeat(64)),
+            }],
+        };
+        let mut reader = assemble_profile_s3_multipart(
+            &completion,
+            vec![ProfileS3MultipartPartSource {
+                part: completion.parts[0].clone(),
+                reader: Box::new(Cursor::new(b"abc")),
+            }],
+        )
+        .expect("assembly");
+        assert!(reader.read_to_end(&mut Vec::new()).is_err());
+
+        let mut mismatched = completion.clone();
+        mismatched.parts[0].size_bytes = 4;
+        assert!(assemble_profile_s3_multipart(
+            &mismatched,
+            vec![ProfileS3MultipartPartSource {
+                part: mismatched.parts[0].clone(),
+                reader: Box::new(Cursor::new(b"abc")),
+            }]
+        )
+        .is_err());
     }
 
     #[test]
