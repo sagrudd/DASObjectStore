@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn liveness_stays_responsive_while_daemon_bridge_is_saturated() {
+    async fn health_and_liveness_stay_responsive_while_daemon_bridge_is_saturated() {
         let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(20));
         let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
         let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
@@ -298,6 +298,16 @@ mod tests {
             .await
             .expect("liveness response");
         assert_eq!(response.status(), StatusCode::OK);
+        let health_response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("health request builds"),
+            )
+            .await
+            .expect("health response");
+        assert_eq!(health_response.status(), StatusCode::OK);
         release_sender.send(()).expect("release blocked call");
         blocked
             .await

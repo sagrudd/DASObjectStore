@@ -924,8 +924,9 @@ requests retain bounded capacity under ingest; no temporary production module
 exceptions remain and the guard passes; appliance-only acceptance blockers are
 recorded and repeatable.
 
-Current delivery note: daemon-independent liveness and degraded Activity
-responses are covered. Standalone static asset reads now use an async bounded
+Current delivery note: daemon-independent health/liveness and degraded Activity
+responses are covered, including a local bridge-saturation regression for both
+health surfaces. Standalone static asset reads now use an async bounded
 lane with explicit no-cache index/unfingerprinted and immutable fingerprinted
 asset cache headers. The authenticated dashboard status route now retains a
 last-successful snapshot and reports stale/retry metadata, while cold starts

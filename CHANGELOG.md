@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.91 - 2026-07-13
+
+- Extend the local bridge-saturation regression to prove both daemon-independent
+  health and liveness remain responsive while a daemon worker is blocked.
+
 ## 0.72.90 - 2026-07-13
 
 - Add a fail-closed drive capacity view that rejects stale or unavailable SSD
