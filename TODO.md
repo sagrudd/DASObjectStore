@@ -711,6 +711,8 @@ completion.
     catalogue first, rejects out-of-bounds starts, and preserves the private
     path boundary. Provider-native range optimization remains an implementation
     detail below this seam.
+  - [x] Add a stable, bounded provider-neutral profile list page with a capped
+    continuation offset and prefix filtering; HTTP serialization remains open.
   - [x] Add provider-neutral, idempotent profile DELETE semantics that inspect
     the catalogue before backend removal, debit folder capacity transactionally,
     and fail closed on guarded-drive identity loss; HTTP gateway wiring remains

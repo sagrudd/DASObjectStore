@@ -58,7 +58,8 @@ confirmation contract.
 
 Profile-backed S3 reads and deletion use a provider-neutral daemon adapter.
 List, HEAD, and GET derive from the authoritative profile catalogue and backend
-read contract; DELETE uses the same catalogue authority before backend removal;
+read contract; list pages are stably ordered and capped at 1,000 keys; DELETE
+uses the same catalogue authority before backend removal;
 provider listings and private filesystem paths are not trusted or returned.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and

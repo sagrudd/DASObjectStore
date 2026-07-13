@@ -14,6 +14,8 @@ use dasobjectstore_core::backend::{
 use dasobjectstore_core::ids::StoreId;
 use std::io::Read;
 
+pub const PROFILE_S3_MAX_KEYS: usize = 1_000;
+
 pub trait ProfileS3ReadBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
 
 impl<T> ProfileS3ReadBackend for T where T: ObjectStoreBackend + ObjectCatalogueAuthority {}
@@ -53,6 +55,12 @@ pub struct ProfileS3Object {
     pub checksum: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileS3ListPage {
+    pub objects: Vec<ProfileS3Object>,
+    pub next_offset: Option<usize>,
+}
+
 pub fn list_profile_objects(
     backend: &dyn ProfileS3ReadBackend,
     prefix: Option<&str>,
@@ -68,6 +76,52 @@ pub fn list_profile_objects(
                 checksum: record.checksum,
             })
             .collect()
+    })
+}
+
+/// Return one bounded, stable-order page from the authoritative profile
+/// catalogue. The offset is an internal continuation token for the eventual
+/// HTTP adapter; it never exposes backend locations.
+pub fn list_profile_objects_page(
+    backend: &dyn ProfileS3ReadBackend,
+    prefix: Option<&str>,
+    offset: usize,
+    limit: usize,
+) -> Result<ProfileS3ListPage, BackendError> {
+    if limit == 0 || limit > PROFILE_S3_MAX_KEYS {
+        return Err(BackendError::InvalidRequest(format!(
+            "profile S3 list limit must be between 1 and {PROFILE_S3_MAX_KEYS}"
+        )));
+    }
+    let prefix = prefix.unwrap_or_default();
+    let mut records = backend
+        .records()?
+        .into_iter()
+        .filter(|record| record.key.object_id.starts_with(prefix))
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| {
+        left.key
+            .object_id
+            .cmp(&right.key.object_id)
+            .then(left.key.version.cmp(&right.key.version))
+    });
+    if offset > records.len() {
+        return Err(BackendError::InvalidRequest(
+            "profile S3 list offset exceeds the filtered catalogue".to_string(),
+        ));
+    }
+    let end = offset.saturating_add(limit).min(records.len());
+    let next_offset = (end < records.len()).then_some(end);
+    Ok(ProfileS3ListPage {
+        objects: records[offset..end]
+            .iter()
+            .map(|record| ProfileS3Object {
+                key: record.key.clone(),
+                size_bytes: record.size_bytes,
+                checksum: record.checksum.clone(),
+            })
+            .collect(),
+        next_offset,
     })
 }
 
@@ -293,7 +347,8 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 mod tests {
     use super::{
         delete_profile_object, get_profile_object, get_profile_object_range, head_profile_object,
-        list_profile_objects, put_profile_object, put_profile_object_with_capacity_provider,
+        list_profile_objects, list_profile_objects_page, put_profile_object,
+        put_profile_object_with_capacity_provider, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -502,6 +557,38 @@ mod tests {
             version: 1,
         };
         assert!(head_profile_object(&backend, &missing).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn list_page_is_stable_bounded_and_prefix_scoped() {
+        let (mut backend, root) = backend();
+        for (object_id, body) in [
+            ("reads/z", &b"z"[..]),
+            ("reads/a", &b"a"[..]),
+            ("other/x", &b"x"[..]),
+        ] {
+            let key = BackendObjectKey {
+                object_id: object_id.to_string(),
+                version: 1,
+            };
+            put_profile_object(
+                &mut backend,
+                &format!("profile-s3-page-{}", key.object_id.replace('/', "-")),
+                &key,
+                &mut &body[..],
+                1,
+            )
+            .expect("put");
+        }
+        let first = list_profile_objects_page(&backend, Some("reads/"), 0, 1).expect("page");
+        assert_eq!(first.objects[0].key.object_id, "reads/a");
+        assert_eq!(first.next_offset, Some(1));
+        let second = list_profile_objects_page(&backend, Some("reads/"), 1, 1).expect("page");
+        assert_eq!(second.objects[0].key.object_id, "reads/z");
+        assert_eq!(second.next_offset, None);
+        assert!(list_profile_objects_page(&backend, None, 0, PROFILE_S3_MAX_KEYS + 1).is_err());
+        assert!(list_profile_objects_page(&backend, None, 4, 1).is_err());
         std::fs::remove_dir_all(root).ok();
     }
 
