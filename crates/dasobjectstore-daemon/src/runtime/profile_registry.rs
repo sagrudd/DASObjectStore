@@ -201,6 +201,11 @@ fn canonical_directory(
         });
     }
     let canonical = fs::canonicalize(path).map_err(|error| registry_io(path, error))?;
+    if canonical == Path::new("/") {
+        return Err(invalid_binding(format!(
+            "{field} must not be the system root"
+        )));
+    }
     if !canonical.is_dir() {
         return Err(invalid_binding(format!(
             "{field} is not a directory: {}",
@@ -304,6 +309,14 @@ mod tests {
             media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
             mount_path_hint: Some(second),
         };
+        assert!(upsert_profile_binding(root.join("bindings.json"), binding).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_system_root_folder_binding() {
+        let root = root("system-root");
+        let binding = folder_binding("folder", Path::new("/"));
         assert!(upsert_profile_binding(root.join("bindings.json"), binding).is_err());
         let _ = fs::remove_dir_all(root);
     }

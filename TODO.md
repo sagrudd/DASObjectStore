@@ -281,7 +281,8 @@ completion.
   - [x] Add the daemon-owned profile-binding registry: portable manifests are
     validated against canonical folder/drive roots, persisted atomically, and
     per-store capacity probes use the binding when present; profile-aware
-    creation/adoption transport remains open.
+    creation/adoption transport remains open. System-root bindings are rejected
+    fail-closed, with strict unknown-field and duplicate-store validation.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

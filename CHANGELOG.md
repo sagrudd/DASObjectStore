@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.118 - 2026-07-13
+
+- Reject system-root profile bindings so daemon capacity probes cannot accept
+  an unbounded host filesystem as a folder or drive backend.
+
 ## 0.72.117 - 2026-07-13
 
 - Harden profile-binding registry compatibility with strict field decoding,
