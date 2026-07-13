@@ -924,7 +924,9 @@ completion.
     ≤24-hour TTL policy; the shared RPM/DEB payload guard and regression test
     reject development keys, issuers, configuration, and enablement switches.
     Native DEB/RPM build scripts now explicitly compile the daemon with
-    ``--no-default-features`` as an additional package-boundary safeguard.
+    ``--no-default-features`` as an additional package-boundary safeguard;
+    ``package_assets`` executes the shared payload guard against safe and
+    forbidden fixture trees so marker/path regressions fail in CI.
     The daemon socket exchange now verifies registered key proofs; the
     canonical versioned HTTPS exchange route is published and dispatched by
     the standalone Web API. Listener authentication and mTLS verification

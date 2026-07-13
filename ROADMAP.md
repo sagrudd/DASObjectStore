@@ -116,7 +116,9 @@ for workspace and generated-data tests. It is explicit, short-lived,
 loopback/local-Docker only, and constrained to synthetic validation stores. It
 is a test-build facility, not an application authority, and is forbidden from
 RPM/DEB contents including keys, issuers, configuration, and enablement
-switches. Package inspection tests are part of this roadmap slice. The core
+switches. The package-asset test executes the shared payload guard against
+safe and forbidden fixture trees, covering marker/path regressions without
+building a package locally. The core
 exchange-request contract validates active key membership, bounded proof shape,
 scope, and lifetime. Core issuance now requires an explicit proof verifier
 implementation and rejects unverified proofs. The daemon now ships a

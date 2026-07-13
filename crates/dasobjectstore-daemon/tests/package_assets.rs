@@ -16,6 +16,8 @@ const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
 const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
+const PACKAGE_AUTH_GUARD: &str =
+    include_str!("../../../packaging/validate-package-auth-content.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const MAKEFILE: &str = include_str!("../../../Makefile");
@@ -31,6 +33,70 @@ fn package_daemon_config_matches_runtime_defaults() {
     assert!(config.telemetry.enabled);
     assert_eq!(config.telemetry.cadence_seconds, 30);
     config.validate().expect("packaged config is valid");
+}
+
+#[test]
+fn package_auth_guard_rejects_development_self_signing_payloads() {
+    let root = std::env::temp_dir().join(format!(
+        "dasobjectstore-package-auth-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).expect("create package payload fixture");
+    let guard = root.join("validate-package-auth-content.sh");
+    std::fs::write(&guard, PACKAGE_AUTH_GUARD).expect("write package guard fixture");
+
+    let safe = root.join("safe");
+    std::fs::create_dir_all(&safe).expect("create safe payload");
+    std::fs::write(safe.join("config.json"), "{\"environment\":\"production\"}")
+        .expect("write safe payload");
+    let accepted = std::process::Command::new("bash")
+        .arg(&guard)
+        .arg(&safe)
+        .output()
+        .expect("run package guard for safe payload");
+    assert!(
+        accepted.status.success(),
+        "safe package payload rejected: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+
+    let forbidden = root.join("forbidden");
+    std::fs::create_dir_all(forbidden.join("development-self-signing"))
+        .expect("create forbidden payload");
+    std::fs::write(
+        forbidden
+            .join("development-self-signing")
+            .join("issuer.conf"),
+        "DASOBJECTSTORE_ENABLE_DEVELOPMENT_SELF_SIGNING=true\n",
+    )
+    .expect("write forbidden payload");
+    let rejected = std::process::Command::new("bash")
+        .arg(&guard)
+        .arg(&forbidden)
+        .output()
+        .expect("run package guard for forbidden payload");
+    assert!(
+        !rejected.status.success(),
+        "forbidden package payload accepted"
+    );
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("development self-signing"),
+        "guard rejection did not explain the boundary: {}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+
+    std::fs::remove_dir_all(root).expect("remove package auth fixture");
+}
+
+fn unique_suffix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos()
+        .to_string()
 }
 
 #[test]
