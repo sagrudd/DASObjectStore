@@ -108,6 +108,21 @@ returns private disk paths and does not mutate the catalogue or backend. Use
 the message and timestamp to decide whether to run the documented reconciliation
 workflow before treating an empty browser view as data loss.
 
+Inspect one profile object
+--------------------------
+
+The same authenticated profile endpoint exposes catalogue-authoritative object
+metadata without returning a payload or backend path:
+
+.. code-block:: text
+
+   HEAD /api/v1/profile-s3/stores/<store>/objects?key=<url-encoded-object-id>&version=1
+
+The response carries the logical key, version, byte size, and checksum after
+the daemon resolves the registered bounded folder profile. A missing key or
+catalogue/backend failure is returned as an explicit error; clients must not
+infer object existence from provider listings.
+
 Download Folder Archives From the Web API
 -----------------------------------------
 

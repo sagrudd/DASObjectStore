@@ -153,10 +153,11 @@ pub use profile_inspection::{
     PROFILE_INSPECTION_SCHEMA_VERSION,
 };
 pub use profile_s3::{
-    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartCompletionRequest,
-    ProfileS3MultipartCompletionResponse, ProfileS3MultipartPartRequest, ProfileS3ObjectView,
-    PROFILE_S3_MAX_KEYS, PROFILE_S3_MAX_MULTIPART_PARTS, PROFILE_S3_MULTIPART_COMPLETE_ROUTE,
-    PROFILE_S3_OBJECTS_ROUTE, PROFILE_S3_ROUTE_PREFIX, PROFILE_S3_SCHEMA_VERSION,
+    ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3ListRequest, ProfileS3ListResponse,
+    ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
+    ProfileS3MultipartPartRequest, ProfileS3ObjectView, PROFILE_S3_MAX_KEYS,
+    PROFILE_S3_MAX_MULTIPART_PARTS, PROFILE_S3_MULTIPART_COMPLETE_ROUTE, PROFILE_S3_OBJECTS_ROUTE,
+    PROFILE_S3_OBJECT_ROUTE, PROFILE_S3_ROUTE_PREFIX, PROFILE_S3_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
@@ -247,6 +248,7 @@ pub enum DaemonApiRequest {
     RegisterProfileBinding(ProfileBindingRequest),
     ProfileBrowser(ProfileBrowserRequest),
     ProfileS3List(ProfileS3ListRequest),
+    ProfileS3Head(ProfileS3HeadRequest),
     ProfileDiagnostics(ProfileDiagnosticsRequest),
     ProfileInspection(ProfileInspectionRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
@@ -303,6 +305,7 @@ impl DaemonApiRequest {
             Self::RegisterProfileBinding(_) => "register_profile_binding",
             Self::ProfileBrowser(_) => "profile_browser",
             Self::ProfileS3List(_) => "profile_s3_list",
+            Self::ProfileS3Head(_) => "profile_s3_head",
             Self::ProfileDiagnostics(_) => "profile_diagnostics",
             Self::ProfileInspection(_) => "profile_inspection",
             Self::ProfileCapabilities(_) => "profile_capabilities",
@@ -383,6 +386,7 @@ impl DaemonApiRequest {
             }
             Self::ProfileBrowser(request) => request.validate(),
             Self::ProfileS3List(request) => request.validate(),
+            Self::ProfileS3Head(request) => request.validate(),
             Self::ProfileDiagnostics(request) => request.validate(),
             Self::ProfileInspection(_) => Ok(()),
             Self::ProfileCapabilities(_) => Ok(()),
@@ -476,6 +480,7 @@ pub enum DaemonApiResponse {
     RegisterProfileBinding(ProfileBindingResponse),
     ProfileBrowser(ProfileBrowserResponse),
     ProfileS3List(ProfileS3ListResponse),
+    ProfileS3Head(ProfileS3HeadResponse),
     ProfileDiagnostics(ProfileDiagnosticsResponse),
     ProfileInspection(ProfileInspectionResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),

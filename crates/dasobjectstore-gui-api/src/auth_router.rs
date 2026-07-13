@@ -83,7 +83,7 @@ pub(crate) fn standalone_dashboard_router_with_state(
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/objects",
-            get(standalone_profile_s3_list),
+            get(standalone_profile_s3_list).head(standalone_profile_s3_head),
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/diagnostics",

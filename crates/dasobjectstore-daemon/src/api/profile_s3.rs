@@ -8,6 +8,7 @@ pub const PROFILE_S3_MAX_KEYS: u16 = 1_000;
 pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = 10_000;
 pub const PROFILE_S3_ROUTE_PREFIX: &str = "/api/v1/profile-s3";
 pub const PROFILE_S3_OBJECTS_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects";
+pub const PROFILE_S3_OBJECT_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects/{key}";
 pub const PROFILE_S3_MULTIPART_COMPLETE_ROUTE: &str =
     "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete";
 
@@ -22,6 +23,48 @@ pub struct ProfileS3ListRequest {
     pub offset: u64,
     #[serde(default = "default_profile_s3_limit")]
     pub limit: u16,
+}
+
+/// Catalogue-authoritative metadata lookup for one logical object. The
+/// daemon resolves the registered profile and never exposes backend paths.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3HeadRequest {
+    pub store_id: StoreId,
+    pub key: BackendObjectKey,
+}
+
+impl ProfileS3HeadRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.store_id.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "store_id" });
+        }
+        if self.key.object_id.trim().is_empty() || self.key.object_id.starts_with('/') {
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "key",
+                value: self.key.object_id.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3HeadResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub object: ProfileS3ObjectView,
+}
+
+impl ProfileS3HeadResponse {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != PROFILE_S3_SCHEMA_VERSION {
+            return Err("unsupported profile S3 schema".to_string());
+        }
+        if self.store_id.as_str().trim().is_empty() {
+            return Err("profile S3 response store identity must not be blank".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl ProfileS3ListRequest {
@@ -318,8 +361,32 @@ mod tests {
         assert_eq!(PROFILE_S3_ROUTE_PREFIX, "/api/v1/profile-s3");
         assert!(PROFILE_S3_OBJECTS_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
         assert!(PROFILE_S3_OBJECTS_ROUTE.contains("{store_id}"));
+        assert!(PROFILE_S3_OBJECT_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
+        assert!(PROFILE_S3_OBJECT_ROUTE.contains("{key}"));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{store_id}"));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{reservation_id}"));
+    }
+
+    #[test]
+    fn head_request_and_response_are_path_free_and_versioned() {
+        let request = ProfileS3HeadRequest {
+            store_id: StoreId::new("codex").expect("store id"),
+            key: BackendObjectKey {
+                object_id: "reads/sample.fastq".to_string(),
+                version: 1,
+            },
+        };
+        request.validate().expect("head request validates");
+        let response = ProfileS3HeadResponse {
+            schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+            store_id: request.store_id,
+            object: ProfileS3ObjectView {
+                key: request.key,
+                size_bytes: 4,
+                checksum: "sha256:abcd".to_string(),
+            },
+        };
+        response.validate().expect("head response validates");
     }
 }

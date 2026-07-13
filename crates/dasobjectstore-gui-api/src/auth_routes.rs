@@ -52,6 +52,7 @@ use axum::{
     Json,
 };
 pub use contracts::*;
+use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_daemon::runtime::LOCAL_ADMIN_CONFIRMATION_MARKER;
 use dasobjectstore_daemon::{
@@ -76,6 +77,8 @@ use dasobjectstore_daemon::{
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse,
     ProfileDiagnosticsRequest as DaemonProfileDiagnosticsRequest,
     ProfileDiagnosticsResponse as DaemonProfileDiagnosticsResponse,
+    ProfileS3HeadRequest as DaemonProfileS3HeadRequest,
+    ProfileS3HeadResponse as DaemonProfileS3HeadResponse,
     ProfileS3ListRequest as DaemonProfileS3ListRequest,
     ProfileS3ListResponse as DaemonProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
@@ -100,6 +103,12 @@ struct ProfileS3ListQuery {
     prefix: Option<String>,
     offset: Option<u64>,
     limit: Option<u16>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ProfileS3HeadQuery {
+    key: Option<String>,
+    version: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -259,6 +268,46 @@ async fn standalone_profile_s3_list(
         .await
         .map(Json)
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_list_failed"))
+}
+
+async fn standalone_profile_s3_head(
+    Path(store_id): Path<String>,
+    Query(query): Query<ProfileS3HeadQuery>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonProfileS3HeadResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = StoreId::new(store_id).map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_store_id",
+            error.to_string(),
+        )
+    })?;
+    let object_id = query.key.ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_key",
+            "profile S3 HEAD requires a key query parameter",
+        )
+    })?;
+    let request = DaemonProfileS3HeadRequest {
+        store_id,
+        key: BackendObjectKey {
+            object_id,
+            version: query.version.unwrap_or(1),
+        },
+    };
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .profile_s3_head(request)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_head_failed"))
 }
 
 async fn standalone_profile_s3_diagnostics(
@@ -1463,6 +1512,33 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/profile-s3/stores/generated-data/objects")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_head_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-head-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("HEAD")
+                    .uri(
+                        "/api/v1/profile-s3/stores/generated-data/objects?key=reads%2Fsample.fastq",
+                    )
                     .body(Body::empty())
                     .expect("request builds"),
             )

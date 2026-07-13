@@ -776,6 +776,11 @@ completion.
     authenticated storage dispatcher, resolving the registered folder binding
     and daemon-owned capacity policy before querying the authoritative
     catalogue; HTTP listener routing remains open.
+  - [x] Add an authenticated profile-S3 HEAD transport that resolves one
+    catalogue-authoritative object through the daemon-owned folder binding and
+    returns only logical key, version, size, and checksum metadata; backend
+    paths and provider listings remain private. Full HTTP PUT/GET/multipart
+    gateway wiring remains separate.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.
