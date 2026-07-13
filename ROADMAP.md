@@ -129,8 +129,8 @@ ring-backed Ed25519/P-256 verifier bound to registered public-key material and
 fingerprints, and its daemon socket now performs proof-verified short-lived
 issuance without persisting bearer tokens. The standalone Web API now dispatches
 the canonical proof-bearing exchange route through the daemon and validates
-claim shape at the response boundary; mTLS transport verification remains a
-listener concern. Native DEB/RPM build scripts also compile the
+claim shape at Web and client response boundaries; mTLS transport verification
+remains a listener concern. Native DEB/RPM build scripts also compile the
 daemon with `--no-default-features`, making the package boundary explicit.
 Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.

@@ -428,7 +428,14 @@ where
         request: ApplicationAccessTokenExchangeRequest,
     ) -> Result<ApplicationAccessTokenExchangeResponse, DaemonClientError> {
         match self.send(DaemonApiRequest::ExchangeApplicationAccessToken(request))? {
-            DaemonApiResponse::ExchangeApplicationAccessToken(response) => Ok(response),
+            DaemonApiResponse::ExchangeApplicationAccessToken(response) => {
+                response.validate().map_err(|error| {
+                    DaemonClientError::Transport(format!(
+                        "invalid application access-token response: {error}"
+                    ))
+                })?;
+                Ok(response)
+            }
             response => Err(unexpected("exchange_application_access_token", response)),
         }
     }
@@ -775,6 +782,7 @@ mod tests {
     use super::{DaemonClient, DaemonClientError, InProcessDaemonTransport};
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplianceTelemetryWindow,
+        ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
         CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
@@ -1066,6 +1074,69 @@ mod tests {
                 actual: "store_inventory",
             }
         ));
+    }
+
+    #[test]
+    fn rejects_malformed_application_access_token_response() {
+        let transport = InProcessDaemonTransport::new(|_request| {
+            Ok(DaemonApiResponse::ExchangeApplicationAccessToken(
+                ApplicationAccessTokenExchangeResponse {
+                    claims: dasobjectstore_core::application_auth::AccessTokenClaims {
+                        schema_version:
+                            dasobjectstore_core::application_auth::APPLICATION_AUTH_SCHEMA_VERSION
+                                .to_string(),
+                        token_id: "access-1".to_string(),
+                        application_id: "synoptikon".to_string(),
+                        audience: String::new(),
+                        issued_at_unix_seconds: 10,
+                        expires_at_unix_seconds: 20,
+                        scope: dasobjectstore_core::application_auth::ApplicationScope {
+                            store_ids: vec![StoreId::new("codex").expect("store id")],
+                            prefixes: vec!["reads".to_string()],
+                            object_types: Vec::new(),
+                            operations: vec![
+                                dasobjectstore_core::application_auth::ApplicationOperation::Read,
+                            ],
+                            ingress_origin: dasobjectstore_core::ingress::IngressOrigin::Synoptikon,
+                            max_object_bytes: Some(10),
+                            max_total_bytes: Some(100),
+                        },
+                    },
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+        let request = ApplicationAccessTokenExchangeRequest {
+            exchange: dasobjectstore_core::application_auth::AccessTokenExchangeRequest {
+                schema_version:
+                    dasobjectstore_core::application_auth::APPLICATION_AUTH_SCHEMA_VERSION
+                        .to_string(),
+                application_id: "synoptikon".to_string(),
+                key_id: "key-1".to_string(),
+                audience: "dasobjectstore".to_string(),
+                requested_issued_at_unix_seconds: 10,
+                requested_expires_at_unix_seconds: 20,
+                scope: dasobjectstore_core::application_auth::ApplicationScope {
+                    store_ids: vec![StoreId::new("codex").expect("store id")],
+                    prefixes: Vec::new(),
+                    object_types: Vec::new(),
+                    operations: vec![
+                        dasobjectstore_core::application_auth::ApplicationOperation::Read,
+                    ],
+                    ingress_origin: dasobjectstore_core::ingress::IngressOrigin::Synoptikon,
+                    max_object_bytes: Some(10),
+                    max_total_bytes: Some(100),
+                },
+                proof: "proof".to_string(),
+            },
+        };
+        let error = client
+            .exchange_application_access_token(request)
+            .expect_err("malformed response rejected");
+        assert!(matches!(error, DaemonClientError::Transport(_)));
+        assert!(error
+            .to_string()
+            .contains("invalid application access-token response"));
     }
 
     #[test]
