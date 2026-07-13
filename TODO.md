@@ -764,11 +764,11 @@ completion.
   - [x] Add a stable, bounded provider-neutral profile list page with a capped
     continuation offset and prefix filtering; HTTP serialization remains open.
   - [x] Add the versioned, path-free profile-S3 list request/response DTO with
-    the same bounded key count and validation contract; authenticated HTTP
-    routing remains open.
+    the same bounded key count and validation contract; the standalone
+    authenticated Web route now delegates through the bounded daemon bridge.
   - [x] Add the canonical runtime-to-transport list projection helper so Web
     and S3 handlers cannot diverge or leak backend locations; authenticated
-    HTTP routing remains open.
+    Web routing now uses the typed daemon projection.
   - [x] Route the bounded profile-S3 list command through the daemon's
     authenticated storage dispatcher, resolving the registered folder binding
     and daemon-owned capacity policy before querying the authoritative

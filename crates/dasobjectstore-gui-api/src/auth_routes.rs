@@ -43,7 +43,7 @@ pub(crate) use auth_router::{
 use auth_validation::*;
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{
         header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, StatusCode,
@@ -52,6 +52,7 @@ use axum::{
     Json,
 };
 pub use contracts::*;
+use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_daemon::runtime::LOCAL_ADMIN_CONFIRMATION_MARKER;
 use dasobjectstore_daemon::{
     AssignLocalUserToLocalGroupRequest as DaemonAssignLocalUserToLocalGroupRequest,
@@ -73,10 +74,11 @@ use dasobjectstore_daemon::{
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
+    ProfileS3ListRequest as DaemonProfileS3ListRequest,
+    ProfileS3ListResponse as DaemonProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -90,6 +92,13 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 const MAX_PERFORMANCE_REPORT_WORKERS: usize = 2;
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ProfileS3ListQuery {
+    prefix: Option<String>,
+    offset: Option<u64>,
+    limit: Option<u16>,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -216,6 +225,38 @@ async fn standalone_store_capacity(
         .await
         .map(Json)
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "capacity_status_failed"))
+}
+
+async fn standalone_profile_s3_list(
+    Path(store_id): Path<String>,
+    Query(query): Query<ProfileS3ListQuery>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonProfileS3ListResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = StoreId::new(store_id).map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_store_id",
+            error.to_string(),
+        )
+    })?;
+    let request = DaemonProfileS3ListRequest {
+        store_id,
+        prefix: query.prefix,
+        offset: query.offset.unwrap_or_default(),
+        limit: query.limit.unwrap_or(100),
+    };
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .profile_s3_list(request)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_list_failed"))
 }
 
 async fn standalone_enclosures_dashboard(
@@ -1369,6 +1410,30 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/dashboard/object-stores/generated-data/capacity")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_list_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-list-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profile-s3/stores/generated-data/objects")
                     .body(Body::empty())
                     .expect("request builds"),
             )
