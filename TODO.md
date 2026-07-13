@@ -681,8 +681,9 @@ completion.
   HTTP routing remain open. A provider-neutral bounded writer-stream helper now
   verifies catalogue authority and exact declared size before reporting a
   successful copy; the provider-neutral GET reader likewise verifies declared
-  size and checksum as it is consumed. HTTP framing and provider-backed
-  transport remain separate.
+  size and checksum as it is consumed, and the bounded stream helper is
+  exported for adapter consumers. HTTP framing and provider-backed transport
+  remain separate.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots
     from `FolderBackend`; folder-profile catalogue records now reload from the
     private snapshot, while repair/lifecycle/S3 and shared catalogue
