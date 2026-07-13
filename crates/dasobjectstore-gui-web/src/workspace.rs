@@ -120,7 +120,7 @@ impl WorkspacePage {
             Self::Enclosures => enclosures_workspace_api_path(api_base_path),
             Self::ObjectStores => objectstores_workspace_api_path(api_base_path),
             Self::Activity => activity_workspace_api_path(api_base_path),
-            Self::RemoteUpload => remote_upload_workspace_api_path(api_base_path),
+            Self::RemoteUpload => remote_upload_workspace_base_api_path(api_base_path),
             Self::Endpoints => endpoints_workspace_api_path(api_base_path),
             Self::UsersGroups => users_groups_workspace_api_path(api_base_path),
             Self::Bioinformatics => bioinformatics_workspace_api_path(api_base_path),
@@ -189,11 +189,19 @@ pub fn activity_workspace_api_path(api_base_path: &str) -> String {
     crate::activity::activity_workspace_api_path(api_base_path)
 }
 
-pub fn remote_upload_workspace_api_path(api_base_path: &str) -> String {
+fn remote_upload_workspace_base_api_path(api_base_path: &str) -> String {
     format!(
         "{}/{}",
         api_base_path.trim_end_matches('/'),
         REMOTE_UPLOAD_WORKSPACE_ROUTE
+    )
+}
+
+pub fn remote_upload_workspace_api_path(api_base_path: &str, store_id: &str) -> String {
+    format!(
+        "{}?store_id={}",
+        remote_upload_workspace_base_api_path(api_base_path),
+        crate::encoding::percent_encode(store_id.trim())
     )
 }
 

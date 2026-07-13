@@ -4,13 +4,10 @@ use super::*;
 #[cfg(target_arch = "wasm32")]
 #[function_component(RemoteUploadPage)]
 pub fn remote_upload_page(props: &RemoteUploadPageProps) -> Html {
-    let base_api_path = WorkspacePage::RemoteUpload.api_path(&props.api_base_path);
-    let api_path = props.target_store_id.as_deref().map_or_else(
-        || base_api_path.clone(),
-        |store_id| format!("{base_api_path}?store_id={store_id}"),
-    );
+    let api_path =
+        super::remote_upload_workspace_api_path(&props.api_base_path, &props.target_store_id);
     let remote_upload_state = use_state(|| ApiLoadState::<RemoteUploadWorkspaceResponse>::Loading);
-    let selected_store = use_state(|| props.target_store_id.clone().unwrap_or_default());
+    let selected_store = use_state(|| props.target_store_id.clone());
     let selected_files = use_state(Vec::<RemoteUploadSelectedFile>::new);
 
     {

@@ -5,6 +5,7 @@ pub mod activity;
 mod api;
 pub mod components;
 pub mod disks;
+mod encoding;
 pub mod endpoints;
 pub mod entrypoint;
 pub mod mount;

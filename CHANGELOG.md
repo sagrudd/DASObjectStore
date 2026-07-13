@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.97 - 2026-07-13
+
+- Require an explicit ObjectStore target at the Remote Upload page boundary,
+  percent-encode target IDs in the workspace route, and render a clear
+  target-required state instead of mounting an unscoped dropzone.
+
 ## 0.72.96 - 2026-07-13
 
 - Correct the capacity-gate status to reflect the delivered TUI and

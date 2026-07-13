@@ -211,6 +211,5 @@ pub(super) fn render_object_store_inventory(
 #[derive(Clone, Debug, Eq, PartialEq, Properties)]
 pub struct RemoteUploadPageProps {
     pub api_base_path: String,
-    #[prop_or_default]
-    pub target_store_id: Option<String>,
+    pub target_store_id: String,
 }

@@ -513,11 +513,23 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                 WorkspacePage::Activity => html! {
                     <ActivityPage api_base_path={props.api_base_path.clone()} />
                 },
-                WorkspacePage::RemoteUpload => html! {
-                    <RemoteUploadPage
-                        api_base_path={props.api_base_path.clone()}
-                        target_store_id={(*remote_upload_target).clone()}
-                    />
+                WorkspacePage::RemoteUpload => match (*remote_upload_target).clone() {
+                    Some(target_store_id) => html! {
+                        <RemoteUploadPage
+                            api_base_path={props.api_base_path.clone()}
+                            target_store_id={target_store_id}
+                        />
+                    },
+                    None => html! {
+                        <section class="dos-page" data-page="remote-upload" data-state="target-required">
+                            <header class="dos-page-header">
+                                <span class="dos-eyebrow">{ "Easyconnect" }</span>
+                                <h1>{ "Remote Upload" }</h1>
+                                <p>{ "Select a writable ObjectStore before choosing files for remote ingress." }</p>
+                            </header>
+                            <p class="dos-empty-state">{ "Select a writable ObjectStore from ObjectStores before choosing files." }</p>
+                        </section>
+                    },
                 },
                 WorkspacePage::Endpoints => html! {
                     <EndpointsWorkspace api_base_path={props.api_base_path.clone()} />

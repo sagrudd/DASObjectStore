@@ -2327,7 +2327,7 @@ non-destructive close, and restores focus to its trigger when closed.
   the target-scoped pane; the pane now renders the target name, writer group,
   object type, used/free capacity, and paired-agent ingress policy before the
   dropzone.
-- [ ] Change `RemoteUploadPageProps`, the Web state in `src/app.rs`, and the
+- [x] Change `RemoteUploadPageProps`, the Web state in `src/app.rs`, and the
   remote-upload API contract so a target store ID is required. The server must
   reject a missing, unauthorised, non-writable, or disabled target; do not rely
   on the browser’s default selection for authorization. Do not silently select
@@ -2344,6 +2344,10 @@ non-destructive close, and restores focus to its trigger when closed.
   - [x] Render target title/context and the file dropzone only after the
     target-scoped response contains an authorized writable store; include
     writer group, object type, capacity, and paired-agent landing policy.
+  - [x] Make the component boundary target-required as well as the route:
+    `RemoteUploadPageProps` now accepts only a non-empty `String`, the app
+    renders a target-required empty state when no ObjectStore was selected,
+    and target query values are percent-encoded through the shared Web helper.
 - [ ] Keep all existing remote-agent pairing, path privacy, S3 credential,
   SSD-first ingress, daemon job, cancellation, and renewal behaviour. This is
   a presentation/context refactor, not permission or transfer-policy

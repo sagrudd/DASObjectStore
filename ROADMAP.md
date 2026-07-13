@@ -901,6 +901,12 @@ icon-button, inspector, and risky-confirmation primitives now have responsive
 CSS and host-safe semantic source contracts; page-flow refactors remain open
 work in TODO Milestone 24.
 
+The target-scoped Remote Upload Web boundary now requires a concrete
+ObjectStore ID in page props and percent-encodes it in the workspace route;
+the authenticated shell renders an explicit target-required state instead of
+mounting a dropzone without a target. API/permission and visual acceptance
+remain part of the open Milestone 24 work.
+
 ## Milestone 25: Campaign Re-baseline and Compatibility Contracts
 
 Goal: turn the appliance implementation into an explicit multi-profile product

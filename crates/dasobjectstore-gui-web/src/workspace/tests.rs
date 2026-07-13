@@ -352,8 +352,8 @@ fn frontend_page_routes_use_dashboard_contracts() {
         "/api/workspaces/activity"
     );
     assert_eq!(
-        remote_upload_workspace_api_path("/api/"),
-        "/api/workspaces/remote-upload"
+        remote_upload_workspace_api_path("/api/", "store&x y"),
+        "/api/workspaces/remote-upload?store_id=store%26x%20y"
     );
     assert_eq!(
         endpoints_workspace_api_path("/api/"),
@@ -2552,6 +2552,8 @@ fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
     assert!(source.contains("capacity: {} used; {} free"));
     assert!(source.contains("let selected_target = ready_stores"));
     assert!(source.contains("if selected_target.is_some()"));
+    assert!(source.contains("pub target_store_id: String"));
+    assert!(!source.contains("pub target_store_id: Option<String>"));
     assert!(
         source.contains("Select a writable ObjectStore from ObjectStores before choosing files.")
     );
