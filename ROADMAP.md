@@ -1240,6 +1240,9 @@ reconciliation timestamps. Authenticated Web verification and the read-only
 ``store profile-verify`` CLI now require daemon-side size/checksum agreement
 before reporting success and return no backend location. Multipart HTTP
 routing remains separate.
+The same path-free profile-readiness projection is now available through the
+authenticated Web route ``/api/v1/profile-readiness/stores/{store_id}``, using
+the bounded daemon bridge and preserving explicit not-ready reasons.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.

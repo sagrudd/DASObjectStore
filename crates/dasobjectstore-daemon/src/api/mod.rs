@@ -154,7 +154,8 @@ pub use profile_inspection::{
     PROFILE_INSPECTION_SCHEMA_VERSION,
 };
 pub use profile_readiness::{
-    ProfileReadinessRequest, ProfileReadinessResponse, PROFILE_READINESS_SCHEMA_VERSION,
+    ProfileReadinessRequest, ProfileReadinessResponse, PROFILE_READINESS_ROUTE,
+    PROFILE_READINESS_SCHEMA_VERSION,
 };
 pub use profile_s3::{
     ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,

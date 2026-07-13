@@ -98,6 +98,10 @@ pub(crate) fn standalone_dashboard_router_with_state(
             get(standalone_profile_s3_health),
         )
         .route(
+            "/api/v1/profile-readiness/stores/{store_id}",
+            get(standalone_profile_readiness),
+        )
+        .route(
             "/api/v1/dashboard/enclosures",
             get(standalone_enclosures_dashboard),
         )

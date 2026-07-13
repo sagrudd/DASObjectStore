@@ -839,6 +839,9 @@ completion.
     combines binding-root state, folder drift, and daemon capacity admission
     status without fabricating hardware health; expose it through the typed
     client and ``store profile-readiness`` CLI command.
+  - [x] Expose the same readiness projection through the authenticated Web
+    route ``/api/v1/profile-readiness/stores/{store_id}``; the route remains
+    read-only and daemon-backed.
 - [ ] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.

@@ -5,6 +5,7 @@ use dasobjectstore_core::protection::ProtectionPolicy;
 use serde::{Deserialize, Serialize};
 
 pub const PROFILE_READINESS_SCHEMA_VERSION: &str = "dasobjectstore.profile_readiness.v1";
+pub const PROFILE_READINESS_ROUTE: &str = "/api/v1/profile-readiness/stores/{store_id}";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProfileReadinessRequest {
@@ -73,5 +74,14 @@ mod tests {
             .expect("decode")
             .validate()
             .expect("valid response");
+    }
+
+    #[test]
+    fn readiness_route_is_stable_and_store_scoped() {
+        assert_eq!(
+            PROFILE_READINESS_ROUTE,
+            "/api/v1/profile-readiness/stores/{store_id}"
+        );
+        assert!(PROFILE_READINESS_ROUTE.contains("{store_id}"));
     }
 }

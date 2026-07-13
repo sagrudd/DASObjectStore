@@ -68,6 +68,10 @@ The command is read-only. A missing or unreadable root, unmanaged/unsafe folder
 entries, or unavailable/blocked capacity appears as an explicit not-ready
 reason and must be resolved through the daemon's managed workflow.
 
+The same projection is available to authenticated Web clients at
+``/api/v1/profile-readiness/stores/{store_id}``; it uses the daemon bridge and
+does not expose managed paths or credentials.
+
 For a catalogue-authoritative content check, ask the daemon to verify the
 recorded size and checksum against the profile payload. The CLI and
 authenticated Web projection return only logical identity and verification

@@ -77,6 +77,8 @@ use dasobjectstore_daemon::{
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse,
     ProfileDiagnosticsRequest as DaemonProfileDiagnosticsRequest,
     ProfileDiagnosticsResponse as DaemonProfileDiagnosticsResponse,
+    ProfileReadinessRequest as DaemonProfileReadinessRequest,
+    ProfileReadinessResponse as DaemonProfileReadinessResponse,
     ProfileS3HeadRequest as DaemonProfileS3HeadRequest,
     ProfileS3HeadResponse as DaemonProfileS3HeadResponse,
     ProfileS3HealthRequest as DaemonProfileS3HealthRequest,
@@ -378,6 +380,31 @@ async fn standalone_profile_s3_health(
         .await
         .map(Json)
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_health_failed"))
+}
+
+async fn standalone_profile_readiness(
+    Path(store_id): Path<String>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonProfileReadinessResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = StoreId::new(store_id).map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_readiness_invalid_store_id",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .profile_readiness(DaemonProfileReadinessRequest { store_id })
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_readiness_failed"))
 }
 
 async fn standalone_profile_s3_diagnostics(
@@ -1633,6 +1660,30 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/profile-s3/stores/generated-data/verify?key=reads%2Fsample.fastq")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_readiness_requires_a_local_session() {
+        let root = temp_root("standalone-profile-readiness-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profile-readiness/stores/generated-data")
                     .body(Body::empty())
                     .expect("request builds"),
             )
