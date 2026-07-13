@@ -217,17 +217,17 @@ completion.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable
-  provider rediscovery, byte-range restart, and appliance acceptance remain.
+  per-store/prefix manifest rediscovery now resumes the newest incomplete
+  checkpoint; byte-range restart and appliance acceptance remain.
   - [x] Add a versioned provider-independent per-key manifest/resume planner
     with safe key normalization, collision/malformed-key outcomes, atomic
     durable in-progress checkpoints and restart-planner tests; stable manifest
-    rediscovery, true byte-range restart, and appliance/provider acceptance
-    remain.
+    rediscovery is now delivered, while true byte-range restart and
+    appliance/provider acceptance remain.
   - [x] Integrate manifest checkpoints into the Garage transfer path, replace
     aggregate `aws s3 sync` with safe per-key downloads, and expose per-key
     progress through the daemon job stream; interrupted clients leave durable
-    in-progress checkpoints while stable manifest rediscovery and true
-    byte-range restart remain open.
+    in-progress checkpoints while true byte-range restart remains open.
   - [x] Add explicit administrator cancellation tokens for an active
     reconciliation job; cancellation is checked between provider transfers and
     leaves the durable in-progress manifest available for later rediscovery.
@@ -2243,8 +2243,8 @@ list until every temporary size-budget exception has been removed.
   restart. Garage now also reports per-key progress and checks administrator
   cancellation between provider transfers while preserving in-progress
   checkpoints. Remaining work is cancellation during a blocked provider copy,
-  true byte-level/range resume, stable rediscovery after restart, and appliance
-  acceptance rather than a new transfer after daemon restart.
+  true byte-level/range resume, and appliance acceptance rather than a new
+  transfer after daemon restart.
 - [ ] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
