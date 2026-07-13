@@ -1190,7 +1190,7 @@ mod tests {
             6,
         )
         .expect("put");
-        std::fs::write(root.join(record.location), b"changed").expect("tamper");
+        std::fs::write(root.join(record.location), b"changed-more").expect("tamper");
         assert!(verify_profile_object(&backend, &key).is_err());
         let mut downloaded = Vec::new();
         assert!(get_profile_object(&backend, &key)
