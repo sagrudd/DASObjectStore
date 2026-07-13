@@ -518,7 +518,7 @@ completion.
   - [x] Add an authenticated, redacted ``profile_inspection`` transport that
     reports root state and drift counts without host paths or user-relative
     keys; missing roots are inspected without recreating the private namespace.
-- [ ] Finalize ingress on the same filesystem using private temporary files,
+- [x] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.
   - [x] Add the macOS-safe `FolderBackend` staging/finalization path with
@@ -536,7 +536,7 @@ completion.
   ``.dasobjectstore`` namespace. Folder objects remain under the private
   namespace with relative catalogue locations that preserve nested keys;
   read-only inspection excludes that namespace and never adopts user files.
-- [ ] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,
+- [x] Reject symlink escape, hard-link ambiguity, devices, sockets, FIFOs,
   unsafe keys, unsupported names, and files changed during import.
   - [x] Harden `FolderBackend` namespace/parent traversal against symlink
     escapes and reject non-regular entries during enumeration; unsafe key and
@@ -554,7 +554,7 @@ completion.
   - [x] Tighten private namespace/object/staging directories to Unix ``0700``
     and payload files to ``0600`` without changing the user-selected root;
     local permission regression coverage passes on macOS.
-- [ ] Add read-only inspection followed by resumable adoption/reconciliation;
+- [x] Add read-only inspection followed by resumable adoption/reconciliation;
   report unmanaged drift without silently accepting it as authoritative.
   - [x] Add a read-only `FolderBackend::inspect_user_tree` report for unmanaged
     hierarchy and unsafe entries; no adoption or authority change occurs during

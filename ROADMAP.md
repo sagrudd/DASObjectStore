@@ -121,7 +121,8 @@ explicit fail-closed requirement mode for profile-aware callers while legacy
 appliance fallback remains compatible. Programmatic bounded-folder creation now
 bootstraps the daemon-private namespace and an empty durable catalogue
 idempotently without adopting unmanaged user files; explicit adopt/reconcile
-reporting and drive-guarded opening remain subsequent seams.
+reporting and checkpointed source-preserving adoption are delivered, while live
+drive opening still requires platform identity probing.
 Profile create/adopt responses now carry redacted unmanaged/unsafe drift counts
 so callers can require explicit reconciliation without receiving private host
 paths; a separately authenticated inspection transport remains open.
