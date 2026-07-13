@@ -31,10 +31,10 @@ evidence and detailed source tasks.
   approved. Daemon-side completion authorization is tested, but no public
   bearer/renewal-token semantics should be exposed without the security
   decision.
-- The native-versus-provider-backed S3 gateway choice remains a product
-  decision; the approved one-root folder adoption semantics are now encoded in
-  the architecture section and implementation must not infer authority from a
-  path or profile name.
+- The public HTTPS completion authentication contract remains a product/security
+  decision; the native-versus-provider-backed S3 choice is resolved below as a
+  provider-neutral adapter boundary with Garage as the local compatibility
+  provider.
 - The local Playwright screenshot runner reaches the fixture server and its
   deterministic fixture/DOM checks pass, but full artifact execution remains
   blocked because ``packaging/web/prepare-web-dist.sh`` exits without a
@@ -680,7 +680,7 @@ completion.
 
 ### Gate 5: Unified S3, product APIs, and migrations
 
-- [ ] Decide native embedded gateway versus provider-backed S3 per profile while
+- [x] Decide native embedded gateway versus provider-backed S3 per profile while
   preserving one public S3 contract.
 - [ ] Route S3 PUT and multipart completion through quota reservation, daemon
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from

@@ -40,7 +40,9 @@ Promotion uses the resumable migration checkpoint state machine. Source
 placements remain retained through destination verification and are retired only
 after explicit confirmation. A failed or interrupted checkpoint preserves source
 retention. Actual copy workers, portable export/import, package installation,
-S3 gateway choice, and appliance acceptance remain open campaign gates.
+HTTP gateway wiring and appliance acceptance remain open campaign gates; the
+provider-neutral S3 adapter boundary is approved, with Garage retained as the
+local compatibility provider behind the daemon authority.
 
 The matrix must be revised when daemon-owned provisioning, product adapters, or
 real-world acceptance changes a row; it must not be used to infer hardware
