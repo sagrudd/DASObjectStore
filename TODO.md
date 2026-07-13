@@ -2322,6 +2322,9 @@ list until every temporary size-budget exception has been removed.
   telemetry collection. Emit a per-disk diagnostic when the marker has no
   usable block-device mapping, the device is absent from `/proc/diskstats`, or
   counter access is denied.
+  - [x] Reject path-bearing `diskstats_device` marker values before sysfs alias
+    resolution so fixture and host traversal remains bounded to the configured
+    telemetry roots; malformed markers return a typed diagnostic.
 - [x] Model first-sample warm-up separately from unavailable telemetry: retain
   the first counter snapshot, report `first_sample_warmup` for per-disk IO, and
   never present a zero or missing rate as a confirmed idle disk.

@@ -498,13 +498,28 @@ fn parse_managed_hdd_marker(
         });
     }
 
+    let diskstats_device_name =
+        optional_marker_value(&values, "diskstats_device").or_else(|| marker_device_name(&values));
+    if let Some(name) = diskstats_device_name.as_deref() {
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name == "."
+            || name == ".."
+        {
+            return Err(ApplianceTelemetryCollectorError::InvalidDeviceMarker {
+                path: marker_path.to_path_buf(),
+                message: "diskstats_device must be a basename without path separators".to_string(),
+            });
+        }
+    }
+
     Ok(Some(ManagedHddMarker {
         disk_id: disk_id.to_string(),
         label: optional_marker_value(&values, "label").or_else(|| Some(disk_id.to_string())),
         enclosure_id: optional_marker_value(&values, "enclosure_id"),
         bay_label: optional_marker_value(&values, "bay_label"),
-        diskstats_device_name: optional_marker_value(&values, "diskstats_device")
-            .or_else(|| marker_device_name(&values)),
+        diskstats_device_name,
         device_path: optional_marker_value(&values, "device"),
         filesystem: optional_marker_value(&values, "filesystem"),
         mount_path: mount_path.to_path_buf(),
