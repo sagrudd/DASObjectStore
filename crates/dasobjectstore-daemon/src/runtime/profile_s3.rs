@@ -1,4 +1,4 @@
-//! Provider-neutral read semantics for profile-backed S3 adapters.
+//! Provider-neutral read/write semantics for profile-backed S3 adapters.
 //!
 //! This module is deliberately below any HTTP or provider implementation. It
 //! derives list, HEAD, and GET views from the daemon-authoritative backend
@@ -143,7 +143,7 @@ mod tests {
     use super::{
         get_profile_object, head_profile_object, list_profile_objects, put_profile_object,
     };
-    use crate::runtime::FolderBackend;
+    use crate::runtime::{DriveBackend, DriveRuntimeGuard, FolderBackend};
     use dasobjectstore_core::backend::{
         BackendObjectKey, ObjectCatalogueAuthority, ObjectStoreBackend,
     };
@@ -154,6 +154,7 @@ mod tests {
     use dasobjectstore_core::store::CapacityPolicy;
     use std::io::Read;
     use std::path::PathBuf;
+    use std::sync::{atomic::AtomicBool, Arc};
 
     fn backend() -> (FolderBackend, PathBuf) {
         let nonce = std::time::SystemTime::now()
@@ -177,6 +178,53 @@ mod tests {
         let backend = FolderBackend::open(&root, manifest, CapacityPolicy::bounded(1024, 0), 0)
             .expect("folder backend");
         (backend, root)
+    }
+
+    #[derive(Debug)]
+    struct TestDriveGuard(AtomicBool);
+
+    impl DriveRuntimeGuard for TestDriveGuard {
+        fn validate(&self) -> Result<(), String> {
+            if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                Ok(())
+            } else {
+                Err("drive identity drifted".to_string())
+            }
+        }
+    }
+
+    fn drive_backend() -> (DriveBackend, Arc<TestDriveGuard>, PathBuf) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-s3-drive-{}-{nonce}",
+            std::process::id()
+        ));
+        let manifest = ObjectStoreManifest {
+            schema_version: 1,
+            store_id: StoreId::new("profile-s3-drive").expect("store id"),
+            deployment_profile: DeploymentProfile::Drive,
+            host_mode: HostMode::System,
+            protection: ProtectionPolicy::LocalOnly,
+            backend: BackendReference::Drive {
+                filesystem_identity: "fsid:profile-s3-drive".to_string(),
+                device_identity: Some("device:profile-s3-drive".to_string()),
+                media: dasobjectstore_core::manifest::DriveMediaKind::Ssd,
+                mount_path_hint: None,
+            },
+        };
+        let guard = Arc::new(TestDriveGuard(AtomicBool::new(true)));
+        let backend = DriveBackend::open(
+            &root,
+            manifest,
+            CapacityPolicy::bounded(1024, 0),
+            0,
+            guard.clone(),
+        )
+        .expect("drive backend");
+        (backend, guard, root)
     }
 
     #[test]
@@ -278,6 +326,33 @@ mod tests {
         assert!(error.to_string().contains("destination already exists"));
         assert_eq!(backend.capacity().reserved_bytes, 0);
         assert_eq!(list_profile_objects(&backend, None).unwrap().len(), 1);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn drive_profile_uses_the_same_s3_adapter_and_fails_closed_on_guard_loss() {
+        let (mut backend, guard, root) = drive_backend();
+        let key = BackendObjectKey {
+            object_id: "drive/sample.fastq".to_string(),
+            version: 1,
+        };
+        put_profile_object(
+            &mut backend,
+            "profile-s3-drive-put",
+            &key,
+            &mut &b"drive"[..],
+            5,
+        )
+        .expect("drive put");
+        assert_eq!(
+            list_profile_objects(&backend, Some("drive/"))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(head_profile_object(&backend, &key).unwrap().size_bytes, 5);
+        guard.0.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(list_profile_objects(&backend, None).is_err());
         std::fs::remove_dir_all(root).ok();
     }
 }

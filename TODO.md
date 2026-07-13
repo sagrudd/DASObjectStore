@@ -670,6 +670,9 @@ completion.
     through the drive guard. It never walks private payloads, keeps the single
     device failure-domain boundary explicit, and fails closed on guard drift;
     catalogue transaction handoff and Web exposure remain shared-profile work.
+  - [x] Exercise the shared provider-neutral S3 list/HEAD/GET/PUT adapter
+    against a guarded drive backend, including fail-closed reads after
+    simulated identity drift; physical disk probing remains hardware-gated.
   - [x] Expose guarded read-only planning, restart-safe replanning, and
     explicit user-tree adoption through the drive backend wrapper. Adoption
     preserves source files and delegates durable checkpointing and catalogue
