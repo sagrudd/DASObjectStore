@@ -78,6 +78,28 @@ pub(super) fn daemon_job_summary_from_application_key_registration(
     )
 }
 
+pub(super) fn daemon_job_summary_from_application_credential_revocation(
+    response: &ApplicationCredentialRevocationResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "application credential {}/{} {}",
+            response.application_id,
+            response.key_id.as_deref().unwrap_or("identity"),
+            if response.revoked {
+                "revoked"
+            } else {
+                "not found"
+            }
+        ),
+    )
+}
+
 pub(super) fn daemon_job_summary_from_prepare_enclosure(
     response: &PrepareEnclosureResponse,
 ) -> DaemonJobSummary {

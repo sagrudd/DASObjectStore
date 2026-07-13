@@ -9,7 +9,8 @@ pub use in_process::InProcessDaemonTransport;
 pub use unix_socket::UnixSocketDaemonTransport;
 
 use crate::api::{
-    ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplicationIdentityRegistrationRequest,
+    ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplicationCredentialRevocationRequest,
+    ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationRequest,
     ApplicationIdentityRegistrationResponse, ApplicationKeyRegistrationRequest,
     ApplicationKeyRegistrationResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
@@ -377,6 +378,16 @@ where
         }
     }
 
+    pub fn revoke_application_credential(
+        &self,
+        request: ApplicationCredentialRevocationRequest,
+    ) -> Result<ApplicationCredentialRevocationResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RevokeApplicationCredential(request))? {
+            DaemonApiResponse::RevokeApplicationCredential(response) => Ok(response),
+            response => Err(unexpected("revoke_application_credential", response)),
+        }
+    }
+
     pub fn prepare_enclosure(
         &self,
         request: PrepareEnclosureRequest,
@@ -640,6 +651,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::RegisterApplicationIdentity(_) => "register_application_identity",
         DaemonApiResponse::RegisterApplicationKey(_) => "register_application_key",
+        DaemonApiResponse::RevokeApplicationCredential(_) => "revoke_application_credential",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",

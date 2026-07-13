@@ -151,6 +151,78 @@ where
             ))?;
             Ok(DaemonApiResponse::RegisterApplicationKey(response))
         }
+        DaemonApiRequest::RevokeApplicationCredential(mut request) => {
+            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "application credential revocation requires an authenticated local administrator",
+                    )));
+                };
+                if !actor.is_administrator() {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authorization_required",
+                        "application credential revocation requires root, sudo, or dasobjectstore-admin membership",
+                    )));
+                }
+            }
+            let now = handler.clock.now_utc();
+            let revoked = if let Some(key_id) = request.key_id.as_deref() {
+                if request.dry_run {
+                    read_application_key(
+                        &handler.application_key_registry_path,
+                        &request.application_id,
+                        key_id,
+                    )
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+                    .is_some()
+                } else {
+                    deactivate_application_key(
+                        &handler.application_key_registry_path,
+                        &request.application_id,
+                        key_id,
+                    )
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+                }
+            } else if request.dry_run {
+                read_application_identity(
+                    &handler.application_identity_registry_path,
+                    &request.application_id,
+                )
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+                .is_some()
+            } else {
+                deactivate_application_identity(
+                    &handler.application_identity_registry_path,
+                    &request.application_id,
+                )
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+            };
+            let job_id_value = format!(
+                "application-revocation-{}",
+                now.chars()
+                    .map(|character| if character.is_ascii_alphanumeric() {
+                        character
+                    } else {
+                        '-'
+                    })
+                    .collect::<String>()
+                    .trim_matches('-')
+                    .to_ascii_lowercase()
+            );
+            let job_id = DaemonJobId::new(job_id_value.clone()).map_err(|_| {
+                DaemonRequestHandlerError::ServiceRuntime(DaemonServiceRuntimeError::InvalidJobId(
+                    job_id_value,
+                ))
+            })?;
+            let response =
+                ApplicationCredentialRevocationResponse::accepted(job_id, now, request, revoked);
+            handler.record_admin_job(daemon_job_summary_from_application_credential_revocation(
+                &response,
+            ))?;
+            Ok(DaemonApiResponse::RevokeApplicationCredential(response))
+        }
         DaemonApiRequest::PrepareEnclosure(request) => {
             let now = handler.clock.now_utc();
             let response = handler

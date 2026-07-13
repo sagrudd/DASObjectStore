@@ -231,6 +231,7 @@ pub enum DaemonApiRequest {
     ServiceProvision(DaemonServiceProvisionRequest),
     RegisterApplicationIdentity(ApplicationIdentityRegistrationRequest),
     RegisterApplicationKey(ApplicationKeyRegistrationRequest),
+    RevokeApplicationCredential(ApplicationCredentialRevocationRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
@@ -283,6 +284,7 @@ impl DaemonApiRequest {
             Self::ServiceProvision(_) => "service_provision",
             Self::RegisterApplicationIdentity(_) => "register_application_identity",
             Self::RegisterApplicationKey(_) => "register_application_key",
+            Self::RevokeApplicationCredential(_) => "revoke_application_credential",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
@@ -351,6 +353,9 @@ impl DaemonApiRequest {
             Self::RegisterApplicationKey(request) => request
                 .validate()
                 .map_err(application_key_registration_validation_error),
+            Self::RevokeApplicationCredential(request) => request
+                .validate()
+                .map_err(application_credential_revocation_validation_error),
             Self::PrepareEnclosure(request) => request
                 .validate()
                 .map_err(prepare_enclosure_validation_error),
@@ -446,6 +451,7 @@ pub enum DaemonApiResponse {
     ServiceProvision(DaemonServiceProvisionResponse),
     RegisterApplicationIdentity(ApplicationIdentityRegistrationResponse),
     RegisterApplicationKey(ApplicationKeyRegistrationResponse),
+    RevokeApplicationCredential(ApplicationCredentialRevocationResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
@@ -566,6 +572,14 @@ fn application_identity_registration_validation_error(
 
 fn application_key_registration_validation_error(
     error: ApplicationKeyRegistrationValidationError,
+) -> DaemonRequestValidationError {
+    DaemonRequestValidationError::InvalidPolicy {
+        message: error.to_string(),
+    }
+}
+
+fn application_credential_revocation_validation_error(
+    error: ApplicationCredentialRevocationValidationError,
 ) -> DaemonRequestValidationError {
     DaemonRequestValidationError::InvalidPolicy {
         message: error.to_string(),

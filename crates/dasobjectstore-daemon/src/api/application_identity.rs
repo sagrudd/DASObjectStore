@@ -254,6 +254,7 @@ pub struct ApplicationCredentialRevocationResponse {
     pub accepted: DaemonJobAcceptedResponse,
     pub application_id: String,
     pub key_id: Option<String>,
+    pub revoked: bool,
     pub administrator_actor: Option<String>,
 }
 
@@ -262,6 +263,7 @@ impl ApplicationCredentialRevocationResponse {
         job_id: DaemonJobId,
         accepted_at_utc: impl Into<String>,
         request: ApplicationCredentialRevocationRequest,
+        revoked: bool,
     ) -> Self {
         Self {
             accepted: DaemonJobAcceptedResponse {
@@ -272,6 +274,7 @@ impl ApplicationCredentialRevocationResponse {
             },
             application_id: request.application_id,
             key_id: request.key_id,
+            revoked,
             administrator_actor: request.administrator_actor,
         }
     }
