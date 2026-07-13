@@ -23,6 +23,35 @@ for local integration tests and service adapters. Public HTTPS/mTLS listener
 wiring is a separate deployment slice. Do not place private keys, proofs, or
 access-token claims in manifests, logs, shell history, or support tickets.
 
+For local integrations, the CLI can submit a path-free request document to the
+same daemon boundary. The request document contains public identity metadata or
+an externally generated proof; it never contains a private key. Registration
+and revocation still require the daemon's local administrator authorization and
+the confirmation marker required by the typed request:
+
+.. code-block:: console
+
+   sudo dasobjectstore application-auth register-identity \
+     --request ./identity-registration.json --json
+   sudo dasobjectstore application-auth register-key \
+     --request ./key-registration.json --json
+   sudo dasobjectstore application-auth revoke \
+     --request ./credential-revocation.json --json
+
+An application signs the proof-free exchange payload using its private key and
+submits the resulting request without exposing that key to DASObjectStore:
+
+.. code-block:: console
+
+   dasobjectstore application-auth exchange \
+     --request ./access-token-exchange.json --json
+
+The daemon verifies identity/key membership, proof, scope, and lifetime before
+returning the typed access-token claims. The CLI does not sign requests, store
+private keys, accept private/bearer secret fields, or bypass daemon
+authorization. Treat the JSON response as credential material and keep it in a
+trusted process boundary.
+
 Choose an ObjectStore and credential authority
 -----------------------------------------------
 

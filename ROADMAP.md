@@ -98,6 +98,12 @@ slice is:
 5. publish contract fixtures for Synoptikon, Mneion, AlleleAnchor, Mnemosyne,
    and standalone integrations without exposing host paths or secrets.
 
+The packaged CLI now provides a request-file bridge for these daemon-owned
+operations (`application-auth register-identity`, `register-key`, `revoke`,
+and `exchange`). It accepts only the versioned path-free request DTOs; private
+keys stay with the caller's signer and all authorization, proof verification,
+confirmation, and issuance decisions remain inside `dasobjectstored`.
+
 Development self-signing is implemented only as a feature-gated local helper
 for workspace and generated-data tests. It is explicit, short-lived,
 loopback/local-Docker only, and constrained to synthetic validation stores. It

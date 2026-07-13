@@ -884,6 +884,11 @@ completion.
     token, and upload-completion capability adapters. The exchange fixture
     carries a placeholder proof only; daemon cryptographic verification and
     issuance remain authoritative follow-up work.
+  - [x] Add a request-file-based ``application-auth`` CLI bridge for identity
+    registration, public-key rotation, revocation, and proof-bearing token
+    exchange. The CLI never accepts private keys or mints credentials; daemon
+    peer authorization, confirmation markers, proof verification, and token
+    issuance remain authoritative.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit

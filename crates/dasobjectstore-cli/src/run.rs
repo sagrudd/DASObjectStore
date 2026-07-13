@@ -16,6 +16,7 @@ use crate::cli::{
     StoreProfileInspectionArgs, StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs,
     StoreValidateArgs, StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
+mod application_auth;
 mod command_handlers;
 mod connection_status;
 mod disk_lockdown;
@@ -91,6 +92,7 @@ use self::performance_ssd_pipeline::{
 use self::performance_ssd_stage_then_drain::benchmark_ssd_stage_then_drain;
 use self::probe::run_probe;
 
+use self::application_auth::run_application_auth;
 use self::command_handlers::{
     probe_current_platform, run_mnemosyne_export, run_mnemosyne_validate_nas_nfs_endpoint,
     run_object_export, run_object_inspect, run_object_put, run_service_render_compose,
@@ -319,6 +321,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
         },
+        Some(Command::ApplicationAuth(args)) => run_application_auth(args, writer),
         Some(Command::Ingest(args)) => match args.command() {
             Some(IngestCommand::Files(args)) => run_ingest_files(args, writer),
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),

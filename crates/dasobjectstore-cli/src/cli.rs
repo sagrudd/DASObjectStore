@@ -3,6 +3,7 @@ use dasobjectstore_object_service::ObjectServiceProviderId;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+mod application_auth;
 mod disk;
 mod ingest;
 mod object;
@@ -12,6 +13,7 @@ mod service;
 mod store;
 mod subobject;
 
+pub(crate) use application_auth::{ApplicationAuthArgs, ApplicationAuthCommand};
 pub(crate) use disk::{
     DiskArgs, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs,
@@ -91,6 +93,9 @@ pub(crate) enum Command {
     Disk(DiskArgs),
     /// Manage object stores and policy.
     Store(StoreArgs),
+    /// Register, rotate, revoke, or exchange daemon-owned application credentials.
+    #[command(name = "application-auth")]
+    ApplicationAuth(ApplicationAuthArgs),
     /// Inspect SSD ingest and destage work.
     Ingest(IngestArgs),
     /// Manage named SubObject endpoints.
