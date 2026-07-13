@@ -6,8 +6,11 @@
 //! unmounted or identity-drifted drive fails closed instead of writing through
 //! a stale mount directory.
 
-use super::folder_backend::{FolderBackend, FolderCapacitySnapshot, FolderInspectionReport};
+use super::folder_backend::{
+    FolderBackend, FolderCapacitySnapshot, FolderInspectionReport, FolderReconciliationPlan,
+};
 use super::folder_catalogue::{FolderCatalogueBrowserEntry, FolderCatalogueBrowserQuery};
+use super::reconciliation::{ReconciliationManifest, ReconciliationPlan};
 use dasobjectstore_core::backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
     ObjectCatalogueAuthority, ObjectStoreBackend,
@@ -101,6 +104,40 @@ impl DriveBackend {
     pub fn inspect_user_tree(&self) -> Result<FolderInspectionReport, BackendError> {
         self.guard()?;
         self.folder.inspect_user_tree()
+    }
+
+    /// Build a read-only, restart-safe reconciliation plan only while the
+    /// drive identity guard is valid. The returned manifest is caller-owned;
+    /// no source files or managed catalogue state are changed.
+    pub fn plan_user_tree_reconciliation(&self) -> Result<FolderReconciliationPlan, BackendError> {
+        self.guard()?;
+        self.folder.plan_user_tree_reconciliation()
+    }
+
+    /// Replan against a caller-owned checkpoint after validating the mounted
+    /// drive identity. This lets daemon orchestration resume without exposing
+    /// the folder engine or bypassing the drive guard.
+    pub fn replan_user_tree_reconciliation(
+        &self,
+        manifest: &mut ReconciliationManifest,
+    ) -> Result<ReconciliationPlan, BackendError> {
+        self.guard()?;
+        self.folder.replan_user_tree_reconciliation(manifest)
+    }
+
+    /// Explicitly adopt user-visible files through the guarded drive profile.
+    /// The folder engine performs durable staging/checkpointing; callers must
+    /// commit returned records through the drive catalogue authority before
+    /// treating the adoption as complete.
+    pub fn adopt_user_tree_reconciliation(
+        &mut self,
+        checkpoint_path: &Path,
+        manifest: &mut ReconciliationManifest,
+        reservation_prefix: &str,
+    ) -> Result<Vec<BackendObjectRecord>, BackendError> {
+        self.guard()?;
+        self.folder
+            .adopt_user_tree_reconciliation(checkpoint_path, manifest, reservation_prefix)
     }
 
     /// Return the folder-compatible browser projection only while the drive
@@ -213,6 +250,7 @@ impl ObjectCatalogueAuthority for DriveBackend {
 mod tests {
     use super::{DriveBackend, DriveRuntimeGuard};
     use crate::runtime::folder_catalogue::FolderCatalogueBrowserQuery;
+    use crate::runtime::reconciliation::ReconciliationManifest;
     use dasobjectstore_core::backend::{
         BackendObjectKey, ObjectCatalogueAuthority, ObjectStoreBackend,
     };
@@ -357,6 +395,56 @@ mod tests {
             .browser_entries(&FolderCatalogueBrowserQuery::default())
             .is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn drive_reconciliation_adoption_is_guarded_and_restart_safe() {
+        let root = unique_root();
+        let guard_state = Arc::new(FakeGuard(AtomicBool::new(true)));
+        let guard: Arc<dyn DriveRuntimeGuard> = guard_state.clone();
+        let mut backend = DriveBackend::open(
+            &root,
+            manifest(),
+            CapacityPolicy::bounded(1024, 1),
+            0,
+            guard,
+        )
+        .expect("drive backend opens");
+        let source = root.join("incoming/run/data.txt");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("parent creates");
+        fs::write(&source, b"drive source").expect("source writes");
+
+        let checkpoint_path = root.with_extension("drive-adoption").join("manifest.json");
+        let mut checkpoint = backend
+            .plan_user_tree_reconciliation()
+            .expect("drive plan builds")
+            .manifest;
+        checkpoint
+            .save_atomic(&checkpoint_path)
+            .expect("checkpoint saves");
+        let mut resumed = ReconciliationManifest::load(&checkpoint_path).expect("checkpoint loads");
+        let records = backend
+            .adopt_user_tree_reconciliation(&checkpoint_path, &mut resumed, "drive-adopt")
+            .expect("drive adoption succeeds");
+
+        assert_eq!(records.len(), 1);
+        assert!(source.exists(), "adoption preserves the source file");
+        assert_eq!(
+            backend.catalogue_records().expect("records guarded").len(),
+            1
+        );
+        assert_eq!(backend.capacity().used_bytes, 12);
+        assert!(resumed.entries["incoming/run/data.txt"]
+            .state
+            .eq(&crate::runtime::reconciliation::ReconciliationEntryState::Complete));
+
+        guard_state.0.store(false, Ordering::SeqCst);
+        assert!(backend.plan_user_tree_reconciliation().is_err());
+        assert!(backend
+            .adopt_user_tree_reconciliation(&checkpoint_path, &mut resumed, "drive-adopt")
+            .is_err());
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(checkpoint_path.parent().expect("checkpoint parent"));
     }
 
     #[test]

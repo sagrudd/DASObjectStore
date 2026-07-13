@@ -204,6 +204,15 @@ Drive capacity snapshots and read-only user-tree inspection are exposed through
 the same guarded boundary; live capacity uses a fail-closed identity check so a
 stale mount cannot be presented as current. SMART/NVMe endurance and live
 device inventory are hardware-dependent follow-up work.
+
+Drive profiles also expose guarded reconciliation planning and explicit
+user-tree adoption. The daemon validates the mounted-drive identity before
+reading or copying source files, preserves the source hierarchy, and records
+restart-safe checkpoints through the shared folder engine. Adoption is an
+explicit operation rather than an implicit write: returned records must pass
+through the daemon catalogue transaction before they are considered complete.
+The drive wrapper does not expose private backend paths or bypass the runtime
+guard when the mount/device identity has drifted.
 The drive boundary also exposes the bounded, profile-neutral folder catalogue
 projection only while the mount/device guard is valid. It reports authoritative
 keys, versions, sizes, checksums, and private locations, does not enumerate

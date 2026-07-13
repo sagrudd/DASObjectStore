@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.11 - 2026-07-13
+
+- Add guarded drive-profile reconciliation planning and explicit adoption with
+  restart-safe checkpoints while preserving source files.
+
 ## 0.76.10 - 2026-07-13
 
 - Wire authenticated bounded-folder adoption through a daemon-owned,
