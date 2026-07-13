@@ -837,6 +837,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Move Activity grids, queue/task cards, typography, and responsive
     rules into `styles/activity.css`; keep shared card/form primitives in the
     base sheet and preserve feature ownership/order tests.
+  - [x] Move enclosure wizard selectors into `styles/enclosures.css` while
+    retaining shared form/review primitives in the base sheet.
   - [x] Move remote-upload layout and selection styles into the dedicated
     `styles/remote-upload.css` feature sheet, register it with Trunk, and keep
     CSS contract tests loading the shared and feature-owned sheets together.

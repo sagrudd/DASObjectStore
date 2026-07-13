@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.108 - 2026-07-13
+
+- Move enclosure wizard selectors into feature-owned CSS with base-leakage and
+  registration-order regression coverage.
+
 ## 0.72.107 - 2026-07-13
 
 - Centralize checked logical used-byte accounting through the shared catalogue

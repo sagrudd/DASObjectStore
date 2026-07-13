@@ -2174,6 +2174,9 @@ fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
         ".dos-detail-list",
         ".dos-drive-card",
         ".dos-slot-list",
+        ".dos-enclosure-wizard",
+        ".dos-wizard-header",
+        ".dos-wizard-steps",
     ] {
         assert!(
             css.contains(selector),
@@ -2187,6 +2190,9 @@ fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
         ".dos-detail-list",
         ".dos-drive-card",
         ".dos-slot-list",
+        ".dos-enclosure-wizard",
+        ".dos-wizard-header",
+        ".dos-wizard-steps",
     ] {
         assert!(
             !base.contains(selector),
