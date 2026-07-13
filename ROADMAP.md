@@ -1193,6 +1193,12 @@ writer group and packaged daemon socket are present. Host-registry mutation is
 retained only for explicit registry/test and no-writer-group migration paths;
 portable SSD mirroring remains a separate compatibility concern.
 
+The daemon-ownership backlog is now tracked as partial rather than open: store
+drain/delete, ingest queue drain, object put, disk retirement, and normal
+writer-group creation have typed runtime operations and regression coverage.
+CLI migration fallbacks and any remaining managed mutation require their own
+daemon runtime operation before they can be marked complete.
+
 The profile-by-host-mode support matrix and fail-closed upgrade/migration
 policy are published in `docs/user/storage-profile-matrix.rst`; preview rows
 remain distinct from DASServer/Garage acceptance and product-adapter blocks.

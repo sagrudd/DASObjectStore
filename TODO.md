@@ -1169,11 +1169,16 @@ list until every temporary size-budget exception has been removed.
     new exception.
   - [x] Move Store drain/delete CLI presentation and daemon request adapters into
     `run/store_write.rs`, leaving the root runner focused on dispatch.
-- [ ] Complete the daemon ownership boundary: add daemon request contracts and
+- [~] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
   disk retirement, and other managed mutations still performed by the CLI.
-  Do not redirect a CLI command to an acceptance-only daemon request unless the
-  daemon actually performs and reports the requested operation.
+  The listed store, ingest, disk-retirement, deletion, object-put, and normal
+  writer-group creation paths now execute and report through typed daemon
+  operations; remaining CLI migration fallbacks and any unlisted managed
+  mutation must not be treated as daemon-owned until their runtime operation is
+  implemented. Do not redirect a CLI command to an acceptance-only daemon
+  request unless the daemon actually performs and reports the requested
+  operation.
   - [x] Route `store drain` through a typed daemon request; keep authorization,
     managed-HDD discovery, metadata mutation, and the full drain report inside
     the daemon while preserving CLI JSON/text output.
