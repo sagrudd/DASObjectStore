@@ -344,3 +344,82 @@ pub enum CapacityLedgerError {
     },
     Overflow,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CapacityLedgerError, CapacityPressureState, CapacityReservationLedger,
+        LogicalObjectVersionCharge,
+    };
+    use crate::store::CapacityPolicy;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    #[test]
+    fn contended_reservations_never_overbook_the_logical_limit() {
+        let ledger = Arc::new(Mutex::new(
+            CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 0)
+                .expect("valid capacity policy"),
+        ));
+        let workers = (0..8)
+            .map(|index| {
+                let ledger = Arc::clone(&ledger);
+                thread::spawn(move || {
+                    let mut ledger = ledger.lock().expect("ledger lock");
+                    ledger
+                        .reserve_object_version(
+                            format!("contended-{index}"),
+                            LogicalObjectVersionCharge::new(300),
+                        )
+                        .is_ok()
+                })
+            })
+            .collect::<Vec<_>>();
+        let admitted = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("worker completes"))
+            .filter(|admitted| *admitted)
+            .count();
+        let ledger = ledger.lock().expect("ledger lock");
+        assert_eq!(admitted, 3);
+        assert_eq!(ledger.reserved_bytes(), 900);
+        assert_eq!(ledger.available_bytes(), Some(100));
+    }
+
+    #[test]
+    fn lowering_quota_preserves_usage_and_blocks_new_admission() {
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 700)
+            .expect("valid capacity policy");
+        ledger
+            .update_policy(CapacityPolicy::bounded(600, 0))
+            .expect("policy update validates");
+        assert_eq!(ledger.pressure_state(), CapacityPressureState::OverQuota);
+        assert_eq!(ledger.available_bytes(), Some(0));
+        assert!(matches!(
+            ledger.reserve("over-quota", 1),
+            Err(CapacityLedgerError::InsufficientCapacity { available_bytes: 0 })
+        ));
+        assert_eq!(ledger.used_bytes(), 700);
+    }
+
+    #[test]
+    fn expiry_uses_creation_timestamp_and_retains_unknown_age() {
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 0)
+            .expect("valid capacity policy");
+        ledger
+            .reserve_at_unix_seconds("old", 100, 100)
+            .expect("old reservation");
+        ledger
+            .reserve_at_unix_seconds("new", 200, 190)
+            .expect("new reservation");
+        ledger
+            .reserve_at_unix_seconds("legacy", 50, 0)
+            .expect("legacy reservation");
+        assert_eq!(
+            ledger.expire_reservations(200, 100),
+            vec![("old".to_string(), 100)]
+        );
+        assert_eq!(ledger.reservation_bytes("legacy"), Some(50));
+        assert_eq!(ledger.reservation_bytes("new"), Some(200));
+    }
+}

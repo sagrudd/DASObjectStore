@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.15 - 2026-07-13
+
+- Add core capacity-ledger regressions for contended admission, quota
+  lowering, and deterministic reservation expiry.
+
 ## 0.76.14 - 2026-07-13
 
 - Expose a side-effect-free CLI renderer for validated macOS per-user

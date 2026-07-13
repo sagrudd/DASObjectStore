@@ -489,6 +489,10 @@ completion.
     Crash/restart persistence, multipart expiry, dedupe, and full-filesystem
     fixtures are otherwise covered above; multipart expiry/renewal remains
     lease-policy gated.
+  - [x] Add core-ledger regressions for mutex-contended reservations, quota
+    lowering while usage is over limit, and deterministic timestamp expiry;
+    unknown-age legacy reservations remain retained and no lease scheduler is
+    enabled without an approved policy.
 
 ### Gate 3: Bounded folder profile
 
