@@ -11,17 +11,18 @@ pub use unix_socket::UnixSocketDaemonTransport;
 use crate::api::{
     ApplianceTelemetryRequest, ApplianceTelemetryResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
-    CapacityAdmissionRequest, CapacityAdmissionResponse, CreateLocalGroupRequest,
-    CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
-    DaemonApiRequest, DaemonApiResponse, DaemonHealthSummaryRequest, DaemonHealthSummaryResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
-    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
-    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-    DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, IngestJobStatusRequest,
-    IngestJobStatusResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
-    ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
-    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
+    CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
+    CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse,
+    DaemonHealthSummaryRequest, DaemonHealthSummaryResponse, DaemonIngestProgressEvent,
+    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobListRequest, DaemonJobListResponse,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
+    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
+    DiskRetireRequest, DiskRetireResponse, IngestJobStatusRequest, IngestJobStatusResponse,
+    IngestQueueDrainRequest, IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse,
+    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
+    ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
     ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
     PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
@@ -94,6 +95,16 @@ where
         match self.send(DaemonApiRequest::StoreInventory(request))? {
             DaemonApiResponse::StoreInventory(response) => Ok(response),
             response => Err(unexpected("store_inventory", response)),
+        }
+    }
+
+    pub fn capacity_status(
+        &self,
+        request: CapacityStatusRequest,
+    ) -> Result<CapacityStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CapacityStatus(request))? {
+            DaemonApiResponse::CapacityStatus(response) => Ok(response),
+            response => Err(unexpected("capacity_status", response)),
         }
     }
 
@@ -566,6 +577,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
         DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",
+        DaemonApiResponse::CapacityStatus(_) => "capacity_status",
         DaemonApiResponse::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
@@ -600,17 +612,18 @@ mod tests {
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplianceTelemetryWindow,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-        CapacityAdmissionRequest, CapacityAdmissionResponse, CreateLocalGroupRequest,
-        CreateLocalGroupResponse, CreateObjectStoreRequest, CreateObjectStoreResponse,
-        DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind, DaemonEndpointValidation,
-        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonJobCancelRequest,
-        DaemonJobCancelResponse, DaemonJobEvent, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
-        DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
-        DaemonJobStatusResponse, DaemonJobSummary, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        DaemonSsdPressure, ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
+        CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
+        CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
+        CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonIngestConflictPolicy, DaemonJobCancelRequest, DaemonJobCancelResponse,
+        DaemonJobEvent, DaemonJobId, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse,
+        DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
+        DaemonJobSummary, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
+        DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
+        DaemonServiceStatusRequest, DaemonServiceStatusResponse, DaemonSsdPressure,
+        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
+        ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
         ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
@@ -699,6 +712,41 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::CapacityAdmission(_)]
+        ));
+    }
+
+    #[test]
+    fn capacity_status_uses_read_only_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::CapacityStatus(CapacityStatusResponse {
+                store_id: StoreId::new("codex").expect("store id"),
+                pressure: dasobjectstore_core::store::CapacityPressureState::Normal,
+                logical_limit_bytes: Some(1_000),
+                used_bytes: 100,
+                reserved_bytes: 20,
+                logical_available_bytes: Some(880),
+                backend_free_bytes: 2_000,
+                backend_available_bytes: 1_900,
+                ssd_available_bytes: Some(500),
+                copy_count: 2,
+                requires_ssd_staging: true,
+                warning_threshold_basis_points: 8_000,
+                critical_threshold_basis_points: 9_500,
+                admission_block_reason: None,
+            }))
+        });
+        let client = DaemonClient::new(transport);
+        let response = client
+            .capacity_status(CapacityStatusRequest {
+                store_id: "codex".to_string(),
+            })
+            .expect("capacity status response");
+        assert_eq!(response.used_bytes, 100);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::CapacityStatus(_)]
         ));
     }
 

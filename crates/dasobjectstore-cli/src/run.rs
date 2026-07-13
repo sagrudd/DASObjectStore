@@ -8,10 +8,11 @@ use crate::cli::{
     ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder,
     PerformanceFileSelection, PerformanceReportArgs, PerformanceScenarioSelection,
     PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
-    ServiceCommand, ServiceRenderComposeArgs, StoreAdoptArgs, StoreCapabilitiesArgs, StoreCommand,
-    StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs,
-    StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs, StoreRepairArgs, StoreS3UploadArgs,
-    StoreValidateArgs, StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
+    ServiceCommand, ServiceRenderComposeArgs, StoreAdoptArgs, StoreCapabilitiesArgs,
+    StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs,
+    StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs,
+    StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
+    SubobjectCreateArgs,
 };
 mod command_handlers;
 mod connection_status;
@@ -145,8 +146,8 @@ use self::storage_lifecycle::{
     run_disk_replace, run_disk_retire, run_pool_import, run_pool_inspect, run_pool_repair,
 };
 use self::store_read::{
-    run_store_capabilities, run_store_contents, run_store_defaults, run_store_list,
-    run_store_s3_upload, run_store_validate,
+    run_store_capabilities, run_store_capacity, run_store_contents, run_store_defaults,
+    run_store_list, run_store_s3_upload, run_store_validate,
 };
 use self::store_write::{
     run_store_adopt, run_store_create, run_store_deduplicate, run_store_delete, run_store_drain,
@@ -164,9 +165,9 @@ use dasobjectstore_core::risk::{
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_daemon::{
-    authoritative_performance_recommendation_path, DaemonClient, DaemonClientError,
-    DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
-    DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
+    authoritative_performance_recommendation_path, CapacityStatusRequest, DaemonClient,
+    DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
+    DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
     DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
@@ -295,6 +296,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Deduplicate(args)) => run_store_deduplicate(args, writer),
             Some(StoreCommand::Defaults(args)) => run_store_defaults(args, writer),
             Some(StoreCommand::Capabilities(args)) => run_store_capabilities(args, writer),
+            Some(StoreCommand::Capacity(args)) => run_store_capacity(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
             Some(StoreCommand::IngestPolicy(args)) => run_store_ingest_policy(args, writer),
             Some(StoreCommand::S3Upload(args)) => run_store_s3_upload(args, writer),

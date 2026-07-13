@@ -3,7 +3,10 @@
 //! The provider deliberately owns all usage and free-space observations. A
 //! request can ask for a decision, but it cannot provide trusted accounting.
 
-use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
+use crate::api::{
+    CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
+    CapacityStatusResponse,
+};
 use crate::runtime::capacity_persistence::{load_capacity_ledger, save_capacity_ledger};
 use crate::runtime::service::DaemonServiceRuntimeError;
 use dasobjectstore_core::ids::StoreId;
@@ -51,6 +54,13 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         &self,
         request: CapacityAdmissionRequest,
     ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError>;
+
+    fn status(
+        &self,
+        _request: CapacityStatusRequest,
+    ) -> Result<CapacityStatusResponse, DaemonServiceRuntimeError> {
+        Err(unavailable("capacity status provider is not configured"))
+    }
 
     fn admit_remote_upload(
         &self,
@@ -249,6 +259,66 @@ impl<P> CapacityAdmissionProvider for FileBackedCapacityAdmissionProvider<P>
 where
     P: CapacitySpaceProbe,
 {
+    fn status(
+        &self,
+        request: CapacityStatusRequest,
+    ) -> Result<CapacityStatusResponse, DaemonServiceRuntimeError> {
+        let store_id = request.validate().map_err(|error| {
+            DaemonServiceRuntimeError::Validation(
+                crate::api::DaemonRequestValidationError::UnsupportedFieldValue {
+                    field: "capacity_status",
+                    value: error.to_string(),
+                },
+            )
+        })?;
+        let definitions = read_store_registry(&self.store_registry_path)
+            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        let definition = definitions
+            .into_iter()
+            .find(|definition| definition.store_id == store_id)
+            .ok_or_else(|| unavailable(format!("unknown object store {store_id}")))?;
+        let mut ledgers = self
+            .ledgers
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = if let Some(ledger) = ledgers.get_mut(store_id.as_str()) {
+            ledger
+        } else {
+            let ledger =
+                self.load_or_initialize(store_id.as_str(), definition.policy.capacity.clone())?;
+            ledgers.insert(store_id.as_str().to_string(), ledger);
+            ledgers
+                .get_mut(store_id.as_str())
+                .expect("ledger inserted before lookup")
+        };
+        ledger
+            .update_policy(definition.policy.capacity.clone())
+            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
+        let backend_free_bytes = self
+            .probe
+            .free_bytes(&self.backend_probe_root)
+            .map_err(|error| unavailable(format!("backend capacity probe failed: {error}")))?;
+        let requires_ssd_staging =
+            definition.policy.ingest_mode != dasobjectstore_core::store::IngestMode::DirectToHdd;
+        let ssd_free_bytes = if requires_ssd_staging {
+            self.probe
+                .free_bytes(&self.ssd_probe_root)
+                .map_err(|error| unavailable(format!("SSD capacity probe failed: {error}")))?
+        } else {
+            0
+        };
+        CapacityStatusResponse::from_ledger(
+            &request,
+            &definition.policy.capacity,
+            ledger,
+            definition.policy.copies,
+            requires_ssd_staging,
+            backend_free_bytes,
+            ssd_free_bytes,
+        )
+        .map_err(|error| unavailable(format!("capacity status failed: {error}")))
+    }
+
     fn admit(
         &self,
         request: CapacityAdmissionRequest,
@@ -411,7 +481,10 @@ mod tests {
     use super::{
         CapacityAdmissionProvider, CapacitySpaceProbe, FileBackedCapacityAdmissionProvider,
     };
-    use crate::api::{CapacityAdmissionDecision, CapacityAdmissionRequest, DaemonIngressOrigin};
+    use crate::api::{
+        CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
+        CapacityStatusRequest, DaemonIngressOrigin,
+    };
     use crate::runtime::{load_capacity_ledger, save_capacity_ledger};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{
@@ -542,6 +615,46 @@ mod tests {
         let released = load_capacity_ledger(&ledger_path).expect("released ledger reload");
         assert_eq!(released.reserved_bytes(), 0);
         assert_eq!(released.used_bytes(), 100);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn provider_reports_read_only_status_without_reserving() {
+        let root = root("status");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let ledger_path = ledger_dir.join("codex.json");
+        let ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 900)
+            .expect("ledger");
+        save_capacity_ledger(&ledger_path, &ledger).expect("ledger seed");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        );
+        let status = provider
+            .status(CapacityStatusRequest {
+                store_id: "codex".to_string(),
+            })
+            .expect("status available");
+        assert_eq!(status.used_bytes, 900);
+        assert_eq!(status.reserved_bytes, 0);
+        assert_eq!(status.logical_available_bytes, Some(0));
+        assert_eq!(
+            status.admission_block_reason,
+            Some(CapacityAdmissionRejectionReason::LogicalQuota)
+        );
+        assert_eq!(
+            load_capacity_ledger(&ledger_path)
+                .expect("ledger reload")
+                .reserved_bytes(),
+            0
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

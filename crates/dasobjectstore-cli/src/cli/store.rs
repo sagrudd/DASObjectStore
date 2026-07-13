@@ -39,6 +39,8 @@ pub(crate) enum StoreCommand {
     Defaults(StoreDefaultsArgs),
     /// Show daemon-owned folder, drive, and appliance capability contracts.
     Capabilities(StoreCapabilitiesArgs),
+    /// Show daemon-owned live logical and physical capacity state.
+    Capacity(StoreCapacityArgs),
     /// List system-managed object stores.
     List(StoreListArgs),
     /// Inspect or update the daemon-owned store ingest landing policy.
@@ -57,6 +59,25 @@ pub(crate) struct StoreCapabilitiesArgs {
 }
 
 impl StoreCapabilitiesArgs {
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreCapacityArgs {
+    /// ObjectStore identifier to inspect.
+    store_id: StoreId,
+    /// Emit the capacity status as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreCapacityArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+
     pub(crate) fn json(&self) -> bool {
         self.json
     }
@@ -644,6 +665,26 @@ mod tests {
             panic!("expected capabilities command")
         };
         assert!(capabilities.json());
+    }
+
+    #[test]
+    fn parses_store_capacity_json_flag() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "capacity",
+            "generated-data",
+            "--json",
+        ])
+        .expect("store capacity parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::Capacity(capacity)) = args.command() else {
+            panic!("expected capacity command")
+        };
+        assert_eq!(capacity.store_id().as_str(), "generated-data");
+        assert!(capacity.json());
     }
 
     #[test]

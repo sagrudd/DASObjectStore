@@ -1,5 +1,8 @@
 use super::*;
-use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
+use crate::api::{
+    CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
+    CapacityStatusResponse,
+};
 
 pub trait DaemonServiceOrchestrator {
     fn status(
@@ -28,6 +31,15 @@ pub trait DaemonServiceOrchestrator {
     ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
         Err(DaemonServiceRuntimeError::UnsupportedOperation {
             operation: "capacity admission provider is not configured".to_string(),
+        })
+    }
+
+    fn capacity_status(
+        &self,
+        _request: CapacityStatusRequest,
+    ) -> Result<CapacityStatusResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "capacity status provider is not configured".to_string(),
         })
     }
 

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.58 - 2026-07-13
+
+- Add read-only daemon and CLI capacity status with ledger pressure,
+  reservation, backend/SSD availability, and explicit admission-block reasons.
+
 ## 0.72.57 - 2026-07-13
 
 - Add an operator runbook for restoring Home telemetry, distinguishing warm-up,

@@ -230,6 +230,14 @@ The CLI exposes the same contract through ``dasobjectstore store capabilities``
 (``--json`` is available for automation); it does not bypass daemon authority
 or claim that an appliance is reachable.
 
+Operators can inspect the daemon-owned live ledger and filesystem observations
+with ``dasobjectstore store capacity <store-id>`` (or ``--json`` for an
+adapter). The read-only command reports logical used/reserved/available bytes,
+backend and SSD availability, copy count, pressure state, and an explicit
+admission-block reason. It never accepts caller-supplied usage or free-space
+values; an unavailable provider is reported as an error rather than guessed
+capacity.
+
 Product-owned policy templates
 ------------------------------
 

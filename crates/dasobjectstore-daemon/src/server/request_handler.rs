@@ -177,32 +177,26 @@ where
         self.live_sqlite_path = live_sqlite_path.into();
         self
     }
-
     pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
         self.hdd_root_path = hdd_root_path.into();
         self
     }
-
     pub fn with_appliance_telemetry_state_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.appliance_telemetry_state_path = path.into();
         self
     }
-
     pub fn with_remote_easyconnect_session_store_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.remote_easyconnect_session_store_path = path.into();
         self
     }
-
     pub fn with_remote_easyconnect_pairing_store_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.remote_easyconnect_pairing_store_path = path.into();
         self
     }
-
     pub fn with_credential_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.credential_registry_path = path.into();
         self
     }
-
     pub fn with_remote_upload_admission_gate(
         mut self,
         remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
@@ -227,7 +221,6 @@ where
     ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
         self.handle_with_progress_for_actor(request, None, emit_progress)
     }
-
     pub fn handle_with_progress_for_actor(
         &self,
         request: DaemonApiRequest,
@@ -240,7 +233,6 @@ where
 
         dispatch::request(self, request, actor, &mut emit_progress)
     }
-
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
         if let Some(registry) = &self.admin_job_registry {
             registry
@@ -653,6 +645,13 @@ where
     ) -> Result<crate::api::CapacityAdmissionResponse, DaemonServiceRuntimeError> {
         GarageServiceController::capacity_admission(self, request)
     }
+
+    fn capacity_status(
+        &self,
+        request: crate::api::CapacityStatusRequest,
+    ) -> Result<crate::api::CapacityStatusResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::capacity_status(self, request)
+    }
     fn prepare_enclosure(
         &self,
         request: PrepareEnclosureRequest,
@@ -976,6 +975,7 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(_) => "create_object_store",
             Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::CapacityAdmission(_) => "capacity_admission",
+            Self::CapacityStatus(_) => "capacity_status",
             Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
             Self::ObjectBrowser(_) => "object_browser",
             Self::ObjectDownload(_) => "object_download",

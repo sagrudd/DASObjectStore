@@ -125,6 +125,18 @@ where
             .admit(request)
     }
 
+    pub fn capacity_status(
+        &self,
+        request: crate::api::CapacityStatusRequest,
+    ) -> Result<crate::api::CapacityStatusResponse, DaemonServiceRuntimeError> {
+        self.capacity_admission_provider
+            .as_ref()
+            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "capacity status provider is not configured".to_string(),
+            })?
+            .status(request)
+    }
+
     pub fn submit_ingest_files_with_capacity_provider(
         &self,
         request: SubmitIngestFilesRequest,

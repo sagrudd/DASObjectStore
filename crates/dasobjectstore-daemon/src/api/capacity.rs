@@ -8,7 +8,8 @@ use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::ingress::IngressOrigin;
 use dasobjectstore_core::store::{
     evaluate_capacity_admission, CapacityAdmissionError, CapacityAdmissionInput,
-    CapacityLedgerError, CapacityPolicy, CapacityReservationLedger, LogicalObjectVersionCharge,
+    CapacityLedgerError, CapacityPolicy, CapacityPressureState, CapacityReservationLedger,
+    LogicalObjectVersionCharge,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -268,6 +269,85 @@ impl CapacityAdmissionResponse {
             warning_threshold_basis_points: policy.warning_threshold_basis_points,
             critical_threshold_basis_points: policy.critical_threshold_basis_points,
             message,
+        })
+    }
+}
+
+/// Read-only live capacity state for an ObjectStore. The daemon fills every
+/// accounting and filesystem observation; callers cannot supply usage or free
+/// space values through this request.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityStatusRequest {
+    pub store_id: String,
+}
+
+impl CapacityStatusRequest {
+    pub fn validate(&self) -> Result<StoreId, CapacityAdmissionValidationError> {
+        if !is_safe_store_id(&self.store_id) {
+            return Err(CapacityAdmissionValidationError::InvalidStoreId);
+        }
+        StoreId::new(self.store_id.clone())
+            .map_err(|_| CapacityAdmissionValidationError::InvalidStoreId)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapacityStatusResponse {
+    pub store_id: StoreId,
+    pub pressure: CapacityPressureState,
+    pub logical_limit_bytes: Option<u64>,
+    pub used_bytes: u64,
+    pub reserved_bytes: u64,
+    pub logical_available_bytes: Option<u64>,
+    pub backend_free_bytes: u64,
+    pub backend_available_bytes: u64,
+    pub ssd_available_bytes: Option<u64>,
+    pub copy_count: u8,
+    pub requires_ssd_staging: bool,
+    pub warning_threshold_basis_points: u16,
+    pub critical_threshold_basis_points: u16,
+    pub admission_block_reason: Option<CapacityAdmissionRejectionReason>,
+}
+
+impl CapacityStatusResponse {
+    pub fn from_ledger(
+        request: &CapacityStatusRequest,
+        policy: &CapacityPolicy,
+        ledger: &CapacityReservationLedger,
+        copy_count: u8,
+        requires_ssd_staging: bool,
+        backend_free_bytes: u64,
+        ssd_free_bytes: u64,
+    ) -> Result<Self, CapacityAdmissionValidationError> {
+        let store_id = request.validate()?;
+        let backend_available_bytes =
+            backend_free_bytes.saturating_sub(policy.backend_reserve_bytes);
+        let logical_available_bytes = ledger.available_bytes();
+        let ssd_available_bytes = requires_ssd_staging.then_some(ssd_free_bytes);
+        let admission_block_reason = if logical_available_bytes.is_some_and(|value| value == 0) {
+            Some(CapacityAdmissionRejectionReason::LogicalQuota)
+        } else if backend_available_bytes == 0 {
+            Some(CapacityAdmissionRejectionReason::BackendReserve)
+        } else if requires_ssd_staging && ssd_free_bytes == 0 {
+            Some(CapacityAdmissionRejectionReason::SsdStaging)
+        } else {
+            None
+        };
+        Ok(Self {
+            store_id,
+            pressure: ledger.pressure_state(),
+            logical_limit_bytes: policy.logical_limit_bytes,
+            used_bytes: ledger.used_bytes(),
+            reserved_bytes: ledger.reserved_bytes(),
+            logical_available_bytes,
+            backend_free_bytes,
+            backend_available_bytes,
+            ssd_available_bytes,
+            copy_count,
+            requires_ssd_staging,
+            warning_threshold_basis_points: policy.warning_threshold_basis_points,
+            critical_threshold_basis_points: policy.critical_threshold_basis_points,
+            admission_block_reason,
         })
     }
 }
@@ -563,5 +643,32 @@ mod tests {
         assert_eq!(encoded["decision"], json!("rejected"));
         assert_eq!(encoded["reason"], json!("backend_reserve"));
         assert!(encoded["ssd_available_bytes"].is_number());
+    }
+
+    #[test]
+    fn capacity_status_reports_ledger_pressure_and_block_reason() {
+        let request = CapacityStatusRequest {
+            store_id: "codex".to_string(),
+        };
+        let policy = CapacityPolicy::bounded(1_000, 100);
+        let mut ledger =
+            CapacityReservationLedger::new(policy.clone(), 900).expect("ledger policy is valid");
+        let status =
+            CapacityStatusResponse::from_ledger(&request, &policy, &ledger, 2, true, 500, 200)
+                .expect("status evaluates");
+        assert_eq!(status.pressure, CapacityPressureState::Critical);
+        assert_eq!(status.logical_available_bytes, Some(0));
+        assert_eq!(
+            status.admission_block_reason,
+            Some(CapacityAdmissionRejectionReason::LogicalQuota)
+        );
+        assert_eq!(status.ssd_available_bytes, Some(200));
+        ledger
+            .reserve("pending", 1)
+            .expect_err("over-quota status must not mutate ledger");
+        assert_eq!(ledger.reserved_bytes(), 0);
+        let encoded = serde_json::to_value(status).expect("status serializes");
+        assert_eq!(encoded["pressure"], json!("critical"));
+        assert_eq!(encoded["admission_block_reason"], json!("logical_quota"));
     }
 }

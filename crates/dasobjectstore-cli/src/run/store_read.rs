@@ -285,6 +285,58 @@ pub(super) fn run_store_capabilities(
     Ok(())
 }
 
+pub(super) fn run_store_capacity(
+    args: &StoreCapacityArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.capacity_status(CapacityStatusRequest {
+        store_id: args.store_id().as_str().to_string(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "ObjectStore capacity")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Pressure: {:?}", response.pressure)?;
+        writeln!(writer, "Logical limit: {:?}", response.logical_limit_bytes)?;
+        writeln!(writer, "Used: {}", format_bytes(response.used_bytes as f64))?;
+        writeln!(
+            writer,
+            "Reserved: {}",
+            format_bytes(response.reserved_bytes as f64)
+        )?;
+        writeln!(
+            writer,
+            "Logical available: {:?}",
+            response.logical_available_bytes
+        )?;
+        writeln!(
+            writer,
+            "Backend free: {}",
+            format_bytes(response.backend_free_bytes as f64)
+        )?;
+        writeln!(
+            writer,
+            "Backend available: {}",
+            format_bytes(response.backend_available_bytes as f64)
+        )?;
+        writeln!(writer, "SSD available: {:?}", response.ssd_available_bytes)?;
+        writeln!(writer, "Copy count: {}", response.copy_count)?;
+        writeln!(
+            writer,
+            "SSD staging required: {}",
+            response.requires_ssd_staging
+        )?;
+        if let Some(reason) = response.admission_block_reason {
+            writeln!(writer, "Admission blocked: {:?}", reason)?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_s3_upload(
     args: &StoreS3UploadArgs,
     writer: &mut impl Write,

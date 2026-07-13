@@ -71,6 +71,30 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::CapacityStatus(request) => {
+            let store_id = match StoreId::new(request.store_id.clone()) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "invalid_store_id",
+                        error.to_string(),
+                    )));
+                }
+            };
+            if let Err(error) = handler.authorize_endpoint_read(actor, &store_id) {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    error.code(),
+                    error.to_string(),
+                )));
+            }
+            match handler.service_orchestrator.capacity_status(request) {
+                Ok(response) => Ok(DaemonApiResponse::CapacityStatus(response)),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "capacity_status_unavailable",
+                    error.to_string(),
+                ))),
+            }
+        }
         DaemonApiRequest::StoreDrain(request) => {
             match handler.store_drain_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::StoreDrain(response)),
@@ -891,7 +915,6 @@ where
                 writable: definition.policy.export_policy == ExportPolicy::S3,
             });
         }
-
         Ok(StoreInventoryResponse { stores: inventory })
     }
 

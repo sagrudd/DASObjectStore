@@ -215,6 +215,11 @@ completion.
     persistence and transport wiring remain open.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
+  - [x] Add a read-only daemon ``capacity_status`` transport response backed by
+    the registry policy, persisted ledger, and daemon-owned statvfs probes;
+    authorized readers receive pressure and explicit block reasons without
+    mutating reservations. The CLI exposes it as ``store capacity`` (including
+    ``--json``); TUI/Web/adapters remain follow-up presentation work.
   - [x] Add transport-neutral daemon capacity admission request/decision DTOs
     with stable snake_case reasons, observed-capacity fields, and direct-ingress
     SSD fields optional; SSD-first/direct behavior is derived from the typed

@@ -35,6 +35,7 @@ pub use appliance_telemetry::{
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
     CapacityAdmissionReservationError, CapacityAdmissionResponse, CapacityAdmissionValidationError,
+    CapacityStatusRequest, CapacityStatusResponse,
 };
 pub use disk_mutation::{
     DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError,
@@ -190,6 +191,7 @@ pub enum DaemonApiRequest {
     CreateObjectStore(CreateObjectStoreRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
+    CapacityStatus(CapacityStatusRequest),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyRequest),
     ObjectBrowser(ObjectBrowserRequest),
     ObjectDownload(ObjectDownloadRequest),
@@ -247,6 +249,10 @@ impl DaemonApiRequest {
                 .map_err(create_object_store_validation_error),
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
+                .validate()
+                .map(|_| ())
+                .map_err(capacity_admission_validation_error),
+            Self::CapacityStatus(request) => request
                 .validate()
                 .map(|_| ())
                 .map_err(capacity_admission_validation_error),
@@ -326,6 +332,7 @@ pub enum DaemonApiResponse {
     CreateObjectStore(CreateObjectStoreResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),
+    CapacityStatus(CapacityStatusResponse),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyResponse),
     ObjectBrowser(ObjectBrowserResponse),
     ObjectDownload(ObjectDownloadResponse),
