@@ -256,9 +256,10 @@ completion.
   one folder root maps exactly to one ObjectStore and how existing data drifts.
   Approved semantics are one bounded root per logical store, read-only drift
   inspection for unmanaged edits, and explicit confirmed reconcile/adopt. The
-  daemon profile-aware creation/adoption transport remains a follow-up
-  implementation seam; legacy appliance creation does not infer profile
-  authority from a path or profile name.
+  daemon profile-binding registration transport and validated CLI workflow are
+  delivered; full backend orchestration remains for live drive/appliance
+  identity probing and shared catalogue wiring. Legacy appliance creation does
+  not infer profile authority from a path or profile name.
 - [ ] Define a capability-based backend contract for validation, reservation,
   staging, durable finalization, reads, enumeration, verification, health,
   reconciliation, and removal.
@@ -289,8 +290,9 @@ completion.
     open.
   - [x] Add the daemon-owned profile-binding registry: portable manifests are
     validated against canonical folder/drive roots, persisted atomically, and
-    per-store capacity probes use the binding when present; profile-aware
-    creation/adoption transport remains open. System-root bindings are rejected
+    per-store capacity probes use the binding when present; profile-binding
+    registration transport is delivered while full backend orchestration
+    remains open. System-root bindings are rejected
     fail-closed, with strict unknown-field and duplicate-store validation. The
     registry path is now daemon-state scoped with an explicit environment
     override; local-Docker bootstrap must still register container-visible roots
@@ -303,12 +305,14 @@ completion.
     store-registry publication remain an ordered orchestration follow-up.
   - [x] Add the ``store profile-binding`` CLI workflow with portable-manifest
     decoding, explicit create/adopt operation, dry-run confirmation, and
-    daemon-client submission; backend opening and publication ordering remain
-    daemon orchestration follow-up.
+    daemon-client submission; folder backend opening and explicit-definition
+    publication are delivered, while full drive/appliance orchestration remains
+    daemon-owned follow-up.
   - [x] Carry the universal ``CapacityPolicy`` through profile binding and
     initialize its daemon ledger before atomic binding persistence; folder and
-    drive registrations now reject unbounded capacity, while store-definition
-    publication remains a separate ordered orchestration step.
+    drive registrations now reject unbounded capacity, while cross-file rollback
+    between binding, ledger, and store-definition persistence remains a separate
+    ordered orchestration step.
   - [x] Allow an explicit daemon-local store definition in the profile
     binding request; after binding and ledger preparation succeed, the daemon
     publishes that definition atomically to its store registry. Omitted
