@@ -1,0 +1,15 @@
+# The Compose build context is the shared Projects directory so the workspace
+# can resolve the sibling prosopikon crate. Keep generated artifacts and local
+# checkouts out of the context while retaining both source trees.
+**
+!DASObjectStore/
+!DASObjectStore/**
+!prosopikon/
+!prosopikon/**
+
+DASObjectStore/target
+DASObjectStore/node_modules
+DASObjectStore/playwright-report
+DASObjectStore/test-results
+prosopikon/target
+prosopikon/node_modules

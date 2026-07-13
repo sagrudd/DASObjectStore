@@ -134,6 +134,9 @@ pub(crate) struct ServiceRenderComposeArgs {
     /// API port to expose.
     #[arg(long)]
     api_port: u16,
+    /// Host path for the generated Garage configuration file.
+    #[arg(long, default_value = "/etc/dasobjectstore/garage.toml")]
+    config_path: PathBuf,
 }
 impl ServiceRenderComposeArgs {
     pub(crate) fn stores_file(&self) -> Option<&Path> {
@@ -162,6 +165,9 @@ impl ServiceRenderComposeArgs {
     }
     pub(crate) fn api_port(&self) -> u16 {
         self.api_port
+    }
+    pub(crate) fn config_path(&self) -> &Path {
+        &self.config_path
     }
 }
 
@@ -209,6 +215,10 @@ mod tests {
         assert_eq!(render.image(), "garage:latest");
         assert_eq!(render.bind_address(), "0.0.0.0");
         assert_eq!(render.api_port(), 3900);
+        assert_eq!(
+            render.config_path(),
+            Path::new("/etc/dasobjectstore/garage.toml")
+        );
 
         for (args, expected) in [
             (

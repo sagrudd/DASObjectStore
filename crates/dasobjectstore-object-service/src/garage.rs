@@ -129,7 +129,9 @@ impl ObjectServiceProvider for GarageProvider {
         yaml.push_str("services:\n");
         yaml.push_str(&format!("  {}:\n", self.config.service_name));
         yaml.push_str(&format!("    image: {}\n", self.config.image));
-        yaml.push_str("    restart: \"no\"\n");
+        yaml.push_str("    init: true\n");
+        yaml.push_str("    restart: unless-stopped\n");
+        yaml.push_str("    stop_grace_period: 30s\n");
         yaml.push_str("    ports:\n");
         yaml.push_str(&render_port_mapping(
             &self.config.bind_address,
@@ -149,17 +151,23 @@ impl ObjectServiceProvider for GarageProvider {
         ));
         yaml.push_str("    volumes:\n");
         yaml.push_str(&format!(
-            "      - {}:/etc/garage.toml:ro\n",
-            self.config.config_path
+            "      - \"{}:/etc/garage.toml:ro\"\n",
+            escape_yaml_string(&self.config.config_path)
         ));
         yaml.push_str(&format!(
-            "      - {}:/var/lib/garage/meta\n",
-            request.ssd_metadata_path
+            "      - \"{}:/var/lib/garage/meta\"\n",
+            escape_yaml_string(&request.ssd_metadata_path)
         ));
         yaml.push_str(&format!(
-            "      - {}:/var/lib/garage/data\n",
-            request.hdd_data_path
+            "      - \"{}:/var/lib/garage/data\"\n",
+            escape_yaml_string(&request.hdd_data_path)
         ));
+        yaml.push_str("    healthcheck:\n");
+        yaml.push_str("      test: [\"CMD\", \"/garage\", \"status\"]\n");
+        yaml.push_str("      interval: 10s\n");
+        yaml.push_str("      timeout: 5s\n");
+        yaml.push_str("      retries: 12\n");
+        yaml.push_str("      start_period: 20s\n");
         yaml.push_str("    environment:\n");
         yaml.push_str("      DASOBJECTSTORE_PROVIDER: garage\n");
         yaml.push_str("    command: [\"/garage\", \"server\", \"--single-node\"]\n");
@@ -194,7 +202,16 @@ impl ObjectServiceProvider for GarageProvider {
 }
 
 fn render_port_mapping(bind_address: &str, port: u16) -> String {
-    format!("      - \"{bind_address}:{port}:{port}\"\n")
+    format!(
+        "      - \"{}:{}:{}\"\n",
+        escape_yaml_string(bind_address),
+        port,
+        port
+    )
+}
+
+fn escape_yaml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn validate_config(config: &GarageProviderConfig) -> Result<(), ObjectServiceError> {
@@ -287,7 +304,9 @@ mod tests {
         assert!(rendered
             .compose_yaml
             .contains("image: dxflrs/garage:v2.3.0"));
-        assert!(rendered.compose_yaml.contains("/etc/garage.toml:ro"));
+        assert!(rendered
+            .compose_yaml
+            .contains("\"/etc/dasobjectstore/garage.toml:/etc/garage.toml:ro\""));
         assert!(rendered.compose_yaml.contains("/var/lib/garage/meta"));
         assert!(rendered.compose_yaml.contains("/var/lib/garage/data"));
         assert!(!rendered.compose_yaml.contains("DASOBJECTSTORE_BUCKETS"));
@@ -295,6 +314,10 @@ mod tests {
         assert!(rendered
             .compose_yaml
             .contains("command: [\"/garage\", \"server\", \"--single-node\"]"));
+        assert!(rendered.compose_yaml.contains("restart: unless-stopped"));
+        assert!(rendered
+            .compose_yaml
+            .contains("test: [\"CMD\", \"/garage\", \"status\"]"));
         assert!(rendered
             .compose_yaml
             .contains("bucket_provisioning: live-garage-admin"));
@@ -317,6 +340,28 @@ mod tests {
 
         assert!(rendered.compose_yaml.contains("\"0.0.0.0:3900:3900\""));
         assert!(rendered.compose_yaml.contains("\"0.0.0.0:3901:3901\""));
+    }
+
+    #[test]
+    fn quotes_host_paths_with_spaces_and_yaml_delimiters() {
+        let provider = GarageProvider::new(GarageProviderConfig {
+            config_path: "/Volumes/Seagate/DAS ObjectStore/runtime/garage.toml".to_string(),
+            ..GarageProviderConfig::default()
+        });
+        let mut request = request();
+        request.ssd_metadata_path = "/Volumes/Seagate/DAS ObjectStore/runtime/meta".to_string();
+        request.hdd_data_path = "/Volumes/Seagate/DAS ObjectStore/runtime/data".to_string();
+
+        let rendered = provider
+            .render_compose(&request)
+            .expect("Garage compose renders");
+
+        assert!(rendered.compose_yaml.contains(
+            "\"/Volumes/Seagate/DAS ObjectStore/runtime/garage.toml:/etc/garage.toml:ro\""
+        ));
+        assert!(rendered
+            .compose_yaml
+            .contains("\"/Volumes/Seagate/DAS ObjectStore/runtime/meta:/var/lib/garage/meta\""));
     }
 
     #[test]

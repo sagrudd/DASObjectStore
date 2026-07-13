@@ -5002,7 +5002,7 @@ mod tests {
         assert!(!output.contains("DASOBJECTSTORE_BUCKETS"));
         assert!(!output.contains("GARAGE_DEFAULT_ACCESS_KEY"));
         assert!(output.contains("\"0.0.0.0:3900:3900\""));
-        assert!(output.contains("/etc/dasobjectstore/garage.toml:/etc/garage.toml:ro"));
+        assert!(output.contains("\"/etc/dasobjectstore/garage.toml:/etc/garage.toml:ro\""));
         assert!(output.contains("command: [\"/garage\", \"server\", \"--single-node\"]"));
         assert!(output.contains("bucket_provisioning: live-garage-admin"));
         assert!(

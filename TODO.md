@@ -40,6 +40,12 @@ evidence and detailed source tasks.
   desktop/mobile artifact execution as environment-gated until the local Web
   asset/bootstrap runtime is available; do not claim visual acceptance from
   this run.
+- A canonical macOS Docker profile now keeps ``/etc/dasobjectstore`` inside
+  the daemon container and persists the generated single-node Garage profile
+  on the attached volume. Docker Desktop execution and an AlleleAnchor
+  adapter smoke remain environment-gated until ``/Volumes/Seagate`` is added
+  to Docker Desktop file sharing; the profile's bind-mount preflight reports
+  this exact remediation before the daemon starts.
 
 ## Market and Mnemosyne Integration Campaign
 
@@ -62,6 +68,13 @@ completion.
   of physical deduplication, with physical amplification reported separately.
 
 ### Gate 0: Re-baseline and close release-critical appliance debt
+
+- [ ] Validate ``deploy/local-docker`` on macOS with Docker Desktop and an
+  attached volume: build the daemon image, start Garage through
+  ``dasobjectstored``, provision one scoped bucket/key, export a redacted
+  client config, and run a non-sensitive S3 adapter smoke. Keep the result
+  classified as local single-node compatibility evidence, not appliance soak
+  acceptance.
 
 - [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or

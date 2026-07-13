@@ -1,6 +1,7 @@
 use super::*;
 
 #[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SourceAclPermission {
     Traverse,
     ReadTree,

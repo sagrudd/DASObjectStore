@@ -151,6 +151,7 @@ pub(crate) fn run_service_render_compose(
                 rpc_port: garage_derived_port(args.api_port(), 1)?,
                 web_port: garage_derived_port(args.api_port(), 2)?,
                 admin_port: garage_derived_port(args.api_port(), 3)?,
+                config_path: args.config_path().to_string_lossy().into_owned(),
                 ..GarageProviderConfig::default()
             });
             provider.render_compose(&request)?

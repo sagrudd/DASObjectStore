@@ -8,6 +8,7 @@ stabilized in the current MVP.
    :maxdepth: 2
 
    getting-started
+   local-docker
    service-boundary
    standalone-auth
    web-interface
