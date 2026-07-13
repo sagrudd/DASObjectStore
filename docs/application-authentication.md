@@ -45,7 +45,9 @@ provider state, size, checksum, reservation state, and catalogue conflicts
 before atomically committing completion. Replays are rejected or return the
 same idempotent terminal result. The daemon now has a durable,
 expiry-pruned replay registry for capability IDs and nonces; proof verification
-and catalogue completion wiring remain authority-side work. Core token issuance
+and catalogue completion wiring remain authority-side work. The daemon's
+Ed25519/P-256 verifier handles asymmetric proofs; mTLS transport verification
+and public catalogue completion wiring remain. Core token issuance
 requires an explicit proof-verifier implementation and rejects unverified
 proofs. The completion helper verifies provider state before consuming a
 capability and releases it when catalogue commit fails, so retries remain safe.
