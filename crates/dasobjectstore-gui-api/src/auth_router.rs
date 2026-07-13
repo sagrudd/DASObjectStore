@@ -78,6 +78,10 @@ pub(crate) fn standalone_dashboard_router_with_state(
             get(standalone_cached_home_dashboard),
         )
         .route(
+            "/api/v1/dashboard/object-stores/{store_id}/capacity",
+            get(standalone_store_capacity),
+        )
+        .route(
             "/api/v1/dashboard/enclosures",
             get(standalone_enclosures_dashboard),
         )

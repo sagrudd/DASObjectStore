@@ -239,6 +239,9 @@ completion.
   - [x] Add an optional Web ``capacity_status`` detail with explicit
     unavailable fallback and old-payload compatibility; live values remain
     unavailable until the authenticated daemon bridge is wired.
+  - [x] Add the authenticated dashboard store-capacity route through the
+    shared bounded daemon bridge, preserving typed busy/circuit/deadline
+    responses; the Web client getter and appliance-backed acceptance remain.
   - [x] Add transport-neutral daemon capacity admission request/decision DTOs
     with stable snake_case reasons, observed-capacity fields, and direct-ingress
     SSD fields optional; SSD-first/direct behavior is derived from the typed

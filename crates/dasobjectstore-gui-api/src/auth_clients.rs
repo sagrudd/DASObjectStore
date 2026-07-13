@@ -181,7 +181,7 @@ fn admin_daemon_bridge_error(
     admin_daemon_bridge_error_with_code(error, "daemon_admin_job_failed")
 }
 
-fn admin_daemon_bridge_error_with_code(
+pub(super) fn admin_daemon_bridge_error_with_code(
     error: crate::daemon_bridge::DaemonBridgeError,
     client_error_code: &'static str,
 ) -> (StatusCode, Json<AuthRouteError>) {

@@ -953,6 +953,11 @@ The Web client now has a typed cached-status response and path helper/getter;
 the existing Home page remains on its live response until stale-data UX is
 intentionally adopted.
 
+The authenticated Web API now exposes a store-scoped capacity-status route
+through the bounded daemon bridge, so live logical/backend/SSD admission data
+can be consumed without a direct registry read; the Web client getter and
+appliance-backed acceptance remain open.
+
 The normal CLI store-creation path now submits a typed daemon request when a
 writer group and packaged daemon socket are present. Host-registry mutation is
 retained only for explicit registry/test and no-writer-group migration paths;

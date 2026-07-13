@@ -31,6 +31,12 @@ metadata when a later refresh is degraded, and fails with ``503`` before the
 first usable snapshot rather than presenting fabricated zeroes. The existing
 ``dashboard/home`` response remains unchanged for the full live dashboard.
 
+Authenticated operators can request live capacity for an authorized store at
+``/api/v1/dashboard/object-stores/{store_id}/capacity``. The route uses the
+bounded daemon bridge and returns typed ``429``/``503`` errors when control
+capacity is saturated, degraded, or past its deadline; it never fabricates a
+capacity snapshot from client-supplied values.
+
 The packaged appliance configuration lives at:
 
 .. code-block:: text
