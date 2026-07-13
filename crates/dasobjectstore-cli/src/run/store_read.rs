@@ -32,6 +32,68 @@ pub(super) fn run_store_profile_inspection(
     Ok(())
 }
 
+pub(super) fn run_store_user_service_plan(
+    args: &StoreUserServicePlanArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    use dasobjectstore_core::deployment::HostMode;
+    use dasobjectstore_daemon::runtime::{folder_host_paths, user_service_plan};
+
+    let home = args
+        .home()
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .ok_or_else(|| {
+            CliError::CommandFailed("per-user service plan requires HOME or --home".to_string())
+        })?;
+    let state_home = args
+        .state_home()
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os("XDG_STATE_HOME").map(PathBuf::from));
+    let runtime_home = args
+        .runtime_home()
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from));
+    let paths = folder_host_paths(
+        HostMode::PerUser,
+        Some(&home),
+        state_home.as_deref(),
+        runtime_home.as_deref(),
+        Path::new("/var/lib/dasobjectstore"),
+        Path::new("/run/dasobjectstore"),
+    )
+    .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let plan = user_service_plan(&paths, args.executable(), args.config(), args.label())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let plist = plan
+        .launchd_plist()
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    if args.json() {
+        #[derive(serde::Serialize)]
+        struct UserServicePlanResponse {
+            label: String,
+            executable: String,
+            config_path: String,
+            state_dir: String,
+            plist: String,
+        }
+        serde_json::to_writer_pretty(
+            &mut *writer,
+            &UserServicePlanResponse {
+                label: plan.label,
+                executable: plan.executable.display().to_string(),
+                config_path: plan.config_path.display().to_string(),
+                state_dir: plan.state_dir.display().to_string(),
+                plist,
+            },
+        )?;
+        writer.write_all(b"\n")?;
+    } else {
+        writer.write_all(plist.as_bytes())?;
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_contents(
     args: &StoreContentsArgs,
     writer: &mut impl Write,
@@ -124,6 +186,46 @@ fn write_store_contents_du(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::run;
+    use crate::cli::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn renders_user_service_plan_as_json_without_installing_launchd_service() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "user-service-plan",
+            "--executable",
+            "/Users/tester/bin/dasobjectstored",
+            "--config",
+            "/Users/tester/Library/Config/dasobjectstore.json",
+            "--home",
+            "/Users/tester",
+            "--state-home",
+            "/Users/tester/Library/State",
+            "--runtime-home",
+            "/tmp/tester-runtime",
+            "--json",
+        ])
+        .expect("user service plan parses");
+        let mut output = Vec::new();
+        run(&cli, &mut output).expect("plan renders");
+        let response: serde_json::Value = serde_json::from_slice(&output).expect("json output");
+        assert_eq!(response["label"], "org.dasobjectstore.dasobjectstored");
+        assert_eq!(
+            response["state_dir"],
+            "/Users/tester/Library/State/dasobjectstore"
+        );
+        assert!(response["plist"]
+            .as_str()
+            .unwrap()
+            .contains("<key>RunAtLoad</key>"));
+    }
 }
 
 fn write_store_contents_tree(

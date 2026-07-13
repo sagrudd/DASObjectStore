@@ -608,6 +608,9 @@ completion.
     absolute executable/config/state paths, safe labels, escaped plist values,
     and no `launchctl` side effects; deployment-layer installation and
     ownership checks remain separate.
+  - [x] Expose the render-only plan through `store user-service-plan` with
+    explicit path overrides, environment fallbacks, and JSON output; the CLI
+    remains side-effect free and deployment installation remains separate.
 - [ ] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
   - [x] Add a local fixture-matrix integration test covering programmatic

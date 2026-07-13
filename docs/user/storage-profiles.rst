@@ -269,6 +269,20 @@ The CLI exposes the same contract through ``dasobjectstore store capabilities``
 (``--json`` is available for automation); it does not bypass daemon authority
 or claim that an appliance is reachable.
 
+Per-user macOS service plans
+----------------------------
+
+Per-user folder stores can render a validated ``launchd`` plan without root or
+any service-manager side effect. Use ``dasobjectstore store user-service-plan``
+with absolute ``--executable`` and ``--config`` paths. ``--home``,
+``--state-home``, and ``--runtime-home`` override the corresponding per-user
+XDG inputs; otherwise ``HOME``, ``XDG_STATE_HOME``, and ``XDG_RUNTIME_DIR`` are
+read from the environment. Add ``--json`` for an adapter-friendly envelope.
+The command only prints the plist and derived state directory: it does not
+write a LaunchAgents file, invoke ``launchctl``, create directories, or start
+``dasobjectstored``. Deployment code remains responsible for ownership checks,
+installation, and lifecycle operations.
+
 Operators can inspect the daemon-owned live ledger and filesystem observations
 with ``dasobjectstore store capacity <store-id>`` (or ``--json`` for an
 adapter). The read-only command reports logical used/reserved/available bytes,

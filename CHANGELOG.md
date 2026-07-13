@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.14 - 2026-07-13
+
+- Expose a side-effect-free CLI renderer for validated macOS per-user
+  `launchd` service plans.
+
 ## 0.76.13 - 2026-07-13
 
 - Add a macOS folder-profile fixture matrix for adoption, recovery, quota, and

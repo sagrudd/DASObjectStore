@@ -26,6 +26,9 @@ pub(crate) enum StoreCommand {
     /// Inspect a daemon-owned profile without exposing host paths.
     #[command(name = "profile-inspection")]
     ProfileInspection(StoreProfileInspectionArgs),
+    /// Render a validated per-user macOS launchd service plan without installing it.
+    #[command(name = "user-service-plan")]
+    UserServicePlan(StoreUserServicePlanArgs),
     /// Inspect objects and aggregate folder sizes in a store.
     #[command(alias = "objects", alias = "list-contents")]
     Contents(StoreContentsArgs),
@@ -136,6 +139,55 @@ pub(crate) struct StoreProfileInspectionArgs {
 impl StoreProfileInspectionArgs {
     pub(crate) fn store_id(&self) -> &str {
         &self.store_id
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreUserServicePlanArgs {
+    /// Absolute dasobjectstored executable path.
+    #[arg(long)]
+    executable: PathBuf,
+    /// Absolute daemon configuration path.
+    #[arg(long)]
+    config: PathBuf,
+    /// Per-user home directory; defaults to HOME.
+    #[arg(long)]
+    home: Option<PathBuf>,
+    /// XDG state home; defaults to HOME/.local/state.
+    #[arg(long)]
+    state_home: Option<PathBuf>,
+    /// XDG runtime directory; omitted when unavailable.
+    #[arg(long)]
+    runtime_home: Option<PathBuf>,
+    /// launchd label.
+    #[arg(long, default_value = "org.dasobjectstore.dasobjectstored")]
+    label: String,
+    /// Emit a JSON envelope containing the rendered plist.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreUserServicePlanArgs {
+    pub(crate) fn executable(&self) -> &Path {
+        &self.executable
+    }
+    pub(crate) fn config(&self) -> &Path {
+        &self.config
+    }
+    pub(crate) fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
+    }
+    pub(crate) fn state_home(&self) -> Option<&Path> {
+        self.state_home.as_deref()
+    }
+    pub(crate) fn runtime_home(&self) -> Option<&Path> {
+        self.runtime_home.as_deref()
+    }
+    pub(crate) fn label(&self) -> &str {
+        &self.label
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -825,6 +877,51 @@ mod tests {
         };
         assert_eq!(inspection.store_id(), "generated-data");
         assert!(inspection.json());
+    }
+
+    #[test]
+    fn parses_user_service_plan_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "user-service-plan",
+            "--executable",
+            "/Users/tester/bin/dasobjectstored",
+            "--config",
+            "/Users/tester/Library/Config/dasobjectstore.json",
+            "--home",
+            "/Users/tester",
+            "--state-home",
+            "/Users/tester/Library/State",
+            "--runtime-home",
+            "/tmp/tester-runtime",
+            "--label",
+            "org.example.dasobjectstored",
+            "--json",
+        ])
+        .expect("user service plan parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::UserServicePlan(plan)) = args.command() else {
+            panic!("expected user service plan command")
+        };
+        assert_eq!(
+            plan.executable(),
+            Path::new("/Users/tester/bin/dasobjectstored")
+        );
+        assert_eq!(
+            plan.config(),
+            Path::new("/Users/tester/Library/Config/dasobjectstore.json")
+        );
+        assert_eq!(plan.home(), Some(Path::new("/Users/tester")));
+        assert_eq!(
+            plan.state_home(),
+            Some(Path::new("/Users/tester/Library/State"))
+        );
+        assert_eq!(plan.runtime_home(), Some(Path::new("/tmp/tester-runtime")));
+        assert_eq!(plan.label(), "org.example.dasobjectstored");
+        assert!(plan.json());
     }
 
     #[test]
