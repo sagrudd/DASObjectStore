@@ -78,7 +78,11 @@ metadata foundations, Linux/macOS probing, store policy, appliance SSD/HDD
 ingress and placement, Garage orchestration, daemon/client APIs, CLI/TUI, Web
 shell and administrator workflows, object browsing/download, EasyConnect
 sessions, telemetry foundations, and Mnemosyne adapter/design work. Completed
-historical checklists remain below and in TODO as evidence.
+historical checklists remain below and in TODO as evidence. The bounded folder
+and guarded-drive profile seams now also provide catalogue-authoritative S3
+read/write/delete/verify/health operations, capacity reconciliation, and a
+versioned path-free list transport projection; authenticated HTTP gateway and
+multipart dispatch remain deliberately separate.
 
 ### Open technical debt
 
