@@ -276,7 +276,8 @@ async function assertObjectStoreWorkflow(page, role) {
   await expectEnabled(createButton, "admin ObjectStore creation must be enabled");
   await createButton.click();
   await createCard.getByLabel("Store name").fill("visual-e2e-store");
-  await createCard.getByLabel("Enclosure anchor").fill("qnap-tl-d800c-visual");
+  await createCard.getByLabel("Writer group").selectOption("bioinformatics");
+  await createCard.getByLabel("Enclosure").selectOption("qnap-tl-d800c-visual");
   await createCard.getByRole("button", { name: "Review daemon plan" }).click();
   await createCard.getByText("dasobjectstore store create visual-e2e-store").waitFor();
   await createCard.getByPlaceholder("confirm create objectstore").fill("confirm create objectstore");
@@ -394,8 +395,10 @@ async function expectDisabled(locator, message) {
 }
 
 async function expectHidden(locator, message) {
-  if (await locator.count() !== 0 && await locator.isVisible()) {
-    throw new Error(message);
+  try {
+    await locator.waitFor({ state: "hidden", timeout: 10_000 });
+  } catch (error) {
+    throw new Error(message, { cause: error });
   }
 }
 
@@ -501,6 +504,14 @@ function apiResponse(pathname, method, request, body = {}) {
   }
   if (pathname === `${apiBase}/logout` && method === "POST") {
     return { username: role.username, disconnected: true };
+  }
+  if (pathname === `${apiV1Base}/health` && method === "GET") {
+    return {
+      service: "dasobjectstore-gui-web",
+      status: "ready",
+      version: "0.72.113",
+      instance_id: "visual-instance",
+    };
   }
   if (pathname === `${apiV1Base}/dashboard/home`) {
     return homeDashboard();
@@ -611,6 +622,16 @@ function homeDashboard() {
     },
     ingest: { pressure: "normal", queued_jobs: 2, active_jobs: 1, failed_jobs: 0, warnings: [] },
     destage: { pending_objects: 12, copying_objects: 2, verified_objects: 950, warnings: [] },
+    object_service: {
+      active: true,
+      remote_ready: true,
+      bind_address: "127.0.0.1",
+      port: 3900,
+      local_url: "http://127.0.0.1:3900",
+      remote_url: null,
+      service_state: "ready",
+      message: null,
+    },
     memory_stress: {
       state: "normal",
       pressure_percent: 42,
@@ -694,6 +715,7 @@ function objectStoresDashboard(role = roles[1]) {
     schema_version: "dasobjectstore.objectstores_page.v1",
     generated_at_utc: "2026-07-08T19:00:00Z",
     groups_file_path: "/opt/dasobjectstore/groups.json",
+    mounted_enclosures: [enclosureCard()],
     groups: [
       {
         group_name: "bioinformatics",
@@ -882,6 +904,8 @@ function usersGroupsWorkspace(role = roles[1]) {
   const canAdmin = role.administrator;
   return {
     host_mode: "standalone",
+    authentication_framework: "hybrid",
+    device_token_requirement: "not_required",
     current_user: {
       username: role.username,
       groups: canAdmin ? ["sudo", "bioinformatics"] : ["bioinformatics"],

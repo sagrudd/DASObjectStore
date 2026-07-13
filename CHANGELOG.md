@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.113 - 2026-07-13
+
+- Refresh Web screenshot fixtures for the v1 health contract, home telemetry,
+  users-first Local Access readiness, and ObjectStore enclosure inventory;
+  await asynchronous task-pane closure in the runner before asserting hidden
+  state.
+
 ## 0.72.112 - 2026-07-13
 
 - Release remote-upload capacity reservations when daemon job/progress setup

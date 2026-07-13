@@ -2412,6 +2412,16 @@ non-destructive close, and restores focus to its trigger when closed.
   closed and open Local Access, Endpoints, and target-scoped Remote Upload
   workflows. Assert no overlap, horizontal overflow, hidden primary form,
   unreadable footer text, or visible upload dropzone before target selection.
+  - [x] Refresh the screenshot fixture health response, home telemetry
+    readiness selector, users-first selector, and ObjectStore enclosure
+    inventory so the runner reaches authenticated workflow pages;
+    desktop/mobile artifact assertions remain open until the runner completes.
+  - [x] Make screenshot task-pane hidden assertions await the asynchronous
+    daemon-response state transition instead of sampling visibility immediately.
+  - [ ] Full Playwright artifact execution remains blocked on this macOS
+    checkout: `packaging/web/prepare-web-dist.sh` currently exits after Trunk
+    build without producing a JavaScript bundle; the last successful run then
+    advanced to endpoint workflow checks before the async pane assertion fix.
 - [x] Update `docs/user/web-interface.rst` and `docs/user/remote-upload.rst`
   with the task-pane interaction, Local Access qualification flow, endpoint
   inventory/add-edit workflow, and ObjectStore-first upload flow. State that

@@ -914,6 +914,13 @@ decorative-mark ownership, TaskPane keyboard/focus boundaries, Local Access
 qualification, endpoint add/edit confirmation, and target-scoped upload
 gating; browser visual artifacts remain environment-gated.
 
+The screenshot runner fixture now supplies the authenticated v1 health payload,
+tracks the home telemetry and users-first inventory selectors, and includes the
+mounted enclosure inventory required by the ObjectStore creation form;
+the runner now also awaits asynchronous task-pane closure. Full visual/DOM
+acceptance still requires a complete desktop/mobile runner pass; this checkout's
+Trunk packaging currently exits without a JavaScript bundle.
+
 The target-scoped Remote Upload Web boundary now requires a concrete
 ObjectStore ID in page props and percent-encodes it in the workspace route;
 the authenticated shell renders an explicit target-required state instead of

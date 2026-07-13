@@ -24,7 +24,7 @@ export const authenticatedPages = [
     name: "home",
     selector: "button[data-page='home']",
     pageSelector: "section[data-page='home']",
-    readySelector: "text=Registered object stores visible to this appliance",
+    readySelector: ".dos-home-telemetry-toolbar",
   },
   {
     name: "enclosures",
@@ -54,7 +54,7 @@ export const authenticatedPages = [
     name: "users-groups",
     selector: "button[data-page='users-groups']",
     pageSelector: "section[data-page='users-groups']",
-    readySelector: "[data-action='assign_local_user_to_group']",
+    readySelector: "[data-section='users-inventory']",
   },
   {
     name: "bioinformatics",
