@@ -1350,6 +1350,11 @@ list until every temporary size-budget exception has been removed.
   authenticated Web action wiring now uses the reserved daemon bridge and
   typed Web client contract; TUI action presentation remains open.
 - [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
+  - [x] Add a deterministic local bridge-saturation regression proving the
+    daemon-independent liveness route remains HTTP 200 while a bounded daemon
+    bridge worker is blocked; bridge capacity is retained until that worker
+    releases. Full appliance I/O saturation, static/login soak, and accept
+    queue measurements remain hardware/deployment acceptance work.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [ ] Document operator triage for an ingest-pressure incident, including the availability indicators, safe daemon throttle/pause action, expected degraded WebUI behavior, and escalation evidence. Do not prescribe killing an ingest or restarting the daemon as the default recovery path.
 

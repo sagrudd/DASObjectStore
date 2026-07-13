@@ -205,10 +205,12 @@ async fn plan_action(
 
 #[cfg(test)]
 mod tests {
+    use super::super::daemon_bridge::DaemonBridge;
     use super::gui_api_router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::json;
+    use std::time::Duration;
     use tower::ServiceExt;
 
     #[test]
@@ -263,6 +265,44 @@ mod tests {
         assert_eq!(encoded["status"], "ready");
         assert_eq!(encoded["service"], "dasobjectstore-gui-api");
         assert!(encoded["instance_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn liveness_stays_responsive_while_daemon_bridge_is_saturated() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(20));
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let blocked = {
+            let bridge = bridge.clone();
+            tokio::spawn(async move {
+                bridge
+                    .call_message(move || {
+                        entered_sender.send(()).expect("blocked call entered");
+                        release_receiver.blocking_recv().expect("release signal");
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(1), entered_receiver)
+            .await
+            .expect("blocked call starts")
+            .expect("entered signal");
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/liveness")
+                    .body(Body::empty())
+                    .expect("liveness request builds"),
+            )
+            .await
+            .expect("liveness response");
+        assert_eq!(response.status(), StatusCode::OK);
+        release_sender.send(()).expect("release blocked call");
+        blocked
+            .await
+            .expect("blocked call joins")
+            .expect("call succeeds");
     }
 
     #[tokio::test]

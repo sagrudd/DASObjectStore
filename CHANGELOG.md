@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.85 - 2026-07-13
+
+- Add a deterministic bridge-saturation regression proving daemon-independent
+  liveness remains responsive while a daemon worker is blocked.
+
 ## 0.72.84 - 2026-07-13
 
 - Add authenticated Web admin pause/throttle/resume routing and typed client
