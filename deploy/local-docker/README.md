@@ -33,7 +33,7 @@ values. Generated files are written below:
 ```text
 /Volumes/Seagate/DASObjectStore/alleleanchor-mvp/
   config/       daemon.json, Garage config, nested Compose file
-  state/        daemon metadata and private Garage credential registry
+  state/        daemon metadata, writable store registry, and private Garage credential registry
   credentials/  mode-0600 Garage and AlleleAnchor credential files
   garage-meta/  Garage metadata
   garage-data/  Garage object data

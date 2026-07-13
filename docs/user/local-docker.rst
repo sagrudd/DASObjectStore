@@ -59,11 +59,16 @@ The generated daemon container uses these stable paths:
 * ``/etc/dasobjectstore/garage.compose.yml``;
 * ``/etc/dasobjectstore/garage.toml``;
 * ``/var/lib/dasobjectstore`` for state and managed credentials;
+* ``/var/lib/dasobjectstore/stores.json`` for the writable daemon-owned store
+  registry;
 * ``/run/dasobjectstore/dasobjectstored.sock`` for the local client boundary.
 
 The host volume is mounted at the same path inside the daemon container so
-nested Compose volume sources remain valid to Docker Desktop. This is why the
-profile does not attempt to write to the macOS host ``/etc`` directory.
+nested Compose volume sources remain valid to Docker Desktop. The profile's
+initial generated store definition is only a bootstrap seed; subsequent daemon
+mutations use the writable state registry, not the read-only ``/etc`` mount.
+This is why the profile does not attempt to write to the macOS host ``/etc``
+directory.
 
 Validation boundary
 -------------------

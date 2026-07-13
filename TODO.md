@@ -123,6 +123,9 @@ completion.
     and validate both generated Compose files with ``docker compose config``;
     container start, Garage provisioning, and S3 smoke remain Docker-daemon
     gated.
+  - [x] Keep the generated bootstrap store seed in the writable daemon state
+    volume and expose explicit store/subobject registry paths; the read-only
+    ``/etc/dasobjectstore`` mount now contains configuration only.
 
 - [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or

@@ -25,7 +25,7 @@ LOG_DIR="$PROFILE_ROOT/logs"
 META_DIR="$PROFILE_ROOT/garage-meta"
 DATA_DIR="$PROFILE_ROOT/garage-data"
 CREDENTIALS_DIR="$PROFILE_ROOT/credentials"
-REGISTRY_PATH="$CONFIG_DIR/stores.json"
+REGISTRY_PATH="$STATE_DIR/stores.json"
 DEVICE_MARKER="$PROFILE_ROOT/.dasobjectstore/device.env"
 GARAGE_PROJECT_DIR="$STATE_DIR/garage"
 GARAGE_COMPOSE="$CONFIG_DIR/garage.compose.yml"
@@ -233,6 +233,9 @@ services:
     init: true
     restart: unless-stopped
     command: ["dasobjectstored", "--config", "/etc/dasobjectstore/daemon.json"]
+    environment:
+      DASOBJECTSTORE_STORE_REGISTRY_PATH: /var/lib/dasobjectstore/stores.json
+      DASOBJECTSTORE_SUBOBJECT_REGISTRY_PATH: /var/lib/dasobjectstore/subobjects.json
     volumes:
       - "$CONFIG_DIR:/etc/dasobjectstore:ro"
       - "$STATE_DIR:/var/lib/dasobjectstore"
