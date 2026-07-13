@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.67 - 2026-07-13
+
+- Verify typed multipart-style remote transfer adapters use daemon capacity
+  admission, commit reservations after success, and release on rejection.
+
 ## 0.72.66 - 2026-07-13
 
 - Add an optional Web ObjectStore capacity-status contract with explicit

@@ -945,6 +945,10 @@ completion; rejection is persisted as a failed job. Local ingest, multipart,
 catalogue accounting remain open. Stale reservations now carry durable
 creation timestamps in schema-v2 ledger snapshots (legacy v1 snapshots remain
 loadable), and the provider exposes an atomic caller-scheduled expiry sweep.
+Typed multipart-style byte-transfer adapters are covered by the same admission
+regression contract: rejection happens before adapter invocation, while
+success/failure paths commit or release the daemon reservation. A concrete
+multipart API and catalogue accounting path is still pending.
 Unknown-age legacy reservations are retained; automatic scheduling and renewal
 remain open until a lease policy is approved.
 Local file ingest now uses the same provider boundary for each non-skipped

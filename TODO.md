@@ -266,6 +266,10 @@ completion.
     lifecycle failures remain fail-closed. Multipart and catalogue accounting
     remain separate follow-up work; explicit stale-reservation maintenance is
     available below.
+  - [x] Route typed S3/multipart byte-transfer adapters through the same
+    capacity admission lifecycle; regression coverage proves rejection occurs
+    before adapter invocation and admitted transfers commit or release their
+    reservation. Concrete multipart API/catalogue accounting remains open.
   - [x] Wire local file ingest through the same daemon provider boundary: each
     non-skipped file reserves its size with the verified ingress origin before
     source/staging or direct-HDD work, commits after durable metadata settlement,

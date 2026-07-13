@@ -842,6 +842,36 @@ mod tests {
         );
         assert_eq!(gate.snapshot().active_s3_transfers, 0);
 
+        let failed_provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Admitted,
+            message: None,
+        });
+        let failed_worker =
+            RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+                .with_capacity_admission_provider(failed_provider.clone());
+        let failed = failed_worker
+            .run_byte_transfer(
+                worker_request("remote-upload-multipart-capacity-failure"),
+                &FailingByteTransfer,
+            )
+            .expect("multipart adapter failure is recorded");
+        let DaemonJobEvent::Failed(job) = failed.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(
+            job.failure_message.as_deref(),
+            Some("object service rejected part")
+        );
+        assert_eq!(
+            *failed_provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:42:remote-upload-multipart-capacity-failure",
+                "release:zymo_fecal_2025.05:remote-upload-multipart-capacity-failure",
+            ]
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
         cleanup(&root);
     }
 
@@ -965,6 +995,67 @@ mod tests {
         assert_eq!(
             *provider.events.lock().expect("events lock"),
             vec!["admit:zymo_fecal_2025.05:42:remote-upload-capacity-rejected"]
+        );
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn typed_multipart_byte_transfer_uses_capacity_lifecycle() {
+        let root = temp_root("remote-upload-multipart-capacity-lifecycle");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Admitted,
+            message: None,
+        });
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+            .with_capacity_admission_provider(provider.clone());
+        let transfer = RecordingByteTransfer { bytes_done: 42 };
+
+        let success = worker
+            .run_byte_transfer(
+                worker_request("remote-upload-multipart-capacity-success"),
+                &transfer,
+            )
+            .expect("admitted multipart adapter succeeds");
+        assert!(matches!(success.final_event, DaemonJobEvent::Complete(_)));
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:42:remote-upload-multipart-capacity-success",
+                "commit:zymo_fecal_2025.05:remote-upload-multipart-capacity-success",
+            ]
+        );
+
+        let rejected_provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Rejected,
+            message: Some("logical quota exhausted".to_string()),
+        });
+        let rejected_worker =
+            RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+                .with_capacity_admission_provider(rejected_provider.clone());
+        let rejected = rejected_worker
+            .run_byte_transfer(
+                worker_request("remote-upload-multipart-capacity-rejected"),
+                &FailingByteTransfer,
+            )
+            .expect("capacity rejection is recorded");
+        let DaemonJobEvent::Failed(job) = rejected.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(
+            job.failure_message.as_deref(),
+            Some("logical quota exhausted")
+        );
+        assert!(rejected.running_event.is_none());
+        assert!(rejected.progress_events.is_empty());
+        assert_eq!(
+            *rejected_provider.events.lock().expect("events lock"),
+            vec!["admit:zymo_fecal_2025.05:42:remote-upload-multipart-capacity-rejected"]
         );
         assert_eq!(gate.snapshot().active_s3_transfers, 0);
 
