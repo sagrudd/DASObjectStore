@@ -74,6 +74,15 @@ pub(crate) fn live_remote_upload_workspace_for_user(
     groups: Vec<String>,
     sudo_administrator: bool,
 ) -> RemoteUploadWorkspaceView {
+    live_remote_upload_workspace_for_user_targeted(username, groups, sudo_administrator, None)
+}
+
+pub(crate) fn live_remote_upload_workspace_for_user_targeted(
+    username: String,
+    groups: Vec<String>,
+    sudo_administrator: bool,
+    target_store_id: Option<&str>,
+) -> RemoteUploadWorkspaceView {
     let dashboard = crate::object_stores_aggregator::live_object_stores_dashboard_for_user(
         groups.clone(),
         sudo_administrator,
@@ -144,11 +153,24 @@ pub(crate) fn live_remote_upload_workspace_for_user(
         .stores
         .into_iter()
         .filter_map(|store| {
+            if target_store_id.is_some_and(|target| target != store.store_id) {
+                return None;
+            }
             let grant = grants_by_store.get(&store.store_id)?;
             Some(remote_upload_store_view(store, grant))
         })
         .collect::<Vec<_>>();
 
+    if stores.is_empty() {
+        if let Some(target_store_id) = target_store_id {
+            warnings.push(DashboardWarning::new(
+                "remote_upload_target_unavailable",
+                format!(
+                    "ObjectStore {target_store_id} is not available for remote upload by the authenticated user."
+                ),
+            ));
+        }
+    }
     if stores.is_empty() && warnings.is_empty() {
         warnings.push(DashboardWarning::new(
             "remote_upload_no_accessible_stores",

@@ -120,14 +120,32 @@ async fn product_bioinformatics_workspace() -> Json<ProductBioinformaticsWorkspa
     Json(ProductBioinformaticsWorkspaceView::bootstrap())
 }
 
-async fn remote_upload_workspace() -> Json<RemoteUploadWorkspaceView> {
-    Json(
-        crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
-            "developer".to_string(),
-            Vec::new(),
-            false,
-        ),
-    )
+#[derive(Clone, Debug, Default, Deserialize)]
+struct RemoteUploadWorkspaceQuery {
+    #[serde(default)]
+    store_id: Option<String>,
+}
+
+async fn remote_upload_workspace(
+    Query(query): Query<RemoteUploadWorkspaceQuery>,
+) -> Result<Json<RemoteUploadWorkspaceView>, StatusCode> {
+    let Some(store_id) = query
+        .store_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    let view = crate::remote_upload_aggregator::live_remote_upload_workspace_for_user_targeted(
+        "developer".to_string(),
+        Vec::new(),
+        false,
+        Some(store_id),
+    );
+    if !view.stores.iter().any(|store| store.store_id == store_id) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(Json(view))
 }
 
 async fn disks_workspace() -> Json<DisksWorkspaceView> {
@@ -503,7 +521,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_upload_workspace_route_returns_access_payload() {
+    async fn remote_upload_workspace_route_requires_explicit_target() {
         let response = gui_api_router()
             .oneshot(
                 Request::builder()
@@ -514,12 +532,22 @@ mod tests {
             .await
             .expect("remote upload response");
 
-        assert_eq!(response.status(), StatusCode::OK);
-        let encoded = response_json(response).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
 
-        assert_eq!(encoded["schema_version"], "dasobjectstore.web_redesign.v1");
-        assert_eq!(encoded["actor"]["username"], "developer");
-        assert!(encoded["stores"].is_array());
+    #[tokio::test]
+    async fn remote_upload_workspace_route_rejects_unavailable_target() {
+        let response = gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/remote-upload?store_id=codex")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("remote upload response");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

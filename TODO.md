@@ -2209,6 +2209,10 @@ non-destructive close, and restores focus to its trigger when closed.
   reject a missing, unauthorised, non-writable, or disabled target; do not rely
   on the browser’s default selection for authorization. Do not silently select
   the first writable store.
+  - [x] Require ``store_id`` on the daemon-independent Web workspace route,
+    filter the response to that target, and render no file dropzone until the
+    explicit target is present. Missing targets return HTTP 400; authorization
+    and writable-state filtering remain server-owned.
 - [ ] Refactor `src/workspace/remote_upload.rs` so its file/folder dropzone,
   handoff summary, and confirm action are not rendered until an explicit,
   authorized target is present. If no writable store exists, show an explanatory

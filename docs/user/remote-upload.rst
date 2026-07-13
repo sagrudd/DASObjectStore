@@ -52,11 +52,14 @@ paste those credentials into support tickets or shell history.
 ObjectStore Selection
 ---------------------
 
-In the Web console, choose an ObjectStore from the remote-upload target list.
-The browser displays ObjectStore names, not internal S3 bucket names. The
-daemon derives the bucket from the paired session grant and rejects attempts to
-upload to a store that is read-only, locked, non-S3, missing a writer group, or
-not granted to the current session.
+Remote Upload is not a global primary workspace. Enter it from an explicit
+ObjectStore target (the Web workspace request carries ``store_id``); the
+browser displays that ObjectStore name rather than internal S3 bucket names.
+The server filters the response to the requested target and rejects a missing,
+read-only, locked, non-S3, missing-writer-group, or unauthorized target. The
+browser does not render a file dropzone until the target is present, and it
+never silently selects the first writable store. The daemon derives the bucket
+from the paired session grant.
 
 The same rule applies to ``dasobjectstore-remote upload``:
 

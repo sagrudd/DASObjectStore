@@ -4,9 +4,13 @@ use super::*;
 #[cfg(target_arch = "wasm32")]
 #[function_component(RemoteUploadPage)]
 pub fn remote_upload_page(props: &RemoteUploadPageProps) -> Html {
-    let api_path = WorkspacePage::RemoteUpload.api_path(&props.api_base_path);
+    let base_api_path = WorkspacePage::RemoteUpload.api_path(&props.api_base_path);
+    let api_path = props.target_store_id.as_deref().map_or_else(
+        || base_api_path.clone(),
+        |store_id| format!("{base_api_path}?store_id={store_id}"),
+    );
     let remote_upload_state = use_state(|| ApiLoadState::<RemoteUploadWorkspaceResponse>::Loading);
-    let selected_store = use_state(String::new);
+    let selected_store = use_state(|| props.target_store_id.clone().unwrap_or_default());
     let selected_files = use_state(Vec::<RemoteUploadSelectedFile>::new);
 
     {
@@ -116,14 +120,7 @@ pub(super) fn render_remote_upload_selection_panel(
         .iter()
         .filter(|store| store.upload_allowed)
         .collect::<Vec<_>>();
-    let effective_store_id = if selected_store.trim().is_empty() {
-        ready_stores
-            .first()
-            .map(|store| store.store_id.clone())
-            .unwrap_or_default()
-    } else {
-        (*selected_store).clone()
-    };
+    let effective_store_id = (*selected_store).clone();
     let selected_target = ready_stores
         .iter()
         .find(|store| store.store_id == effective_store_id)
@@ -181,18 +178,21 @@ pub(super) fn render_remote_upload_selection_panel(
                         }) }
                     </select>
                 </div>
-                <label class="dos-remote-upload-dropzone" ondrop={on_drop} ondragover={on_drag_over}>
-                    <strong>{ "Drop files or folders here" }</strong>
-                    <span>{ "The browser records local metadata only; bytes transfer through the paired dasobjectstore-remote agent after confirmation." }</span>
-                    <input
-                        type="file"
-                        multiple=true
-                        webkitdirectory=true
-                        directory=true
-                        onchange={on_file_input}
-                        disabled={ready_stores.is_empty()}
-                    />
-                </label>
+                { if selected_target.is_some() { html! {
+                    <label class="dos-remote-upload-dropzone" ondrop={on_drop} ondragover={on_drag_over}>
+                        <strong>{ "Drop files or folders here" }</strong>
+                        <span>{ "The browser records local metadata only; bytes transfer through the paired dasobjectstore-remote agent after confirmation." }</span>
+                        <input
+                            type="file"
+                            multiple=true
+                            webkitdirectory=true
+                            directory=true
+                            onchange={on_file_input}
+                        />
+                    </label>
+                } } else { html! {
+                    <p class="dos-empty-state">{ "Select a writable ObjectStore from ObjectStores before choosing files." }</p>
+                } } }
             </div>
             { render_remote_upload_selection_summary(&summary, selected_target.map(|store| store.display_name.as_str())) }
             <div class="dos-job-actions">

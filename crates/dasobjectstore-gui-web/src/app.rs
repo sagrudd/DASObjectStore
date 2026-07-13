@@ -502,7 +502,10 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                     <ActivityPage api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::RemoteUpload => html! {
-                    <RemoteUploadPage api_base_path={props.api_base_path.clone()} />
+                    <RemoteUploadPage
+                        api_base_path={props.api_base_path.clone()}
+                        target_store_id={None::<String>}
+                    />
                 },
                 WorkspacePage::Endpoints => html! {
                     <EndpointsWorkspace api_base_path={props.api_base_path.clone()} />
