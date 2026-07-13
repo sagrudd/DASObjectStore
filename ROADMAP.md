@@ -101,7 +101,8 @@ should continue.
 New bounded ObjectStores now initialize their daemon-owned quota ledger before
 the store registry definition is published, so creation cannot expose a finite
 quota without durable admission state. Per-profile manifest/root registration
-and probe-path selection remain the next capacity/profile seam.
+and probe-path selection now have a daemon-owned binding registry; profile-aware
+creation/adoption transport remains the next capacity/profile seam.
 
 The canonical local Docker profile now renders successfully against the
 dedicated macOS validation root and both generated Compose documents pass

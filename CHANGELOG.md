@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.116 - 2026-07-13
+
+- Add daemon-owned profile bindings that validate portable manifests, resolve
+  canonical folder/drive roots, and feed per-store capacity probes without
+  exposing host paths through consumer-facing store definitions.
+
 ## 0.72.115 - 2026-07-13
 
 - Initialize daemon-owned capacity ledgers before publishing newly-created

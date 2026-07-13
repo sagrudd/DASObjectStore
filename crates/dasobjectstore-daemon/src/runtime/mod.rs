@@ -17,6 +17,7 @@ mod migration_worker;
 mod object_browser;
 mod object_download;
 mod performance_policy;
+mod profile_registry;
 mod reconciliation;
 mod remote_pairings;
 mod remote_sessions;
@@ -99,6 +100,10 @@ pub use performance_policy::{
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
+};
+pub use profile_registry::{
+    read_profile_binding, upsert_profile_binding, BackendProfileBinding,
+    PROFILE_BINDING_REGISTRY_SCHEMA,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,

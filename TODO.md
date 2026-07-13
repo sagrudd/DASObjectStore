@@ -127,6 +127,22 @@ completion.
   - [x] Keep the generated bootstrap store seed in the writable daemon state
     volume and expose explicit store/subobject registry paths; the read-only
     ``/etc/dasobjectstore`` mount now contains configuration only.
+  - [x] Fix the local daemon Compose command to respect the image entrypoint.
+    **COMPLETED (2026-07-13):** Docker Desktop showed repeated
+    ``unsupported dasobjectstored argument: dasobjectstored`` restarts because
+    the generated stack passed the entrypoint name twice. The renderer now
+    passes only ``--config /etc/dasobjectstore/daemon.json``; local profile
+    startup and the scoped credential export were revalidated after the fix.
+  - [x] Keep the daemon Unix socket off the APFS/USB bind mount.
+    **COMPLETED (2026-07-13):** Docker Desktop returned ``Operation not
+    supported`` when ``/run/dasobjectstore`` was mapped to Seagate. The local
+    stack now uses a container-local ``tmpfs`` for the runtime socket while
+    retaining persistent state and Garage data on the attached profile root.
+  - [x] Include AlmaLinux runtime libraries required by the daemon.
+    **COMPLETED (2026-07-13):** the first AlmaLinux 9 minimal image reached
+    the entrypoint but failed on missing ``libpam.so.0``. The image now
+    installs the small runtime set (PAM, OpenSSL, zlib, libstdc++, and CA
+    certificates) before startup.
 
 - [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or
@@ -250,6 +266,10 @@ completion.
   - [x] Route folder adoption catalogue commits through the shared authority
     seam; richer daemon transaction and SQLite/object-service integration stay
     open.
+  - [x] Add the daemon-owned profile-binding registry: portable manifests are
+    validated against canonical folder/drive roots, persisted atomically, and
+    per-store capacity probes use the binding when present; profile-aware
+    creation/adoption transport remains open.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
@@ -315,7 +335,7 @@ completion.
     authorized readers receive pressure and explicit block reasons without
     mutating reservations. The CLI exposes it as ``store capacity`` (including
     ``--json``); TUI rendering and the authenticated Web route are delivered,
-    while profile-specific adapters remain follow-up work.
+    while profile-specific creation/adoption adapters remain follow-up work.
   - [x] Render the daemon-owned capacity snapshot in the embedded TUI with
     logical used/reserved/available bytes, backend and SSD availability, copy
     amplification, thresholds, and admission-block reasons; the authenticated
@@ -350,7 +370,8 @@ completion.
     and SSD free space, atomically persists admitted reservations, and fails
     closed for missing bounded ledgers or probe/persistence errors; configured
     copy counts remain daemon-authoritative. S3/multipart completion and
-    stale-reservation scheduling remain open.
+    stale-reservation scheduling remain open; registered profile bindings now
+    select canonical per-store probe roots without changing consumer DTOs.
   - [x] Initialize a new store's durable capacity ledger before publishing its
     registry definition, with idempotent restart-safe creation and regression
     coverage; per-profile manifest/root probe selection remains a separate

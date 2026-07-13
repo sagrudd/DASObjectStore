@@ -8,6 +8,7 @@ use crate::api::{
     CapacityStatusResponse,
 };
 use crate::runtime::capacity_persistence::{load_capacity_ledger, save_capacity_ledger};
+use crate::runtime::profile_registry::read_profile_binding;
 use crate::runtime::service::DaemonServiceRuntimeError;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::CapacityReservationLedger;
@@ -131,6 +132,7 @@ pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
     ledger_directory: PathBuf,
     backend_probe_root: PathBuf,
     ssd_probe_root: PathBuf,
+    profile_binding_registry_path: Option<PathBuf>,
     probe: P,
     ledgers: Mutex<HashMap<String, CapacityReservationLedger>>,
 }
@@ -160,9 +162,32 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             ledger_directory: ledger_directory.into(),
             backend_probe_root: backend_probe_root.into(),
             ssd_probe_root: ssd_probe_root.into(),
+            profile_binding_registry_path: None,
             probe,
             ledgers: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub fn with_profile_binding_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.profile_binding_registry_path = Some(path.into());
+        self
+    }
+
+    fn probe_roots(
+        &self,
+        store_id: &StoreId,
+    ) -> Result<(PathBuf, PathBuf), DaemonServiceRuntimeError> {
+        let Some(registry_path) = &self.profile_binding_registry_path else {
+            return Ok((self.backend_probe_root.clone(), self.ssd_probe_root.clone()));
+        };
+        let Some(binding) = read_profile_binding(registry_path, store_id.as_str())? else {
+            return Ok((self.backend_probe_root.clone(), self.ssd_probe_root.clone()));
+        };
+        let staging_root = binding
+            .ssd_staging_root
+            .clone()
+            .unwrap_or_else(|| binding.backend_root.clone());
+        Ok((binding.backend_root, staging_root))
     }
 
     fn ledger_path(&self, store_id: &str) -> PathBuf {
@@ -332,15 +357,16 @@ where
         ledger
             .update_policy(definition.policy.capacity.clone())
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
+        let (backend_probe_root, ssd_probe_root) = self.probe_roots(&store_id)?;
         let backend_free_bytes = self
             .probe
-            .free_bytes(&self.backend_probe_root)
+            .free_bytes(&backend_probe_root)
             .map_err(|error| unavailable(format!("backend capacity probe failed: {error}")))?;
         let requires_ssd_staging =
             definition.policy.ingest_mode != dasobjectstore_core::store::IngestMode::DirectToHdd;
         let ssd_free_bytes = if requires_ssd_staging {
             self.probe
-                .free_bytes(&self.ssd_probe_root)
+                .free_bytes(&ssd_probe_root)
                 .map_err(|error| unavailable(format!("SSD capacity probe failed: {error}")))?
         } else {
             0
@@ -401,13 +427,14 @@ where
             .update_policy(definition.policy.capacity.clone())
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
 
+        let (backend_probe_root, ssd_probe_root) = self.probe_roots(&store_id)?;
         let backend_free_bytes = self
             .probe
-            .free_bytes(&self.backend_probe_root)
+            .free_bytes(&backend_probe_root)
             .map_err(|error| unavailable(format!("backend capacity probe failed: {error}")))?;
         let ssd_free_bytes = if request.requires_ssd_staging() {
             self.probe
-                .free_bytes(&self.ssd_probe_root)
+                .free_bytes(&ssd_probe_root)
                 .map_err(|error| unavailable(format!("SSD capacity probe failed: {error}")))?
         } else {
             0
@@ -524,7 +551,12 @@ mod tests {
         CapacityStatusRequest, DaemonIngressOrigin,
     };
     use crate::runtime::{load_capacity_ledger, save_capacity_ledger};
+    use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::manifest::{
+        BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+    };
+    use dasobjectstore_core::protection::ProtectionPolicy;
     use dasobjectstore_core::store::{
         CapacityPolicy, CapacityReservationLedger, StoreClass, StorePolicy,
     };
@@ -544,6 +576,22 @@ mod tests {
                 Ok(self.ssd)
             } else {
                 Ok(self.backend)
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct PathProbe;
+
+    impl CapacitySpaceProbe for PathProbe {
+        fn free_bytes(&self, path: &Path) -> Result<u64, String> {
+            let path = path.to_string_lossy();
+            if path.contains("profile-backend") {
+                Ok(2_222)
+            } else if path.contains("profile-ssd") {
+                Ok(3_333)
+            } else {
+                Ok(111)
             }
         }
     }
@@ -739,6 +787,53 @@ mod tests {
                 .reserved_bytes(),
             0
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn provider_uses_registered_profile_roots_for_capacity_probes() {
+        let root = root("profile-roots");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let ledger =
+            CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
+        save_capacity_ledger(ledger_dir.join("codex.json"), &ledger).expect("ledger seed");
+        let backend_root = root.join("profile-backend");
+        let staging_root = root.join("profile-ssd");
+        std::fs::create_dir_all(&backend_root).expect("backend root");
+        std::fs::create_dir_all(&staging_root).expect("staging root");
+        let binding = crate::runtime::BackendProfileBinding {
+            manifest: ObjectStoreManifest {
+                schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                store_id: StoreId::new("codex").expect("store id"),
+                deployment_profile: DeploymentProfile::Folder,
+                host_mode: HostMode::PerUser,
+                protection: ProtectionPolicy::LocalOnly,
+                backend: BackendReference::Folder {
+                    root_identity: "fsid:codex".to_string(),
+                },
+            },
+            backend_root: backend_root.clone(),
+            ssd_staging_root: Some(staging_root.clone()),
+        };
+        let profile_registry = root.join("profile-bindings.json");
+        crate::runtime::upsert_profile_binding(&profile_registry, binding)
+            .expect("profile binding");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            root.join("fallback-backend"),
+            root.join("fallback-ssd"),
+            PathProbe,
+        )
+        .with_profile_binding_registry_path(profile_registry);
+        let status = provider
+            .status(CapacityStatusRequest {
+                store_id: "codex".to_string(),
+            })
+            .expect("profile status");
+        assert_eq!(status.backend_free_bytes, 2_222);
+        assert_eq!(status.ssd_available_bytes, Some(3_333));
         let _ = std::fs::remove_dir_all(root);
     }
 
