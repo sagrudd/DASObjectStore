@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.117 - 2026-07-13
+
+- Harden profile-binding registry compatibility with strict field decoding,
+  duplicate-store rejection, and collision-safe atomic writer temporary files.
+
 ## 0.72.116 - 2026-07-13
 
 - Add daemon-owned profile bindings that validate portable manifests, resolve

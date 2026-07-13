@@ -7,13 +7,16 @@
 use super::DaemonServiceRuntimeError;
 use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PROFILE_BINDING_REGISTRY_SCHEMA: &str = "dasobjectstore.profile_binding_registry.v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct BackendProfileBinding {
     pub manifest: ObjectStoreManifest,
     pub backend_root: PathBuf,
@@ -56,6 +59,7 @@ impl BackendProfileBinding {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ProfileBindingRegistryFile {
     schema_version: String,
     bindings: Vec<BackendProfileBinding>,
@@ -131,6 +135,19 @@ fn read_registry(path: &Path) -> Result<ProfileBindingRegistryFile, DaemonServic
             registry.schema_version
         )));
     }
+    let mut store_ids = BTreeSet::new();
+    for binding in &registry.bindings {
+        binding
+            .manifest
+            .validate()
+            .map_err(|error| invalid_binding(error.to_string()))?;
+        if !store_ids.insert(binding.manifest.store_id.as_str()) {
+            return Err(invalid_binding(format!(
+                "duplicate profile binding for store {}",
+                binding.manifest.store_id
+            )));
+        }
+    }
     Ok(registry)
 }
 
@@ -143,11 +160,15 @@ fn write_registry(
         .ok_or_else(|| invalid_binding("profile binding registry has no parent"))?;
     fs::create_dir_all(parent).map_err(|error| registry_io(parent, error))?;
     let temporary = parent.join(format!(
-        ".{}.tmp-{}",
+        ".{}.tmp-{}-{}",
         path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("profiles"),
-        std::process::id()
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
     ));
     let bytes = serde_json::to_vec_pretty(registry).map_err(|error| {
         DaemonServiceRuntimeError::UnsupportedOperation {
@@ -203,7 +224,9 @@ fn registry_io(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_profile_binding, upsert_profile_binding, BackendProfileBinding};
+    use super::{
+        read_profile_binding, read_registry, upsert_profile_binding, BackendProfileBinding,
+    };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::manifest::{
@@ -282,6 +305,39 @@ mod tests {
             mount_path_hint: Some(second),
         };
         assert!(upsert_profile_binding(root.join("bindings.json"), binding).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_unknown_registry_fields_and_duplicate_store_ids() {
+        let root = root("strict");
+        let path = root.join("bindings.json");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend");
+        let binding = folder_binding("folder", &backend);
+        let mut encoded = serde_json::to_value(&binding).expect("binding JSON");
+        encoded["unexpected"] = serde_json::json!(true);
+        fs::write(
+            &path,
+            serde_json::json!({
+                "schema_version": super::PROFILE_BINDING_REGISTRY_SCHEMA,
+                "bindings": [encoded]
+            })
+            .to_string(),
+        )
+        .expect("unknown-field registry");
+        assert!(read_registry(&path).is_err());
+        fs::remove_file(&path).expect("remove malformed registry");
+
+        upsert_profile_binding(&path, binding.clone()).expect("binding upsert");
+        let mut duplicate = serde_json::from_str::<serde_json::Value>(
+            &fs::read_to_string(&path).expect("registry read"),
+        )
+        .expect("registry JSON");
+        let first = duplicate["bindings"][0].clone();
+        duplicate["bindings"] = serde_json::json!([first.clone(), first]);
+        fs::write(&path, duplicate.to_string()).expect("duplicate registry");
+        assert!(read_registry(&path).is_err());
         let _ = fs::remove_dir_all(root);
     }
 }
