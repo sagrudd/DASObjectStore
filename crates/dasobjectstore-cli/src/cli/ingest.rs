@@ -226,6 +226,9 @@ pub(crate) struct IngestControlArgs {
     confirm: String,
     #[arg(long)]
     json: bool,
+    /// Render a compact operator snapshot suitable for captured TUI evidence.
+    #[arg(long, conflicts_with = "json")]
+    tui: bool,
 }
 
 impl IngestControlArgs {
@@ -243,6 +246,9 @@ impl IngestControlArgs {
     }
     pub(crate) fn json(&self) -> bool {
         self.json
+    }
+    pub(crate) fn tui(&self) -> bool {
+        self.tui
     }
 }
 
@@ -469,7 +475,7 @@ mod tests {
             "protect Web availability",
             "--confirm",
             "confirm ingest control",
-            "--json",
+            "--tui",
         ])
         .expect("ingest control parses");
         let Some(Command::Ingest(args)) = cli.command() else {
@@ -481,7 +487,20 @@ mod tests {
         assert_eq!(control.action(), "pause");
         assert_eq!(control.reason(), "protect Web availability");
         assert_eq!(control.confirm(), "confirm ingest control");
-        assert!(control.json());
+        assert!(control.tui());
+        assert!(!control.json());
+
+        let error = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "control",
+            "--action",
+            "pause",
+            "--tui",
+            "--json",
+        ])
+        .expect_err("tui and json must be mutually exclusive");
+        assert!(error.to_string().contains("cannot be used with"));
     }
 
     #[test]

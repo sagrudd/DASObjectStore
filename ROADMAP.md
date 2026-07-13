@@ -56,7 +56,8 @@ transfer worker with progress and administrator cancellation checks between
 provider transfers, while stable byte-range resume, non-Garage providers, and
 appliance soak acceptance remain open; daemon/CLI file-ingest pause/throttle/
 resume is now available between source objects and through an authenticated Web
-admin action (TUI action presentation remains);
+admin action (the compact ``ingest control --tui`` acknowledgement is now
+available; interactive keyboard controls and live state refresh remain);
 control/Web capacity is not fully
 reserved under ingest; telemetry device mapping and appliance acceptance remain
 incomplete; and UI/design work remains. The module-size guard now passes with no

@@ -102,9 +102,9 @@ completion.
   login, static assets, cancellation, and degraded cached status responsive
   during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, strict
   cancellation, configured runtime resource-policy injection, and the daemon/
-  CLI file-ingest emergency control and authenticated Web action bridging are
-  delivered; TUI action presentation, async HTTP bridging, and appliance soak
-  acceptance remain.
+  CLI file-ingest emergency control, authenticated Web action bridging, and a
+  compact one-shot TUI action snapshot are delivered; async HTTP bridging and
+  appliance soak acceptance remain.
   - [x] Load the versioned ingest resource policy from daemon configuration,
     inject its CPU/memory/socket/I/O budget into packaged local ingest, and
     retain a backward-compatible safe default when the field is absent. The
@@ -1348,7 +1348,9 @@ list until every temporary size-budget exception has been removed.
   work untouched. The control is process-local (restart returns to `running`)
   and provider-specific S3 workers retain their separate admission gate;
   authenticated Web action wiring now uses the reserved daemon bridge and
-  typed Web client contract; TUI action presentation remains open.
+  typed Web client contract; the compact ``ingest control --tui`` snapshot is
+  covered by parser and renderer tests, while interactive keyboard controls
+  and live daemon state refresh remain open.
 - [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
   - [x] Add a deterministic local bridge-saturation regression proving the
     daemon-independent liveness route remains HTTP 200 while a bounded daemon

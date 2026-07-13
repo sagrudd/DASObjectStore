@@ -5,12 +5,14 @@
 //! graphical terminal views with flags such as `dasobjectstore ingest files
 //! --tui`.
 
+pub mod ingest_control;
 pub mod layout;
 pub mod monitoring;
 pub mod planning;
 pub mod resource;
 pub mod upload;
 
+pub use ingest_control::IngestControlDisplay;
 pub use layout::{classify_terminal_layout, TerminalLayout};
 pub use monitoring::{
     format_rate_label, AttachState, Bottleneck, CompletionFraction, DaemonActionSupport,

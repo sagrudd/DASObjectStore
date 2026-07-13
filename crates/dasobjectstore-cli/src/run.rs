@@ -587,6 +587,12 @@ fn run_ingest_control(args: &IngestControlArgs, writer: &mut impl Write) -> Resu
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response)?;
         writer.write_all(b"\n")?;
+    } else if args.tui() {
+        writeln!(
+            writer,
+            "{}",
+            dasobjectstore_tui::IngestControlDisplay::from_response(&response).snapshot_text()
+        )?;
     } else {
         writeln!(writer, "Ingest control: {:?}", response.state)?;
         writeln!(writer, "Changed: {}", response.changed)?;

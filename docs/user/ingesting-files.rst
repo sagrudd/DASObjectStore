@@ -508,6 +508,13 @@ The authenticated Web administrator route mirrors the CLI contract at
 control bridge and returns a typed ``paused``, ``throttled``, or ``running``
 state; it never mutates storage directly.
 
+For captured operator evidence, add ``--tui`` to the CLI command. This renders
+a compact, line-oriented acknowledgement containing the resulting admission
+state, whether it changed, the applied/preview mode, and the operator reason.
+It is a one-shot view: it does not accept keyboard commands or poll daemon
+state. ``--tui`` and ``--json`` are mutually exclusive so machine-readable
+output cannot be silently replaced by presentation text.
+
 Operator triage for ingest pressure
 -----------------------------------
 
