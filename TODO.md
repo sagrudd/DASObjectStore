@@ -778,6 +778,10 @@ completion.
     the catalogue before backend removal, debit folder capacity transactionally,
     and fail closed on guarded-drive identity loss; HTTP gateway wiring remains
     open.
+  - [x] Add the provider-neutral multipart completion metadata contract with
+    bounded part count, strict ordering, per-part checksums, overflow-safe
+    total-size validation, and reservation identity; stream assembly and HTTP
+    gateway wiring remain separate.
 - [ ] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic.

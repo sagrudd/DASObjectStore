@@ -1197,6 +1197,9 @@ object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.
 Garage S3 reconciliation now passes its controller-owned provider into that
 worker as well; multipart paths still need explicit provider injection.
+The profile S3 seam now publishes bounded multipart completion metadata
+(ordered parts, per-part SHA-256 checksums, total-size and reservation
+validation); stream assembly, provider injection, and HTTP dispatch remain.
 Capacity-enabled local ingest also rejects a client copy-count override before
 any source read when it differs from the daemon ObjectStore policy; legacy
 standalone executor paths retain their explicit override behavior.

@@ -15,6 +15,7 @@ use dasobjectstore_core::ids::StoreId;
 use std::io::Read;
 
 pub const PROFILE_S3_MAX_KEYS: usize = 1_000;
+pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = 10_000;
 
 pub trait ProfileS3ReadBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
 
@@ -59,6 +60,79 @@ pub struct ProfileS3Object {
 pub struct ProfileS3ListPage {
     pub objects: Vec<ProfileS3Object>,
     pub next_offset: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileS3MultipartPart {
+    pub part_number: u32,
+    pub size_bytes: u64,
+    pub checksum: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileS3MultipartCompletion {
+    pub reservation_id: String,
+    pub key: BackendObjectKey,
+    pub expected_size_bytes: u64,
+    pub parts: Vec<ProfileS3MultipartPart>,
+}
+
+impl ProfileS3MultipartCompletion {
+    /// Validate the provider-neutral completion metadata before assembling
+    /// parts into a daemon-owned staged stream. Reservation admission and
+    /// catalogue commit remain the same lifecycle as a normal PUT.
+    pub fn validate(&self) -> Result<(), BackendError> {
+        if self.reservation_id.trim().is_empty() {
+            return Err(BackendError::InvalidRequest(
+                "multipart reservation_id must not be blank".to_string(),
+            ));
+        }
+        if self.key.object_id.trim().is_empty() || self.key.object_id.starts_with('/') {
+            return Err(BackendError::InvalidRequest(
+                "multipart object key must be a relative logical key".to_string(),
+            ));
+        }
+        if self.expected_size_bytes == 0 || self.parts.is_empty() {
+            return Err(BackendError::InvalidRequest(
+                "multipart completion requires a non-empty object and parts".to_string(),
+            ));
+        }
+        if self.parts.len() > PROFILE_S3_MAX_MULTIPART_PARTS {
+            return Err(BackendError::InvalidRequest(format!(
+                "multipart completion exceeds {PROFILE_S3_MAX_MULTIPART_PARTS} parts"
+            )));
+        }
+        let mut previous = 0_u32;
+        let total = self.parts.iter().try_fold(0_u64, |total, part| {
+            if part.part_number == 0 || part.part_number <= previous {
+                return Err(BackendError::InvalidRequest(
+                    "multipart parts must be strictly ordered and unique".to_string(),
+                ));
+            }
+            previous = part.part_number;
+            if part.size_bytes == 0
+                || !part.checksum.starts_with("sha256:")
+                || part.checksum.len() != "sha256:".len() + 64
+                || !part.checksum["sha256:".len()..]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(BackendError::InvalidRequest(
+                    "multipart parts require a non-zero size and sha256 checksum".to_string(),
+                ));
+            }
+            total
+                .checked_add(part.size_bytes)
+                .ok_or_else(|| BackendError::InvalidRequest("multipart size overflow".to_string()))
+        })?;
+        if total != self.expected_size_bytes {
+            return Err(BackendError::InvalidRequest(format!(
+                "multipart part total {total} does not match expected size {}",
+                self.expected_size_bytes
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Project an authoritative runtime page into the versioned daemon transport
@@ -428,7 +502,8 @@ mod tests {
         delete_profile_object, delete_profile_object_with_capacity_provider, get_profile_object,
         get_profile_object_range, head_profile_object, list_profile_objects,
         list_profile_objects_page, profile_health, profile_s3_list_response, put_profile_object,
-        put_profile_object_with_capacity_provider, verify_profile_object, PROFILE_S3_MAX_KEYS,
+        put_profile_object_with_capacity_provider, verify_profile_object,
+        ProfileS3MultipartCompletion, ProfileS3MultipartPart, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -751,6 +826,37 @@ mod tests {
         assert_eq!(backend.capacity().reserved_bytes, 0);
         assert_eq!(list_profile_objects(&backend, None).unwrap().len(), 1);
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn multipart_completion_validates_order_checksums_and_total_size() {
+        let completion = ProfileS3MultipartCompletion {
+            reservation_id: "multipart-1".to_string(),
+            key: BackendObjectKey {
+                object_id: "writes/multipart.fastq".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 7,
+            parts: vec![
+                ProfileS3MultipartPart {
+                    part_number: 1,
+                    size_bytes: 3,
+                    checksum: format!("sha256:{}", "a".repeat(64)),
+                },
+                ProfileS3MultipartPart {
+                    part_number: 2,
+                    size_bytes: 4,
+                    checksum: format!("sha256:{}", "b".repeat(64)),
+                },
+            ],
+        };
+        completion.validate().expect("valid multipart completion");
+        let mut invalid = completion.clone();
+        invalid.parts[1].part_number = 1;
+        assert!(invalid.validate().is_err());
+        invalid = completion.clone();
+        invalid.expected_size_bytes = 8;
+        assert!(invalid.validate().is_err());
     }
 
     #[test]
