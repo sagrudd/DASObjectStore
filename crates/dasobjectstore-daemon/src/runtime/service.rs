@@ -2,7 +2,7 @@ use super::capacity_provider::CapacityAdmissionProvider;
 use super::ingest_files::DaemonIngestFilesRuntimeError;
 use super::{
     admin_jobs::AdminJobRegistry,
-    ingest_files::submit_ingest_files_to_local_store_with_capacity_provider,
+    ingest_files::resource_gate::submit_ingest_files_with_resource_gate,
     remote_upload::{
         run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider,
         RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
@@ -10,7 +10,8 @@ use super::{
     },
 };
 use crate::api::{
-    CapacityAdmissionRequest, CapacityAdmissionResponse, DaemonIngestProgressEvent, DaemonJobId,
+    CapacityAdmissionRequest, CapacityAdmissionResponse, DaemonIngestProgressEvent,
+    DaemonIngestResourceGate, DaemonIngestResourcePolicy, DaemonJobId,
     DaemonRequestValidationError, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
     DaemonServiceOperation, DaemonServiceStatusDetail, DaemonServiceStatusRequest,
     DaemonServiceStatusResponse, StoreRepairS3Reconciliation, SubmitIngestFilesRequest,
@@ -71,6 +72,7 @@ pub struct GarageServiceController<R> {
     config: GarageServiceRuntimeConfig,
     runner: R,
     capacity_admission_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
+    ingest_resource_gate: Option<Arc<DaemonIngestResourceGate>>,
 }
 
 impl<R> GarageServiceController<R>
@@ -82,6 +84,7 @@ where
             config,
             runner,
             capacity_admission_provider: None,
+            ingest_resource_gate: None,
         }
     }
 
@@ -90,6 +93,18 @@ where
         provider: Arc<dyn CapacityAdmissionProvider>,
     ) -> Self {
         self.capacity_admission_provider = Some(provider);
+        self
+    }
+
+    pub fn with_ingest_resource_policy(mut self, policy: DaemonIngestResourcePolicy) -> Self {
+        let available_cpu_cores = std::thread::available_parallelism()
+            .map(|cores| cores.get().min(u16::MAX as usize) as u16)
+            .unwrap_or(1)
+            .max(1);
+        self.ingest_resource_gate = Some(Arc::new(DaemonIngestResourceGate::from_policy(
+            policy,
+            available_cpu_cores,
+        )));
         self
     }
 
@@ -145,11 +160,12 @@ where
             DaemonIngestProgressEvent,
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
-        submit_ingest_files_to_local_store_with_capacity_provider(
+        submit_ingest_files_with_resource_gate(
             request,
             accepted_at_utc,
             emit_progress,
             self.capacity_admission_provider.clone(),
+            self.ingest_resource_gate.clone(),
         )
     }
 
@@ -280,6 +296,7 @@ where
             accepted_at_utc,
             is_cancelled,
             self.capacity_admission_provider.clone(),
+            self.ingest_resource_gate.clone(),
             emit_progress,
         )
     }

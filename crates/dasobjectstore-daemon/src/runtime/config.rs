@@ -1,6 +1,7 @@
 use super::appliance_telemetry::{
     validate_appliance_telemetry_cadence, APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS,
 };
+use crate::api::DaemonIngestResourcePolicy;
 use dasobjectstore_core::DEFAULT_PRODUCT_ROOT;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -46,6 +47,8 @@ pub struct DaemonRuntimeConfig {
     pub product_root: PathBuf,
     #[serde(default)]
     pub telemetry: DaemonTelemetryRuntimeConfig,
+    #[serde(default)]
+    pub ingest_resource_policy: DaemonIngestResourcePolicy,
 }
 
 impl DaemonRuntimeConfig {
@@ -61,6 +64,7 @@ impl DaemonRuntimeConfig {
             log_dir: PathBuf::from(DEFAULT_DAEMON_LOG_DIR),
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
             telemetry: DaemonTelemetryRuntimeConfig::default(),
+            ingest_resource_policy: DaemonIngestResourcePolicy::default(),
         }
     }
 
@@ -76,6 +80,7 @@ impl DaemonRuntimeConfig {
             log_dir: PathBuf::from(LINUX_DAEMON_LOG_DIR),
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
             telemetry: DaemonTelemetryRuntimeConfig::default(),
+            ingest_resource_policy: DaemonIngestResourcePolicy::default(),
         }
     }
 
@@ -225,7 +230,44 @@ mod tests {
         assert_eq!(config.product_root, PathBuf::from(DEFAULT_PRODUCT_ROOT));
         assert!(config.telemetry.enabled);
         assert_eq!(config.telemetry.cadence_seconds, 30);
+        assert_eq!(
+            config.ingest_resource_policy,
+            crate::api::DaemonIngestResourcePolicy::default()
+        );
         config.validate().expect("default config is valid");
+    }
+
+    #[test]
+    fn legacy_config_without_ingest_policy_uses_safe_default() {
+        let json = serde_json::json!({
+            "service_user": DEFAULT_DAEMON_SERVICE_USER,
+            "service_group": DEFAULT_DAEMON_GROUP,
+            "config_path": DEFAULT_DAEMON_CONFIG_PATH,
+            "runtime_dir": DEFAULT_DAEMON_RUNTIME_DIR,
+            "socket_path": format!("{DEFAULT_DAEMON_RUNTIME_DIR}/{DEFAULT_DAEMON_SOCKET_FILE_NAME}"),
+            "state_dir": DEFAULT_DAEMON_STATE_DIR,
+            "log_dir": DEFAULT_DAEMON_LOG_DIR,
+            "product_root": DEFAULT_PRODUCT_ROOT,
+            "telemetry": {"enabled": true, "cadence_seconds": 30}
+        });
+        let config: DaemonRuntimeConfig = serde_json::from_value(json).expect("legacy config");
+        assert_eq!(
+            config.ingest_resource_policy,
+            crate::api::DaemonIngestResourcePolicy::default()
+        );
+    }
+
+    #[test]
+    fn configured_ingest_policy_round_trips_through_json() {
+        let mut config = DaemonRuntimeConfig::default_packaged();
+        config.ingest_resource_policy.memory_budget_bytes = 256 * 1024 * 1024;
+        config.ingest_resource_policy.worker_counts.hdd_write = 2;
+
+        let encoded = serde_json::to_string(&config).expect("config serializes");
+        let decoded: DaemonRuntimeConfig =
+            serde_json::from_str(&encoded).expect("config deserializes");
+
+        assert_eq!(decoded, config);
     }
 
     #[test]

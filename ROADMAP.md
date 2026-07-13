@@ -930,16 +930,20 @@ fail closed. Appliance soak and telemetry freshness remain open.
 The daemon API also exposes a typed ingest admission decision combining
 source-read pressure/error backpressure with adaptive worker scheduling. It
 reports run/throttle/block and the limiting schedule reason; live host resource
-reservations, telemetry, and runtime call-site wiring remain open.
+telemetry and HTTP bridging remain open.
 
 A transactional resource gate now prevents concurrent daemon jobs from
 overbooking CPU, memory, socket-worker, or I/O-worker budgets and releases
-leases automatically on scope exit. Runtime policy injection and host telemetry
-remain open.
+leases automatically on scope exit. The packaged daemon now loads the ingest
+resource policy from its versioned runtime config (with a safe legacy default)
+and injects that policy into local file-ingest reservations; host telemetry
+remains open.
 
 Packaged local file ingest now acquires a bounded shared resource lease before
-source enumeration and releases it on every completion/error path; dynamic
-policy injection remains open.
+source enumeration and releases it on every completion/error path. The lease
+budget is selected from the daemon-configured ingest policy rather than a
+hard-coded runtime default. Garage S3 reconciliation uses the same injected
+gate before handing staged provider data to local ingest.
 
 The TUI now renders an optional daemon admission action, limiting reason, and
 worker schedule alongside live ingest telemetry; Web bridging and host-level

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.80 - 2026-07-13
+
+- Load the daemon ingest resource policy from the packaged runtime config and
+  inject it into local file-ingest reservations, preserving safe defaults for
+  legacy config files.
+
 ## 0.72.79 - 2026-07-13
 
 - Route normal CLI `store create` requests with a writer group through the

@@ -101,8 +101,14 @@ completion.
 - [~] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
   during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, and
-  strict cancellation are delivered; async HTTP bridging and appliance soak
-  acceptance remain.
+  strict cancellation are delivered; configured runtime resource-policy
+  injection is now wired; async HTTP bridging and appliance soak acceptance
+  remain.
+  - [x] Load the versioned ingest resource policy from daemon configuration,
+    inject its CPU/memory/socket/I/O budget into packaged local ingest, and
+    retain a backward-compatible safe default when the field is absent. The
+    same gate is threaded through Garage reconciliation; explicit HTTP
+    bridging and host-level control-plane telemetry remain open.
 - [ ] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
   appliance acceptance gaps without fabricating continuity.
 - [x] Remove temporary production module-size exceptions through owned,

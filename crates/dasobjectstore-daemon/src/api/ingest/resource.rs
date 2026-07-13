@@ -145,6 +145,13 @@ impl DaemonIngestResourceGate {
         }
     }
 
+    pub fn from_policy(policy: DaemonIngestResourcePolicy, available_cpu_cores: u16) -> Self {
+        Self::new(DaemonIngestResourceBudget::from_policy(
+            policy,
+            available_cpu_cores,
+        ))
+    }
+
     pub fn try_reserve(
         &self,
         reservation: DaemonIngestResourceReservation,
@@ -311,5 +318,42 @@ mod tests {
         );
         drop(first);
         assert!(gate.try_reserve(reservation()).is_ok());
+    }
+
+    #[test]
+    fn policy_constructor_applies_configured_memory_budget() {
+        let policy = DaemonIngestResourcePolicy {
+            memory_budget_bytes: 100,
+            system_safety_reserve: DaemonIngestSystemSafetyReserve {
+                cpu_cores: 0,
+                memory_bytes: 0,
+            },
+            ..DaemonIngestResourcePolicy::default()
+        };
+        let gate = DaemonIngestResourceGate::from_policy(policy, 2);
+        let _lease = gate
+            .try_reserve(DaemonIngestResourceReservation {
+                cpu_cores: 1,
+                memory_bytes: 100,
+                socket_workers: 1,
+                io_workers: 2,
+            })
+            .expect("configured budget admits one reservation");
+        let error = gate
+            .try_reserve(DaemonIngestResourceReservation {
+                cpu_cores: 1,
+                memory_bytes: 1,
+                socket_workers: 1,
+                io_workers: 2,
+            })
+            .expect_err("configured memory budget rejects over-admission");
+        assert_eq!(
+            error,
+            DaemonIngestResourceReservationError::BudgetExceeded {
+                resource: "memory_bytes",
+                requested: 1,
+                available: 0,
+            }
+        );
     }
 }

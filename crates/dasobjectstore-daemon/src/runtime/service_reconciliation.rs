@@ -7,10 +7,10 @@ use super::reconciliation::{
 };
 use super::service::{DaemonServiceRuntimeError, GarageServiceRuntimeConfig, ServiceCommandRunner};
 use crate::api::{
-    DaemonIngestConflictPolicy, DaemonIngressOrigin, StoreRepairS3Reconciliation,
-    SubmitIngestFilesRequest,
+    DaemonIngestConflictPolicy, DaemonIngestResourceGate, DaemonIngressOrigin,
+    StoreRepairS3Reconciliation, SubmitIngestFilesRequest,
 };
-use crate::runtime::submit_ingest_files_to_local_store_with_capacity_provider;
+use crate::runtime::ingest_files::resource_gate::submit_ingest_files_with_resource_gate;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_object_service::{
@@ -28,6 +28,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     accepted_at_utc: &str,
     is_cancelled: &dyn Fn() -> bool,
     capacity_provider: Option<std::sync::Arc<dyn CapacityAdmissionProvider>>,
+    resource_gate: Option<std::sync::Arc<DaemonIngestResourceGate>>,
     emit_progress: &mut dyn FnMut(
         crate::api::DaemonIngestProgressEvent,
     ) -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
@@ -236,7 +237,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
             }
         }
     }
-    let ingest = submit_ingest_files_to_local_store_with_capacity_provider(
+    let ingest = submit_ingest_files_with_resource_gate(
         SubmitIngestFilesRequest {
             endpoint: store_id,
             source_path: staging_path.clone(),
@@ -251,6 +252,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         accepted_at_utc,
         emit_progress,
         capacity_provider,
+        resource_gate,
     )
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
         operation: format!("S3 reconciliation ingest failed: {error}"),

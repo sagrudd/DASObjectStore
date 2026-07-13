@@ -203,6 +203,13 @@ Operators configure telemetry in `/etc/dasobjectstore/daemon.json` under the
 }
 ```
 
+The same daemon configuration may include an `ingest_resource_policy` object.
+Its worker counts, memory budget, and safety reserve are converted into the
+daemon's transactional CPU, memory, socket-worker, and I/O-worker admission
+budget for local file ingest. A config written before this field existed is
+still valid and receives the safe built-in policy. Validate policy edits with
+`dasobjectstored --check-config` before restarting the service.
+
 Before restarting the service after a cadence or enablement change, validate
 the edited file:
 

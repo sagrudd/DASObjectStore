@@ -40,7 +40,7 @@ mod pipeline_events;
 mod pipeline_state;
 mod pipeline_workers;
 mod progress;
-mod resource_gate;
+pub(crate) mod resource_gate;
 mod scheduling;
 mod source_classification;
 
@@ -115,12 +115,13 @@ pub fn submit_ingest_files_to_local_store_with_capacity_provider(
     progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
-    let executor = LocalFileIngestExecutor::from_environment();
-    let executor = executor.with_capacity_admission_provider(capacity_provider);
-    let mut progress = progress::IngestProgressCoalescer::new(progress);
-    let response = executor.submit(request, accepted_at_utc, |event| progress.publish(event))?;
-    progress.flush()?;
-    Ok(response)
+    resource_gate::submit_ingest_files_with_resource_gate(
+        request,
+        accepted_at_utc,
+        progress,
+        capacity_provider,
+        None,
+    )
 }
 
 #[derive(Clone)]
@@ -133,6 +134,7 @@ struct LocalFileIngestExecutor {
     source_is_server_local: fn(&Path) -> bool,
     capacity_policy: SsdCapacityPolicy,
     capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
+    resource_gate: Option<Arc<crate::api::DaemonIngestResourceGate>>,
 }
 
 impl LocalFileIngestExecutor {
@@ -146,6 +148,7 @@ impl LocalFileIngestExecutor {
             source_is_server_local,
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
+            resource_gate: None,
         }
     }
 
@@ -199,11 +202,8 @@ impl LocalFileIngestExecutor {
                 managed_disk_roots.len()
             )));
         }
-        let _resource_lease = resource_gate::reserve_ingest_resources().map_err(|error| {
-            DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                "ingest resource admission rejected: {error:?}"
-            ))
-        })?;
+        let _resource_lease = resource_gate::reserve_ingest_resources(self.resource_gate.clone())
+            .map_err(resource_gate::resource_admission_error)?;
         ensure_live_metadata_for_ingest(
             &self.live_sqlite_path,
             &endpoint.store,
@@ -1116,6 +1116,7 @@ mod tests {
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
+            resource_gate: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1188,6 +1189,7 @@ mod tests {
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: Some(capacity_provider.clone()),
+            resource_gate: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1290,6 +1292,7 @@ mod tests {
                 source_is_server_local: |_| false,
                 capacity_policy: SsdCapacityPolicy::new(99, 100, 0).expect("capacity policy"),
                 capacity_provider: None,
+                resource_gate: None,
             };
             let mut events = Vec::new();
             executor
@@ -1387,6 +1390,7 @@ mod tests {
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
+            resource_gate: None,
         };
         let mut progress_events = Vec::new();
         executor
@@ -1438,6 +1442,7 @@ mod tests {
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
+            resource_gate: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1514,6 +1519,7 @@ mod tests {
             source_is_server_local: |_| true,
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
+            resource_gate: None,
         };
 
         let mut progress_events = Vec::new();

@@ -35,6 +35,15 @@ The Unix-domain socket is the local client transport. The daemon will use peer
 credentials on Linux to identify the submitting local actor before accepting
 storage-mutating jobs.
 
+The packaged daemon also accepts an ``ingest_resource_policy`` object in its
+JSON configuration. Its worker counts and memory budget become the daemon's
+transactional CPU, memory, socket-worker, and I/O-worker admission budget for
+local file ingest. Older configuration files may omit this object and receive
+the safe built-in policy; operators should use ``--check-config`` before
+deploying a changed policy.
+The same budget is used when Garage reconciliation hands staged provider data
+back to the local ingest pipeline; it does not bypass daemon admission.
+
 The packaged daemon also owns appliance telemetry collection. By default,
 ``/etc/dasobjectstore/daemon.json`` enables telemetry with a 30 second cadence
 and writes the current JSON state under:
