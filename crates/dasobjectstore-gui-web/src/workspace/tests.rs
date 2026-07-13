@@ -242,7 +242,6 @@ fn primary_navigation_uses_redesign_labels() {
             "Home",
             "Enclosures",
             "ObjectStores",
-            "Remote Upload",
             "Endpoints",
             "Activity",
             "Local Access",
@@ -264,8 +263,8 @@ fn primary_navigation_is_host_mode_aware_for_users_groups() {
 
     assert!(standalone_labels.contains(&"Activity"));
     assert!(synoptikon_labels.contains(&"Activity"));
-    assert!(standalone_labels.contains(&"Remote Upload"));
-    assert!(synoptikon_labels.contains(&"Remote Upload"));
+    assert!(!standalone_labels.contains(&"Remote Upload"));
+    assert!(!synoptikon_labels.contains(&"Remote Upload"));
     assert!(standalone_labels.contains(&"Endpoints"));
     assert!(!synoptikon_labels.contains(&"Endpoints"));
     assert!(standalone_labels.contains(&"Local Access"));

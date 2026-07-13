@@ -2193,10 +2193,11 @@ non-destructive close, and restores focus to its trigger when closed.
 
 ### 24.4 Remote Upload: explicit ObjectStore selection is mandatory
 
-- [ ] Remove `RemoteUpload` from the global `PRIMARY_NAVIGATION` and
+- [x] Remove `RemoteUpload` from the global `PRIMARY_NAVIGATION` and
   `INTEGRATED_PRIMARY_NAVIGATION` arrays in
   `crates/dasobjectstore-gui-web/src/workspace.rs`. A generic remote-upload
-  page must not be reachable as an unscoped primary workspace.
+  page must not be reachable as an unscoped primary workspace; target-scoped
+  entry from ObjectStores remains open.
 - [ ] Add an `Upload` action to each writable, authorized ObjectStore row/card
   in `src/workspace/object_stores.rs`. The action selects that exact store and
   opens the remote-upload pane or a target-scoped workspace. Its visible title

@@ -135,22 +135,20 @@ impl WorkspacePage {
     }
 }
 
-pub const PRIMARY_NAVIGATION: [WorkspacePage; 8] = [
+pub const PRIMARY_NAVIGATION: [WorkspacePage; 7] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
-    WorkspacePage::RemoteUpload,
     WorkspacePage::Endpoints,
     WorkspacePage::Activity,
     WorkspacePage::UsersGroups,
     WorkspacePage::Bioinformatics,
 ];
 
-pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 6] = [
+pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 5] = [
     WorkspacePage::Home,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
-    WorkspacePage::RemoteUpload,
     WorkspacePage::Activity,
     WorkspacePage::Bioinformatics,
 ];

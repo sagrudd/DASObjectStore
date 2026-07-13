@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.59 - 2026-07-13
+
+- Remove the unscoped Remote Upload workspace from primary navigation while
+  target-scoped ObjectStore upload entry is completed.
+
 ## 0.72.58 - 2026-07-13
 
 - Add read-only daemon and CLI capacity status with ledger pressure,

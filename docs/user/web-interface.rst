@@ -310,6 +310,10 @@ empty, permission-denied, transport-error, and stale-data states so operators
 can distinguish an empty appliance from an authentication problem or a transport
 failure.
 
+Remote Upload is intentionally not a global primary workspace. Upload entry is
+being moved behind an explicitly selected, writable ObjectStore so a browser
+cannot present an unbound dropzone or rely on an implicit first store.
+
 Home attention cards are derived from the daemon Home payload rather than from
 static placeholder text. The current Web layer surfaces appliance health,
 failed or suspect drives, ingest pressure, destage backlog, capacity pressure,
