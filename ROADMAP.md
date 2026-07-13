@@ -169,9 +169,10 @@ is not yet an atomic catalogue transaction; Garage reconciliation now uses
 durable provider-independent manifest/checkpoint planning plus a per-key Garage
 transfer worker with progress and administrator cancellation checks between
 provider transfers. Retry jobs now rediscover the newest incomplete manifest
-for the same store/prefix scope without following symlinks, while stable
-byte-range resume, non-Garage providers, and appliance soak acceptance remain
-open; daemon/CLI file-ingest pause/throttle/
+for the same store/prefix scope without following symlinks, and resumed keys
+request and append only the missing byte suffix after validating the partial
+file. Non-Garage providers and appliance soak acceptance remain open;
+daemon/CLI file-ingest pause/throttle/
 resume is now available between source objects and through an authenticated Web
 admin action (the compact ``ingest control --tui`` acknowledgement is now
 available; interactive keyboard controls and live state refresh remain);

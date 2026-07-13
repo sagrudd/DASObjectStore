@@ -19,6 +19,10 @@ use dasobjectstore_object_service::{
     default_store_registry_path, read_managed_credential_registry, read_store_registry,
 };
 use serde_json::Value;
+use std::fs::{self, OpenOptions};
+use std::io;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     config: &GarageServiceRuntimeConfig,
@@ -181,7 +185,29 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                 size_bytes,
                 ..
             } => {
-                let size_bytes = size_bytes.unwrap_or_default();
+                let resume_offset = match action {
+                    ReconciliationAction::Resume {
+                        downloaded_bytes, ..
+                    } => Some(*downloaded_bytes),
+                    _ => None,
+                };
+                let declared_size = *size_bytes;
+                if let (Some(offset), Some(size)) = (resume_offset, declared_size) {
+                    if offset > size {
+                        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: format!(
+                                "reconciliation checkpoint offset {offset} exceeds declared size {size} for {key}"
+                            ),
+                        });
+                    }
+                } else if resume_offset.is_some() {
+                    return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!(
+                            "reconciliation resume requires a declared size for {key}"
+                        ),
+                    });
+                }
+                let size_bytes = declared_size.unwrap_or_default();
                 manifest
                     .checkpoint(
                         &manifest_path,
@@ -214,28 +240,89 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                         }
                     })?;
                 }
-                let args = vec![
-                    "--endpoint-url".to_string(),
-                    config.endpoint.clone(),
-                    "s3".to_string(),
-                    "cp".to_string(),
-                    format!("s3://{bucket_name}/{key}"),
-                    destination.display().to_string(),
-                    "--no-progress".to_string(),
-                ];
+                if let Some(offset) = resume_offset.filter(|offset| *offset > 0) {
+                    if let Err(error) = validate_partial_offset(&destination, offset, key) {
+                        manifest
+                            .checkpoint(
+                                &manifest_path,
+                                key,
+                                ReconciliationEntryState::Failed,
+                                Some(error.to_string()),
+                                offset,
+                            )
+                            .map_err(reconciliation_manifest_error)?;
+                        return Err(error);
+                    }
+                }
+                let temporary_range_path = resume_offset.filter(|offset| *offset > 0).map(|_| {
+                    destination.with_file_name(format!(
+                        ".{}.resume-{}",
+                        destination
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("object"),
+                        reconciliation_temp_suffix()
+                    ))
+                });
+                let args = reconciliation_download_args(
+                    &config.endpoint,
+                    &bucket_name,
+                    key,
+                    &destination,
+                    resume_offset,
+                    temporary_range_path.as_deref(),
+                );
                 if let Err(error) =
                     runner.run_with_display_args_and_env("aws", &args, &args, &environment)
                 {
+                    if let Some(path) = &temporary_range_path {
+                        let _ = fs::remove_file(path);
+                    }
                     manifest
                         .checkpoint(
                             &manifest_path,
                             key,
                             ReconciliationEntryState::Failed,
                             Some(error.to_string()),
-                            0,
+                            resume_offset.unwrap_or_default(),
                         )
                         .map_err(reconciliation_manifest_error)?;
                     return Err(error);
+                }
+                if let Some(offset) = resume_offset.filter(|offset| *offset > 0) {
+                    let partial = temporary_range_path.as_deref().ok_or_else(|| {
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: format!("missing range staging path for {key}"),
+                        }
+                    })?;
+                    if let Err(error) =
+                        append_range_download(&destination, partial, offset, size_bytes)
+                    {
+                        let _ = fs::remove_file(partial);
+                        manifest
+                            .checkpoint(
+                                &manifest_path,
+                                key,
+                                ReconciliationEntryState::Failed,
+                                Some(error.to_string()),
+                                offset,
+                            )
+                            .map_err(reconciliation_manifest_error)?;
+                        return Err(error);
+                    }
+                } else if let Some(size) = declared_size {
+                    if let Err(error) = validate_downloaded_size(&destination, size, key) {
+                        manifest
+                            .checkpoint(
+                                &manifest_path,
+                                key,
+                                ReconciliationEntryState::Failed,
+                                Some(error.to_string()),
+                                resume_offset.unwrap_or_default(),
+                            )
+                            .map_err(reconciliation_manifest_error)?;
+                        return Err(error);
+                    }
                 }
                 manifest
                     .checkpoint(
@@ -290,6 +377,145 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         ingest_job_id: Some(ingest.job_id.to_string()),
         dry_run: false,
     })
+}
+
+fn reconciliation_download_args(
+    endpoint: &str,
+    bucket_name: &str,
+    key: &str,
+    destination: &Path,
+    resume_offset: Option<u64>,
+    range_destination: Option<&Path>,
+) -> Vec<String> {
+    match resume_offset.filter(|offset| *offset > 0) {
+        Some(offset) => vec![
+            "--endpoint-url".to_string(),
+            endpoint.to_string(),
+            "s3api".to_string(),
+            "get-object".to_string(),
+            "--bucket".to_string(),
+            bucket_name.to_string(),
+            "--key".to_string(),
+            key.to_string(),
+            "--range".to_string(),
+            format!("bytes={offset}-"),
+            range_destination
+                .expect("range destination is required for a non-zero resume")
+                .display()
+                .to_string(),
+        ],
+        _ => vec![
+            "--endpoint-url".to_string(),
+            endpoint.to_string(),
+            "s3".to_string(),
+            "cp".to_string(),
+            format!("s3://{bucket_name}/{key}"),
+            destination.display().to_string(),
+            "--no-progress".to_string(),
+        ],
+    }
+}
+
+fn reconciliation_temp_suffix() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
+}
+
+fn append_range_download(
+    destination: &Path,
+    partial: &Path,
+    offset: u64,
+    expected_size: u64,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let destination_label = destination.display().to_string();
+    validate_partial_offset(destination, offset, &destination_label)?;
+    let partial_size = fs::metadata(partial)
+        .map_err(|error| reconciliation_file_error(partial, error))?
+        .len();
+    let expected_suffix = expected_size.checked_sub(offset).ok_or_else(|| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "reconciliation range offset exceeds size for {}",
+                destination.display()
+            ),
+        }
+    })?;
+    if partial_size != expected_suffix {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "reconciliation range size {partial_size} does not match expected suffix {expected_suffix} for {}",
+                destination.display()
+            ),
+        });
+    }
+    let mut output = OpenOptions::new()
+        .append(true)
+        .open(destination)
+        .map_err(|error| reconciliation_file_error(destination, error))?;
+    let mut input =
+        fs::File::open(partial).map_err(|error| reconciliation_file_error(partial, error))?;
+    io::copy(&mut input, &mut output)
+        .map_err(|error| reconciliation_file_error(destination, error))?;
+    output
+        .sync_all()
+        .map_err(|error| reconciliation_file_error(destination, error))?;
+    let final_size = fs::metadata(destination)
+        .map_err(|error| reconciliation_file_error(destination, error))?
+        .len();
+    if final_size != expected_size {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "reconciliation destination size {final_size} does not match expected size {expected_size} for {}",
+                destination.display()
+            ),
+        });
+    }
+    fs::remove_file(partial).map_err(|error| reconciliation_file_error(partial, error))
+}
+
+fn validate_partial_offset(
+    destination: &Path,
+    offset: u64,
+    key: &str,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let destination_size = fs::metadata(destination)
+        .map_err(|error| reconciliation_file_error(destination, error))?
+        .len();
+    if destination_size != offset {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "reconciliation partial size {destination_size} does not match checkpoint offset {offset} for {key}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn validate_downloaded_size(
+    destination: &Path,
+    expected_size: u64,
+    key: &str,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let actual = fs::metadata(destination)
+        .map_err(|error| reconciliation_file_error(destination, error))?
+        .len();
+    if actual != expected_size {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "reconciliation download size {actual} does not match expected size {expected_size} for {key}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn reconciliation_file_error(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
+    DaemonServiceRuntimeError::CommandIo {
+        program: "reconciliation file".to_string(),
+        message: format!("{}: {error}", path.display()),
+    }
 }
 
 pub(super) fn list_garage_objects<R: ServiceCommandRunner>(
@@ -405,4 +631,75 @@ fn emit_reconciliation_key_progress(
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
         operation: format!("reconciliation progress delivery failed: {error}"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{append_range_download, reconciliation_download_args};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn validation_root(label: &str) -> PathBuf {
+        let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(".dasobjectstore-codex-validation"))
+            })
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!(
+                "service-reconciliation-{label}-{}",
+                std::process::id()
+            ));
+        fs::create_dir_all(&root).expect("validation root");
+        root
+    }
+
+    #[test]
+    fn resume_command_requests_only_the_missing_suffix() {
+        let destination = PathBuf::from("/var/lib/dasobjectstore/partial.bin");
+        let range = PathBuf::from("/var/lib/dasobjectstore/.partial.bin.resume");
+        let args = reconciliation_download_args(
+            "http://127.0.0.1:3900",
+            "bucket-1",
+            "reads/sample.fastq",
+            &destination,
+            Some(12),
+            Some(&range),
+        );
+        assert_eq!(args[2], "s3api");
+        assert_eq!(args[3], "get-object");
+        assert_eq!(args[8], "--range");
+        assert_eq!(args[9], "bytes=12-");
+        assert_eq!(args[10], range.display().to_string());
+        assert!(!args.iter().any(|arg| arg == "cp"));
+    }
+
+    #[test]
+    fn appends_and_fsyncs_verified_range_suffix() {
+        let root = validation_root("append");
+        let destination = root.join("partial.bin");
+        let range = root.join("partial.bin.resume");
+        fs::write(&destination, b"abc").expect("partial destination");
+        fs::write(&range, b"def").expect("range suffix");
+
+        append_range_download(&destination, &range, 3, 6).expect("append range");
+
+        assert_eq!(fs::read(&destination).expect("destination"), b"abcdef");
+        assert!(!range.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_range_when_existing_partial_size_drifted() {
+        let root = validation_root("drift");
+        let destination = root.join("partial.bin");
+        let range = root.join("partial.bin.resume");
+        fs::write(&destination, b"ab").expect("partial destination");
+        fs::write(&range, b"def").expect("range suffix");
+
+        assert!(append_range_download(&destination, &range, 3, 6).is_err());
+        assert_eq!(fs::read(&destination).expect("destination"), b"ab");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }
