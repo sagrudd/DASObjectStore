@@ -1012,6 +1012,10 @@ writer group and packaged daemon socket are present. Host-registry mutation is
 retained only for explicit registry/test and no-writer-group migration paths;
 portable SSD mirroring remains a separate compatibility concern.
 
+The profile-by-host-mode support matrix and fail-closed upgrade/migration
+policy are published in `docs/user/storage-profile-matrix.rst`; preview rows
+remain distinct from DASServer/Garage acceptance and product-adapter blocks.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.
