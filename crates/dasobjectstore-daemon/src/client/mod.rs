@@ -9,7 +9,8 @@ pub use in_process::InProcessDaemonTransport;
 pub use unix_socket::UnixSocketDaemonTransport;
 
 use crate::api::{
-    ApplianceTelemetryRequest, ApplianceTelemetryResponse, AssignLocalUserToLocalGroupRequest,
+    ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplicationIdentityRegistrationRequest,
+    ApplicationIdentityRegistrationResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
     CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
     CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
@@ -355,6 +356,16 @@ where
         }
     }
 
+    pub fn register_application_identity(
+        &self,
+        request: ApplicationIdentityRegistrationRequest,
+    ) -> Result<ApplicationIdentityRegistrationResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RegisterApplicationIdentity(request))? {
+            DaemonApiResponse::RegisterApplicationIdentity(response) => Ok(response),
+            response => Err(unexpected("register_application_identity", response)),
+        }
+    }
+
     pub fn prepare_enclosure(
         &self,
         request: PrepareEnclosureRequest,
@@ -616,6 +627,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ApplianceTelemetry(_) => "appliance_telemetry",
         DaemonApiResponse::ServiceLifecycle(_) => "service_lifecycle",
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
+        DaemonApiResponse::RegisterApplicationIdentity(_) => "register_application_identity",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",

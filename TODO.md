@@ -803,7 +803,8 @@ completion.
     path-free identity registry now persists validated owner, purpose,
     ObjectStore/namespace scope, operation set, ingress origin, byte/object
     limits, expiry, active state, and deterministic application IDs without
-    secrets or host paths; authenticated API wiring and audit metadata remain.
+    secrets or host paths; authenticated local-administrator API wiring is now
+    present, while audit metadata and cryptographic custody remain.
   - [ ] Implement rotatable asymmetric-key or certificate identities and a
     short-lived access-token exchange (normally 5–15 minutes). Do not issue
     long-lived broadly scoped bearer access tokens.

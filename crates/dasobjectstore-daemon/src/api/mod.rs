@@ -1,6 +1,7 @@
 //! Transport-neutral daemon API contracts.
 
 mod appliance_telemetry;
+mod application_identity;
 mod capacity;
 mod disk_mutation;
 mod enclosure;
@@ -37,6 +38,10 @@ pub use appliance_telemetry::{
     ApplianceTelemetryResponse, ApplianceTelemetrySeries, ApplianceTelemetrySessionPoint,
     ApplianceTelemetrySessionSummary, ApplianceTelemetryState, ApplianceTelemetryWindow,
     ApplianceTelemetryWindowAvailability,
+};
+pub use application_identity::{
+    ApplicationIdentityRegistrationRequest, ApplicationIdentityRegistrationResponse,
+    ApplicationIdentityRegistrationValidationError, APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
 };
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
@@ -218,6 +223,7 @@ pub enum DaemonApiRequest {
     ApplianceTelemetry(ApplianceTelemetryRequest),
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
+    RegisterApplicationIdentity(ApplicationIdentityRegistrationRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
@@ -268,6 +274,7 @@ impl DaemonApiRequest {
             Self::ApplianceTelemetry(_) => "appliance_telemetry",
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
+            Self::RegisterApplicationIdentity(_) => "register_application_identity",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
@@ -330,6 +337,9 @@ impl DaemonApiRequest {
             Self::CancelJob(request) => request.validate().map_err(generic_job_validation_error),
             Self::ServiceLifecycle(request) => request.validate(),
             Self::ServiceProvision(request) => request.validate(),
+            Self::RegisterApplicationIdentity(request) => request
+                .validate()
+                .map_err(application_identity_registration_validation_error),
             Self::PrepareEnclosure(request) => request
                 .validate()
                 .map_err(prepare_enclosure_validation_error),
@@ -423,6 +433,7 @@ pub enum DaemonApiResponse {
     ApplianceTelemetry(ApplianceTelemetryResponse),
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
+    RegisterApplicationIdentity(ApplicationIdentityRegistrationResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
@@ -530,6 +541,14 @@ fn endpoint_inventory_validation_error(
                 expected: ENDPOINT_RECORD_CONFIRMATION,
             }
         }
+    }
+}
+
+fn application_identity_registration_validation_error(
+    error: ApplicationIdentityRegistrationValidationError,
+) -> DaemonRequestValidationError {
+    DaemonRequestValidationError::InvalidPolicy {
+        message: error.to_string(),
     }
 }
 

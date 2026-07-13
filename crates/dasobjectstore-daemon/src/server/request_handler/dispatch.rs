@@ -24,6 +24,7 @@ where
         service_request @ (DaemonApiRequest::ServiceStatus(_)
         | DaemonApiRequest::ServiceLifecycle(_)
         | DaemonApiRequest::ServiceProvision(_)
+        | DaemonApiRequest::RegisterApplicationIdentity(_)
         | DaemonApiRequest::PrepareEnclosure(_)
         | DaemonApiRequest::CreateObjectStore(_)
         | DaemonApiRequest::RegisterProfileBinding(_)

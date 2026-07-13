@@ -35,6 +35,27 @@ pub(super) fn daemon_job_summary_from_service_provision(
     )
 }
 
+pub(super) fn daemon_job_summary_from_application_identity_registration(
+    response: &ApplicationIdentityRegistrationResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "application identity {} {}",
+            response.identity.application_id,
+            if response.replaced {
+                "replaced"
+            } else {
+                "registered"
+            }
+        ),
+    )
+}
+
 pub(super) fn daemon_job_summary_from_prepare_enclosure(
     response: &PrepareEnclosureResponse,
 ) -> DaemonJobSummary {

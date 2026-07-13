@@ -39,6 +39,64 @@ where
             handler.record_admin_job(daemon_job_summary_from_service_provision(&response))?;
             Ok(DaemonApiResponse::ServiceProvision(response))
         }
+        DaemonApiRequest::RegisterApplicationIdentity(mut request) => {
+            // Identity registration mutates daemon-owned authority and is
+            // therefore administrator-only. Dry-run validates policy without
+            // requiring a mutation authority or persisting metadata.
+            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "application identity registration requires an authenticated local administrator",
+                    )));
+                };
+                if !actor.is_administrator() {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authorization_required",
+                        "application identity registration requires root, sudo, or dasobjectstore-admin membership",
+                    )));
+                }
+            }
+            let now = handler.clock.now_utc();
+            let application_id = request.identity.application_id.clone();
+            let replaced = read_application_identity(
+                &handler.application_identity_registry_path,
+                &application_id,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+            .is_some();
+            if !request.dry_run {
+                upsert_application_identity(
+                    &handler.application_identity_registry_path,
+                    request.identity.clone(),
+                )
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            }
+            let job_id_value = format!(
+                "application-identity-{}",
+                now.chars()
+                    .map(|character| if character.is_ascii_alphanumeric() {
+                        character
+                    } else {
+                        '-'
+                    })
+                    .collect::<String>()
+                    .trim_matches('-')
+                    .to_ascii_lowercase()
+            );
+            let job_id = DaemonJobId::new(job_id_value.clone()).map_err(|_| {
+                DaemonRequestHandlerError::ServiceRuntime(DaemonServiceRuntimeError::InvalidJobId(
+                    job_id_value,
+                ))
+            })?;
+            let response =
+                ApplicationIdentityRegistrationResponse::accepted(job_id, now, request, replaced);
+            handler.record_admin_job(daemon_job_summary_from_application_identity_registration(
+                &response,
+            ))?;
+            Ok(DaemonApiResponse::RegisterApplicationIdentity(response))
+        }
         DaemonApiRequest::PrepareEnclosure(request) => {
             let now = handler.clock.now_utc();
             let response = handler
