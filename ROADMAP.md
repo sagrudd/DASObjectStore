@@ -907,6 +907,9 @@ the authenticated shell renders an explicit target-required state instead of
 mounting a dropzone without a target. API/permission and visual acceptance
 remain part of the open Milestone 24 work.
 
+The no-target state also offers a direct return action to ObjectStores, keeping
+the target-scoped workflow navigable without exposing an unscoped upload form.
+
 Guarded direct-to-HDD imports now use the shared inline-hash copy primitive;
 optional source metadata is checked after the single read, preserving the
 direct-ingress policy without a strict pre-copy hash pass.

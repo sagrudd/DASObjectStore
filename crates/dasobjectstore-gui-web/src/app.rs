@@ -463,6 +463,10 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
             active_page.set(WorkspacePage::RemoteUpload);
         })
     };
+    let on_remote_upload_back = {
+        let active_page = active_page.clone();
+        Callback::from(move |_| active_page.set(WorkspacePage::ObjectStores))
+    };
 
     html! {
         <section class="dos-workspace-shell">
@@ -528,6 +532,9 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
                                 <p>{ "Select a writable ObjectStore before choosing files for remote ingress." }</p>
                             </header>
                             <p class="dos-empty-state">{ "Select a writable ObjectStore from ObjectStores before choosing files." }</p>
+                            <button type="button" class="dos-secondary-action" onclick={on_remote_upload_back}>
+                                { "Back to ObjectStores" }
+                            </button>
                         </section>
                     },
                 },

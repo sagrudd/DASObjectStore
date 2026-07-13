@@ -16,6 +16,10 @@ fn workspace_component_source() -> String {
     .concat()
 }
 
+fn authenticated_workspace_source() -> &'static str {
+    include_str!("../app.rs")
+}
+
 fn web_styles_source() -> String {
     [
         include_str!("../../styles/remote-upload.css"),
@@ -2535,6 +2539,7 @@ fn remote_upload_selection_summary_counts_files_folders_and_bytes() {
 #[test]
 fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
     let source = workspace_component_source();
+    let app_source = authenticated_workspace_source();
     let css = web_styles_source();
 
     assert!(source.contains("dos-remote-upload-panel"));
@@ -2558,6 +2563,9 @@ fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
         source.contains("Select a writable ObjectStore from ObjectStores before choosing files.")
     );
     assert!(!source.contains("ready_stores.first()"));
+    assert!(app_source.contains("data-state=\"target-required\""));
+    assert!(app_source.contains("Back to ObjectStores"));
+    assert!(app_source.contains("WorkspacePage::ObjectStores"));
 
     assert!(css.contains(".dos-remote-upload-panel"));
     assert!(css.contains(".dos-remote-upload-grid"));

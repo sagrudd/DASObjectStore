@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.99 - 2026-07-13
+
+- Add a direct `Back to ObjectStores` action to the target-required Remote
+  Upload state, keeping the scoped workflow navigable without an unscoped form.
+
 ## 0.72.98 - 2026-07-13
 
 - Keep guarded direct-to-HDD imports on the one-read inline-checksum path;

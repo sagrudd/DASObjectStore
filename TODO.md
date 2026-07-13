@@ -2339,7 +2339,7 @@ non-destructive close, and restores focus to its trigger when closed.
     filter the response to that target, and render no file dropzone until the
     explicit target is present. Missing targets return HTTP 400; authorization
     and writable-state filtering remain server-owned.
-- [ ] Refactor `src/workspace/remote_upload.rs` so its file/folder dropzone,
+- [x] Refactor `src/workspace/remote_upload.rs` so its file/folder dropzone,
   handoff summary, and confirm action are not rendered until an explicit,
   authorized target is present. If no writable store exists, show an explanatory
   empty state with a route/action back to ObjectStores; do not show an active
@@ -2351,6 +2351,8 @@ non-destructive close, and restores focus to its trigger when closed.
     `RemoteUploadPageProps` now accepts only a non-empty `String`, the app
     renders a target-required empty state when no ObjectStore was selected,
     and target query values are percent-encoded through the shared Web helper.
+  - [x] Add a direct `Back to ObjectStores` action to the target-required
+    empty state so the target-scoped flow does not strand the operator.
 - [ ] Keep all existing remote-agent pairing, path privacy, S3 credential,
   SSD-first ingress, daemon job, cancellation, and renewal behaviour. This is
   a presentation/context refactor, not permission or transfer-policy
