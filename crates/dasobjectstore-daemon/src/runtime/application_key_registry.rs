@@ -1,0 +1,267 @@
+//! Daemon-owned public-key/certificate descriptors for application identity
+//! rotation. Private keys and bearer tokens are intentionally out of this
+//! registry.
+
+use super::DaemonServiceRuntimeError;
+use dasobjectstore_core::application_auth::ApplicationKeyDescriptor;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub const APPLICATION_KEY_REGISTRY_SCHEMA: &str = "dasobjectstore.application_key_registry.v1";
+pub const APPLICATION_KEY_REGISTRY_FILE_NAME: &str = "application-keys.json";
+pub const APPLICATION_KEY_REGISTRY_ENV: &str = "DASOBJECTSTORE_APPLICATION_KEYS_PATH";
+
+pub fn default_application_key_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
+    state_dir.as_ref().join(APPLICATION_KEY_REGISTRY_FILE_NAME)
+}
+
+pub fn application_key_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
+    std::env::var_os(APPLICATION_KEY_REGISTRY_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_application_key_registry_path(state_dir))
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ApplicationKeyRegistryFile {
+    schema_version: String,
+    keys: Vec<ApplicationKeyDescriptor>,
+}
+
+impl Default for ApplicationKeyRegistryFile {
+    fn default() -> Self {
+        Self {
+            schema_version: APPLICATION_KEY_REGISTRY_SCHEMA.to_string(),
+            keys: Vec::new(),
+        }
+    }
+}
+
+pub fn list_application_keys(
+    path: impl AsRef<Path>,
+) -> Result<Vec<ApplicationKeyDescriptor>, DaemonServiceRuntimeError> {
+    Ok(read_registry(path.as_ref())?.keys)
+}
+
+pub fn read_application_key(
+    path: impl AsRef<Path>,
+    application_id: &str,
+    key_id: &str,
+) -> Result<Option<ApplicationKeyDescriptor>, DaemonServiceRuntimeError> {
+    Ok(read_registry(path.as_ref())?
+        .keys
+        .into_iter()
+        .find(|key| key.application_id == application_id && key.key_id == key_id))
+}
+
+pub fn upsert_application_key(
+    path: impl AsRef<Path>,
+    key: ApplicationKeyDescriptor,
+) -> Result<(), DaemonServiceRuntimeError> {
+    key.validate()
+        .map_err(|error| invalid_key(error.to_string()))?;
+    let path = path.as_ref();
+    let mut registry = read_registry(path)?;
+    if let Some(existing) = registry.keys.iter_mut().find(|existing| {
+        existing.application_id == key.application_id && existing.key_id == key.key_id
+    }) {
+        *existing = key;
+    } else {
+        registry.keys.push(key);
+    }
+    registry.keys.sort_by(|left, right| {
+        left.application_id
+            .cmp(&right.application_id)
+            .then_with(|| left.key_id.cmp(&right.key_id))
+    });
+    write_registry(path, &registry)
+}
+
+pub fn deactivate_application_key(
+    path: impl AsRef<Path>,
+    application_id: &str,
+    key_id: &str,
+) -> Result<bool, DaemonServiceRuntimeError> {
+    let path = path.as_ref();
+    let mut registry = read_registry(path)?;
+    let Some(key) = registry
+        .keys
+        .iter_mut()
+        .find(|key| key.application_id == application_id && key.key_id == key_id)
+    else {
+        return Ok(false);
+    };
+    key.active = false;
+    write_registry(path, &registry)?;
+    Ok(true)
+}
+
+fn read_registry(path: &Path) -> Result<ApplicationKeyRegistryFile, DaemonServiceRuntimeError> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(ApplicationKeyRegistryFile::default())
+        }
+        Err(error) => return Err(registry_io(path, error)),
+    };
+    let registry: ApplicationKeyRegistryFile = serde_json::from_reader(file).map_err(|error| {
+        invalid_key(format!(
+            "invalid application key registry {}: {error}",
+            path.display()
+        ))
+    })?;
+    if registry.schema_version != APPLICATION_KEY_REGISTRY_SCHEMA {
+        return Err(invalid_key(format!(
+            "unsupported application key registry schema {}",
+            registry.schema_version
+        )));
+    }
+    let mut key_ids = BTreeSet::new();
+    for key in &registry.keys {
+        key.validate()
+            .map_err(|error| invalid_key(error.to_string()))?;
+        let unique_id = format!("{}\0{}", key.application_id, key.key_id);
+        if !key_ids.insert(unique_id) {
+            return Err(invalid_key(format!(
+                "duplicate application key {}/{}",
+                key.application_id, key.key_id
+            )));
+        }
+    }
+    Ok(registry)
+}
+
+fn write_registry(
+    path: &Path,
+    registry: &ApplicationKeyRegistryFile,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid_key("application key registry has no parent"))?;
+    fs::create_dir_all(parent).map_err(|error| registry_io(parent, error))?;
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("application-keys"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    let bytes = serde_json::to_vec_pretty(registry)
+        .map_err(|error| invalid_key(format!("serialize application key registry: {error}")))?;
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| registry_io(&temporary, error))?;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| registry_io(&temporary, error))?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|error| registry_io(path, error))?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| registry_io(parent, error))
+}
+
+fn invalid_key(message: impl Into<String>) -> DaemonServiceRuntimeError {
+    DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!("invalid application key registry: {}", message.into()),
+    }
+}
+
+fn registry_io(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
+    DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!("application key registry I/O {}: {error}", path.display()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        deactivate_application_key, default_application_key_registry_path, list_application_keys,
+        read_application_key, upsert_application_key, APPLICATION_KEY_REGISTRY_SCHEMA,
+    };
+    use dasobjectstore_core::application_auth::{
+        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, APPLICATION_AUTH_SCHEMA_VERSION,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn root(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(".dasobjectstore-codex-validation"))
+            })
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!(
+                "application-keys-{label}-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+        fs::create_dir_all(&root).expect("fixture root");
+        root
+    }
+
+    fn key(application_id: &str, key_id: &str) -> ApplicationKeyDescriptor {
+        ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: application_id.to_string(),
+            key_id: key_id.to_string(),
+            algorithm: ApplicationKeyAlgorithm::Ed25519,
+            public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        }
+    }
+
+    #[test]
+    fn default_registry_path_is_state_scoped() {
+        assert_eq!(
+            default_application_key_registry_path("/var/lib/dasobjectstore"),
+            PathBuf::from("/var/lib/dasobjectstore/application-keys.json")
+        );
+    }
+
+    #[test]
+    fn key_rotation_metadata_round_trips_without_private_material() {
+        let path = root("round-trip").join("keys.json");
+        upsert_application_key(&path, key("synoptikon-ingest", "key-1")).expect("write");
+        let found = read_application_key(&path, "synoptikon-ingest", "key-1")
+            .expect("read")
+            .expect("key");
+        assert_eq!(found.key_id, "key-1");
+        let encoded = fs::read_to_string(&path).expect("registry bytes");
+        assert!(encoded.contains(APPLICATION_KEY_REGISTRY_SCHEMA));
+        assert!(!encoded.contains("private_key"));
+        assert!(!encoded.contains("/srv"));
+    }
+
+    #[test]
+    fn keys_are_sorted_and_deactivation_preserves_descriptor() {
+        let path = root("deactivate").join("keys.json");
+        upsert_application_key(&path, key("zeta", "key-2")).expect("write");
+        upsert_application_key(&path, key("alpha", "key-1")).expect("write");
+        assert_eq!(list_application_keys(&path).expect("list").len(), 2);
+        assert!(deactivate_application_key(&path, "alpha", "key-1").expect("deactivate"));
+        assert!(!deactivate_application_key(&path, "missing", "key-1").expect("missing"));
+        assert!(
+            !read_application_key(&path, "alpha", "key-1")
+                .expect("read")
+                .expect("key")
+                .active
+        );
+    }
+}

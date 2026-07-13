@@ -30,6 +30,37 @@ pub enum ApplicationCredentialKind {
     DevelopmentSelfSigned,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationKeyAlgorithm {
+    Ed25519,
+    EcdsaP256Sha256,
+    MtlsCertificate,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationKeyDescriptor {
+    pub schema_version: String,
+    pub application_id: String,
+    pub key_id: String,
+    pub algorithm: ApplicationKeyAlgorithm,
+    pub public_key_fingerprint: String,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+    pub active: bool,
+}
+
+impl ApplicationKeyDescriptor {
+    pub fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
+        validate_schema(&self.schema_version)?;
+        validate_slug("application_id", &self.application_id)?;
+        validate_slug("key_id", &self.key_id)?;
+        validate_sha256_fingerprint(&self.public_key_fingerprint, "public_key_fingerprint")?;
+        validate_lifetime(self.issued_at_unix_seconds, self.expires_at_unix_seconds)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApplicationOperation {
@@ -379,6 +410,23 @@ fn validate_lifetime(
     }
 }
 
+fn validate_sha256_fingerprint(
+    value: &str,
+    field: &'static str,
+) -> Result<(), ApplicationAuthValidationError> {
+    if !value.starts_with("sha256:")
+        || value.len() != "sha256:".len() + 64
+        || !value["sha256:".len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(ApplicationAuthValidationError::Invalid(format!(
+            "{field} must be a sha256 fingerprint"
+        )));
+    }
+    Ok(())
+}
+
 fn prefix_contains(allowed: &str, requested: &str) -> bool {
     allowed.is_empty() || requested == allowed || requested.starts_with(&format!("{allowed}/"))
 }
@@ -583,5 +631,23 @@ mod tests {
             identity.validate(),
             Err(ApplicationAuthValidationError::DuplicateScope("prefixes"))
         );
+    }
+
+    #[test]
+    fn public_key_descriptor_is_rotatable_metadata_without_private_material() {
+        let descriptor = ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: "synoptikon-ingest".to_string(),
+            key_id: "key-2026-07".to_string(),
+            algorithm: ApplicationKeyAlgorithm::Ed25519,
+            public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        };
+        descriptor.validate().expect("descriptor");
+        let encoded = serde_json::to_string(&descriptor).expect("encode");
+        assert!(!encoded.contains("private_key"));
+        assert!(!encoded.contains("secret"));
     }
 }

@@ -3,6 +3,7 @@
 mod admin_jobs;
 mod appliance_telemetry;
 mod application_identity_registry;
+mod application_key_registry;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
@@ -55,6 +56,12 @@ pub use application_identity_registry::{
     default_application_identity_registry_path, list_application_identities,
     read_application_identity, upsert_application_identity, APPLICATION_IDENTITY_REGISTRY_ENV,
     APPLICATION_IDENTITY_REGISTRY_FILE_NAME, APPLICATION_IDENTITY_REGISTRY_SCHEMA,
+};
+pub use application_key_registry::{
+    application_key_registry_path, deactivate_application_key,
+    default_application_key_registry_path, list_application_keys, read_application_key,
+    upsert_application_key, APPLICATION_KEY_REGISTRY_ENV, APPLICATION_KEY_REGISTRY_FILE_NAME,
+    APPLICATION_KEY_REGISTRY_SCHEMA,
 };
 pub use capacity_persistence::{
     load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError,
