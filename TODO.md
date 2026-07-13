@@ -1298,6 +1298,10 @@ list until every temporary size-budget exception has been removed.
     HTTP 200 while the daemon-backed Activity round trip is degraded; the
     Activity response remains a typed 200 workspace with warnings and retryable
     state rather than blocking the health surface.
+  - [x] Bound standalone static-asset reads behind a four-permit async lane and
+    add explicit no-cache index/unfingerprinted and immutable fingerprinted
+    asset cache headers; route regressions cover both cache policies. A cached
+    daemon appliance-status snapshot remains open.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.

@@ -920,6 +920,12 @@ requests retain bounded capacity under ingest; no temporary production module
 exceptions remain and the guard passes; appliance-only acceptance blockers are
 recorded and repeatable.
 
+Current delivery note: daemon-independent liveness and degraded Activity
+responses are covered. Standalone static asset reads now use an async bounded
+lane with explicit no-cache index/unfingerprinted and immutable fingerprinted
+asset cache headers. A cached daemon appliance-status snapshot and appliance
+soak remain open.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.72 - 2026-07-13
+
+- Bound standalone Web static-asset reads behind a small async semaphore and
+  apply explicit no-cache or immutable fingerprinted-asset cache headers.
+
 ## 0.72.71 - 2026-07-13
 
 - Correct the CSS campaign ledger to distinguish completed feature-style

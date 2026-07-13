@@ -11,9 +11,17 @@ use dasobjectstore_gui_api::{
     StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Component, PathBuf};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Semaphore;
+
+const STATIC_ASSET_READ_PERMITS: usize = 4;
+
+fn static_asset_read_permits() -> &'static Arc<Semaphore> {
+    static PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    PERMITS.get_or_init(|| Arc::new(Semaphore::new(STATIC_ASSET_READ_PERMITS)))
+}
 
 pub(crate) async fn run(cli: &ServerCli, writer: &mut impl Write) -> Result<(), ServerRunError> {
     let config = cli.server_config()?;
@@ -109,11 +117,16 @@ async fn root_redirect() -> Redirect {
 }
 
 async fn serve_asset(path: PathBuf, content_type: &'static str) -> Response {
-    let bytes = match fs::read(&path) {
+    let _permit = match static_asset_read_permits().clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    };
+    let cache_control = static_asset_cache_control(&path);
+    let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
-    bytes_response(content_type, bytes)
+    bytes_response(content_type, bytes, cache_control)
 }
 
 async fn serve_named_asset(web_root: PathBuf, asset: String) -> Response {
@@ -155,9 +168,43 @@ fn static_asset_content_type(path: &std::path::Path) -> &'static str {
     }
 }
 
-fn bytes_response(content_type: &'static str, bytes: Vec<u8>) -> Response {
+fn static_asset_cache_control(path: &std::path::Path) -> &'static str {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return "no-cache";
+    };
+    if file_name == "index.html" {
+        return "no-cache";
+    }
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return "no-cache";
+    };
+    let Some((_, fingerprint)) = stem.rsplit_once('-') else {
+        return "no-cache";
+    };
+    if fingerprint.len() >= 6 && fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+fn bytes_response(
+    content_type: &'static str,
+    bytes: Vec<u8>,
+    cache_control: &'static str,
+) -> Response {
     match HeaderValue::from_str(content_type) {
-        Ok(content_type) => ([(header::CONTENT_TYPE, content_type)], bytes).into_response(),
+        Ok(content_type) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                (
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static(cache_control),
+                ),
+            ],
+            bytes,
+        )
+            .into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -343,6 +390,7 @@ mod tests {
             .expect("index response");
 
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
 
         let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
             .oneshot(
@@ -355,6 +403,10 @@ mod tests {
             .expect("asset response");
 
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "public, max-age=31536000, immutable"
+        );
 
         let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
             .oneshot(
@@ -415,6 +467,26 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         cleanup(&auth_root);
         cleanup(&root);
+    }
+
+    #[test]
+    fn static_asset_cache_policy_requires_a_hex_fingerprint() {
+        assert_eq!(
+            super::static_asset_cache_control(Path::new("styles-abcdef.css")),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            super::static_asset_cache_control(Path::new("styles.css")),
+            "no-cache"
+        );
+        assert_eq!(
+            super::static_asset_cache_control(Path::new("index.html")),
+            "no-cache"
+        );
+        assert_eq!(
+            super::static_asset_cache_control(Path::new("styles-not-a-hash.css")),
+            "no-cache"
+        );
     }
 
     fn temp_root(label: &str) -> PathBuf {
