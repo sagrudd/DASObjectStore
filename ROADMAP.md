@@ -901,6 +901,10 @@ icon-button, inspector, and risky-confirmation primitives now have responsive
 CSS and host-safe semantic source contracts; page-flow refactors remain open
 work in TODO Milestone 24.
 
+Activity report dropzone and progress styles now live in a dedicated
+`styles/reporting.css` feature sheet, with registration/order and base-leakage
+tests; remaining global CSS and screenshot artifact work stays open.
+
 The target-scoped Remote Upload Web boundary now requires a concrete
 ObjectStore ID in page props and percent-encodes it in the workspace route;
 the authenticated shell renders an explicit target-required state instead of

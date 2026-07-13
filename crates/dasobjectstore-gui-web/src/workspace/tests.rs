@@ -30,6 +30,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/endpoints.css"),
         include_str!("../../styles/auth.css"),
         include_str!("../../styles/enclosures.css"),
+        include_str!("../../styles/reporting.css"),
         include_str!("../../styles.css"),
     ]
     .concat()
@@ -2192,6 +2193,34 @@ fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
             "enclosure selector leaked into base CSS: {selector}"
         );
     }
+}
+
+#[test]
+fn reporting_css_is_feature_owned_and_registered_before_base_styles() {
+    let base = include_str!("../../styles.css");
+    let feature = include_str!("../../styles/reporting.css");
+    let index = include_str!("../../index.html");
+    for selector in [
+        ".dos-reporting-card",
+        ".dos-report-dropzone",
+        ".dos-report-progress",
+        ".dos-report-progress-bar",
+    ] {
+        assert!(
+            feature.contains(selector),
+            "missing reporting selector {selector}"
+        );
+        assert!(
+            !base.contains(selector),
+            "reporting selector leaked into base CSS: {selector}"
+        );
+    }
+    let feature_link = index
+        .find("styles/reporting.css")
+        .expect("reporting sheet registered");
+    let base_link = index.find("styles.css").expect("base sheet registered");
+    assert!(feature_link < base_link);
+    assert_eq!(index.matches("styles/reporting.css").count(), 1);
 }
 
 #[test]

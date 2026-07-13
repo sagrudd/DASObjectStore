@@ -6,7 +6,7 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
-## 0.72.106 - 2026-07-13
+## 0.72.107 - 2026-07-13
 
 - Centralize checked logical used-byte accounting through the shared catalogue
   authority contract for folder-profile initialization.
@@ -15,6 +15,10 @@ agreement before landing.
   migration state, with destination-reopen coverage.
 - Mark the published profile/host-mode support matrix and fail-closed upgrade
   policy as delivered while retaining appliance and product-adapter blocks.
+- Move Activity report dropzone/progress styles into a feature-owned CSS sheet
+  with order and base-leakage regression coverage.
+
+## 0.72.106 - 2026-07-13
 
 ## 0.72.105 - 2026-07-13
 

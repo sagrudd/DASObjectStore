@@ -846,6 +846,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Move Home telemetry chart and source/gap treatments into
     `styles/home.css`, keeping the global sheet focused on shared primitives and
     loading the feature sheet through Trunk and CSS contract tests.
+  - [x] Move Activity report dropzone/progress styles into
+    `styles/reporting.css` and add feature-ownership/order contract coverage.
   - [x] Correct the screenshot runner’s footer assertion to accept the approved
     report-style sans-serif footer and reject only an accidental monospace
     treatment; full Playwright artifact execution remains environment-gated.
