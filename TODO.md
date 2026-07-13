@@ -48,7 +48,7 @@ evidence and detailed source tasks.
 - `[ ]` Gate 6 — integration and market-readiness acceptance awaits the
   blocked deployment, security, stress, and product-workflow matrices.
 
-## Current External Blockers (2026-07-12)
+## Current External Blockers (2026-07-13)
 
 - DASServer/Garage hardware, appliance credentials, and deployment access are
   unavailable while travelling. This blocks appliance/provider soak, package
@@ -64,13 +64,10 @@ evidence and detailed source tasks.
   decision; the native-versus-provider-backed S3 choice is resolved below as a
   provider-neutral adapter boundary with Garage as the local compatibility
   provider.
-- The local Playwright screenshot runner reaches the fixture server and its
-  deterministic fixture/DOM checks pass, but full artifact execution remains
-  blocked because ``packaging/web/prepare-web-dist.sh`` exits without a
-  JavaScript bundle after the Trunk build on this macOS checkout. Treat
-  desktop/mobile artifact execution as environment-gated until the local Web
-  asset/bootstrap runtime is available; do not claim visual acceptance from
-  this run.
+- The local Playwright screenshot runner now builds the WebAssembly bundle and
+  completes the desktop/mobile fixture matrix. It remains a local visual
+  regression signal only; appliance-host and production-browser acceptance are
+  still deployment-gated.
 - A canonical macOS Docker profile now keeps ``/etc/dasobjectstore`` inside
   the daemon container and persists the generated single-node Garage profile
   on the attached volume. Docker Desktop execution and an AlleleAnchor
@@ -1110,14 +1107,14 @@ list until every temporary size-budget exception has been removed.
   persisted-credential validation.
 - [x] Align remote-upload admission with the registry's canonical `s3_bucket`
   export label so writer-group users can authenticate to exported stores.
-- [ ] Split global Web CSS by base primitives and feature-owned styles, and
+- [x] Split global Web CSS by base primitives and feature-owned styles, and
   split screenshot regression runner, fixture server, assertions, and
   per-workspace fixtures into dedicated modules.
   - [x] Move Object Browser controls, hierarchy/table, placement badges,
     download states, and responsive breakpoints into
     `styles/object-browser.css`; register it before shared styles and preserve
-    CSS contract coverage. Screenshot runner artifact execution remains open
-    behind the documented local Playwright bootstrap blocker.
+    CSS contract coverage. The desktop/mobile screenshot runner now executes
+    against the built WebAssembly bundle.
   - [x] Move Activity grids, queue/task cards, typography, and responsive
     rules into `styles/activity.css`; keep shared card/form primitives in the
     base sheet and preserve feature ownership/order tests.
@@ -1136,7 +1133,7 @@ list until every temporary size-budget exception has been removed.
     `styles/reporting.css` and add feature-ownership/order contract coverage.
   - [x] Correct the screenshot runner’s footer assertion to accept the approved
     report-style sans-serif footer and reject only an accidental monospace
-    treatment; full Playwright artifact execution remains environment-gated.
+    treatment; full Playwright artifact execution now passes locally.
   - [x] Move authentication shell/form selectors into feature-owned
     ``styles/auth.css`` while retaining shared card/session primitives in the
     base sheet; registration and source-contract coverage preserve load order.
@@ -2692,8 +2689,8 @@ non-destructive close, and restores focus to its trigger when closed.
   Escape close, and focus return for every task pane; Local Access per-user
   memberships/qualification; endpoint add/edit prefill and confirmation gate;
   and remote-upload rejection without an explicit target. Source/component
-  contracts plus existing footer/API route tests cover these boundaries;
-  runtime visual artifact execution remains environment-gated.
+  contracts plus existing footer/API route tests cover these boundaries; the
+  local runtime visual matrix now also passes.
 - [x] Add desktop and 390 px mobile visual/DOM regression coverage for the
   closed and open Local Access, Endpoints, and target-scoped Remote Upload
   workflows. Assert no overlap, horizontal overflow, hidden primary form,
