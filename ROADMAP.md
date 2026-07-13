@@ -946,6 +946,9 @@ runtime guard reports loss of the mounted device.
 Logical used-byte accounting now uses one overflow-safe authority helper for
 folder-profile initialization; daemon registry/provider reconciliation remains
 open.
+Folder adoption now uses the same authority batch seam rather than a concrete
+catalogue call site; richer daemon transaction and SQLite/object-service
+integration remain open.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 

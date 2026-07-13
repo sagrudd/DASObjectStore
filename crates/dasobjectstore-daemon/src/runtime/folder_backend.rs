@@ -303,8 +303,7 @@ impl FolderBackend {
                     return Err(error);
                 }
             };
-            self.catalogue
-                .commit_records([finalized.clone()])
+            self.catalogue_authority_commit_batch(&[finalized.clone()])
                 .map_err(|error| {
                     let _ = manifest.checkpoint(
                         checkpoint_path,

@@ -6,10 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
-## 0.72.103 - 2026-07-13
+## 0.72.104 - 2026-07-13
 
 - Centralize checked logical used-byte accounting through the shared catalogue
   authority contract for folder-profile initialization.
+- Route folder adoption catalogue commits through the shared authority seam.
+
+## 0.72.103 - 2026-07-13
 
 ## 0.72.102 - 2026-07-13
 

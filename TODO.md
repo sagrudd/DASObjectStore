@@ -179,6 +179,9 @@ completion.
     fail closed on drive-guard loss for catalogue reads and mutations.
   - [x] Centralize checked logical used-byte accounting through the authority
     contract; FolderBackend now uses the shared overflow-safe helper.
+  - [x] Route folder adoption catalogue commits through the shared authority
+    seam; richer daemon transaction and SQLite/object-service integration stay
+    open.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
