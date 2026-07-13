@@ -414,4 +414,31 @@ mod tests {
         assert!(catalogue.records().is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn authority_batch_conflict_preserves_the_previous_snapshot() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        let mut catalogue = FolderCatalogue::open(&path, "codex").expect("catalogue opens");
+        catalogue
+            .commit_batch(&[record()])
+            .expect("initial authority batch commits");
+        let mut conflicting = record();
+        conflicting.checksum = "sha256:different".to_string();
+        let additional = BackendObjectRecord {
+            key: BackendObjectKey {
+                object_id: "incoming/new.dat".to_string(),
+                version: 1,
+            },
+            size_bytes: 8,
+            checksum: "sha256:new".to_string(),
+            location: ".dasobjectstore/objects/incoming/new.dat".to_string(),
+        };
+
+        assert!(catalogue.commit_batch(&[conflicting, additional]).is_err());
+        assert_eq!(catalogue.records(), vec![record()]);
+        let restarted = FolderCatalogue::open(&path, "codex").expect("catalogue reloads");
+        assert_eq!(restarted.records(), vec![record()]);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

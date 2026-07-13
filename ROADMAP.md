@@ -938,6 +938,8 @@ remain open pending the shared metadata decision.
 The core now exposes a minimal profile-neutral `ObjectCatalogueAuthority`
 batch contract, with the durable folder catalogue implementing it while
 SQLite/object-service, appliance, and daemon transaction adapters remain open.
+Authority batch conflict and restart tests prove a rejected version cannot
+partially persist a companion record.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 

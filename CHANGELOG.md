@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.101 - 2026-07-13
+
+- Add all-or-none authority-batch regression coverage across conflicting
+  versions and catalogue restart.
+
 ## 0.72.100 - 2026-07-13
 
 - Add the profile-neutral `ObjectCatalogueAuthority` batch contract and adapt

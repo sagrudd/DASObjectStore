@@ -173,6 +173,8 @@ completion.
   - [x] Define the minimal profile-neutral `ObjectCatalogueAuthority` batch
     contract and adapt the durable folder catalogue to it; shared SQLite,
     appliance, and daemon transaction wiring remain open.
+  - [x] Prove authority batches are all-or-none across conflicts and restart;
+    a conflicting existing version cannot partially add a new record.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
