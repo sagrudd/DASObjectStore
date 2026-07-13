@@ -98,12 +98,13 @@ slice is:
 5. publish contract fixtures for Synoptikon, Mneion, AlleleAnchor, Mnemosyne,
    and standalone integrations without exposing host paths or secrets.
 
-Development self-signing may be implemented only for local workspace and
-generated-data tests. It must be explicit, short-lived, loopback/local-Docker
-only, and constrained to synthetic validation stores. It is a test-build
-facility, not an application authority, and is forbidden from RPM/DEB contents
-including keys, issuers, configuration, and enablement switches. Package
-inspection tests are part of this roadmap slice.
+Development self-signing is implemented only as a feature-gated local helper
+for workspace and generated-data tests. It is explicit, short-lived,
+loopback/local-Docker only, and constrained to synthetic validation stores. It
+is a test-build facility, not an application authority, and is forbidden from
+RPM/DEB contents including keys, issuers, configuration, and enablement
+switches. Package inspection tests are part of this roadmap slice; daemon
+listener wiring and token-proof verification remain open.
 
 ### Current delivered baseline
 

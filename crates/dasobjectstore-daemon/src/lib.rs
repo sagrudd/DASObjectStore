@@ -3,6 +3,8 @@
 pub mod api;
 pub mod auth;
 pub mod client;
+#[cfg(feature = "development-self-signing")]
+pub mod development_self_signing;
 pub mod runtime;
 pub mod server;
 

@@ -721,6 +721,7 @@ dependencies = [
  "dasobjectstore-metadata",
  "dasobjectstore-object-service",
  "libc",
+ "rcgen",
  "rusqlite",
  "serde",
  "serde_json",

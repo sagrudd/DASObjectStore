@@ -45,9 +45,9 @@ Renewal tokens are not accepted as bearer credentials for this operation.
 
 ## Development self-signing mode
 
-For software development and generated-data tests, the daemon may accept an
-explicitly enabled self-signed development identity. This is a constrained
-testing convenience, not production authority:
+For software development and generated-data tests, the workspace provides an
+explicitly feature-gated self-signed development identity helper. This is a
+constrained testing convenience, not production authority:
 
 - it is accepted only in an explicit development/local-Docker mode;
 - it is limited to loopback or the canonical local container network;
@@ -61,6 +61,12 @@ testing convenience, not production authority:
 - it is rejected for appliance profiles, production configuration, non-local
   listeners, and real user/project stores; and
 - startup and audit output identify development authentication clearly.
+
+The helper is compiled only with the local workspace Cargo feature
+`development-self-signing`; normal daemon builds and all package build scripts
+use the default feature set. The helper's certificate/private-key material is
+returned only to the local test process and is not persisted by the package
+build.
 
 Development self-signing is excluded from RPM and DEB artifacts. Packaging
 must not ship a development private key, development issuer, development

@@ -39,6 +39,15 @@ require_text() {
   fi
 }
 
+require_absent() {
+  local path="$1"
+  local forbidden="$2"
+  if grep -Fq -- "$forbidden" "$path"; then
+    printf 'package build asset %s must not contain: %s\n' "$path" "$forbidden" >&2
+    exit 1
+  fi
+}
+
 require_file "$service"
 require_file "$web_service"
 require_file "$source_access_service"
@@ -205,6 +214,10 @@ require_text "$build_remote_rpm" 'target/release/dasobjectstore-remote'
 require_text "$build_remote_rpm" 'docs/user/remote-client.rst'
 require_text "$build_remote_rpm" '/usr/bin/dasobjectstore-remote'
 require_text "$build_remote_rpm" 'Recommends:      awscli'
+require_absent "$build_deb" 'development-self-signing'
+require_absent "$build_rpm" 'development-self-signing'
+require_absent "$build_remote_deb" 'development-self-signing'
+require_absent "$build_remote_rpm" 'development-self-signing'
 
 require_text "$prepare_web_dist" "trunk build --release"
 require_text "$prepare_web_dist" "wasm32-unknown-unknown"
