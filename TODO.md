@@ -31,9 +31,10 @@ evidence and detailed source tasks.
   approved. Daemon-side completion authorization is tested, but no public
   bearer/renewal-token semantics should be exposed without the security
   decision.
-- Folder one-root adoption semantics and native-versus-provider-backed S3
-  gateway choice remain product decisions listed above; implementation should
-  not infer them from a path or profile name.
+- The native-versus-provider-backed S3 gateway choice remains a product
+  decision; the approved one-root folder adoption semantics are now encoded in
+  the architecture section and implementation must not infer authority from a
+  path or profile name.
 - The local Playwright screenshot runner reaches the fixture server and its
   deterministic fixture/DOM checks pass, but full artifact execution remains
   blocked because ``packaging/web/prepare-web-dist.sh`` exits without a
@@ -350,6 +351,10 @@ completion.
     closed for missing bounded ledgers or probe/persistence errors; configured
     copy counts remain daemon-authoritative. S3/multipart completion and
     stale-reservation scheduling remain open.
+  - [x] Initialize a new store's durable capacity ledger before publishing its
+    registry definition, with idempotent restart-safe creation and regression
+    coverage; per-profile manifest/root probe selection remains a separate
+    follow-up.
   - [x] Add explicit provider commit/release lifecycle operations with
     snapshot rollback when durable persistence fails; transfer workers still
     need to carry reservation IDs through their completion/failure paths.

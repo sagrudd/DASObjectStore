@@ -89,7 +89,7 @@ use self::job_projection::{
 };
 pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
-    create_object_store_with_registry, resolve_authorization_store_id,
+    create_object_store_with_capacity, resolve_authorization_store_id,
     rotated_easyconnect_renewal_token, stable_easyconnect_id,
 };
 pub struct DaemonRequestHandler<S, C> {
@@ -765,7 +765,7 @@ where
         request: CreateObjectStoreRequest,
         accepted_at_utc: &str,
     ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
-        create_object_store_with_registry(request, default_store_registry_path(), accepted_at_utc)
+        create_object_store_with_capacity(self, request, accepted_at_utc)
     }
 
     fn upsert_endpoint_inventory(
@@ -1528,7 +1528,7 @@ mod tests {
         request.store_id = "porkchop".to_string();
         request.dry_run = false;
 
-        let response = super::create_object_store_with_registry(
+        let response = super::request_helpers::create_object_store_with_registry(
             request,
             &registry_path,
             "2026-07-10T14:23:45Z",

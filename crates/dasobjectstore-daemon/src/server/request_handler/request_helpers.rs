@@ -40,6 +40,20 @@ pub(super) fn create_object_store_with_registry(
     ))
 }
 
+pub(super) fn create_object_store_with_capacity<R>(
+    controller: &GarageServiceController<R>,
+    request: CreateObjectStoreRequest,
+    accepted_at_utc: &str,
+) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError>
+where
+    R: ServiceCommandRunner,
+{
+    if !request.dry_run {
+        controller.initialize_store_capacity_from_request(&request)?;
+    }
+    create_object_store_with_registry(request, default_store_registry_path(), accepted_at_utc)
+}
+
 pub(super) fn resolve_authorization_store_id(
     endpoint: &StoreId,
     store_registry_path: &Path,

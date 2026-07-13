@@ -50,6 +50,17 @@ impl CapacitySpaceProbe for StatvfsCapacitySpaceProbe {
 }
 
 pub trait CapacityAdmissionProvider: Send + Sync {
+    /// Prepare the durable ledger for a newly-created store before its
+    /// registry definition becomes visible. Implementations must be
+    /// idempotent and must never overwrite existing usage or reservations.
+    fn initialize_store(
+        &self,
+        _store_id: &StoreId,
+        _policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Ok(())
+    }
+
     fn admit(
         &self,
         request: CapacityAdmissionRequest,
@@ -158,6 +169,25 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         self.ledger_directory.join(format!("{store_id}.json"))
     }
 
+    fn initialize_ledger(
+        &self,
+        store_id: &StoreId,
+        policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let path = self.ledger_path(store_id.as_str());
+        if path.exists() {
+            let _existing = load_capacity_ledger(&path)
+                .map_err(|error| unavailable(format!("capacity ledger load failed: {error}")))?;
+            return Ok(());
+        }
+
+        let ledger = CapacityReservationLedger::new(policy, 0).map_err(|error| {
+            unavailable(format!("capacity ledger initialization failed: {error:?}"))
+        })?;
+        save_capacity_ledger(path, &ledger)
+            .map_err(|error| unavailable(format!("capacity ledger persistence failed: {error}")))
+    }
+
     fn policy_for_store(
         &self,
         store_id: &StoreId,
@@ -259,6 +289,14 @@ impl<P> CapacityAdmissionProvider for FileBackedCapacityAdmissionProvider<P>
 where
     P: CapacitySpaceProbe,
 {
+    fn initialize_store(
+        &self,
+        store_id: &StoreId,
+        policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.initialize_ledger(store_id, policy)
+    }
+
     fn status(
         &self,
         request: CapacityStatusRequest,
@@ -615,6 +653,52 @@ mod tests {
         let released = load_capacity_ledger(&ledger_path).expect("released ledger reload");
         assert_eq!(released.reserved_bytes(), 0);
         assert_eq!(released.used_bytes(), 100);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn initialize_store_is_idempotent_and_restores_bounded_admission() {
+        let root = root("initialize");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir.clone(),
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        );
+        let store_id = StoreId::new("codex").expect("store id");
+        let policy = CapacityPolicy::bounded(1_000, 100);
+
+        provider
+            .initialize_store(&store_id, policy.clone())
+            .expect("ledger initializes");
+        provider
+            .initialize_store(&store_id, policy)
+            .expect("second initialization is idempotent");
+        assert_eq!(
+            load_capacity_ledger(ledger_dir.join("codex.json"))
+                .expect("ledger reload")
+                .used_bytes(),
+            0
+        );
+        let response = provider
+            .admit(request(DaemonIngressOrigin::RemoteS3, "initialized-upload"))
+            .expect("bounded store admits after creation");
+        assert_eq!(response.decision, CapacityAdmissionDecision::Admitted);
+        provider
+            .initialize_store(&store_id, CapacityPolicy::bounded(1_000, 100))
+            .expect("reinitialization preserves active reservations");
+        assert_eq!(
+            load_capacity_ledger(ledger_dir.join("codex.json"))
+                .expect("ledger reload after reinitialization")
+                .reserved_bytes(),
+            100
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.115 - 2026-07-13
+
+- Initialize daemon-owned capacity ledgers before publishing newly-created
+  ObjectStores, keeping bounded stores restart-safe and immediately admitting
+  only through durable quota state.
+
 ## 0.72.114 - 2026-07-13
 
 - Encode the approved storage-authority and consumer-boundary decisions and

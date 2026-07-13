@@ -98,6 +98,11 @@ exceptions. Hardware-only acceptance is deferred while travelling without DAS
 access, but offline design, domain, metadata, API, test, and packaging work
 should continue.
 
+New bounded ObjectStores now initialize their daemon-owned quota ledger before
+the store registry definition is published, so creation cannot expose a finite
+quota without durable admission state. Per-profile manifest/root registration
+and probe-path selection remain the next capacity/profile seam.
+
 The canonical local Docker profile now renders successfully against the
 dedicated macOS validation root and both generated Compose documents pass
 configuration parsing. Starting the daemon, nested Garage, and the AlleleAnchor

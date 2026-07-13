@@ -10,8 +10,8 @@ use super::{
     },
 };
 use crate::api::{
-    CapacityAdmissionRequest, CapacityAdmissionResponse, DaemonIngestProgressEvent,
-    DaemonIngestResourceGate, DaemonIngestResourcePolicy, DaemonJobId,
+    CapacityAdmissionRequest, CapacityAdmissionResponse, CreateObjectStoreRequest,
+    DaemonIngestProgressEvent, DaemonIngestResourceGate, DaemonIngestResourcePolicy, DaemonJobId,
     DaemonRequestValidationError, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
     DaemonServiceOperation, DaemonServiceStatusDetail, DaemonServiceStatusRequest,
     DaemonServiceStatusResponse, StoreRepairS3Reconciliation, SubmitIngestFilesRequest,
@@ -150,6 +150,29 @@ where
                 operation: "capacity status provider is not configured".to_string(),
             })?
             .status(request)
+    }
+
+    pub fn initialize_store_capacity(
+        &self,
+        store_id: &StoreId,
+        policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        if let Some(provider) = &self.capacity_admission_provider {
+            provider.initialize_store(store_id, policy)?;
+        }
+        Ok(())
+    }
+
+    pub fn initialize_store_capacity_from_request(
+        &self,
+        request: &CreateObjectStoreRequest,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let definition = request.registry_definition().map_err(|error| {
+            DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
+                error.to_string(),
+            ))
+        })?;
+        self.initialize_store_capacity(&definition.store_id, definition.policy.capacity)
     }
 
     pub fn submit_ingest_files_with_capacity_provider(
