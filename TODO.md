@@ -175,6 +175,8 @@ completion.
     appliance, and daemon transaction wiring remain open.
   - [x] Prove authority batches are all-or-none across conflicts and restart;
     a conflicting existing version cannot partially add a new record.
+  - [x] Adapt the SSD-backed drive profile to the same authority contract and
+    fail closed on drive-guard loss for catalogue reads and mutations.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

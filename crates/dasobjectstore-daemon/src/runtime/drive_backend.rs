@@ -10,7 +10,7 @@ use super::folder_backend::{FolderBackend, FolderCapacitySnapshot, FolderInspect
 use super::folder_catalogue::{FolderCatalogueBrowserEntry, FolderCatalogueBrowserQuery};
 use dasobjectstore_core::backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
-    ObjectStoreBackend,
+    ObjectCatalogueAuthority, ObjectStoreBackend,
 };
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
@@ -192,11 +192,30 @@ impl ObjectStoreBackend for DriveBackend {
     }
 }
 
+impl ObjectCatalogueAuthority for DriveBackend {
+    fn records(&self) -> Result<Vec<BackendObjectRecord>, BackendError> {
+        self.guard()?;
+        Ok(self.folder.catalogue_records())
+    }
+
+    fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError> {
+        self.guard()?;
+        self.folder.catalogue_authority_commit_batch(records)
+    }
+
+    fn remove_record(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
+        self.guard()?;
+        self.folder.catalogue_authority_remove_record(key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DriveBackend, DriveRuntimeGuard};
     use crate::runtime::folder_catalogue::FolderCatalogueBrowserQuery;
-    use dasobjectstore_core::backend::{BackendObjectKey, ObjectStoreBackend};
+    use dasobjectstore_core::backend::{
+        BackendObjectKey, ObjectCatalogueAuthority, ObjectStoreBackend,
+    };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::manifest::{
@@ -337,6 +356,40 @@ mod tests {
         assert!(backend
             .browser_entries(&FolderCatalogueBrowserQuery::default())
             .is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn drive_catalogue_authority_is_guarded_and_profile_neutral() {
+        let root = unique_root();
+        let guard_state = Arc::new(FakeGuard(AtomicBool::new(true)));
+        let guard: Arc<dyn DriveRuntimeGuard> = guard_state.clone();
+        let mut backend = DriveBackend::open(
+            &root,
+            manifest(),
+            CapacityPolicy::bounded(1024, 1),
+            0,
+            guard,
+        )
+        .expect("drive backend opens");
+        let record = dasobjectstore_core::backend::BackendObjectRecord {
+            key: BackendObjectKey {
+                object_id: "catalogue/data.txt".to_string(),
+                version: 1,
+            },
+            size_bytes: 4,
+            checksum: "sha256:data".to_string(),
+            location: ".dasobjectstore/objects/catalogue/data.txt".to_string(),
+        };
+        ObjectCatalogueAuthority::commit_batch(&mut backend, &[record.clone()])
+            .expect("guarded authority commit");
+        assert_eq!(
+            ObjectCatalogueAuthority::records(&backend).expect("guarded authority records"),
+            vec![record.clone()]
+        );
+        guard_state.0.store(false, Ordering::SeqCst);
+        assert!(ObjectCatalogueAuthority::records(&backend).is_err());
+        assert!(ObjectCatalogueAuthority::remove_record(&mut backend, &record.key).is_err());
         let _ = fs::remove_dir_all(root);
     }
 

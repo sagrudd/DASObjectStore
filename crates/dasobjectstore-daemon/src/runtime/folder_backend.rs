@@ -137,6 +137,20 @@ impl FolderBackend {
         self.catalogue.records()
     }
 
+    pub(crate) fn catalogue_authority_commit_batch(
+        &mut self,
+        records: &[BackendObjectRecord],
+    ) -> Result<(), BackendError> {
+        self.catalogue.commit_records(records.iter().cloned())
+    }
+
+    pub(crate) fn catalogue_authority_remove_record(
+        &mut self,
+        key: &BackendObjectKey,
+    ) -> Result<(), BackendError> {
+        self.catalogue.remove(key)
+    }
+
     /// Return a guarded, profile-neutral browser projection over the durable
     /// private catalogue. This never walks payload files or user-visible data.
     pub fn browser_entries(

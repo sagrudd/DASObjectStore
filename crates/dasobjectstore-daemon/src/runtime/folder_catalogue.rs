@@ -199,8 +199,8 @@ impl FolderCatalogue {
 }
 
 impl ObjectCatalogueAuthority for FolderCatalogue {
-    fn records(&self) -> Vec<BackendObjectRecord> {
-        self.records()
+    fn records(&self) -> Result<Vec<BackendObjectRecord>, BackendError> {
+        Ok(self.records())
     }
 
     fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError> {
@@ -400,7 +400,7 @@ mod tests {
             .commit_batch(&[record()])
             .expect("authority batch commits");
         assert_eq!(
-            ObjectCatalogueAuthority::records(&catalogue),
+            ObjectCatalogueAuthority::records(&catalogue).expect("authority records"),
             vec![record()]
         );
         ObjectCatalogueAuthority::remove_record(

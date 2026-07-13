@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.102 - 2026-07-13
+
+- Adapt the SSD-backed drive profile to the shared catalogue authority and
+  fail closed on drive-guard loss for catalogue reads and mutations.
+
 ## 0.72.101 - 2026-07-13
 
 - Add all-or-none authority-batch regression coverage across conflicting

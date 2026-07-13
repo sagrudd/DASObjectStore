@@ -940,6 +940,9 @@ batch contract, with the durable folder catalogue implementing it while
 SQLite/object-service, appliance, and daemon transaction adapters remain open.
 Authority batch conflict and restart tests prove a rejected version cannot
 partially persist a companion record.
+The SSD-backed drive profile now delegates the same authority contract through
+its validated folder engine and rejects reads or mutations when the drive
+runtime guard reports loss of the mounted device.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 

@@ -64,7 +64,7 @@ pub struct BackendHealth {
 /// profile-neutral backend record rather than provider- or appliance-specific
 /// metadata; richer portable catalogue adapters remain layered above it.
 pub trait ObjectCatalogueAuthority {
-    fn records(&self) -> Vec<BackendObjectRecord>;
+    fn records(&self) -> Result<Vec<BackendObjectRecord>, BackendError>;
 
     fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError>;
 
