@@ -74,6 +74,10 @@ pub(crate) fn standalone_dashboard_router_with_state(
     Router::new()
         .route("/api/v1/dashboard/home", get(standalone_home_dashboard))
         .route(
+            "/api/v1/dashboard/status",
+            get(standalone_cached_home_dashboard),
+        )
+        .route(
             "/api/v1/dashboard/enclosures",
             get(standalone_enclosures_dashboard),
         )

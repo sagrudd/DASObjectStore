@@ -24,8 +24,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod cache;
 mod object_service;
 mod telemetry;
+
+pub(crate) use cache::{cached_home_dashboard, CachedHomeDashboardView};
 
 pub(crate) const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 pub(crate) const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";

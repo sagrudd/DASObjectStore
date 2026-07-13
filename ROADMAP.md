@@ -923,8 +923,9 @@ recorded and repeatable.
 Current delivery note: daemon-independent liveness and degraded Activity
 responses are covered. Standalone static asset reads now use an async bounded
 lane with explicit no-cache index/unfingerprinted and immutable fingerprinted
-asset cache headers. A cached daemon appliance-status snapshot and appliance
-soak remain open.
+asset cache headers. The authenticated dashboard status route now retains a
+last-successful snapshot and reports stale/retry metadata, while cold starts
+fail closed. Appliance soak and telemetry freshness remain open.
 
 ## Milestone 27: Universal Capacity and Reservation Policy
 

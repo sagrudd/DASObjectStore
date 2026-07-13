@@ -178,6 +178,22 @@ async fn standalone_home_dashboard(
     Ok(Json(crate::home_aggregator::live_home_dashboard()))
 }
 
+async fn standalone_cached_home_dashboard(
+    State(_state): State<StandaloneDashboardRouteState>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<crate::home_aggregator::CachedHomeDashboardView>, (StatusCode, Json<AuthRouteError>)>
+{
+    crate::home_aggregator::cached_home_dashboard()
+        .map(Json)
+        .map_err(|message| {
+            route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "dashboard_unavailable",
+                message,
+            )
+        })
+}
+
 async fn standalone_enclosures_dashboard(
     State(state): State<StandaloneDashboardRouteState>,
     actor: AuthenticatedGuiActor,
@@ -1233,6 +1249,30 @@ mod tests {
             "admin_required"
         );
 
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn cached_dashboard_status_requires_a_local_session() {
+        let root = temp_root("standalone-dashboard-status-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/status")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         cleanup(&root);
     }
 

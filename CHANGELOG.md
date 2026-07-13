@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.73 - 2026-07-13
+
+- Add an authenticated cached dashboard status contract with explicit
+  cold-start failure and stale-last-success semantics, and document the
+  additive endpoint for operators and integrations.
+
 ## 0.72.72 - 2026-07-13
 
 - Bound standalone Web static-asset reads behind a small async semaphore and

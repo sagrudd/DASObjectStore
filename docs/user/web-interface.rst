@@ -24,6 +24,13 @@ retry guidance; a cold-start transport failure remains an explicit error rather
 than fabricated status. Liveness, static assets, and login/session routes do
 not depend on that dashboard snapshot.
 
+Operators and integrations that need a small authenticated status payload can
+use ``/products/dasobjectstore/api/v1/dashboard/status``. This endpoint keeps
+the last successful server-side snapshot, returns ``stale`` and ``warning``
+metadata when a later refresh is degraded, and fails with ``503`` before the
+first usable snapshot rather than presenting fabricated zeroes. The existing
+``dashboard/home`` response remains unchanged for the full live dashboard.
+
 The packaged appliance configuration lives at:
 
 .. code-block:: text
