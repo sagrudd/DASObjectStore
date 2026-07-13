@@ -14,6 +14,18 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PROFILE_BINDING_REGISTRY_SCHEMA: &str = "dasobjectstore.profile_binding_registry.v1";
+pub const PROFILE_BINDING_REGISTRY_FILE_NAME: &str = "profile-bindings.json";
+pub const PROFILE_BINDING_REGISTRY_ENV: &str = "DASOBJECTSTORE_PROFILE_BINDINGS_PATH";
+
+pub fn default_profile_binding_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
+    state_dir.as_ref().join(PROFILE_BINDING_REGISTRY_FILE_NAME)
+}
+
+pub fn profile_binding_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
+    std::env::var_os(PROFILE_BINDING_REGISTRY_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_profile_binding_registry_path(state_dir))
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -230,7 +242,8 @@ fn registry_io(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::{
-        read_profile_binding, read_registry, upsert_profile_binding, BackendProfileBinding,
+        default_profile_binding_registry_path, read_profile_binding, read_registry,
+        upsert_profile_binding, BackendProfileBinding,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
@@ -254,6 +267,14 @@ mod tests {
             ));
         fs::create_dir_all(&root).expect("fixture root");
         root
+    }
+
+    #[test]
+    fn default_binding_registry_path_is_state_scoped() {
+        assert_eq!(
+            default_profile_binding_registry_path("/var/lib/dasobjectstore"),
+            PathBuf::from("/var/lib/dasobjectstore/profile-bindings.json")
+        );
     }
 
     fn folder_binding(store_id: &str, root: &Path) -> BackendProfileBinding {

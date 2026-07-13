@@ -44,10 +44,7 @@ fn run() -> Result<(), String> {
     let garage =
         GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner)
             .with_capacity_admission_provider(Arc::new(
-                FileBackedCapacityAdmissionProvider::for_daemon(&config.state_dir)
-                    .with_profile_binding_registry_path(
-                        config.state_dir.join("profile-bindings.json"),
-                    ),
+                FileBackedCapacityAdmissionProvider::for_daemon(&config.state_dir),
             ))
             .with_ingest_resource_policy(config.ingest_resource_policy);
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(

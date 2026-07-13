@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.119 - 2026-07-13
+
+- Add a state-scoped profile-binding registry path helper with an explicit
+  environment override, keeping daemon and container deployments consistent.
+
 ## 0.72.118 - 2026-07-13
 
 - Reject system-root profile bindings so daemon capacity probes cannot accept

@@ -8,7 +8,7 @@ use crate::api::{
     CapacityStatusResponse,
 };
 use crate::runtime::capacity_persistence::{load_capacity_ledger, save_capacity_ledger};
-use crate::runtime::profile_registry::read_profile_binding;
+use crate::runtime::profile_registry::{profile_binding_registry_path, read_profile_binding};
 use crate::runtime::service::DaemonServiceRuntimeError;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::CapacityReservationLedger;
@@ -146,6 +146,7 @@ impl FileBackedCapacityAdmissionProvider<StatvfsCapacitySpaceProbe> {
             crate::runtime::default_ssd_root(),
             StatvfsCapacitySpaceProbe,
         )
+        .with_profile_binding_registry_path(profile_binding_registry_path(state_dir))
     }
 }
 

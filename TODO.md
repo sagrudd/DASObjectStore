@@ -282,7 +282,10 @@ completion.
     validated against canonical folder/drive roots, persisted atomically, and
     per-store capacity probes use the binding when present; profile-aware
     creation/adoption transport remains open. System-root bindings are rejected
-    fail-closed, with strict unknown-field and duplicate-store validation.
+    fail-closed, with strict unknown-field and duplicate-store validation. The
+    registry path is now daemon-state scoped with an explicit environment
+    override; local-Docker bootstrap must still register container-visible roots
+    before strict missing-binding enforcement can replace legacy fallback.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
