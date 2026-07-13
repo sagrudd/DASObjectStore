@@ -130,7 +130,7 @@ require_text "$postinst" "systemctl enable --now dasobjectstored.service dasobje
 require_text "$postinst" "systemctl restart dasobjectstored.service dasobjectstore-server.service"
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 
-require_text "$build_deb" "cargo build --release -p dasobjectstore-daemon"
+require_text "$build_deb" "cargo build --release --no-default-features -p dasobjectstore-daemon"
 require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'
@@ -169,7 +169,7 @@ require_text "$reporting_wrapper" 'grammateus_markdown_pdf'
 require_text "$reporting_wrapper" 'docker_args=(run --rm'
 
 require_text "$build_rpm" "rpmbuild"
-require_text "$build_rpm" "cargo build --release -p dasobjectstore-daemon"
+require_text "$build_rpm" "cargo build --release --no-default-features -p dasobjectstore-daemon"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'

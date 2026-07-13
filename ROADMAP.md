@@ -106,7 +106,8 @@ RPM/DEB contents including keys, issuers, configuration, and enablement
 switches. Package inspection tests are part of this roadmap slice. The core
 exchange-request contract validates active key membership, bounded proof shape,
 scope, and lifetime; daemon listener wiring, cryptographic proof verification,
-and token issuance remain open.
+and token issuance remain open. Native DEB/RPM build scripts also compile the
+daemon with `--no-default-features`, making the package boundary explicit.
 
 ### Current delivered baseline
 
