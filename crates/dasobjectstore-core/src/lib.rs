@@ -34,7 +34,8 @@ pub use application_auth::{
 };
 pub use backend::{
     catalogue_logical_used_bytes, BackendCapabilities, BackendError, BackendHealth,
-    BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority, ObjectStoreBackend,
+    BackendObjectKey, BackendObjectRecord, BackendOperation, ObjectCatalogueAuthority,
+    ObjectStoreBackend,
 };
 pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,

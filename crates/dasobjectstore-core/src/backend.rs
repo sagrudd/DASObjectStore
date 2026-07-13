@@ -20,6 +20,54 @@ pub struct BackendCapabilities {
     pub removal: bool,
 }
 
+/// Stable names for the operations advertised by [`BackendCapabilities`].
+/// Adapters can use this vocabulary to explain an unavailable operation
+/// without duplicating the capability-field mapping.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendOperation {
+    Validation,
+    Reservation,
+    Staging,
+    DurableFinalization,
+    Reads,
+    Enumeration,
+    Verification,
+    Health,
+    Reconciliation,
+    Removal,
+}
+
+impl BackendOperation {
+    pub const ALL: [Self; 10] = [
+        Self::Validation,
+        Self::Reservation,
+        Self::Staging,
+        Self::DurableFinalization,
+        Self::Reads,
+        Self::Enumeration,
+        Self::Verification,
+        Self::Health,
+        Self::Reconciliation,
+        Self::Removal,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Validation => "validation",
+            Self::Reservation => "reservation",
+            Self::Staging => "staging",
+            Self::DurableFinalization => "durable_finalization",
+            Self::Reads => "reads",
+            Self::Enumeration => "enumeration",
+            Self::Verification => "verification",
+            Self::Health => "health",
+            Self::Reconciliation => "reconciliation",
+            Self::Removal => "removal",
+        }
+    }
+}
+
 impl BackendCapabilities {
     pub const fn complete() -> Self {
         Self {
@@ -34,6 +82,28 @@ impl BackendCapabilities {
             reconciliation: true,
             removal: true,
         }
+    }
+
+    pub const fn supports(self, operation: BackendOperation) -> bool {
+        match operation {
+            BackendOperation::Validation => self.validation,
+            BackendOperation::Reservation => self.reservation,
+            BackendOperation::Staging => self.staging,
+            BackendOperation::DurableFinalization => self.durable_finalization,
+            BackendOperation::Reads => self.reads,
+            BackendOperation::Enumeration => self.enumeration,
+            BackendOperation::Verification => self.verification,
+            BackendOperation::Health => self.health,
+            BackendOperation::Reconciliation => self.reconciliation,
+            BackendOperation::Removal => self.removal,
+        }
+    }
+
+    pub fn missing_operations(self) -> Vec<BackendOperation> {
+        BackendOperation::ALL
+            .into_iter()
+            .filter(|operation| !self.supports(*operation))
+            .collect()
     }
 }
 
@@ -151,7 +221,7 @@ pub trait ObjectStoreBackend {
 mod tests {
     use super::{
         catalogue_logical_used_bytes, BackendCapabilities, BackendObjectKey, BackendObjectRecord,
-        ObjectCatalogueAuthority, ObjectStoreBackend,
+        BackendOperation, ObjectCatalogueAuthority, ObjectStoreBackend,
     };
 
     #[test]
@@ -167,9 +237,42 @@ mod tests {
         assert!(capabilities.health);
         assert!(capabilities.reconciliation);
         assert!(capabilities.removal);
+        assert!(capabilities.missing_operations().is_empty());
 
         fn accepts_contract<T: ObjectStoreBackend>() {}
         let _ = accepts_contract::<TestBackend>;
+    }
+
+    #[test]
+    fn capabilities_report_stable_missing_operation_names() {
+        let capabilities = BackendCapabilities {
+            validation: true,
+            reads: true,
+            health: true,
+            ..BackendCapabilities::default()
+        };
+        assert!(capabilities.supports(BackendOperation::Validation));
+        assert!(!capabilities.supports(BackendOperation::Reservation));
+        assert_eq!(
+            serde_json::to_string(&BackendOperation::DurableFinalization).expect("operation JSON"),
+            "\"durable_finalization\""
+        );
+        assert_eq!(
+            capabilities
+                .missing_operations()
+                .into_iter()
+                .map(BackendOperation::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "reservation",
+                "staging",
+                "durable_finalization",
+                "enumeration",
+                "verification",
+                "reconciliation",
+                "removal",
+            ]
+        );
     }
 
     #[test]

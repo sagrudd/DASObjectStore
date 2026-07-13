@@ -316,7 +316,10 @@ completion.
   unchanged ingress/repair/export evidence remain open.
   - [x] Add the shared `ObjectStoreBackend` trait, typed object/health/error
     records, and explicit capability flags for every operation; concrete folder,
-    drive, and appliance implementations remain subsequent gates.
+    drive, and appliance implementations remain subsequent gates. The core now
+    also publishes a stable operation vocabulary with `supports` and
+    missing-operation projections so adapters can explain capability gaps
+    without duplicating field mappings.
 - [ ] Version portable manifest and placement contracts so logical identity,
   hierarchy, versions, hashes, provenance, protection, and backend locations do
   not encode mandatory appliance SSD/HDD assumptions.
