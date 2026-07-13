@@ -775,18 +775,21 @@ completion.
   - [x] Route the bounded profile-S3 list command through the daemon's
     authenticated storage dispatcher, resolving the registered folder binding
     and daemon-owned capacity policy before querying the authoritative
-    catalogue; HTTP listener routing remains open.
+    catalogue; the authenticated Web list route now delegates through the same
+    daemon projection.
   - [x] Add an authenticated profile-S3 HEAD transport that resolves one
     catalogue-authoritative object through the daemon-owned folder binding and
     returns only logical key, version, size, and checksum metadata; backend
-    paths and provider listings remain private. Full HTTP PUT/GET/multipart
-    gateway wiring remains separate.
+    paths and provider listings remain private; the authenticated Web HEAD
+    route delegates through this transport. Full HTTP PUT/GET/multipart gateway
+    wiring remains separate.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
-    daemon bridge; SMART/NVMe and appliance topology remain separate.
+    daemon bridge; the authenticated Web health route delegates through the
+    same projection. SMART/NVMe and appliance topology remain separate.
   - [x] Expose profile health through ``store profile-health`` with human and
     JSON output so CLI, Web, and daemon consumers share the same response.
   - [x] Add catalogue-authorized provider-neutral profile verification and
