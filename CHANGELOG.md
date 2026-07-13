@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.71 - 2026-07-13
+
+- Correct the CSS campaign ledger to distinguish completed feature-style
+  extraction from the still environment-gated screenshot artifacts.
+
 ## 0.72.70 - 2026-07-13
 
 - Move enclosure inventory, drive detail, and responsive layout rules into a

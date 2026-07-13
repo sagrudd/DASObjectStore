@@ -787,8 +787,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Move Object Browser controls, hierarchy/table, placement badges,
     download states, and responsive breakpoints into
     `styles/object-browser.css`; register it before shared styles and preserve
-    CSS contract coverage. Remaining auth/enclosure/activity CSS and screenshot
-    runner modularity remain open.
+    CSS contract coverage. Screenshot runner artifact execution remains open
+    behind the documented local Playwright bootstrap blocker.
   - [x] Move Activity grids, queue/task cards, typography, and responsive
     rules into `styles/activity.css`; keep shared card/form primitives in the
     base sheet and preserve feature ownership/order tests.
