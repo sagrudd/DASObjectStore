@@ -165,8 +165,8 @@ use dasobjectstore_core::risk::{
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_daemon::{
-    authoritative_performance_recommendation_path, CapacityStatusRequest, DaemonClient,
-    DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
+    authoritative_performance_recommendation_path, CapacityStatusRequest, CreateObjectStoreRequest,
+    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
     DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
     DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
@@ -180,7 +180,7 @@ use dasobjectstore_daemon::{
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
     StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
-    DEFAULT_DAEMON_STATE_DIR,
+    DEFAULT_DAEMON_STATE_DIR, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,

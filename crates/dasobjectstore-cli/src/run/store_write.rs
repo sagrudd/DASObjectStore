@@ -1,6 +1,7 @@
 //! Store creation and portable-registry write handlers.
 
 use super::*;
+use dasobjectstore_core::store::{CapacityBehavior, ExportPolicy, RetentionPolicy};
 
 pub(super) fn run_store_drain(
     args: &StoreDrainArgs,
@@ -94,18 +95,35 @@ pub(super) fn run_store_create(
         writer_group: args.writer_group().map(ToOwned::to_owned),
         public: args.public(),
     };
+    let daemon_config = DaemonRuntimeConfig::default_packaged();
+    let use_daemon = args.registry_path().is_none()
+        && definition.writer_group.is_some()
+        && daemon_config.socket_path.exists();
+    let daemon_response = if use_daemon {
+        let request = create_object_store_request(args, &definition);
+        Some(
+            DaemonClient::new(UnixSocketDaemonTransport::new(daemon_config.socket_path))
+                .create_object_store(request)?,
+        )
+    } else {
+        None
+    };
     let registry_path = args
         .registry_path()
         .map(Path::to_path_buf)
         .unwrap_or_else(default_store_registry_path);
-    let report = upsert_store_definition(&registry_path, definition)?;
+    let report = if daemon_response.is_none() {
+        Some(upsert_store_definition(&registry_path, definition.clone())?)
+    } else {
+        None
+    };
     let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
     let portable_report = super::registry_access::upsert_portable_store_definition(
         args.ssd_root(),
         allow_default_ssd,
-        &report.definition,
+        &definition,
     )?;
-    if let Some(writer_group) = &report.definition.writer_group {
+    if let Some(writer_group) = &definition.writer_group {
         super::registry_access::grant_store_writer_group_access(
             args.ssd_root(),
             allow_default_ssd,
@@ -117,7 +135,7 @@ pub(super) fn run_store_create(
             writer_group,
         )?;
     }
-    if let Some(reader_group) = &report.definition.reader_group {
+    if let Some(reader_group) = &definition.reader_group {
         super::registry_access::grant_writer_group_registry_access(&registry_path, reader_group)?;
         super::registry_access::grant_writer_group_registry_access(
             &default_subobject_registry_path(),
@@ -125,17 +143,46 @@ pub(super) fn run_store_create(
         )?;
     }
 
-    if args.json() {
+    if let Some(response) = daemon_response {
+        if args.json() {
+            serde_json::to_writer_pretty(
+                &mut *writer,
+                &serde_json::json!({
+                    "daemon": response,
+                    "portable": portable_report,
+                }),
+            )?;
+            writer.write_all(b"\n")?;
+        } else {
+            writeln!(writer, "Store creation accepted by daemon")?;
+            writeln!(writer, "Store: {}", response.store_id)?;
+            writeln!(writer, "Job: {}", response.accepted.job_id)?;
+            writeln!(writer, "Class: {}", response.store_class)?;
+            writeln!(writer, "Copies: {}", response.required_copies)?;
+            if let Some(bucket) = response.bucket {
+                writeln!(writer, "Bucket: {bucket}")?;
+            }
+            if let Some(portable) = &portable_report {
+                writeln!(
+                    writer,
+                    "Portable registry: {}",
+                    portable.registry_path.display()
+                )?;
+            } else {
+                writeln!(writer, "Portable registry: not detected")?;
+            }
+        }
+    } else if args.json() {
         serde_json::to_writer_pretty(
             &mut *writer,
             &serde_json::json!({
-                "host": report,
+                "host": report.expect("direct store create report"),
                 "portable": portable_report,
             }),
         )?;
         writer.write_all(b"\n")?;
     } else {
-        write_store_create_report(&report, writer)?;
+        write_store_create_report(&report.expect("direct store create report"), writer)?;
         match &portable_report {
             Some(report) => writeln!(
                 writer,
@@ -147,6 +194,122 @@ pub(super) fn run_store_create(
     }
 
     Ok(())
+}
+
+pub(super) fn create_object_store_request(
+    args: &StoreCreateArgs,
+    definition: &StoreServiceDefinition,
+) -> CreateObjectStoreRequest {
+    let policy = &definition.policy;
+    CreateObjectStoreRequest {
+        store_id: definition.store_id.to_string(),
+        store_class: policy.class.name().to_string(),
+        required_copies: policy.copies,
+        bucket: definition.bucket_name.clone(),
+        reader_group: definition.reader_group.clone(),
+        writer_group: definition
+            .writer_group
+            .clone()
+            .expect("daemon create requires a writer group"),
+        ssd_root: args
+            .ssd_root()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_ssd_root),
+        object_type: "naive".to_string(),
+        enclosure_id: None,
+        public: definition.public,
+        writeable: true,
+        capacity_behavior: match policy.capacity_behavior {
+            CapacityBehavior::RejectWrites => "reject_writes",
+            CapacityBehavior::BackpressureByPriority => "backpressure_by_priority",
+            CapacityBehavior::MarkRedownloadRequired => "mark_redownload_required",
+        }
+        .to_string(),
+        retention: match policy.retention_policy {
+            RetentionPolicy::ImmediateDelete => "immediate_delete",
+            RetentionPolicy::TombstoneThenGc => "tombstone_then_gc",
+        }
+        .to_string(),
+        endpoint_export_mode: match policy.export_policy {
+            ExportPolicy::S3 => "s3_bucket",
+            ExportPolicy::ReadOnlyFileExport => "read_only_file_export",
+            ExportPolicy::Disabled => "disabled",
+        }
+        .to_string(),
+        dry_run: false,
+        client_request_id: Some(format!("cli-store-create-{}", definition.store_id)),
+        administrator_actor: None,
+        confirmation_marker: OBJECT_STORE_CREATE_CONFIRMATION.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn daemon_create_request_maps_store_policy_contract() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "create",
+            "generated-data",
+            "--class",
+            "generated_data",
+            "--copies",
+            "2",
+            "--bucket",
+            "generated-data",
+            "--reader-group",
+            "bioinformatics-readers",
+            "--writer-group",
+            "bioinformatics-writers",
+            "--public",
+        ])
+        .expect("store create parses");
+        let Some(Command::Store(store_args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::Create(args)) = store_args.command() else {
+            panic!("expected store create command")
+        };
+        let definition = StoreServiceDefinition {
+            store_id: args.store_id().clone(),
+            policy: StorePolicy::defaults_for(args.class()),
+            bucket_name: args.bucket().map(ToOwned::to_owned),
+            reader_group: args.reader_group().map(ToOwned::to_owned),
+            writer_group: args.writer_group().map(ToOwned::to_owned),
+            public: args.public(),
+        };
+        let request = create_object_store_request(args, &definition);
+
+        assert_eq!(request.store_id, "generated-data");
+        assert_eq!(request.store_class, "generated_data");
+        assert_eq!(request.required_copies, 2);
+        assert_eq!(request.bucket.as_deref(), Some("generated-data"));
+        assert_eq!(
+            request.reader_group.as_deref(),
+            Some("bioinformatics-readers")
+        );
+        assert_eq!(request.writer_group, "bioinformatics-writers");
+        assert_eq!(request.object_type, "naive");
+        assert!(request.public);
+        assert!(request.writeable);
+        assert_eq!(request.capacity_behavior, "backpressure_by_priority");
+        assert_eq!(request.retention, "tombstone_then_gc");
+        assert_eq!(request.endpoint_export_mode, "s3_bucket");
+        assert!(!request.dry_run);
+        assert_eq!(
+            request.client_request_id.as_deref(),
+            Some("cli-store-create-generated-data")
+        );
+        assert_eq!(
+            request.confirmation_marker,
+            OBJECT_STORE_CREATE_CONFIRMATION
+        );
+        request.validate().expect("daemon request validates");
+    }
 }
 
 pub(super) fn run_store_adopt(

@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.79 - 2026-07-13
+
+- Route normal CLI `store create` requests with a writer group through the
+  typed daemon object-store creation contract when the packaged daemon is
+  available, while retaining explicit registry and adoption paths for
+  migration tooling.
+
 ## 0.72.78 - 2026-07-13
 
 - Wire local file ingest through the shared bounded daemon resource gate before

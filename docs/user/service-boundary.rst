@@ -100,6 +100,24 @@ group, for example ``mnemosyne``. The writer group authorizes daemon job
 submission for that store. It should not be used to grant broad write access to
 individual HDD filesystems.
 
+Store creation boundary
+-----------------------
+
+When the packaged daemon is available, the normal
+``dasobjectstore store create`` command submits a typed
+``create_object_store`` request whenever a writer group is supplied. The
+daemon validates the store policy, selects its system-managed registry, and
+records the accepted creation job. The CLI may still mirror the resulting
+definition to a validated portable SSD registry and apply platform ACLs; it
+does not write the host registry in this path.
+
+An explicit hidden ``--registry-path`` is reserved for local tests and
+migration tooling. A create without a writer group also remains on the legacy
+portable/host-registry path until the daemon contract supports an explicit
+unassigned-writer policy. These fallback cases are intentionally visible in
+the implementation rather than silently treated as daemon-owned production
+mutations.
+
 Daemon-owned store drain
 -------------------------
 

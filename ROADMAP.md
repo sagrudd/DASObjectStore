@@ -949,6 +949,11 @@ The Web client now has a typed cached-status response and path helper/getter;
 the existing Home page remains on its live response until stale-data UX is
 intentionally adopted.
 
+The normal CLI store-creation path now submits a typed daemon request when a
+writer group and packaged daemon socket are present. Host-registry mutation is
+retained only for explicit registry/test and no-writer-group migration paths;
+portable SSD mirroring remains a separate compatibility concern.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.

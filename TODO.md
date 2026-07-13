@@ -726,6 +726,11 @@ list until every temporary size-budget exception has been removed.
   - [x] Route `object put` through a typed daemon request so staged SSD/HDD
     placement and metadata mutation execute behind the authenticated daemon
     boundary rather than in the CLI process.
+  - [x] Route normal CLI `store create` requests with a writer group through
+    the typed daemon creation contract when the packaged daemon socket is
+    available; keep explicit registry-path, no-writer-group, portable mirror,
+    and `store adopt` behavior as separate migration/test fallbacks until an
+    unassigned-writer policy is approved.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.
