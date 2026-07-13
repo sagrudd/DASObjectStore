@@ -908,7 +908,8 @@ completion.
     active identity/key membership, bounded proof shape, lifetime, and scope;
     issuance now requires an explicit verifier boundary and rejects unverified
     proofs. The daemon now provides a ring-backed Ed25519/P-256 verifier bound
-    to registered public-key material and fingerprints. The daemon socket now
+    to registered public-key material and fingerprints, with positive proof
+    regressions for both algorithms. The daemon socket now
     performs proof-verified issuance without persisting bearer tokens; private
     key custody and mTLS transport verification remain; the standalone Web API
     now dispatches the canonical proof-bearing exchange route through the

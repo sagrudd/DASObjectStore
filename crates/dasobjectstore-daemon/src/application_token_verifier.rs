@@ -69,7 +69,8 @@ mod tests {
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::ingress::IngressOrigin;
     use dasobjectstore_core::object_type::ObjectType;
-    use ring::signature::{Ed25519KeyPair, KeyPair};
+    use ring::rand::SystemRandom;
+    use ring::signature::{EcdsaKeyPair, Ed25519KeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
     use sha2::{Digest, Sha256};
 
     fn identity() -> ApplicationIdentity {
@@ -172,6 +173,60 @@ mod tests {
                 &identity,
                 &key,
                 "access-verified".to_string(),
+                &RingApplicationExchangeProofVerifier,
+            )
+            .expect("verified access token");
+    }
+
+    #[test]
+    fn p256_proof_is_verified_against_bound_public_key() {
+        let identity = identity();
+        let rng = SystemRandom::new();
+        let signing_key = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng)
+            .expect("generate key");
+        let signing_key =
+            EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, signing_key.as_ref(), &rng)
+                .expect("parse key");
+        let public_key = signing_key.public_key().as_ref();
+        let fingerprint = format!(
+            "sha256:{}",
+            Sha256::digest(public_key)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        let key = ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: "p256-key-1".to_string(),
+            algorithm: ApplicationKeyAlgorithm::EcdsaP256Sha256,
+            public_key_fingerprint: fingerprint,
+            public_key_material: Some(BASE64.encode(public_key)),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        };
+        let mut request = AccessTokenExchangeRequest {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: key.key_id.clone(),
+            audience: "dasobjectstore".to_string(),
+            requested_issued_at_unix_seconds: 2_000,
+            requested_expires_at_unix_seconds: 2_600,
+            scope: identity.scope.clone(),
+            proof: String::new(),
+        };
+        request.proof = BASE64.encode(
+            signing_key
+                .sign(&rng, &request.signing_payload())
+                .expect("sign proof")
+                .as_ref(),
+        );
+        request
+            .issue_access_token(
+                &identity,
+                &key,
+                "p256-access-verified".to_string(),
                 &RingApplicationExchangeProofVerifier,
             )
             .expect("verified access token");
