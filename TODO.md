@@ -2255,14 +2255,15 @@ list until every temporary size-budget exception has been removed.
   standalone proof-bearing HTTP route now dispatches through the daemon
   authority.
   - [~] Add a guarded, resumable reconciliation operation for already-uploaded
-  S3/object-service keys missing from the ObjectBrowser catalogue; report
-  collisions, malformed keys, and inaccessible objects without silently
-  overwriting metadata. ``store repair STORE --reconcile-s3 --apply`` now
-  performs a safe SSD-first Garage import and catalogue registration with
+    S3/object-service keys missing from the ObjectBrowser catalogue; report
+    collisions, malformed keys, and inaccessible objects without silently
+    overwriting metadata. ``store repair STORE --reconcile-s3 --apply`` now
+    performs a safe SSD-first Garage import and catalogue registration with
     per-key manifests, collision reporting, and durable checkpoints; daemon
     retries now rediscover the newest incomplete per-store/prefix manifest
-    without following symlinks; remaining work is byte-range continuation,
-  non-Garage providers, and appliance acceptance.
+    without following symlinks and resume interrupted keys by requesting and
+    appending only the missing byte suffix after validating the partial file;
+    remaining work is non-Garage providers and appliance acceptance.
 - [~] Make `store repair --reconcile-s3` terminate naturally with a persisted
   terminal job state and final CLI response. Garage reconciliation now forwards
   normal coalesced SSD/HDD ingest events, preserves existing live metadata
