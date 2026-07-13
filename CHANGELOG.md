@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.90 - 2026-07-13
+
+- Add a fail-closed drive capacity view that rejects stale or unavailable SSD
+  identity guards before presenting live capacity.
+
 ## 0.72.89 - 2026-07-13
 
 - Reuse the bounded, profile-neutral folder catalogue browser projection

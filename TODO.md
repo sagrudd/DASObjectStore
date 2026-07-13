@@ -446,7 +446,8 @@ completion.
     bounded-capacity behavior; an injected runtime guard fails closed before
     filesystem I/O when mount/device state drifts.
   - [x] Expose drive capacity and read-only user-tree inspection through the
-    guarded profile boundary; SMART/NVMe telemetry and daemon inventory remain
+    guarded profile boundary, including a fail-closed ``guarded_capacity``
+    accessor; SMART/NVMe telemetry and daemon inventory remain
     hardware-dependent.
   - [x] Expose the same bounded, profile-neutral catalogue browser projection
     through the drive guard. It never walks private payloads, keeps the single

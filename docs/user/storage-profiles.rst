@@ -191,8 +191,9 @@ before filesystem operations so an unmounted or identity-drifted SSD cannot be
 treated as an ordinary directory; host-specific guard implementations remain
 future work.
 Drive capacity snapshots and read-only user-tree inspection are exposed through
-the same guarded boundary; SMART/NVMe endurance and live device inventory are
-hardware-dependent follow-up work.
+the same guarded boundary; live capacity uses a fail-closed identity check so a
+stale mount cannot be presented as current. SMART/NVMe endurance and live
+device inventory are hardware-dependent follow-up work.
 The drive boundary also exposes the bounded, profile-neutral folder catalogue
 projection only while the mount/device guard is valid. It reports authoritative
 keys, versions, sizes, checksums, and private locations, does not enumerate

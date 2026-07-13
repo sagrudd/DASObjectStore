@@ -82,6 +82,22 @@ impl DriveBackend {
         self.folder.capacity()
     }
 
+    /// Return capacity only while the drive identity guard is valid. The
+    /// unguarded accessor remains available for internal post-operation
+    /// accounting, but callers presenting live drive state should use this
+    /// fail-closed view.
+    pub fn guarded_capacity(&self) -> Result<FolderCapacitySnapshot, BackendError> {
+        self.guard()?;
+        Ok(self.folder.capacity())
+    }
+
+    /// Return only authoritative catalogue records while the drive identity
+    /// guard is valid; private payload enumeration is intentionally excluded.
+    pub fn catalogue_records(&self) -> Result<Vec<BackendObjectRecord>, BackendError> {
+        self.guard()?;
+        Ok(self.folder.catalogue_records())
+    }
+
     pub fn inspect_user_tree(&self) -> Result<FolderInspectionReport, BackendError> {
         self.guard()?;
         self.folder.inspect_user_tree()
@@ -316,6 +332,8 @@ mod tests {
         assert!(entries.is_empty());
 
         guard_state.0.store(false, Ordering::SeqCst);
+        assert!(backend.guarded_capacity().is_err());
+        assert!(backend.catalogue_records().is_err());
         assert!(backend
             .browser_entries(&FolderCatalogueBrowserQuery::default())
             .is_err());
