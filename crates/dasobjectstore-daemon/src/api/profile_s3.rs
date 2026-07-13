@@ -39,10 +39,10 @@ impl ProfileS3HeadRequest {
         if self.store_id.as_str().trim().is_empty() {
             return Err(DaemonRequestValidationError::BlankField { field: "store_id" });
         }
-        if self.key.object_id.trim().is_empty() || self.key.object_id.starts_with('/') {
+        if let Err(value) = validate_object_key(&self.key) {
             return Err(DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "key",
-                value: self.key.object_id.clone(),
+                value,
             });
         }
         Ok(())
@@ -101,6 +101,7 @@ impl ProfileS3HeadResponse {
         if self.store_id.as_str().trim().is_empty() {
             return Err("profile S3 response store identity must not be blank".to_string());
         }
+        self.object.validate()?;
         Ok(())
     }
 }
@@ -124,6 +125,7 @@ impl ProfileS3VerifyResponse {
         if self.store_id.as_str().trim().is_empty() || !self.verified {
             return Err("profile S3 verification response is not verified".to_string());
         }
+        self.object.validate()?;
         Ok(())
     }
 }
@@ -169,13 +171,30 @@ pub struct ProfileS3ObjectView {
     pub checksum: String,
 }
 
+impl ProfileS3ObjectView {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_object_key(&self.key)
+            .map_err(|value| format!("invalid profile S3 key: {value}"))?;
+        if !is_sha256_checksum(&self.checksum) {
+            return Err("profile S3 object checksum must be a sha256 digest".to_string());
+        }
+        Ok(())
+    }
+}
+
 impl ProfileS3ListResponse {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != PROFILE_S3_SCHEMA_VERSION {
             return Err("unsupported profile S3 schema".to_string());
         }
+        if self.store_id.as_str().trim().is_empty() {
+            return Err("profile S3 response store identity must not be blank".to_string());
+        }
         if self.objects.len() > PROFILE_S3_MAX_KEYS as usize {
             return Err("profile S3 response exceeds maximum key count".to_string());
+        }
+        for object in &self.objects {
+            object.validate()?;
         }
         Ok(())
     }
@@ -210,10 +229,10 @@ impl ProfileS3MultipartCompletionRequest {
                 field: "reservation_id",
             });
         }
-        if self.key.object_id.trim().is_empty() || self.key.object_id.starts_with('/') {
+        if let Err(value) = validate_object_key(&self.key) {
             return Err(DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "key",
-                value: self.key.object_id.clone(),
+                value,
             });
         }
         if self.expected_size_bytes == 0 || self.parts.is_empty() {
@@ -279,11 +298,32 @@ impl ProfileS3MultipartCompletionResponse {
         if self.store_id.as_str().trim().is_empty() || self.reservation_id.trim().is_empty() {
             return Err("multipart completion response identity must not be blank".to_string());
         }
-        if self.key.object_id.trim().is_empty() || self.key.object_id.starts_with('/') {
-            return Err("multipart completion response key must be relative".to_string());
-        }
+        validate_object_key(&self.key)
+            .map_err(|value| format!("multipart completion response key is invalid: {value}"))?;
         Ok(())
     }
+}
+
+fn validate_object_key(key: &BackendObjectKey) -> Result<(), String> {
+    if key.version == 0 {
+        return Err("object version must be greater than zero".to_string());
+    }
+    if key.object_id.trim().is_empty()
+        || key.object_id.starts_with('/')
+        || key.object_id.ends_with('/')
+        || key.object_id.contains('\\')
+        || key.object_id.contains('\0')
+    {
+        return Err(key.object_id.clone());
+    }
+    if key
+        .object_id
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(key.object_id.clone());
+    }
+    Ok(())
 }
 
 fn is_sha256_checksum(value: &str) -> bool {
@@ -327,7 +367,7 @@ mod tests {
                     version: 1,
                 },
                 size_bytes: 12,
-                checksum: "sha256:abc".to_string(),
+                checksum: format!("sha256:{}", "a".repeat(64)),
             }],
             next_offset: Some(1),
         };
@@ -335,6 +375,30 @@ mod tests {
         assert!(!json.contains("backend_root"));
         assert!(!json.contains("location"));
         response.validate().expect("schema validates");
+    }
+
+    #[test]
+    fn object_views_reject_unsafe_keys_zero_versions_and_short_checksums() {
+        let mut response = ProfileS3ListResponse {
+            schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+            store_id: StoreId::new("codex").expect("store id"),
+            objects: vec![ProfileS3ObjectView {
+                key: BackendObjectKey {
+                    object_id: "../escape".to_string(),
+                    version: 1,
+                },
+                size_bytes: 1,
+                checksum: format!("sha256:{}", "a".repeat(64)),
+            }],
+            next_offset: None,
+        };
+        assert!(response.validate().is_err());
+        response.objects[0].key.object_id = "safe/key".to_string();
+        response.objects[0].key.version = 0;
+        assert!(response.validate().is_err());
+        response.objects[0].key.version = 1;
+        response.objects[0].checksum = "sha256:short".to_string();
+        assert!(response.validate().is_err());
     }
 
     #[test]
@@ -470,7 +534,7 @@ mod tests {
             object: ProfileS3ObjectView {
                 key: request.key,
                 size_bytes: 4,
-                checksum: "sha256:abcd".to_string(),
+                checksum: format!("sha256:{}", "a".repeat(64)),
             },
         };
         response.validate().expect("head response validates");

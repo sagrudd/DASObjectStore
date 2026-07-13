@@ -841,7 +841,9 @@ completion.
   - [x] Add the versioned, path-free profile-S3 multipart completion request
     and acknowledgement DTOs with the same bounded validation contract;
     authenticated HTTP routing remains open; runtime completion now reuses the
-    provider-neutral assembler and transactional PUT path.
+    provider-neutral assembler and transactional PUT path. List, HEAD,
+    verify, and completion responses also reject unsafe logical keys, zero
+    versions, and malformed SHA-256 checksums before transport dispatch.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.
