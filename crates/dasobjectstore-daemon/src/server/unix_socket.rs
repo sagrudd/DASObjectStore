@@ -740,7 +740,20 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
 
-        let mut ingest = UnixStream::connect(&socket_path).expect("ingest connects");
+        let connect_with_retry = || {
+            let mut last_error = None;
+            for _ in 0..20 {
+                match UnixStream::connect(&socket_path) {
+                    Ok(stream) => return Ok(stream),
+                    Err(error) => {
+                        last_error = Some(error);
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            }
+            Err(last_error.expect("at least one connection attempt"))
+        };
+        let mut ingest = connect_with_retry().expect("ingest connects");
         serde_json::to_writer(
             &mut ingest,
             &DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
@@ -761,7 +774,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("ingest handler entered");
 
-        let mut control = UnixStream::connect(&socket_path).expect("control connects");
+        let mut control = connect_with_retry().expect("control connects");
         control
             .set_read_timeout(Some(Duration::from_millis(250)))
             .expect("control timeout set");
