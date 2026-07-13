@@ -311,8 +311,12 @@ completion.
     maintenance API that atomically persists reclaimed bytes. Unknown-age
     legacy reservations are retained; automatic expiry and renewal remain
     intentionally disabled pending an approved lease policy.
+  - [x] Exercise the file-backed provider against a real macOS filesystem
+    fixture, including statvfs backend/SSD observations, admission, and commit;
+    appliance-scale full-disk acceptance remains blocked on DASServer access.
     Crash/restart persistence, multipart expiry, dedupe, and full-filesystem
-    fixtures remain open.
+    fixtures are otherwise covered above; multipart expiry/renewal remains
+    lease-policy gated.
 
 ### Gate 3: Bounded folder profile
 

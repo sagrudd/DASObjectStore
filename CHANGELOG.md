@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.68 - 2026-07-13
+
+- Add a macOS full-filesystem capacity-provider fixture using real ``statvfs``
+  observations and transactional reservation settlement.
+
 ## 0.72.67 - 2026-07-13
 
 - Verify typed multipart-style remote transfer adapters use daemon capacity

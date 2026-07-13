@@ -659,6 +659,42 @@ mod tests {
     }
 
     #[test]
+    fn statvfs_provider_fixture_uses_real_filesystem_capacity() {
+        let root = root("statvfs");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let ledger_path = ledger_dir.join("codex.json");
+        let ledger =
+            CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
+        save_capacity_ledger(&ledger_path, &ledger).expect("ledger seed");
+        let backend_root = root.join("backend");
+        let ssd_root = root.join("ssd");
+        std::fs::create_dir_all(&backend_root).expect("backend root");
+        std::fs::create_dir_all(&ssd_root).expect("ssd root");
+
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            backend_root,
+            ssd_root,
+            super::StatvfsCapacitySpaceProbe,
+        );
+        let response = provider
+            .admit(request(DaemonIngressOrigin::RemoteS3, "statvfs-upload"))
+            .expect("real filesystem has capacity");
+
+        assert_eq!(response.decision, CapacityAdmissionDecision::Admitted);
+        assert!(response.backend_free_bytes > 0);
+        assert!(response.backend_available_bytes > 0);
+        assert!(response.ssd_available_bytes.is_some_and(|bytes| bytes > 0));
+
+        provider
+            .commit(&StoreId::new("codex").expect("store id"), "statvfs-upload")
+            .expect("reservation commits");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn provider_expiry_reclaims_only_stale_durable_reservations() {
         let root = root("expiry");
         let (registry_path, _) = registry(&root);
