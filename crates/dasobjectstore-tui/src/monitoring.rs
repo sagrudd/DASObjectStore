@@ -1,5 +1,5 @@
 use crate::planning::format_size_label;
-use dasobjectstore_daemon::api::CapacityStatusResponse;
+use dasobjectstore_daemon::api::{CapacityStatusResponse, DaemonIngestAdmissionDecision};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveIngestTelemetry {
@@ -21,6 +21,9 @@ pub struct LiveIngestTelemetry {
     /// daemon control plane is reconnecting.  When present it is rendered
     /// alongside the pipeline telemetry rather than inferred from SSD usage.
     pub capacity: Option<CapacityStatusResponse>,
+    /// Latest daemon-owned admission decision, when the control plane provides
+    /// one. This is optional so reconnecting clients do not infer pressure.
+    pub admission: Option<DaemonIngestAdmissionDecision>,
     pub action_support: DaemonActionSupport,
     pub attach_state: AttachState,
     pub errors: Vec<TuiErrorState>,
@@ -56,6 +59,7 @@ impl LiveIngestTelemetry {
             verification_label: self.verification.display_label(),
             throughput_label: self.throughput.display_label(),
             capacity_label: self.capacity.as_ref().map(capacity_display_label),
+            admission_label: self.admission.map(admission_display_label),
             actions: actions.actions,
             attach_label: self.attach_state.display_label(),
             error_labels: self
@@ -85,6 +89,7 @@ pub struct LiveMonitoringDisplay {
     pub verification_label: String,
     pub throughput_label: String,
     pub capacity_label: Option<String>,
+    pub admission_label: Option<String>,
     pub actions: Vec<KeyboardActionDisplay>,
     pub attach_label: String,
     pub error_labels: Vec<String>,
@@ -106,6 +111,9 @@ impl LiveMonitoringDisplay {
         lines.push(self.throughput_label.clone());
         if let Some(capacity) = &self.capacity_label {
             lines.push(capacity.clone());
+        }
+        if let Some(admission) = &self.admission_label {
+            lines.push(admission.clone());
         }
         lines.push(self.attach_label.clone());
 
@@ -168,6 +176,17 @@ fn capacity_display_label(response: &CapacityStatusResponse) -> String {
         response.warning_threshold_basis_points,
         response.critical_threshold_basis_points,
         block,
+    )
+}
+
+fn admission_display_label(decision: DaemonIngestAdmissionDecision) -> String {
+    format!(
+        "Daemon admission: {:?} ({:?}), source-read workers {}, HDD queue depth {}, verification parallelism {}",
+        decision.action,
+        decision.reason,
+        decision.schedule.worker_counts.source_read,
+        decision.schedule.hdd_queue_depth,
+        decision.schedule.verification_parallelism,
     )
 }
 
@@ -910,6 +929,32 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn renders_daemon_admission_reason_and_schedule() {
+        let mut telemetry = sample_telemetry();
+        telemetry.admission = Some(dasobjectstore_daemon::api::DaemonIngestAdmissionDecision {
+            action: dasobjectstore_daemon::api::DaemonIngestAdmissionAction::Throttle,
+            reason: dasobjectstore_daemon::api::DaemonIngestAdmissionReason::Scheduler(
+                dasobjectstore_daemon::api::DaemonIngestAdaptiveSchedulingLimit::MemoryPressure,
+            ),
+            schedule: dasobjectstore_daemon::api::DaemonIngestAdaptiveWorkerSchedule {
+                worker_counts: dasobjectstore_daemon::api::DaemonIngestWorkerCounts {
+                    source_read: 1,
+                    ..Default::default()
+                },
+                hdd_queue_depth: 4,
+                verification_parallelism: 2,
+                limiting_factor:
+                    dasobjectstore_daemon::api::DaemonIngestAdaptiveSchedulingLimit::MemoryPressure,
+                effective_cpu_cores: 2,
+            },
+        });
+
+        assert!(telemetry.snapshot_text().contains(
+            "Daemon admission: Throttle (Scheduler(MemoryPressure)), source-read workers 1, HDD queue depth 4, verification parallelism 2"
+        ));
+    }
+
     fn sample_telemetry() -> LiveIngestTelemetry {
         let total_bytes = 64 * 1024 * 1024 * 1024;
         let staged_bytes = 32 * 1024 * 1024 * 1024;
@@ -978,6 +1023,7 @@ mod tests {
                 trend: ThroughputTrend::Up,
             },
             capacity: None,
+            admission: None,
             action_support: DaemonActionSupport {
                 pause: true,
                 resume: true,

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.76 - 2026-07-13
+
+- Show the daemon ingest admission action, limiting reason, and worker schedule
+  in the live TUI when that control-plane snapshot is available.
+
 ## 0.72.75 - 2026-07-13
 
 - Add a transactional daemon ingest resource gate for CPU, memory, socket

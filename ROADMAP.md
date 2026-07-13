@@ -937,6 +937,10 @@ overbooking CPU, memory, socket-worker, or I/O-worker budgets and releases
 leases automatically on scope exit. Runtime policy injection and host telemetry
 remain open.
 
+The TUI now renders an optional daemon admission action, limiting reason, and
+worker schedule alongside live ingest telemetry; Web bridging and host-level
+availability counters remain open.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.

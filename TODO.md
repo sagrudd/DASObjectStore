@@ -1316,6 +1316,9 @@ list until every temporary size-budget exception has been removed.
     automatic lease release; runtime policy injection and live telemetry remain.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
+  - [x] Surface the optional daemon ingest admission action, limiting reason,
+    source-read worker count, HDD queue depth, and verification parallelism in
+    the TUI; Web bridge and live host telemetry remain.
 - [ ] Add an authenticated, daemon-owned emergency `ingest pause/throttle/resume` operation that safely stops new source reads while preserving staged data, in-flight checksum/durability rules, and a responsive WebUI. Do not require a service restart or raw process priority changes during an incident.
 - [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
