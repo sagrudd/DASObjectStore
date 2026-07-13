@@ -9,7 +9,7 @@ use super::reconciliation::{
 };
 use dasobjectstore_core::backend::{
     catalogue_logical_used_bytes, BackendCapabilities, BackendError, BackendHealth,
-    BackendObjectKey, BackendObjectRecord, ObjectStoreBackend,
+    BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority, ObjectStoreBackend,
 };
 use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
 use dasobjectstore_core::store::{CapacityPolicy, CapacityReservationLedger};
@@ -609,6 +609,20 @@ impl ObjectStoreBackend for FolderBackend {
             sync_directory(parent)?;
         }
         Ok(())
+    }
+}
+
+impl ObjectCatalogueAuthority for FolderBackend {
+    fn records(&self) -> Result<Vec<BackendObjectRecord>, BackendError> {
+        Ok(self.catalogue_records())
+    }
+
+    fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError> {
+        self.catalogue_authority_commit_batch(records)
+    }
+
+    fn remove_record(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
+        self.catalogue_authority_remove_record(key)
     }
 }
 

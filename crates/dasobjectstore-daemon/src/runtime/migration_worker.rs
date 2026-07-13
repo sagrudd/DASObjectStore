@@ -3,7 +3,8 @@
 use super::drive_backend::DriveBackend;
 use super::folder_backend::FolderBackend;
 use dasobjectstore_core::backend::{
-    BackendError, BackendObjectKey, BackendObjectRecord, ObjectStoreBackend,
+    BackendError, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
+    ObjectStoreBackend,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::migration::{MigrationTransitionError, StoreMigration};
@@ -107,13 +108,20 @@ fn copy_object(
         let _ = migration.fail();
         return Err(FolderMigrationError::VerificationMismatch);
     }
+    if let Err(error) = destination.commit_batch(&[verified.clone()]) {
+        let _ = migration.fail();
+        return Err(FolderMigrationError::Backend {
+            operation: "commit destination catalogue",
+            error,
+        });
+    }
     migration
         .mark_destination_verified()
         .map_err(FolderMigrationError::Transition)?;
     Ok(finalized)
 }
 
-pub trait MigrationBackend: ObjectStoreBackend {
+pub trait MigrationBackend: ObjectStoreBackend + ObjectCatalogueAuthority {
     fn store_id(&self) -> &StoreId;
     fn release_reservation(&mut self, reservation_id: &str) -> Result<(), BackendError>;
 }
@@ -300,6 +308,15 @@ mod tests {
         assert!(migration.source_retained);
         assert_eq!(source.verify(&key).expect("source remains").size_bytes, 11);
         assert_eq!(destination.capacity().used_bytes, 11);
+        assert_eq!(destination.catalogue_records().len(), 1);
+        let reopened = FolderBackend::open(
+            &destination_root,
+            manifest("destination-store"),
+            CapacityPolicy::bounded(1_000, 0),
+            0,
+        )
+        .expect("destination reopens from authoritative catalogue");
+        assert_eq!(reopened.catalogue_records().len(), 1);
         let _ = fs::remove_dir_all(source_root);
         let _ = fs::remove_dir_all(destination_root);
     }

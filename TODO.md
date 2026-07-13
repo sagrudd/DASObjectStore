@@ -518,6 +518,9 @@ completion.
   - [x] Generalize the migration worker to a guarded dedicated-SSD drive
     destination, preserving the same source-retention and checksum guarantees;
     appliance adapters and catalogue transaction wiring remain open.
+  - [x] Commit migration destination records through the same authority before
+    marking the destination verified; folder reopen tests prove catalogue and
+    logical usage survive restart, while provider/appliance adapters remain.
 - [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
   - [x] The core migration state machine and atomic checkpoints retain source

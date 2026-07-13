@@ -949,6 +949,9 @@ open.
 Folder adoption now uses the same authority batch seam rather than a concrete
 catalogue call site; richer daemon transaction and SQLite/object-service
 integration remain open.
+Folder-to-folder and folder-to-drive migrations now commit the verified
+destination record through the shared authority before advancing migration
+state; destination reopen coverage proves catalogue-backed logical usage.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 
