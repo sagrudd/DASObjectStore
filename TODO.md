@@ -712,6 +712,9 @@ completion.
   - [x] Fail closed when an existing per-user state directory is not owned by
     the current user; missing state remains allowed for first-run render-only
     planning, and no service-manager side effects are introduced.
+  - [x] Prove per-user and system host-mode state/runtime namespaces remain
+    distinct in a macOS path-coexistence regression; service-manager
+    installation and ownership checks remain deployment work.
 - [ ] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
   - [x] Add a local fixture-matrix integration test covering programmatic

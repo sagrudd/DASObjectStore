@@ -340,6 +340,39 @@ mod tests {
     }
 
     #[test]
+    fn per_user_and_system_modes_have_non_overlapping_namespaces() {
+        let user = folder_host_paths(
+            HostMode::PerUser,
+            Some(Path::new("/Users/tester")),
+            Some(Path::new("/Users/tester/Library/State")),
+            Some(Path::new("/Users/tester/Library/Runtime")),
+            Path::new("/var/lib/dasobjectstore"),
+            Path::new("/run/dasobjectstore"),
+        )
+        .expect("per-user paths derive");
+        let system = folder_host_paths(
+            HostMode::System,
+            None,
+            None,
+            None,
+            Path::new("/var/lib/dasobjectstore"),
+            Path::new("/run/dasobjectstore"),
+        )
+        .expect("system paths derive");
+
+        assert_ne!(user.state_dir, system.state_dir);
+        assert_ne!(user.runtime_dir, system.runtime_dir);
+        assert_eq!(
+            user.socket_path("daemon.sock").expect("user socket"),
+            PathBuf::from("/Users/tester/Library/Runtime/dasobjectstore/daemon.sock")
+        );
+        assert_eq!(
+            system.socket_path("daemon.sock").expect("system socket"),
+            PathBuf::from("/run/dasobjectstore/daemon.sock")
+        );
+    }
+
+    #[test]
     fn renders_escaped_launchd_user_service_plan_without_installing_it() {
         let paths = folder_host_paths(
             HostMode::PerUser,
