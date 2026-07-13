@@ -13,13 +13,12 @@ use crate::api::{
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingOperation, ProfileBindingRequest, ProfileBindingResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    ProfileBindingRequest, ProfileBindingResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
@@ -44,15 +43,16 @@ use crate::runtime::{
     AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
     DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    FolderBackend, GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
-    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
-    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
-    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
-    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
-    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
-    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
+    FolderBackend, FolderInspectionReport, GarageServiceController, LocalAdminRuntimeError,
+    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
+    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
+    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
@@ -1192,9 +1192,14 @@ mod tests {
         )
         .with_profile_binding_registry_path(&profile_registry);
 
-        handler
+        let first_response = handler
             .handle(DaemonApiRequest::RegisterProfileBinding(request.clone()))
             .expect("folder profile create");
+        let DaemonApiResponse::RegisterProfileBinding(first_response) = first_response else {
+            panic!("expected profile binding response");
+        };
+        assert_eq!(first_response.unmanaged_path_count, 1);
+        assert_eq!(first_response.unsafe_path_count, 0);
         let catalogue_path = backend_root.join(".dasobjectstore/catalogue.json");
         let first_catalogue = fs::read(&catalogue_path).expect("catalogue read");
         let snapshot: serde_json::Value =
@@ -1207,9 +1212,14 @@ mod tests {
         assert!(!backend_root
             .join(".dasobjectstore/objects/incoming/user.txt")
             .exists());
-        handler
+        let second_response = handler
             .handle(DaemonApiRequest::RegisterProfileBinding(request))
             .expect("idempotent folder profile create");
+        let DaemonApiResponse::RegisterProfileBinding(second_response) = second_response else {
+            panic!("expected profile binding response");
+        };
+        assert_eq!(second_response.unmanaged_path_count, 1);
+        assert_eq!(second_response.unsafe_path_count, 0);
 
         assert!(backend_root.join(".dasobjectstore/objects").is_dir());
         assert!(backend_root.join(".dasobjectstore/staging").is_dir());

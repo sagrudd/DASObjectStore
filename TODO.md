@@ -501,6 +501,9 @@ completion.
     private namespace and durable empty catalogue, idempotently and without
     adopting unmanaged user files; explicit adopt/reconcile reporting and
     package hooks remain open.
+  - [x] Include daemon-derived unmanaged/unsafe drift counts in profile
+    create/adopt responses without exposing host paths; a separately
+    authenticated redacted inspection transport remains open.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.

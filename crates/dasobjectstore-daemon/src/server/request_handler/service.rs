@@ -59,7 +59,7 @@ where
         DaemonApiRequest::RegisterProfileBinding(request) => {
             let now = handler.clock.now_utc();
             let store_definition = request.store_definition.clone();
-            if !request.dry_run {
+            let inspection = if !request.dry_run {
                 request.validate().map_err(|error| {
                     DaemonRequestHandlerError::ServiceRuntime(
                         DaemonServiceRuntimeError::ObjectService(
@@ -76,7 +76,7 @@ where
                     },
                 )
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
-                ensure_profile_backend(&request)
+                let inspection = ensure_profile_backend(&request)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 handler
                     .service_orchestrator
@@ -85,10 +85,17 @@ where
                         request.capacity.clone(),
                     )
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
-            }
+                inspection
+            } else {
+                None
+            };
             let mut response =
                 register_profile_binding(request, &handler.profile_binding_registry_path, &now)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            if let Some(inspection) = inspection {
+                response.unmanaged_path_count = inspection.unmanaged_paths.len();
+                response.unsafe_path_count = inspection.unsafe_paths.len();
+            }
             if let Some(definition) = store_definition {
                 if !response.accepted.dry_run {
                     upsert_store_definition(&handler.store_registry_path, definition).map_err(

@@ -103,11 +103,9 @@ pub(super) fn register_profile_binding(
 /// files can be copied into the managed namespace.
 pub(super) fn ensure_profile_backend(
     request: &ProfileBindingRequest,
-) -> Result<(), DaemonServiceRuntimeError> {
-    if request.operation != ProfileBindingOperation::Create
-        || request.manifest.deployment_profile != DeploymentProfile::Folder
-    {
-        return Ok(());
+) -> Result<Option<FolderInspectionReport>, DaemonServiceRuntimeError> {
+    if request.manifest.deployment_profile != DeploymentProfile::Folder {
+        return Ok(None);
     }
     FolderBackend::open(
         request.backend_root.clone(),
@@ -115,9 +113,10 @@ pub(super) fn ensure_profile_backend(
         request.capacity.clone(),
         0,
     )
-    .map(|_| ())
+    .and_then(|backend| backend.inspect_user_tree())
+    .map(Some)
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
-        operation: format!("open profile backend: {error}"),
+        operation: format!("inspect profile backend: {error}"),
     })
 }
 

@@ -122,6 +122,9 @@ appliance fallback remains compatible. Programmatic bounded-folder creation now
 bootstraps the daemon-private namespace and an empty durable catalogue
 idempotently without adopting unmanaged user files; explicit adopt/reconcile
 reporting and drive-guarded opening remain subsequent seams.
+Profile create/adopt responses now carry redacted unmanaged/unsafe drift counts
+so callers can require explicit reconciliation without receiving private host
+paths; a separately authenticated inspection transport remains open.
 
 The canonical local Docker profile now renders successfully against the
 dedicated macOS validation root and both generated Compose documents pass

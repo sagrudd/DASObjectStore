@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.5 - 2026-07-13
+
+- Report daemon-derived unmanaged and unsafe folder-entry counts in profile
+  create/adopt responses without exposing host paths or adopting user files.
+
 ## 0.76.4 - 2026-07-13
 
 - Bootstrap bounded folder profile creation through the daemon's private
