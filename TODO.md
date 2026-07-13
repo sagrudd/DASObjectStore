@@ -818,8 +818,11 @@ completion.
     session, upload ID, ObjectStore, object key, expected size/checksum,
     audience, expiry, and nonce; verify provider state before atomic catalogue
     commit and make retries idempotent.
-  - [ ] Add explicit expiry, revocation, rotation, replay protection, and
-    redacted audit events for every credential class.
+  - [~] Add explicit expiry, revocation, rotation, replay protection, and
+    redacted audit events for every credential class. Upload-completion
+    capability consumption now has a daemon-owned, state-scoped atomic replay
+    registry with expiry pruning and single-use nonce/capability checks;
+    cryptographic proof verification, revocation API, and audit events remain.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and

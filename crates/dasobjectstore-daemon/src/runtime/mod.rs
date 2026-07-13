@@ -2,6 +2,7 @@
 
 mod admin_jobs;
 mod appliance_telemetry;
+mod application_capability_replay;
 mod application_identity_registry;
 mod application_key_registry;
 mod capacity_persistence;
@@ -50,6 +51,11 @@ pub use appliance_telemetry::{
     APPLIANCE_TELEMETRY_SCHEMA_VERSION, DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT,
     DEFAULT_LOCAL_GROUP_PATH, DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH,
     DEFAULT_STANDALONE_AUTH_ROOT,
+};
+pub use application_capability_replay::{
+    application_capability_replay_path, consume_upload_completion_capability,
+    default_application_capability_replay_path, APPLICATION_CAPABILITY_REPLAY_ENV,
+    APPLICATION_CAPABILITY_REPLAY_FILE_NAME, APPLICATION_CAPABILITY_REPLAY_SCHEMA,
 };
 pub use application_identity_registry::{
     application_identity_registry_path, deactivate_application_identity,

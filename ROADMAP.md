@@ -110,6 +110,9 @@ and token issuance remain open. Native DEB/RPM build scripts also compile the
 daemon with `--no-default-features`, making the package boundary explicit.
 Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.
+The daemon now also provides a state-scoped, expiry-pruned single-use replay
+registry for completion capabilities; proof verification, revocation APIs, and
+audit events remain part of the authority boundary.
 
 ### Current delivered baseline
 
