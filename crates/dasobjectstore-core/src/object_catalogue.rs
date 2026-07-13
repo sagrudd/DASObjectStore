@@ -68,6 +68,16 @@ impl PortableObjectCatalogue {
             .map_err(PortableObjectCatalogueDecodeError::InvalidCatalogue)?;
         Ok(catalogue)
     }
+
+    /// Encode a portable catalogue only after validating the complete
+    /// profile-neutral contract. Exporters therefore cannot emit malformed
+    /// paths, duplicate versions, or unsupported lifecycle/protection state.
+    pub fn encode_json(&self) -> Result<String, PortableObjectCatalogueValidationError> {
+        self.validate()?;
+        serde_json::to_string(self).map_err(|error| {
+            PortableObjectCatalogueValidationError::Serialization(error.to_string())
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -284,6 +294,7 @@ pub enum PortableObjectCatalogueValidationError {
     BlankVerificationTime,
     BlankLocation,
     UnsafeLocation,
+    Serialization(String),
 }
 
 impl Display for PortableObjectCatalogueValidationError {
@@ -318,6 +329,12 @@ impl Display for PortableObjectCatalogueValidationError {
             }
             Self::UnsafeLocation => {
                 formatter.write_str("placement path must be a safe relative path")
+            }
+            Self::Serialization(message) => {
+                write!(
+                    formatter,
+                    "portable catalogue serialization failed: {message}"
+                )
             }
         }
     }
@@ -387,11 +404,24 @@ mod tests {
     fn companion_catalogue_round_trips_profile_neutral_records() {
         let catalogue = catalogue();
         catalogue.validate().expect("catalogue validates");
-        let encoded = serde_json::to_string(&catalogue).expect("catalogue encodes");
+        let encoded = catalogue.encode_json().expect("catalogue encodes");
         assert_eq!(
             PortableObjectCatalogue::decode_json(&encoded),
             Ok(catalogue)
         );
+    }
+
+    #[test]
+    fn export_rejects_invalid_catalogue_before_serialization() {
+        let mut catalogue = catalogue();
+        catalogue.objects[0].placements[0].location = PortablePlacementLocation::Folder {
+            relative_path: "../outside-store".to_string(),
+        };
+
+        assert!(matches!(
+            catalogue.encode_json(),
+            Err(PortableObjectCatalogueValidationError::UnsafeLocation)
+        ));
     }
 
     #[test]

@@ -41,3 +41,5 @@ duplicate object versions or placements, unsafe paths, and future schema
 versions are rejected before interpretation. It does not change the strict v1
 ObjectStore manifest or make private folder/drive catalogue files authoritative;
 daemon transaction wiring and profile adoption remain separate decisions.
+Export adapters use the same validation boundary before emitting JSON, so an
+export cannot contain an unsafe placement or duplicate logical version.

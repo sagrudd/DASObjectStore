@@ -335,6 +335,10 @@ completion.
     companion contract for logical object versions, digests, provenance,
     lifecycle/protection state, and profile-neutral placements; private
     catalogue authority and daemon transaction wiring remain open.
+  - [x] Add a validated ``encode_json`` export path for the portable catalogue
+    so migration/export adapters cannot emit duplicate versions, unsafe paths,
+    or unsupported schema records; daemon-owned catalogue transaction wiring
+    remains open.
   - [x] Define the minimal profile-neutral `ObjectCatalogueAuthority` batch
     contract and adapt the durable folder catalogue to it; shared SQLite,
     appliance, and daemon transaction wiring remain open.
