@@ -121,6 +121,26 @@ pub struct ObjectStoreIngestPolicyResponse {
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct IngestControlRequest {
+    pub action: String,
+    pub reason: String,
+    pub dry_run: bool,
+    pub confirmation_marker: Option<String>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(dead_code)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct IngestControlResponse {
+    pub state: String,
+    pub changed: bool,
+    pub dry_run: bool,
+    pub reason: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct EnclosurePrepareResponse {
     pub accepted: EnclosurePrepareAcceptedResponse,

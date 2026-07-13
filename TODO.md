@@ -102,8 +102,9 @@ completion.
   login, static assets, cancellation, and degraded cached status responsive
   during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, strict
   cancellation, configured runtime resource-policy injection, and the daemon/
-  CLI file-ingest emergency control are delivered; authenticated Web/TUI action
-  bridging, async HTTP bridging, and appliance soak acceptance remain.
+  CLI file-ingest emergency control and authenticated Web action bridging are
+  delivered; TUI action presentation, async HTTP bridging, and appliance soak
+  acceptance remain.
   - [x] Load the versioned ingest resource policy from daemon configuration,
     inject its CPU/memory/socket/I/O budget into packaged local ingest, and
     retain a backward-compatible safe default when the field is absent. The
@@ -1346,7 +1347,8 @@ list until every temporary size-budget exception has been removed.
   source reads between objects, and leaves in-flight checksum/fsync/rename
   work untouched. The control is process-local (restart returns to `running`)
   and provider-specific S3 workers retain their separate admission gate;
-  authenticated Web/TUI action wiring remains open.
+  authenticated Web action wiring now uses the reserved daemon bridge and
+  typed Web client contract; TUI action presentation remains open.
 - [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [ ] Document operator triage for an ingest-pressure incident, including the availability indicators, safe daemon throttle/pause action, expected degraded WebUI behavior, and escalation evidence. Do not prescribe killing an ingest or restarting the daemon as the default recovery path.

@@ -503,6 +503,11 @@ imports), while provider-specific S3 workers retain their own admission gate.
 The Web/TUI surfaces should be treated as degraded until the state returns to
 ``running``.
 
+The authenticated Web administrator route mirrors the CLI contract at
+``POST /api/v1/workspaces/admin/ingest-control``. It uses the daemon's reserved
+control bridge and returns a typed ``paused``, ``throttled``, or ``running``
+state; it never mutates storage directly.
+
 The operations TUI provides the console workflow contract for planning,
 confirmation, launch, monitoring, reconnect, and completion review. It uses the
 same daemon job model as the CLI and Web UI, with visibility into file counts,

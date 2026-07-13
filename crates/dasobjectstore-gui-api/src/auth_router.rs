@@ -144,6 +144,10 @@ pub(crate) fn standalone_enclosure_admin_router_with_state(
             post(update_object_store_ingest_policy),
         )
         .route(
+            "/api/v1/workspaces/admin/ingest-control",
+            post(control_ingest),
+        )
+        .route(
             "/api/v1/workspaces/endpoints/upsert",
             post(upsert_endpoint_inventory),
         )

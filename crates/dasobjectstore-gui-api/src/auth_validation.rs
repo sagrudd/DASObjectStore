@@ -237,6 +237,37 @@ pub(super) fn validate_object_store_ingest_policy_request(
     Ok(request)
 }
 
+pub(super) fn validate_ingest_control_request(
+    request: IngestControlRequest,
+) -> Result<StandaloneIngestControlDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
+    let reason = required_field("reason", request.reason)?;
+    let confirmation_marker = request.confirmation_marker.unwrap_or_default();
+    let action = match request.action {
+        IngestControlAction::Pause => DaemonIngestControlAction::Pause,
+        IngestControlAction::Throttle => DaemonIngestControlAction::Throttle,
+        IngestControlAction::Resume => DaemonIngestControlAction::Resume,
+    };
+    let daemon_request = DaemonIngestControlRequest {
+        action,
+        reason,
+        dry_run: request.dry_run,
+        confirmation_marker,
+    };
+    daemon_request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_ingest_control",
+            error.to_string(),
+        )
+    })?;
+    Ok(StandaloneIngestControlDaemonRequest {
+        action: daemon_request.action,
+        reason: daemon_request.reason,
+        dry_run: daemon_request.dry_run,
+        confirmation_marker: daemon_request.confirmation_marker,
+    })
+}
+
 pub(super) fn validate_endpoint_inventory_upsert_request(
     request: EndpointInventoryUpsertRequest,
 ) -> Result<DaemonUpsertEndpointInventoryRequest, (StatusCode, Json<AuthRouteError>)> {

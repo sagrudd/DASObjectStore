@@ -154,6 +154,32 @@ pub struct ObjectStoreIngestPolicyRequest {
     pub confirmation_marker: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestControlAction {
+    Pause,
+    Throttle,
+    Resume,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IngestControlRequest {
+    pub action: IngestControlAction,
+    pub reason: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub confirmation_marker: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct IngestControlResponse {
+    pub state: String,
+    pub changed: bool,
+    pub dry_run: bool,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StandaloneObjectStoreIngestPolicyResponse {
     pub job_id: String,

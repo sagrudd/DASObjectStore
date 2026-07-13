@@ -98,6 +98,22 @@ pub(super) fn ingest_policy_response_from_daemon(
     }
 }
 
+pub(super) fn ingest_control_response_from_daemon(
+    response: DaemonIngestControlResponse,
+) -> IngestControlResponse {
+    IngestControlResponse {
+        state: match response.state {
+            DaemonIngestControlState::Running => "running",
+            DaemonIngestControlState::Throttled => "throttled",
+            DaemonIngestControlState::Paused => "paused",
+        }
+        .to_string(),
+        changed: response.changed,
+        dry_run: response.dry_run,
+        reason: response.reason,
+    }
+}
+
 fn ingest_mode_label(mode: dasobjectstore_core::store::IngestMode) -> String {
     match mode {
         dasobjectstore_core::store::IngestMode::SsdFirst => "ssd_first",

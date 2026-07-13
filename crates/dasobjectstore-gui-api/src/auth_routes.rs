@@ -63,9 +63,12 @@ use dasobjectstore_daemon::{
     CreateObjectStoreRequest as DaemonCreateObjectStoreRequest,
     CreateObjectStoreResponse as DaemonCreateObjectStoreResponse, DaemonClient,
     DaemonEndpointBinding, DaemonEndpointKind, DaemonEndpointValidation,
-    DaemonEndpointValidationState, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
-    DaemonJobKind, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
-    DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminCommand, DaemonRuntimeConfig,
+    DaemonEndpointValidationState, DaemonIngestControlAction, DaemonIngestControlState,
+    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobProgress,
+    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    DaemonLocalAdminCommand, DaemonRuntimeConfig,
+    IngestControlRequest as DaemonIngestControlRequest,
+    IngestControlResponse as DaemonIngestControlResponse,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
@@ -392,6 +395,18 @@ async fn update_object_store_ingest_policy(
         .map(Json)
 }
 
+async fn control_ingest(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<IngestControlRequest>,
+) -> Result<Json<IngestControlResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    let request = validate_ingest_control_request(request)?;
+    submit_ingest_control_request(&state, request)
+        .await
+        .map(Json)
+}
+
 async fn upsert_endpoint_inventory(
     State(state): State<StandaloneEnclosureAdminRouteState>,
     actor: AuthenticatedGuiActor,
@@ -611,11 +626,12 @@ mod tests {
         standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
         CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
         DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
         DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
         EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
-        EndpointValidationUpsertRequest, GuiApiHostMode, LocalPasswordAuthenticator,
-        LocalUserAuthorityProvider, LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
+        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
+        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
         PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
         RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
         StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
@@ -627,13 +643,13 @@ mod tests {
         StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
         StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
         StandaloneEndpointInventoryAcceptedResponse, StandaloneEndpointInventoryUpsertResponse,
-        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
-        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
-        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-        StandaloneObjectStoreIngestPolicyResponse, StandaloneReportingRouteState,
-        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
-        OBJECT_STORE_CREATE_CONFIRMATION,
+        StandaloneIngestControlDaemonRequest, StandaloneLocalGroupAdminAcceptedResponse,
+        StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
+        StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
+        StandaloneLocalGroupOperation, StandaloneObjectStoreIngestPolicyResponse,
+        StandaloneReportingRouteState, StandaloneUsersGroupsRouteState,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
@@ -2022,6 +2038,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ingest_control_forwards_authenticated_admin_action() {
+        let root = temp_root("objectstore-ingest-control-forward");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(client),
+        ));
+
+        let response = post_json_with_session::<IngestControlResponse>(
+            app,
+            "/api/v1/workspaces/admin/ingest-control",
+            "admin",
+            &login.session_token,
+            &IngestControlRequest {
+                action: IngestControlAction::Pause,
+                reason: "protect Web availability".to_string(),
+                dry_run: true,
+                confirmation_marker: Some("confirm ingest control".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.state, "paused");
+        assert!(response.dry_run);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn ingest_control_rejects_blank_reason_before_daemon_call() {
+        let root = temp_root("objectstore-ingest-control-validation");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let app = standalone_enclosure_admin_router_with_state(test_enclosure_admin_state(
+            auth_store,
+            local_user("operator", vec!["sudo"]),
+            Some(recording_enclosure_client()),
+        ));
+        let response = post_json_response_with_session(
+            app,
+            "/api/v1/workspaces/admin/ingest-control",
+            "admin",
+            &login.session_token,
+            &IngestControlRequest {
+                action: IngestControlAction::Pause,
+                reason: String::new(),
+                dry_run: true,
+                confirmation_marker: None,
+            },
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn create_object_store_derives_immutable_fields_from_minimal_request() {
         let root = temp_root("objectstore-create-derived");
         let auth_store = registered_auth_store(&root);
@@ -3002,6 +3076,28 @@ mod tests {
                 changed: true,
                 dry_run: request.dry_run,
                 administrator_actor: request.administrator_actor,
+            })
+        }
+
+        fn submit_ingest_control(
+            &self,
+            request: StandaloneIngestControlDaemonRequest,
+        ) -> Result<IngestControlResponse, StandaloneEnclosureAdminClientError> {
+            if let Some(message) = &self.fail_message {
+                return Err(StandaloneEnclosureAdminClientError {
+                    message: message.clone(),
+                });
+            }
+            Ok(IngestControlResponse {
+                state: match request.action {
+                    DaemonIngestControlAction::Pause => "paused",
+                    DaemonIngestControlAction::Throttle => "throttled",
+                    DaemonIngestControlAction::Resume => "running",
+                }
+                .to_string(),
+                changed: true,
+                dry_run: request.dry_run,
+                reason: request.reason,
             })
         }
 

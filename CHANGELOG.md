@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.84 - 2026-07-13
+
+- Add authenticated Web admin pause/throttle/resume routing and typed client
+  contracts for daemon file ingest control.
+
 ## 0.72.83 - 2026-07-13
 
 - Add daemon-owned and CLI emergency file-ingest pause/throttle/resume control

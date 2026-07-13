@@ -459,6 +459,14 @@ pub async fn submit_object_store_ingest_policy(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn submit_ingest_control(
+    api_base_path: &str,
+    request: &IngestControlRequest,
+) -> Result<IngestControlResponse, ApiError> {
+    post_json(&ingest_control_path(api_base_path), request).await
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn submit_endpoint_inventory_upsert(
     api_base_path: &str,
     request: &EndpointInventoryUpsertRequest,
@@ -479,6 +487,14 @@ pub fn object_store_create_path(api_base_path: &str) -> String {
 pub fn object_store_ingest_policy_path(api_base_path: &str) -> String {
     format!(
         "{}/workspaces/object-stores/ingest-policy",
+        api_base_path.trim_end_matches('/')
+    )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn ingest_control_path(api_base_path: &str) -> String {
+    format!(
+        "{}/workspaces/admin/ingest-control",
         api_base_path.trim_end_matches('/')
     )
 }
@@ -603,13 +619,14 @@ mod tests {
     use super::{
         activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
         auth_path, cached_home_dashboard_api_path, endpoint_inventory_upsert_path,
-        object_browser_api_path, object_download_api_path, object_folder_download_api_path,
-        object_store_create_path, object_store_ingest_policy_path, store_capacity_api_path,
-        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
-        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
-        EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
-        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
-        ObjectStoresPageResponse, RemoteUploadWorkspaceResponse, UsersGroupsWorkspaceResponse,
+        ingest_control_path, object_browser_api_path, object_download_api_path,
+        object_folder_download_api_path, object_store_create_path, object_store_ingest_policy_path,
+        store_capacity_api_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
+        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
+        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
+        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
+        LocalGroupAdminResponse, ObjectStoresPageResponse, RemoteUploadWorkspaceResponse,
+        UsersGroupsWorkspaceResponse,
     };
     use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 
@@ -984,6 +1001,14 @@ mod tests {
         assert_eq!(
             object_store_ingest_policy_path("/products/dasobjectstore/api/v1/"),
             "/products/dasobjectstore/api/v1/workspaces/object-stores/ingest-policy"
+        );
+    }
+
+    #[test]
+    fn builds_ingest_control_route_under_product_mount() {
+        assert_eq!(
+            ingest_control_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/workspaces/admin/ingest-control"
         );
     }
 

@@ -116,6 +116,29 @@ pub(super) async fn submit_update_object_store_ingest_policy_request(
         .map_err(admin_daemon_bridge_error)
 }
 
+pub(super) async fn submit_ingest_control_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: StandaloneIngestControlDaemonRequest,
+) -> Result<IngestControlResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        daemon_unavailable(
+            "daemon_ingest_control_unavailable",
+            "daemon ingest control contract is not available",
+        )
+    })?;
+    let client = Arc::clone(client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_ingest_control(request)
+                .map_err(|err| err.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
+}
+
 pub(super) async fn submit_endpoint_inventory_upsert_request(
     state: &StandaloneEnclosureAdminRouteState,
     request: DaemonUpsertEndpointInventoryRequest,

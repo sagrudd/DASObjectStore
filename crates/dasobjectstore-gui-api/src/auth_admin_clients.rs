@@ -43,6 +43,11 @@ pub(super) trait StandaloneEnclosureAdminClient: Send + Sync {
         request: DaemonUpdateObjectStoreIngestPolicyRequest,
     ) -> Result<StandaloneObjectStoreIngestPolicyResponse, StandaloneEnclosureAdminClientError>;
 
+    fn submit_ingest_control(
+        &self,
+        request: StandaloneIngestControlDaemonRequest,
+    ) -> Result<IngestControlResponse, StandaloneEnclosureAdminClientError>;
+
     fn submit_endpoint_inventory_upsert(
         &self,
         request: DaemonUpsertEndpointInventoryRequest,
@@ -94,6 +99,14 @@ pub(super) struct StandaloneAdminJobStatusDaemonRequest {
 pub(super) struct StandaloneAdminJobCancelDaemonRequest {
     pub(super) job_id: String,
     pub(super) reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct StandaloneIngestControlDaemonRequest {
+    pub(super) action: DaemonIngestControlAction,
+    pub(super) reason: String,
+    pub(super) dry_run: bool,
+    pub(super) confirmation_marker: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -230,6 +243,21 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
         self.client
             .upsert_endpoint_inventory(request)
             .map(endpoint_inventory_upsert_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn submit_ingest_control(
+        &self,
+        request: StandaloneIngestControlDaemonRequest,
+    ) -> Result<IngestControlResponse, StandaloneEnclosureAdminClientError> {
+        self.client
+            .ingest_control(DaemonIngestControlRequest {
+                action: request.action,
+                reason: request.reason,
+                dry_run: request.dry_run,
+                confirmation_marker: request.confirmation_marker,
+            })
+            .map(ingest_control_response_from_daemon)
             .map_err(standalone_enclosure_admin_client_error)
     }
 
