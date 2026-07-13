@@ -713,6 +713,9 @@ completion.
     detail below this seam.
   - [x] Add a stable, bounded provider-neutral profile list page with a capped
     continuation offset and prefix filtering; HTTP serialization remains open.
+  - [x] Run profile S3 folder/drive contract fixtures against the dedicated
+    macOS generated-data root when configured; each test removes only its
+    uniquely named child and never the validation root itself.
   - [x] Add provider-neutral, idempotent profile DELETE semantics that inspect
     the catalogue before backend removal, debit folder capacity transactionally,
     and fail closed on guarded-drive identity loss; HTTP gateway wiring remains

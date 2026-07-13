@@ -371,16 +371,23 @@ mod tests {
 
     static TEST_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-    fn backend() -> (FolderBackend, PathBuf) {
+    fn test_root(prefix: &str) -> PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
         let sequence = TEST_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "dasobjectstore-profile-s3-{}-{nonce}-{sequence}",
+        let base = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        base.join(format!(
+            "{prefix}-{}-{nonce}-{sequence}",
             std::process::id(),
-        ));
+        ))
+    }
+
+    fn backend() -> (FolderBackend, PathBuf) {
+        let root = test_root("dasobjectstore-profile-s3");
         let manifest = ObjectStoreManifest {
             schema_version: 1,
             store_id: StoreId::new("profile-s3").expect("store id"),
@@ -410,15 +417,7 @@ mod tests {
     }
 
     fn drive_backend() -> (DriveBackend, Arc<TestDriveGuard>, PathBuf) {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let sequence = TEST_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "dasobjectstore-profile-s3-drive-{}-{nonce}-{sequence}",
-            std::process::id(),
-        ));
+        let root = test_root("dasobjectstore-profile-s3-drive");
         let manifest = ObjectStoreManifest {
             schema_version: 1,
             store_id: StoreId::new("profile-s3-drive").expect("store id"),
