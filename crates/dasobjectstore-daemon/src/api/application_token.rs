@@ -33,11 +33,7 @@ pub struct ApplicationAccessTokenExchangeResponse {
 
 impl ApplicationAccessTokenExchangeResponse {
     pub fn validate(&self) -> Result<(), String> {
-        self.claims
-            .schema_version
-            .eq(dasobjectstore_core::application_auth::APPLICATION_AUTH_SCHEMA_VERSION)
-            .then_some(())
-            .ok_or_else(|| "unsupported application access-token schema".to_string())
+        self.claims.validate().map_err(|error| error.to_string())
     }
 }
 
@@ -71,6 +67,39 @@ mod tests {
             APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
             "/api/v1/application-auth/access-token"
         );
+    }
+
+    #[test]
+    fn exchange_response_rejects_malformed_claims() {
+        let mut claims = sample_claims();
+        claims.audience.clear();
+        let response = super::ApplicationAccessTokenExchangeResponse { claims };
+        assert!(response.validate().is_err());
+    }
+
+    fn sample_claims() -> dasobjectstore_core::application_auth::AccessTokenClaims {
+        use dasobjectstore_core::application_auth::{
+            AccessTokenClaims, ApplicationOperation, ApplicationScope,
+        };
+        use dasobjectstore_core::ids::StoreId;
+        use dasobjectstore_core::ingress::IngressOrigin;
+        AccessTokenClaims {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            token_id: "access-1".to_string(),
+            application_id: "synoptikon".to_string(),
+            audience: "dasobjectstore".to_string(),
+            issued_at_unix_seconds: 10,
+            expires_at_unix_seconds: 20,
+            scope: ApplicationScope {
+                store_ids: vec![StoreId::new("codex").expect("store")],
+                prefixes: vec!["reads".to_string()],
+                object_types: vec![],
+                operations: vec![ApplicationOperation::Read],
+                ingress_origin: IngressOrigin::Synoptikon,
+                max_object_bytes: Some(10),
+                max_total_bytes: Some(100),
+            },
+        }
     }
 
     fn sample_scope() -> dasobjectstore_core::application_auth::ApplicationScope {

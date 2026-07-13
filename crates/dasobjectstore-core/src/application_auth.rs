@@ -317,15 +317,23 @@ impl AccessTokenExchangeRequest {
 }
 
 impl AccessTokenClaims {
-    pub fn validate_against(
-        &self,
-        identity: &ApplicationIdentity,
-    ) -> Result<(), ApplicationAuthValidationError> {
+    /// Validate claim fields that do not require the daemon-owned identity
+    /// registry. Transport adapters use this before exposing or forwarding
+    /// claims; `validate_against` adds identity membership and scope checks.
+    pub fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
         validate_schema(&self.schema_version)?;
         validate_slug("token_id", &self.token_id)?;
         validate_slug("application_id", &self.application_id)?;
         validate_text("audience", &self.audience)?;
         validate_lifetime(self.issued_at_unix_seconds, self.expires_at_unix_seconds)?;
+        self.scope.validate()
+    }
+
+    pub fn validate_against(
+        &self,
+        identity: &ApplicationIdentity,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        self.validate()?;
         identity.validate()?;
         if !identity.active {
             return Err(ApplicationAuthValidationError::InactiveIdentity);
