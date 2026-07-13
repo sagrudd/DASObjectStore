@@ -716,6 +716,9 @@ completion.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.
+  - [x] Reconcile daemon logical capacity from the authoritative profile
+    catalogue after profile deletion, retaining outstanding reservations and
+    failing closed when ledger persistence is unavailable.
   - [x] Run profile S3 folder/drive contract fixtures against the dedicated
     macOS generated-data root when configured; each test removes only its
     uniquely named child and never the validation root itself.

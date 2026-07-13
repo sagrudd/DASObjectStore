@@ -953,6 +953,19 @@ mod tests {
     }
 
     #[test]
+    fn catalogue_reconciliation_replaces_usage_but_retains_reservations() {
+        let mut ledger = super::CapacityReservationLedger::new(CapacityPolicy::bounded(100, 0), 40)
+            .expect("capacity policy is valid");
+        ledger.reserve("pending", 10).expect("reservation fits");
+        ledger
+            .reconcile_used_bytes(5)
+            .expect("catalogue usage fits");
+        assert_eq!(ledger.used_bytes(), 5);
+        assert_eq!(ledger.reserved_bytes(), 10);
+        assert_eq!(ledger.available_bytes(), Some(85));
+    }
+
+    #[test]
     fn capacity_admission_uses_logical_backend_ssd_and_copy_constraints() {
         let policy = CapacityPolicy::bounded(1_000, 100);
         let admission = evaluate_capacity_admission(

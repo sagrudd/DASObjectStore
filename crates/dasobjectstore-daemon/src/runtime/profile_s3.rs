@@ -8,8 +8,8 @@ use crate::api::CapacityAdmissionDecision;
 use crate::runtime::capacity_provider::CapacityAdmissionProvider;
 use crate::runtime::{DriveBackend, FolderBackend};
 use dasobjectstore_core::backend::{
-    BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
-    ObjectStoreBackend,
+    catalogue_logical_used_bytes, BackendError, BackendHealth, BackendObjectKey,
+    BackendObjectRecord, ObjectCatalogueAuthority, ObjectStoreBackend,
 };
 use dasobjectstore_core::ids::StoreId;
 use std::io::Read;
@@ -217,6 +217,34 @@ pub fn delete_profile_object(
     backend.remove(key).map(|()| true)
 }
 
+/// Delete a profile object and reconcile the daemon-owned logical ledger from
+/// the resulting authoritative catalogue. The payload/catalogue mutation is
+/// durable before reconciliation; if the provider cannot persist the new
+/// usage, a later reconciliation can safely retry without deleting again.
+pub fn delete_profile_object_with_capacity_provider(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    backend: &mut dyn ProfileS3WriteBackend,
+    key: &BackendObjectKey,
+) -> Result<bool, BackendError> {
+    let store_id = StoreId::new(store_id.to_string()).map_err(|error| {
+        BackendError::InvalidRequest(format!("invalid profile S3 ObjectStore id: {error}"))
+    })?;
+    let removed = delete_profile_object(backend, key)?;
+    if !removed {
+        return Ok(false);
+    }
+    let used_bytes = catalogue_logical_used_bytes(backend)?;
+    capacity_provider
+        .reconcile_used_bytes(&store_id, used_bytes)
+        .map_err(|error| {
+            BackendError::InvalidRequest(format!(
+                "profile S3 deletion succeeded but capacity reconciliation failed: {error}"
+            ))
+        })?;
+    Ok(true)
+}
+
 fn discard_prefix(reader: &mut dyn Read, mut remaining: u64) -> Result<(), BackendError> {
     let mut buffer = [0_u8; 64 * 1024];
     while remaining != 0 {
@@ -368,8 +396,9 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_profile_object, get_profile_object, get_profile_object_range, head_profile_object,
-        list_profile_objects, list_profile_objects_page, profile_health, put_profile_object,
+        delete_profile_object, delete_profile_object_with_capacity_provider, get_profile_object,
+        get_profile_object_range, head_profile_object, list_profile_objects,
+        list_profile_objects_page, profile_health, put_profile_object,
         put_profile_object_with_capacity_provider, verify_profile_object, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
@@ -534,6 +563,18 @@ mod tests {
                 .lock()
                 .expect("events lock")
                 .push(format!("release:{store_id}:{reservation_id}"));
+            Ok(())
+        }
+
+        fn reconcile_used_bytes(
+            &self,
+            store_id: &StoreId,
+            used_bytes: u64,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("reconcile:{store_id}:{used_bytes}"));
             Ok(())
         }
     }
@@ -773,6 +814,38 @@ mod tests {
         .expect("put");
         guard.0.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(delete_profile_object(&mut backend, &key).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn delete_with_capacity_provider_reconciles_logical_usage() {
+        let (mut backend, root) = backend();
+        let provider = RecordingCapacityProvider::default();
+        let key = BackendObjectKey {
+            object_id: "provider/delete.fastq".to_string(),
+            version: 1,
+        };
+        put_profile_object(
+            &mut backend,
+            "profile-s3-provider-delete",
+            &key,
+            &mut &b"delete"[..],
+            6,
+        )
+        .expect("put");
+        assert!(delete_profile_object_with_capacity_provider(
+            &provider,
+            "profile-s3",
+            &mut backend,
+            &key,
+        )
+        .expect("delete"));
+        assert!(provider
+            .events
+            .lock()
+            .expect("events lock")
+            .iter()
+            .any(|event| event == "reconcile:profile-s3:0"));
         std::fs::remove_dir_all(root).ok();
     }
 

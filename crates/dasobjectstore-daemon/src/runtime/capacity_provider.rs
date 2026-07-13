@@ -125,6 +125,16 @@ pub trait CapacityAdmissionProvider: Send + Sync {
             "capacity reservation release provider is not configured",
         ))
     }
+
+    fn reconcile_used_bytes(
+        &self,
+        _store_id: &StoreId,
+        _used_bytes: u64,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Err(unavailable(
+            "capacity usage reconciliation provider is not configured",
+        ))
+    }
 }
 
 pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
@@ -540,6 +550,33 @@ where
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
         ledger.release(reservation_id).map_err(|error| {
             unavailable(format!("capacity reservation release failed: {error:?}"))
+        })?;
+        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+            *ledger = before;
+            return Err(unavailable(format!(
+                "capacity ledger persistence failed: {error}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn reconcile_used_bytes(
+        &self,
+        store_id: &StoreId,
+        used_bytes: u64,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut ledgers = self
+            .ledgers
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        let before = ledger.clone();
+        ledger
+            .update_policy(policy)
+            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
+        ledger.reconcile_used_bytes(used_bytes).map_err(|error| {
+            unavailable(format!("capacity usage reconciliation failed: {error:?}"))
         })?;
         if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
             *ledger = before;

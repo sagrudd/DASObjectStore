@@ -315,6 +315,17 @@ impl CapacityReservationLedger {
         Ok(())
     }
 
+    /// Reconcile logical usage from an authoritative catalogue snapshot while
+    /// retaining outstanding reservations. The sum is checked so accounting
+    /// cannot become internally overflowing during recovery.
+    pub fn reconcile_used_bytes(&mut self, used_bytes: u64) -> Result<(), CapacityLedgerError> {
+        used_bytes
+            .checked_add(self.reserved_bytes())
+            .ok_or(CapacityLedgerError::Overflow)?;
+        self.used_bytes = used_bytes;
+        Ok(())
+    }
+
     pub fn release(&mut self, reservation_id: &str) -> Result<u64, CapacityLedgerError> {
         self.reservations
             .remove(reservation_id)

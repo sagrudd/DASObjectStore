@@ -62,6 +62,8 @@ read contract; list pages are stably ordered and capped at 1,000 keys; DELETE
 uses the same catalogue authority before backend removal;
 verification re-hashes the payload and rejects size/checksum drift, while the
 health projection remains provider-neutral and path-free;
+when a daemon capacity provider is present, deletion reconciles logical used
+bytes from the post-delete catalogue while retaining in-flight reservations;
 provider listings and private filesystem paths are not trusted or returned.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
