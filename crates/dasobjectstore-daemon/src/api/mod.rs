@@ -52,6 +52,7 @@ pub use application_identity::{
 };
 pub use application_token::{
     ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
+    APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
 };
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,

@@ -915,8 +915,10 @@ completion.
     reject development keys, issuers, configuration, and enablement switches.
     Native DEB/RPM build scripts now explicitly compile the daemon with
     ``--no-default-features`` as an additional package-boundary safeguard.
-    The daemon socket exchange now verifies registered key proofs; public
-    listener wiring remains open.
+    The daemon socket exchange now verifies registered key proofs; the
+    canonical versioned HTTPS exchange route constant is also published for
+    clients and adapters. Listener authentication, mTLS verification, and
+    runtime HTTP dispatch remain open.
   - [x] Publish versioned, non-secret JSON contract fixtures for identity,
     public-key descriptor, exchange request, scoped access token, renewal-only
     token, and upload-completion capability adapters. The exchange fixture

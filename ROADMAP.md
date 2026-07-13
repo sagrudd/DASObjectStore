@@ -1269,6 +1269,9 @@ the bounded daemon bridge and preserving explicit not-ready reasons.
 Static profile-capability discovery is also available through authenticated
 Web at ``/api/v1/profile-capabilities``; the response remains a versioned
 catalogue and never implies provisioning or live hardware health.
+The application access-token contract now publishes one canonical versioned
+HTTPS exchange route for clients and adapters; listener authentication, mTLS
+verification, and runtime HTTP dispatch remain deployment-layer work.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.

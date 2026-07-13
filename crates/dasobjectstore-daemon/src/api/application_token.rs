@@ -2,6 +2,12 @@ use crate::api::DaemonRequestValidationError;
 use dasobjectstore_core::application_auth::{AccessTokenClaims, AccessTokenExchangeRequest};
 use serde::{Deserialize, Serialize};
 
+/// Canonical HTTPS route for proof-bearing application access-token exchange.
+/// Listener authentication (including mTLS where configured) and daemon
+/// dispatch remain deployment-layer responsibilities; this constant keeps
+/// clients and Web adapters on one versioned path without exposing secrets.
+pub const APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE: &str = "/api/v1/application-auth/access-token";
+
 /// Public daemon boundary for proof-verified application access-token
 /// exchange. Identity and key registries remain daemon-owned; callers submit
 /// only the signed, path-free request.
@@ -37,7 +43,7 @@ impl ApplicationAccessTokenExchangeResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::ApplicationAccessTokenExchangeRequest;
+    use super::{ApplicationAccessTokenExchangeRequest, APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE};
     use dasobjectstore_core::application_auth::{
         AccessTokenExchangeRequest, APPLICATION_AUTH_SCHEMA_VERSION,
     };
@@ -57,6 +63,14 @@ mod tests {
             },
         };
         request.validate().expect("shape validates");
+    }
+
+    #[test]
+    fn exchange_route_is_versioned_and_path_stable() {
+        assert_eq!(
+            APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
+            "/api/v1/application-auth/access-token"
+        );
     }
 
     fn sample_scope() -> dasobjectstore_core::application_auth::ApplicationScope {
