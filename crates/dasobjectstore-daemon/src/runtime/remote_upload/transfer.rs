@@ -38,6 +38,33 @@ pub struct RemoteUploadCompletionRecord {
     pub source_bytes: u64,
 }
 
+impl RemoteUploadCompletionRecord {
+    /// Construct the daemon-owned completion handoff record from a transfer
+    /// job. Completion implementations must never receive an unaddressable
+    /// job or ObjectStore identifier, because that would make a catalogue
+    /// transaction impossible to reconcile safely.
+    fn from_job(
+        job: &RemoteUploadS3TransferJob,
+    ) -> Result<Self, RemoteUploadCompletionCommitError> {
+        if job.job_id.trim().is_empty() {
+            return Err(RemoteUploadCompletionCommitError::new(
+                "remote upload completion job id must not be blank",
+            ));
+        }
+        if StoreId::new(job.object_store.clone()).is_err() {
+            return Err(RemoteUploadCompletionCommitError::new(
+                "remote upload completion ObjectStore id must not be blank",
+            ));
+        }
+
+        Ok(Self {
+            job_id: job.job_id.clone(),
+            object_store: job.object_store.clone(),
+            source_bytes: job.source_bytes,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteUploadCompletionCommitError {
     message: String,
@@ -289,12 +316,10 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         let transfer_result = transfer_result.and_then(|()| {
             completion
                 .map(|completion| {
+                    let record = RemoteUploadCompletionRecord::from_job(&job)
+                        .map_err(|error| error.to_string())?;
                     completion
-                        .commit(&RemoteUploadCompletionRecord {
-                            job_id: job.job_id.clone(),
-                            object_store: job.object_store.clone(),
-                            source_bytes: job.source_bytes,
-                        })
+                        .commit(&record)
                         .map_err(|error| error.to_string())
                 })
                 .transpose()

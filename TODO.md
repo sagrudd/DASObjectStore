@@ -235,7 +235,10 @@ completion.
     upload worker; a successful provider transfer is not reported complete when
     the injected manifest/catalogue handoff fails. Concrete catalogue wiring,
     service-principal/token-exchange implementation, and public endpoint wiring
-    remain open under the approved authentication contract.
+    remain open under the approved authentication contract. The handoff now
+    also rejects blank job/ObjectStore identifiers before invoking catalogue
+    code, so malformed completion records fail closed without creating an
+    unreconcilable catalogue transaction.
   - [x] Release an admitted remote-upload capacity reservation when daemon job
     or progress setup fails before transfer execution; invalid-job regression
     coverage proves no reservation leak.

@@ -1133,6 +1133,12 @@ requests retain bounded capacity under ingest; no temporary production module
 exceptions remain and the guard passes; appliance-only acceptance blockers are
 recorded and repeatable.
 
+The remote-upload completion gate now validates the job and ObjectStore
+identifiers before invoking an injected catalogue/manifest commit. Malformed
+handoff records therefore fail closed without publishing completion or creating
+an unreconcilable catalogue transaction; provider-backed catalogue wiring and
+public completion endpoints remain separately gated.
+
 Current delivery note: daemon-independent health/liveness and degraded Activity
 responses are covered, including a local bridge-saturation regression for both
 health surfaces. Standalone static asset reads now use an async bounded

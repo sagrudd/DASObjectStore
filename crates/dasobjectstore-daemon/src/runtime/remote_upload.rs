@@ -909,6 +909,33 @@ mod tests {
     }
 
     #[test]
+    fn completion_handoff_rejects_blank_object_store_before_catalogue_commit() {
+        let root = temp_root("remote-upload-completion-invalid-store");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let completion = RecordingCompletionCommit::default();
+        let mut request = worker_request("remote-upload-job-invalid-store");
+        request.job.object_store = "  ".to_string();
+
+        let report = worker
+            .run_with_completion(request, &completion, |_| Ok::<(), &'static str>(()))
+            .expect("invalid completion handoff is recorded as a failed job");
+
+        let DaemonJobEvent::Failed(final_job) = report.final_event else {
+            panic!("expected failed final event");
+        };
+        assert_eq!(
+            final_job.failure_message.as_deref(),
+            Some("remote upload completion ObjectStore id must not be blank")
+        );
+        assert!(completion.records.borrow().is_empty());
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn transfer_worker_commits_capacity_on_success_and_releases_on_failure() {
         let root = temp_root("remote-upload-capacity-lifecycle");
         let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
