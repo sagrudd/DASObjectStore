@@ -907,6 +907,10 @@ the authenticated shell renders an explicit target-required state instead of
 mounting a dropzone without a target. API/permission and visual acceptance
 remain part of the open Milestone 24 work.
 
+Guarded direct-to-HDD imports now use the shared inline-hash copy primitive;
+optional source metadata is checked after the single read, preserving the
+direct-ingress policy without a strict pre-copy hash pass.
+
 ## Milestone 25: Campaign Re-baseline and Compatibility Contracts
 
 Goal: turn the appliance implementation into an explicit multi-profile product

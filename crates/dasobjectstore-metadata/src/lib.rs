@@ -43,9 +43,10 @@ pub use contents::{
     StoreContentsSnapshot,
 };
 pub use copy::{
-    verify_hdd_copy_hash, write_hdd_copy_with_inline_hash_with_controlled_progress,
-    write_verified_hdd_copy, write_verified_hdd_copy_with_progress, HddCopyError, HddCopyReport,
-    HddCopyRequest, HddInlineHashCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
+    verify_hdd_copy_hash, write_hdd_copy_with_inline_hash,
+    write_hdd_copy_with_inline_hash_with_controlled_progress, write_verified_hdd_copy,
+    write_verified_hdd_copy_with_progress, HddCopyError, HddCopyReport, HddCopyRequest,
+    HddInlineHashCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,

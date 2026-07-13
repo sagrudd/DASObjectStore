@@ -187,6 +187,15 @@ pub fn write_hdd_copy_with_inline_hash_with_controlled_progress(
     report
 }
 
+/// Copy one HDD payload while calculating its checksum from the same source
+/// read. Callers that have an expected digest may compare the returned report
+/// after the copy; no strict pre-copy source read is required.
+pub fn write_hdd_copy_with_inline_hash(
+    request: &HddInlineHashCopyRequest,
+) -> Result<HddCopyReport, HddCopyError> {
+    write_hdd_copy_with_inline_hash_with_controlled_progress(request, |_| Ok(()))
+}
+
 /// Copies one source stream to distinct HDD destinations concurrently.
 ///
 /// The source is opened and read once. Each bounded writer queue provides

@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.98 - 2026-07-13
+
+- Keep guarded direct-to-HDD imports on the one-read inline-checksum path;
+  trusted expected digests are now optional post-copy verification rather than
+  an unconditional pre-copy source hash.
+
 ## 0.72.97 - 2026-07-13
 
 - Require an explicit ObjectStore target at the Remote Upload page boundary,

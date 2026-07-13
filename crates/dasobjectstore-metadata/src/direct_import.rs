@@ -1,4 +1,6 @@
-use crate::{write_verified_hdd_copy, HddCopyError, HddCopyReport, HddCopyRequest};
+use crate::{
+    write_hdd_copy_with_inline_hash, HddCopyError, HddCopyReport, HddInlineHashCopyRequest,
+};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::risk::{
@@ -80,7 +82,6 @@ pub enum DirectHddImportError {
     StorePolicy(StorePolicyValidationErrors),
     StoreMustBeReproducibleCache { class: StoreClass },
     StoreMustAllowDirectToHdd,
-    MissingExpectedContentHash,
     RiskGate(RiskGateError),
     Copy(HddCopyError),
 }
@@ -96,9 +97,6 @@ impl Display for DirectHddImportError {
             ),
             Self::StoreMustAllowDirectToHdd => {
                 formatter.write_str("store policy must use direct-to-HDD ingest")
-            }
-            Self::MissingExpectedContentHash => {
-                formatter.write_str("direct-to-HDD import requires an expected content hash")
             }
             Self::RiskGate(err) => write!(formatter, "{err}"),
             Self::Copy(err) => write!(formatter, "{err}"),
@@ -119,14 +117,23 @@ pub fn import_reproducible_object_direct_to_hdd(
 ) -> Result<DirectHddImportReport, DirectHddImportError> {
     validate_direct_hdd_import_request(request)?;
 
-    let copy_report = write_verified_hdd_copy(&HddCopyRequest::new(
+    let copy_report = write_hdd_copy_with_inline_hash(&HddInlineHashCopyRequest::new(
         request.object_id.clone(),
         request.disk_id.clone(),
         1,
         &request.source_path,
         &request.destination_path,
-        request.expected_content_hash.clone(),
     ))?;
+
+    if !request.expected_content_hash.trim().is_empty()
+        && request.expected_content_hash != copy_report.content_hash
+    {
+        let _ = std::fs::remove_file(&copy_report.destination_path);
+        return Err(DirectHddImportError::Copy(HddCopyError::HashMismatch {
+            expected: request.expected_content_hash.clone(),
+            actual: copy_report.content_hash,
+        }));
+    }
 
     Ok(report_from_copy(request, copy_report))
 }
@@ -147,10 +154,6 @@ fn validate_direct_hdd_import_request(
 
     if request.store_policy.ingest_mode != IngestMode::DirectToHdd {
         return Err(DirectHddImportError::StoreMustAllowDirectToHdd);
-    }
-
-    if request.expected_content_hash.trim().is_empty() {
-        return Err(DirectHddImportError::MissingExpectedContentHash);
     }
 
     RiskGate::new(request.risk_policy)
@@ -238,6 +241,24 @@ mod tests {
             DirectHddImportError::RiskGate(RiskGateError::MissingConfirmation { .. })
         ));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn direct_import_hashes_inline_when_expected_digest_is_unavailable() {
+        let root = temp_root("direct-import-inline-hash");
+        let source_path = root.join("source");
+        let destination_path = root.join("dest");
+        fs::create_dir_all(&root).expect("create temp root");
+        fs::write(&source_path, b"payload without pre-copy").expect("source payload");
+        let request = request(source_path, destination_path, String::new());
+
+        let report = import_reproducible_object_direct_to_hdd(&request)
+            .expect("inline checksum should admit direct import");
+
+        assert_eq!(report.content_hash_algorithm, "sha256");
+        assert_eq!(report.bytes_written, 24);
+        assert!(!report.content_hash.is_empty());
         let _ = fs::remove_dir_all(root);
     }
 

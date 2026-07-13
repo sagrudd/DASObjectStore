@@ -1116,6 +1116,9 @@ list until every temporary size-budget exception has been removed.
 - [x] Add executor route-plan regression coverage proving Remote/Web/USB external origins select SSD-first under a direct-capable store policy.
 - [x] Add full-pipeline coverage proving external-origin SSD-first behavior through staged settlement under a direct-capable policy.
 - [x] Add deterministic performance coverage for no pre-copy hash on normal direct ingress and bounded high-frequency progress delivery; existing fan-out and staged external fixtures cover byte-path correctness.
+- [x] Keep the guarded legacy `direct-to-HDD` import on the same inline-hash
+  copy path: an expected digest is now an optional post-copy check, so callers
+  without trusted source metadata do not trigger a strict pre-copy read.
 - [ ] Add appliance sustained external-origin throughput and direct-ingest
   no-precopy soak acceptance. Broader performance/soak acceptance remains
   tracked under Web availability. Deferred while travelling without DAS host
