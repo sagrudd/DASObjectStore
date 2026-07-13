@@ -3995,6 +3995,13 @@ mod tests {
         assert_eq!(response.claims.application_id, application_id);
         assert_eq!(response.claims.audience, "dasobjectstore");
         assert_eq!(response.claims.expires_at_unix_seconds, 2_600);
+        let audit = read_application_audit_events(root.join("application-audit.json"))
+            .expect("exchange audit event");
+        assert!(audit.iter().any(|event| {
+            event.operation == "issue_access_token"
+                && event.application_id == application_id
+                && event.key_id.as_deref() == Some("exchange-key")
+        }));
         cleanup(&root);
     }
 

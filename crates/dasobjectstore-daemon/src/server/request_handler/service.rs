@@ -40,7 +40,9 @@ where
             Ok(DaemonApiResponse::ServiceProvision(response))
         }
         DaemonApiRequest::ExchangeApplicationAccessToken(request) => {
+            let now = handler.clock.now_utc();
             let exchange = request.exchange;
+            let exchange_key_id = exchange.key_id.clone();
             let identity = read_application_identity(
                 &handler.application_identity_registry_path,
                 &exchange.application_id,
@@ -92,6 +94,17 @@ where
                         },
                     )
                 })?;
+            record_application_audit_event(
+                &handler.application_audit_log_path,
+                &now,
+                "issue_access_token",
+                &claims.application_id,
+                Some(&exchange_key_id),
+                None,
+                "application access-token exchange",
+                false,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             Ok(DaemonApiResponse::ExchangeApplicationAccessToken(
                 ApplicationAccessTokenExchangeResponse { claims },
             ))

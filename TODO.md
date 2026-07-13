@@ -894,7 +894,8 @@ completion.
     now published and wired through authenticated administrator dispatch to
     atomic identity/key deactivation; redacted, reason-digest audit events are
     now persisted atomically for registration, rotation, revocation, and
-    completion paths, while mTLS/public endpoint wiring remains.
+    access-token issuance, and completion paths, while mTLS/public endpoint
+    wiring remains.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
