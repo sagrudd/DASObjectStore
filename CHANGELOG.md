@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.100 - 2026-07-13
+
+- Add the profile-neutral `ObjectCatalogueAuthority` batch contract and adapt
+  the durable folder catalogue without changing portable manifest v1.
+
 ## 0.72.99 - 2026-07-13
 
 - Add a direct `Back to ObjectStores` action to the target-required Remote

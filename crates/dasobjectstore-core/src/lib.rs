@@ -25,7 +25,7 @@ pub mod utc;
 
 pub use backend::{
     BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
-    ObjectStoreBackend,
+    ObjectCatalogueAuthority, ObjectStoreBackend,
 };
 pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,

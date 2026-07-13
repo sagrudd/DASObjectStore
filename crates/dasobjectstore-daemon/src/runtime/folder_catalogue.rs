@@ -1,6 +1,8 @@
 //! Durable catalogue transaction for the bounded folder profile.
 
-use dasobjectstore_core::backend::{BackendError, BackendObjectKey, BackendObjectRecord};
+use dasobjectstore_core::backend::{
+    BackendError, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -196,6 +198,20 @@ impl FolderCatalogue {
     }
 }
 
+impl ObjectCatalogueAuthority for FolderCatalogue {
+    fn records(&self) -> Vec<BackendObjectRecord> {
+        self.records()
+    }
+
+    fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError> {
+        self.commit_records(records.iter().cloned())
+    }
+
+    fn remove_record(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
+        self.remove(key)
+    }
+}
+
 impl From<BackendObjectRecord> for FolderCatalogueBrowserEntry {
     fn from(record: BackendObjectRecord) -> Self {
         Self {
@@ -221,7 +237,9 @@ fn io_error(error: std::io::Error) -> BackendError {
 #[cfg(test)]
 mod tests {
     use super::{FolderCatalogue, FolderCatalogueBrowserQuery};
-    use dasobjectstore_core::backend::{BackendObjectKey, BackendObjectRecord};
+    use dasobjectstore_core::backend::{
+        BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
+    };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -367,6 +385,33 @@ mod tests {
             })
             .expect_err("oversized browser page rejected");
         assert!(error.to_string().contains("page limit"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_catalogue_implements_shared_authority_batch_contract() {
+        fn accepts_authority<T: ObjectCatalogueAuthority>() {}
+        accepts_authority::<FolderCatalogue>();
+
+        let root = root();
+        let path = root.join("catalogue.json");
+        let mut catalogue = FolderCatalogue::open(&path, "codex").expect("catalogue opens");
+        catalogue
+            .commit_batch(&[record()])
+            .expect("authority batch commits");
+        assert_eq!(
+            ObjectCatalogueAuthority::records(&catalogue),
+            vec![record()]
+        );
+        ObjectCatalogueAuthority::remove_record(
+            &mut catalogue,
+            &BackendObjectKey {
+                object_id: "incoming/data.txt".to_string(),
+                version: 1,
+            },
+        )
+        .expect("authority removal commits");
+        assert!(catalogue.records().is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 }

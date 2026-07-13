@@ -170,6 +170,9 @@ completion.
     companion contract for logical object versions, digests, provenance,
     lifecycle/protection state, and profile-neutral placements; private
     catalogue authority and daemon transaction wiring remain open.
+  - [x] Define the minimal profile-neutral `ObjectCatalogueAuthority` batch
+    contract and adapt the durable folder catalogue to it; shared SQLite,
+    appliance, and daemon transaction wiring remain open.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

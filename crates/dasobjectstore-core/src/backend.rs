@@ -57,6 +57,20 @@ pub struct BackendHealth {
     pub message: Option<String>,
 }
 
+/// Minimal catalogue authority shared by profile backends.
+///
+/// Implementations must persist a batch before returning success and reject
+/// conflicting logical object versions. The trait deliberately deals in the
+/// profile-neutral backend record rather than provider- or appliance-specific
+/// metadata; richer portable catalogue adapters remain layered above it.
+pub trait ObjectCatalogueAuthority {
+    fn records(&self) -> Vec<BackendObjectRecord>;
+
+    fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError>;
+
+    fn remove_record(&mut self, key: &BackendObjectKey) -> Result<(), BackendError>;
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BackendError {
     Manifest(ObjectStoreManifestValidationError),

@@ -935,6 +935,10 @@ placements. Unknown/future schema, duplicate-record, and unsafe-path checks
 are covered locally; daemon catalogue authority and profile-adoption wiring
 remain open pending the shared metadata decision.
 
+The core now exposes a minimal profile-neutral `ObjectCatalogueAuthority`
+batch contract, with the durable folder catalogue implementing it while
+SQLite/object-service, appliance, and daemon transaction adapters remain open.
+
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 
 Goal: close current daemon ownership, upload completion, reconciliation,
