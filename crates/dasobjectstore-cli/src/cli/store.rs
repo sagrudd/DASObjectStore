@@ -26,6 +26,9 @@ pub(crate) enum StoreCommand {
     /// Inspect a daemon-owned profile without exposing host paths.
     #[command(name = "profile-inspection")]
     ProfileInspection(StoreProfileInspectionArgs),
+    /// Browse a bounded folder profile through the daemon-owned catalogue.
+    #[command(name = "profile-browser")]
+    ProfileBrowser(StoreProfileBrowserArgs),
     /// Render a validated per-user macOS launchd service plan without installing it.
     #[command(name = "user-service-plan")]
     UserServicePlan(StoreUserServicePlanArgs),
@@ -139,6 +142,48 @@ pub(crate) struct StoreProfileInspectionArgs {
 impl StoreProfileInspectionArgs {
     pub(crate) fn store_id(&self) -> &str {
         &self.store_id
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileBrowserArgs {
+    /// Logical ObjectStore identifier.
+    store_id: String,
+    /// Restrict results to keys below this logical prefix.
+    #[arg(long)]
+    prefix: Option<String>,
+    /// Restrict results to keys containing this text.
+    #[arg(long)]
+    search: Option<String>,
+    /// Zero-based result offset.
+    #[arg(long, default_value_t = 0)]
+    offset: u64,
+    /// Maximum entries to return (bounded by the daemon contract).
+    #[arg(long, default_value_t = 100)]
+    limit: u16,
+    /// Emit the typed response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileBrowserArgs {
+    pub(crate) fn store_id(&self) -> &str {
+        &self.store_id
+    }
+    pub(crate) fn prefix(&self) -> Option<&str> {
+        self.prefix.as_deref()
+    }
+    pub(crate) fn search(&self) -> Option<&str> {
+        self.search.as_deref()
+    }
+    pub(crate) fn offset(&self) -> u64 {
+        self.offset
+    }
+    pub(crate) fn limit(&self) -> u16 {
+        self.limit
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -877,6 +922,38 @@ mod tests {
         };
         assert_eq!(inspection.store_id(), "generated-data");
         assert!(inspection.json());
+    }
+
+    #[test]
+    fn parses_profile_browser_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-browser",
+            "generated-data",
+            "--prefix",
+            "reads/",
+            "--search",
+            "sample",
+            "--offset",
+            "10",
+            "--limit",
+            "25",
+            "--json",
+        ])
+        .expect("profile browser parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileBrowser(browser)) = args.command() else {
+            panic!("expected profile browser command")
+        };
+        assert_eq!(browser.store_id(), "generated-data");
+        assert_eq!(browser.prefix(), Some("reads/"));
+        assert_eq!(browser.search(), Some("sample"));
+        assert_eq!(browser.offset(), 10);
+        assert_eq!(browser.limit(), 25);
+        assert!(browser.json());
     }
 
     #[test]

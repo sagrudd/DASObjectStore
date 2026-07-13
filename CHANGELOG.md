@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.17 - 2026-07-13
+
+- Expose bounded folder catalogue browsing through the daemon-owned CLI
+  transport with redacted tabular and JSON output.
+
 ## 0.76.16 - 2026-07-13
 
 - Add an authorized, profile-neutral folder catalogue browser transport that

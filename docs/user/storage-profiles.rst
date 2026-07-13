@@ -278,9 +278,12 @@ use the typed daemon ``profile_browser`` request for a bounded folder profile.
 It supports prefix/search paging and returns only immutable object keys,
 versions, logical sizes, and checksums. Backend roots, staging paths,
 credentials, object-type guesses, lifecycle claims, and placement are not
-returned. A missing catalogue is reported as unavailable without creating a
-namespace. Drive browsing remains unavailable until the daemon can validate the
-live filesystem/device identity guard for that request.
+returned. The CLI exposes the same daemon-owned projection as
+``dasobjectstore store profile-browser STORE_ID`` with ``--prefix``,
+``--search``, ``--offset``, ``--limit``, and ``--json`` options. A missing
+catalogue is reported as unavailable without creating a namespace. Drive
+browsing remains unavailable until the daemon can validate the live
+filesystem/device identity guard for that request.
 
 Per-user macOS service plans
 ----------------------------

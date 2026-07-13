@@ -597,6 +597,10 @@ completion.
     and checksums while omitting private locations and unsupported appliance
     metadata; missing catalogues never get created and drive browsing remains
     guarded until live identity probing is available.
+  - [x] Expose the profile-browser transport through the read-only CLI as
+    ``store profile-browser`` with bounded prefix/search paging and JSON or
+    redacted tabular output; the CLI remains a daemon client and never reads
+    managed roots directly.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

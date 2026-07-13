@@ -32,6 +32,45 @@ pub(super) fn run_store_profile_inspection(
     Ok(())
 }
 
+pub(super) fn run_store_profile_browser(
+    args: &StoreProfileBrowserArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let store_id = StoreId::new(args.store_id())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_browser(ProfileBrowserRequest {
+            store_id,
+            prefix: args.prefix().map(str::to_owned),
+            search: args.search().map(str::to_owned),
+            offset: args.offset(),
+            limit: args.limit(),
+            delegated_actor: None,
+        })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Profile browser")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Profile: {}", response.profile.name())?;
+        writeln!(writer, "Entries: {}", response.entries.len())?;
+        writeln!(writer, "Total matches: {}", response.total_entries)?;
+        if let Some(next_offset) = response.next_offset {
+            writeln!(writer, "Next offset: {next_offset}")?;
+        }
+        for entry in response.entries {
+            writeln!(
+                writer,
+                "{}\t{}\t{}\t{}",
+                entry.key.object_id, entry.key.version, entry.size_bytes, entry.checksum
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_user_service_plan(
     args: &StoreUserServicePlanArgs,
     writer: &mut impl Write,
