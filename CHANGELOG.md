@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.75.0 - 2026-07-13
+
+- Carry universal capacity policy through profile-binding registration and
+  initialize the daemon ledger before binding persistence; bounded profiles now
+  fail closed when no finite logical limit is supplied.
+
 ## 0.74.0 - 2026-07-13
 
 - Add the `store profile-binding` CLI workflow for validated daemon-owned

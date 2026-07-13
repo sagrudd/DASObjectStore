@@ -1,6 +1,7 @@
 use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::manifest::ObjectStoreManifest;
+use dasobjectstore_core::store::CapacityPolicy;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -17,6 +18,7 @@ pub enum ProfileBindingOperation {
 pub struct ProfileBindingRequest {
     pub operation: ProfileBindingOperation,
     pub manifest: ObjectStoreManifest,
+    pub capacity: CapacityPolicy,
     pub backend_root: PathBuf,
     #[serde(default)]
     pub ssd_staging_root: Option<PathBuf>,
@@ -32,6 +34,16 @@ impl ProfileBindingRequest {
         self.manifest
             .validate()
             .map_err(|error| ProfileBindingValidationError::InvalidManifest(error.to_string()))?;
+        if let Some(error) = self.capacity.validation_error() {
+            return Err(ProfileBindingValidationError::InvalidCapacity(
+                error.to_string(),
+            ));
+        }
+        if self.manifest.deployment_profile != DeploymentProfile::Appliance
+            && self.capacity.logical_limit_bytes.is_none()
+        {
+            return Err(ProfileBindingValidationError::FiniteCapacityRequired);
+        }
         require_absolute("backend_root", &self.backend_root)?;
         if let Some(path) = &self.ssd_staging_root {
             require_absolute("ssd_staging_root", path)?;
@@ -63,6 +75,7 @@ pub struct ProfileBindingResponse {
     pub operation: ProfileBindingOperation,
     pub store_id: String,
     pub deployment_profile: DeploymentProfile,
+    pub capacity: CapacityPolicy,
     pub backend_root: PathBuf,
     pub ssd_staging_root: Option<PathBuf>,
     pub administrator_actor: Option<String>,
@@ -84,6 +97,7 @@ impl ProfileBindingResponse {
             operation: request.operation,
             store_id: request.manifest.store_id.to_string(),
             deployment_profile: request.manifest.deployment_profile,
+            capacity: request.capacity,
             backend_root: request.backend_root,
             ssd_staging_root: request.ssd_staging_root,
             administrator_actor: request.administrator_actor,
@@ -94,6 +108,8 @@ impl ProfileBindingResponse {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProfileBindingValidationError {
     InvalidManifest(String),
+    InvalidCapacity(String),
+    FiniteCapacityRequired,
     RelativePath { field: &'static str, path: PathBuf },
     BlankClientRequestId,
     BlankAdministratorActor,
@@ -104,6 +120,10 @@ impl std::fmt::Display for ProfileBindingValidationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidManifest(message) => formatter.write_str(message),
+            Self::InvalidCapacity(message) => formatter.write_str(message),
+            Self::FiniteCapacityRequired => {
+                formatter.write_str("bounded profile requires a finite logical capacity limit")
+            }
             Self::RelativePath { field, path } => {
                 write!(formatter, "{field} must be absolute: {}", path.display())
             }
@@ -158,6 +178,7 @@ mod tests {
                     root_identity: "fsid:codex".to_string(),
                 },
             },
+            capacity: CapacityPolicy::bounded(1024, 64),
             backend_root: PathBuf::from("/tmp/codex"),
             ssd_staging_root: None,
             dry_run: true,
@@ -186,6 +207,16 @@ mod tests {
                 field: "backend_root",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn bounded_profiles_require_finite_capacity() {
+        let mut request = request();
+        request.capacity = CapacityPolicy::default();
+        assert!(matches!(
+            request.validate(),
+            Err(ProfileBindingValidationError::FiniteCapacityRequired)
         ));
     }
 }

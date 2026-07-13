@@ -640,6 +640,14 @@ impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
 where
     R: ServiceCommandRunner,
 {
+    fn initialize_profile_capacity(
+        &self,
+        store_id: &StoreId,
+        policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        GarageServiceController::initialize_store_capacity(self, store_id, policy)
+    }
+
     fn status(
         &self,
         request: DaemonServiceStatusRequest,

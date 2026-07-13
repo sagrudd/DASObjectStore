@@ -68,6 +68,12 @@ pub(crate) struct StoreProfileBindingArgs {
     /// Daemon-visible canonical backend root for this profile.
     #[arg(long)]
     backend_root: PathBuf,
+    /// Logical ObjectStore capacity in bytes; required for folder/drive profiles.
+    #[arg(long)]
+    capacity_limit_bytes: Option<u64>,
+    /// Reserved backend bytes excluded from logical admission.
+    #[arg(long, default_value_t = 0)]
+    backend_reserve_bytes: u64,
     /// Optional daemon-visible SSD staging root for external ingress.
     #[arg(long)]
     ssd_staging_root: Option<PathBuf>,
@@ -91,6 +97,12 @@ impl StoreProfileBindingArgs {
     }
     pub(crate) fn backend_root(&self) -> &Path {
         &self.backend_root
+    }
+    pub(crate) fn capacity_limit_bytes(&self) -> Option<u64> {
+        self.capacity_limit_bytes
+    }
+    pub(crate) fn backend_reserve_bytes(&self) -> u64 {
+        self.backend_reserve_bytes
     }
     pub(crate) fn ssd_staging_root(&self) -> Option<&Path> {
         self.ssd_staging_root.as_deref()

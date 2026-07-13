@@ -1,7 +1,7 @@
 //! Store creation and portable-registry write handlers.
 
 use super::*;
-use dasobjectstore_core::store::{CapacityBehavior, ExportPolicy, RetentionPolicy};
+use dasobjectstore_core::store::{CapacityBehavior, CapacityPolicy, ExportPolicy, RetentionPolicy};
 
 pub(super) fn run_store_profile_binding(
     args: &StoreProfileBindingArgs,
@@ -19,6 +19,10 @@ pub(super) fn run_store_profile_binding(
         .register_profile_binding(ProfileBindingRequest {
             operation,
             manifest,
+            capacity: args
+                .capacity_limit_bytes()
+                .map(|limit| CapacityPolicy::bounded(limit, args.backend_reserve_bytes()))
+                .unwrap_or_default(),
             backend_root: args.backend_root().to_path_buf(),
             ssd_staging_root: args.ssd_staging_root().map(Path::to_path_buf),
             dry_run: args.dry_run(),

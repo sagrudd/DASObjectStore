@@ -109,7 +109,9 @@ quota without durable admission state. Per-profile manifest/root registration
 and probe-path selection now have a daemon-owned binding registry; explicit
 typed create/adopt binding registration transport is now available. Backend
 opening, quota-ledger initialization, and store-registry publication remain;
-the CLI exposes the same validated create/adopt workflow. These remain
+the CLI exposes the same validated create/adopt workflow, and bounded
+CapacityPolicy is initialized before binding persistence. Store-definition
+publication remains
 the next ordered capacity/profile seam. The binding registry path is state-scoped
 with an explicit environment override; strict
 missing-binding rejection is deferred until local-Docker bootstrap can persist

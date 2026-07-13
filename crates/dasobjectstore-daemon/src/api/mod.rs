@@ -569,6 +569,14 @@ fn profile_binding_validation_error(
         ProfileBindingValidationError::InvalidManifest(message) => {
             DaemonRequestValidationError::InvalidPolicy { message }
         }
+        ProfileBindingValidationError::InvalidCapacity(message) => {
+            DaemonRequestValidationError::InvalidPolicy { message }
+        }
+        ProfileBindingValidationError::FiniteCapacityRequired => {
+            DaemonRequestValidationError::InvalidPolicy {
+                message: "bounded profile requires a finite logical capacity limit".to_string(),
+            }
+        }
         ProfileBindingValidationError::RelativePath { field, path } => {
             DaemonRequestValidationError::RelativePath { field, path }
         }

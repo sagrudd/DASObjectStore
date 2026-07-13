@@ -301,6 +301,10 @@ completion.
     decoding, explicit create/adopt operation, dry-run confirmation, and
     daemon-client submission; backend opening and publication ordering remain
     daemon orchestration follow-up.
+  - [x] Carry the universal ``CapacityPolicy`` through profile binding and
+    initialize its daemon ledger before atomic binding persistence; folder and
+    drive registrations now reject unbounded capacity, while store-definition
+    publication remains a separate ordered orchestration step.
 - [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

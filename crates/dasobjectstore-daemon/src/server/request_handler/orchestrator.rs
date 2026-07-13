@@ -5,6 +5,14 @@ use crate::api::{
 };
 
 pub trait DaemonServiceOrchestrator {
+    fn initialize_profile_capacity(
+        &self,
+        _store_id: &StoreId,
+        _policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Ok(())
+    }
+
     fn status(
         &self,
         request: DaemonServiceStatusRequest,

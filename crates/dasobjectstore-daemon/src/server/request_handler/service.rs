@@ -58,6 +58,15 @@ where
         }
         DaemonApiRequest::RegisterProfileBinding(request) => {
             let now = handler.clock.now_utc();
+            if !request.dry_run {
+                handler
+                    .service_orchestrator
+                    .initialize_profile_capacity(
+                        &request.manifest.store_id,
+                        request.capacity.clone(),
+                    )
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            }
             let response =
                 register_profile_binding(request, &handler.profile_binding_registry_path, &now)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
