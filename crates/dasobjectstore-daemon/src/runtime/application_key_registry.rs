@@ -9,11 +9,18 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const APPLICATION_KEY_REGISTRY_SCHEMA: &str = "dasobjectstore.application_key_registry.v1";
 pub const APPLICATION_KEY_REGISTRY_FILE_NAME: &str = "application-keys.json";
 pub const APPLICATION_KEY_REGISTRY_ENV: &str = "DASOBJECTSTORE_APPLICATION_KEYS_PATH";
+
+static APPLICATION_KEY_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn registry_lock() -> &'static Mutex<()> {
+    APPLICATION_KEY_REGISTRY_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 pub fn default_application_key_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
     state_dir.as_ref().join(APPLICATION_KEY_REGISTRY_FILE_NAME)
@@ -44,6 +51,9 @@ impl Default for ApplicationKeyRegistryFile {
 pub fn list_application_keys(
     path: impl AsRef<Path>,
 ) -> Result<Vec<ApplicationKeyDescriptor>, DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application key registry lock poisoned");
     Ok(read_registry(path.as_ref())?.keys)
 }
 
@@ -52,6 +62,9 @@ pub fn read_application_key(
     application_id: &str,
     key_id: &str,
 ) -> Result<Option<ApplicationKeyDescriptor>, DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application key registry lock poisoned");
     Ok(read_registry(path.as_ref())?
         .keys
         .into_iter()
@@ -62,6 +75,9 @@ pub fn upsert_application_key(
     path: impl AsRef<Path>,
     key: ApplicationKeyDescriptor,
 ) -> Result<(), DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application key registry lock poisoned");
     key.validate()
         .map_err(|error| invalid_key(error.to_string()))?;
     let path = path.as_ref();
@@ -86,6 +102,9 @@ pub fn deactivate_application_key(
     application_id: &str,
     key_id: &str,
 ) -> Result<bool, DaemonServiceRuntimeError> {
+    let _guard = registry_lock()
+        .lock()
+        .expect("application key registry lock poisoned");
     let path = path.as_ref();
     let mut registry = read_registry(path)?;
     let Some(key) = registry
@@ -264,5 +283,27 @@ mod tests {
                 .expect("key")
                 .active
         );
+    }
+
+    #[test]
+    fn concurrent_key_upserts_preserve_all_descriptors() {
+        let path = root("concurrent-upserts").join("keys.json");
+        let left_path = path.clone();
+        let left = std::thread::spawn(move || {
+            upsert_application_key(&left_path, key("synoptikon", "left")).expect("write left")
+        });
+        let right_path = path.clone();
+        let right = std::thread::spawn(move || {
+            upsert_application_key(&right_path, key("synoptikon", "right")).expect("write right")
+        });
+        left.join().expect("left joins");
+        right.join().expect("right joins");
+
+        let ids = list_application_keys(&path)
+            .expect("list keys")
+            .into_iter()
+            .map(|key| key.key_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["left", "right"]);
     }
 }

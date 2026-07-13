@@ -919,7 +919,10 @@ completion.
     key custody and mTLS transport verification remain; the standalone Web API
     now dispatches the canonical proof-bearing exchange route through the
     daemon, validates claim shape at both Web and client response boundaries,
-    and rejects malformed claims before consumers can use them.
+    and rejects malformed claims before consumers can use them. Key-registry
+    read-modify-write operations are serialized in the daemon and covered by
+    a concurrent-upsert regression, so rotation and revocation cannot lose
+    sibling descriptors.
     Do not issue long-lived broadly scoped bearer access tokens.
   - [~] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
