@@ -1,8 +1,18 @@
 //! Transactional capacity accounting for optional SubObject budgets.
 
 use crate::store::{CapacityLedgerError, CapacityPolicy, CapacityReservationLedger};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display};
+
+pub const SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SubObjectCapacityLedgerSnapshot {
+    pub schema_version: u32,
+    pub parent: crate::store::CapacityReservationLedgerSnapshotV2,
+    pub children: BTreeMap<String, crate::store::CapacityReservationLedgerSnapshotV2>,
+}
 
 /// A parent ObjectStore ledger with independently bounded child ledgers.
 /// Reservations and commits update both ledgers; a failed child reservation
@@ -50,6 +60,66 @@ impl SubObjectCapacityLedger {
 
     pub fn child(&self, child_id: &str) -> Option<&CapacityReservationLedger> {
         self.children.get(child_id)
+    }
+
+    pub fn snapshot(&self) -> SubObjectCapacityLedgerSnapshot {
+        SubObjectCapacityLedgerSnapshot {
+            schema_version: SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
+            parent: self.parent.snapshot_with_expiry(),
+            children: self
+                .children
+                .iter()
+                .map(|(child_id, ledger)| (child_id.clone(), ledger.snapshot_with_expiry()))
+                .collect(),
+        }
+    }
+
+    pub fn from_snapshot(
+        snapshot: SubObjectCapacityLedgerSnapshot,
+    ) -> Result<Self, SubObjectCapacityError> {
+        if snapshot.schema_version != SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION {
+            return Err(SubObjectCapacityError::InvalidSnapshotSchema {
+                schema_version: snapshot.schema_version,
+            });
+        }
+        let SubObjectCapacityLedgerSnapshot {
+            parent: parent_snapshot,
+            children: child_snapshots,
+            ..
+        } = snapshot;
+        let mut expected_parent_reservations = BTreeMap::new();
+        let mut child_used_bytes = 0_u64;
+        for (child_id, child_snapshot) in &child_snapshots {
+            for (reservation_id, bytes) in &child_snapshot.reservations {
+                let parent_id = parent_reservation_id(child_id, reservation_id);
+                if expected_parent_reservations
+                    .insert(parent_id, *bytes)
+                    .is_some()
+                {
+                    return Err(SubObjectCapacityError::InvalidReservationLink);
+                }
+            }
+            child_used_bytes = child_used_bytes
+                .checked_add(child_snapshot.used_bytes)
+                .ok_or(SubObjectCapacityError::Overflow)?;
+        }
+        if parent_snapshot.reservations != expected_parent_reservations
+            || child_used_bytes > parent_snapshot.used_bytes
+        {
+            return Err(SubObjectCapacityError::InvalidReservationLink);
+        }
+        let parent = CapacityReservationLedger::from_snapshot_with_expiry(parent_snapshot)
+            .map_err(SubObjectCapacityError::Parent)?;
+        let mut children = HashMap::new();
+        for (child_id, child_snapshot) in child_snapshots {
+            if child_id.trim().is_empty() || children.contains_key(&child_id) {
+                return Err(SubObjectCapacityError::InvalidChildId);
+            }
+            let child = CapacityReservationLedger::from_snapshot_with_expiry(child_snapshot)
+                .map_err(SubObjectCapacityError::Child)?;
+            children.insert(child_id, child);
+        }
+        Ok(Self { parent, children })
     }
 
     pub fn reserve(
@@ -158,6 +228,8 @@ pub enum SubObjectCapacityError {
     InvalidChildId,
     DuplicateChild { child_id: String },
     UnknownChild { child_id: String },
+    InvalidSnapshotSchema { schema_version: u32 },
+    InvalidReservationLink,
     Parent(CapacityLedgerError),
     Child(CapacityLedgerError),
     Overflow,
@@ -175,6 +247,15 @@ impl Display for SubObjectCapacityError {
             }
             Self::UnknownChild { child_id } => {
                 write!(formatter, "unknown SubObject `{child_id}`")
+            }
+            Self::InvalidSnapshotSchema { schema_version } => {
+                write!(
+                    formatter,
+                    "unsupported SubObject capacity snapshot schema {schema_version}"
+                )
+            }
+            Self::InvalidReservationLink => {
+                formatter.write_str("SubObject capacity snapshot has inconsistent parent links")
             }
             Self::Parent(error) => write!(formatter, "parent capacity: {error:?}"),
             Self::Child(error) => write!(formatter, "SubObject capacity: {error:?}"),
@@ -240,6 +321,53 @@ mod tests {
         assert!(matches!(error, SubObjectCapacityError::Parent(_)));
         assert_eq!(ledger.parent().reserved_bytes(), 0);
         assert_eq!(ledger.child("child-a").unwrap().reserved_bytes(), 0);
+    }
+
+    #[test]
+    fn snapshot_round_trip_preserves_parent_child_usage_and_reservations() {
+        let mut ledger = ledger();
+        ledger
+            .reserve("child-a", "upload-1", 50)
+            .expect("reservation fits");
+        let restored =
+            SubObjectCapacityLedger::from_snapshot(ledger.snapshot()).expect("snapshot restores");
+
+        assert_eq!(restored.parent().used_bytes(), 100);
+        assert_eq!(restored.parent().reserved_bytes(), 50);
+        assert_eq!(restored.child("child-a").unwrap().used_bytes(), 20);
+        assert_eq!(restored.child("child-a").unwrap().reserved_bytes(), 50);
+        assert_eq!(
+            restored
+                .child("child-a")
+                .unwrap()
+                .reservation_bytes("upload-1"),
+            Some(50)
+        );
+    }
+
+    #[test]
+    fn snapshot_rejects_unknown_schema() {
+        let mut snapshot = ledger().snapshot();
+        snapshot.schema_version += 1;
+        assert!(matches!(
+            SubObjectCapacityLedger::from_snapshot(snapshot),
+            Err(SubObjectCapacityError::InvalidSnapshotSchema { .. })
+        ));
+    }
+
+    #[test]
+    fn snapshot_rejects_missing_parent_reservation_link() {
+        let mut ledger = ledger();
+        ledger
+            .reserve("child-a", "upload-1", 50)
+            .expect("reservation fits");
+        let mut snapshot = ledger.snapshot();
+        snapshot.parent.reservations.clear();
+
+        assert!(matches!(
+            SubObjectCapacityLedger::from_snapshot(snapshot),
+            Err(SubObjectCapacityError::InvalidReservationLink)
+        ));
     }
 
     #[test]

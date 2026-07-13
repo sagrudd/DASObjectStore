@@ -55,7 +55,10 @@ pub use object_catalogue::{
 pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;
 pub use store::LogicalObjectVersionCharge;
-pub use subobject_capacity::{SubObjectCapacityError, SubObjectCapacityLedger};
+pub use subobject_capacity::{
+    SubObjectCapacityError, SubObjectCapacityLedger, SubObjectCapacityLedgerSnapshot,
+    SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
+};
 
 /// Current core crate version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

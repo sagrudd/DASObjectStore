@@ -437,7 +437,9 @@ completion.
 - [ ] Add optional SubObject budgets whose reservations atomically update both
   child and parent allocations.
   - [x] Add a core hierarchical SubObject capacity ledger with atomic
-    parent/child reservation, commit, and release behavior; daemon registry
+    parent/child reservation, commit, and release behavior; a strict,
+    schema-versioned parent/child snapshot contract now preserves reservation
+    links across restart and rejects inconsistent links. Daemon registry
     persistence and transport wiring remain open.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.

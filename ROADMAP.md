@@ -1242,6 +1242,9 @@ object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.
 Garage S3 reconciliation now passes its controller-owned provider into that
 worker as well; multipart paths still need explicit provider injection.
+The core SubObject capacity ledger now has a strict, schema-versioned snapshot
+contract that preserves parent/child reservation links and rejects inconsistent
+restart state; daemon registry persistence and transport wiring remain open.
 The profile S3 seam now publishes bounded multipart completion metadata
 (ordered parts, per-part SHA-256 checksums, total-size and reservation
 validation) and a streaming assembler that verifies each declared part;
