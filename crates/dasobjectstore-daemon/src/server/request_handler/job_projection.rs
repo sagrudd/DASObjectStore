@@ -56,6 +56,28 @@ pub(super) fn daemon_job_summary_from_application_identity_registration(
     )
 }
 
+pub(super) fn daemon_job_summary_from_application_key_registration(
+    response: &ApplicationKeyRegistrationResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "application key {}/{} {}",
+            response.key.application_id,
+            response.key.key_id,
+            if response.replaced {
+                "replaced"
+            } else {
+                "registered"
+            }
+        ),
+    )
+}
+
 pub(super) fn daemon_job_summary_from_prepare_enclosure(
     response: &PrepareEnclosureResponse,
 ) -> DaemonJobSummary {

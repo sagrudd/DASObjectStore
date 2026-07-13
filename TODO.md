@@ -808,9 +808,10 @@ completion.
   - [~] Implement rotatable asymmetric-key or certificate identities and a
     short-lived access-token exchange (normally 5–15 minutes). Public key and
     certificate descriptors now have a versioned, daemon-owned rotation
-    registry with active/revoked state and fingerprints; private key custody,
-    proof verification, and exchange issuance remain. Do not issue long-lived
-    broadly scoped bearer access tokens.
+    registry with authenticated administrator registration, active/revoked
+    state, and fingerprints; private key custody, proof verification, and
+    exchange issuance remain. Do not issue long-lived broadly scoped bearer
+    access tokens.
   - [ ] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
     audience, expiry, and nonce; verify provider state before atomic catalogue

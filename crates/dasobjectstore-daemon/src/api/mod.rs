@@ -41,7 +41,9 @@ pub use appliance_telemetry::{
 };
 pub use application_identity::{
     ApplicationIdentityRegistrationRequest, ApplicationIdentityRegistrationResponse,
-    ApplicationIdentityRegistrationValidationError, APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
+    ApplicationIdentityRegistrationValidationError, ApplicationKeyRegistrationRequest,
+    ApplicationKeyRegistrationResponse, ApplicationKeyRegistrationValidationError,
+    APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
 };
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
@@ -224,6 +226,7 @@ pub enum DaemonApiRequest {
     ServiceLifecycle(DaemonServiceLifecycleRequest),
     ServiceProvision(DaemonServiceProvisionRequest),
     RegisterApplicationIdentity(ApplicationIdentityRegistrationRequest),
+    RegisterApplicationKey(ApplicationKeyRegistrationRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
@@ -275,6 +278,7 @@ impl DaemonApiRequest {
             Self::ServiceLifecycle(_) => "service_lifecycle",
             Self::ServiceProvision(_) => "service_provision",
             Self::RegisterApplicationIdentity(_) => "register_application_identity",
+            Self::RegisterApplicationKey(_) => "register_application_key",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
@@ -340,6 +344,9 @@ impl DaemonApiRequest {
             Self::RegisterApplicationIdentity(request) => request
                 .validate()
                 .map_err(application_identity_registration_validation_error),
+            Self::RegisterApplicationKey(request) => request
+                .validate()
+                .map_err(application_key_registration_validation_error),
             Self::PrepareEnclosure(request) => request
                 .validate()
                 .map_err(prepare_enclosure_validation_error),
@@ -434,6 +441,7 @@ pub enum DaemonApiResponse {
     ServiceLifecycle(DaemonServiceLifecycleResponse),
     ServiceProvision(DaemonServiceProvisionResponse),
     RegisterApplicationIdentity(ApplicationIdentityRegistrationResponse),
+    RegisterApplicationKey(ApplicationKeyRegistrationResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
@@ -546,6 +554,14 @@ fn endpoint_inventory_validation_error(
 
 fn application_identity_registration_validation_error(
     error: ApplicationIdentityRegistrationValidationError,
+) -> DaemonRequestValidationError {
+    DaemonRequestValidationError::InvalidPolicy {
+        message: error.to_string(),
+    }
+}
+
+fn application_key_registration_validation_error(
+    error: ApplicationKeyRegistrationValidationError,
 ) -> DaemonRequestValidationError {
     DaemonRequestValidationError::InvalidPolicy {
         message: error.to_string(),

@@ -25,6 +25,7 @@ where
         | DaemonApiRequest::ServiceLifecycle(_)
         | DaemonApiRequest::ServiceProvision(_)
         | DaemonApiRequest::RegisterApplicationIdentity(_)
+        | DaemonApiRequest::RegisterApplicationKey(_)
         | DaemonApiRequest::PrepareEnclosure(_)
         | DaemonApiRequest::CreateObjectStore(_)
         | DaemonApiRequest::RegisterProfileBinding(_)

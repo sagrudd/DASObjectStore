@@ -2,12 +2,12 @@ use crate::api::{
     query_appliance_telemetry, remote_easyconnect_renew_after_offset_seconds,
     resolve_remote_easyconnect_session_lifetime_seconds, ApplianceTelemetryRequest,
     ApplianceTelemetryResponse, ApplicationIdentityRegistrationResponse,
-    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
-    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    ApplicationKeyRegistrationResponse, AssignLocalUserToLocalGroupRequest,
+    AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
+    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobId, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
+    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
@@ -37,26 +37,27 @@ use crate::auth::{
 };
 use crate::runtime::{
     appliance_telemetry_state_path, application_identity_registry_path,
-    default_endpoint_registry_path, default_hdd_root, default_ssd_root, discover_managed_hdd_roots,
-    provision_garage_store_registry, query_object_browser_metadata, read_application_identity,
+    application_key_registry_path, default_endpoint_registry_path, default_hdd_root,
+    default_ssd_root, discover_managed_hdd_roots, provision_garage_store_registry,
+    query_object_browser_metadata, read_application_identity, read_application_key,
     read_object_browser_metadata, read_profile_binding, read_profile_binding_record,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    upsert_application_identity, upsert_endpoint_inventory_record, upsert_profile_binding,
-    validate_profile_binding_claim, AdminJobRegistry, ApplianceTelemetrySampleSet,
-    BackendProfileBinding, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    upsert_application_identity, upsert_application_key, upsert_endpoint_inventory_record,
+    upsert_profile_binding, validate_profile_binding_claim, AdminJobRegistry,
+    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, FolderBackend, FolderCatalogue,
+    FolderCatalogueBrowserQuery, FolderInspectionReport, GarageServiceController,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, ObjectBrowserQueryError, ReconciliationManifest,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
@@ -89,6 +90,7 @@ mod storage_reconciliation;
 
 use self::job_projection::{
     daemon_job_summary_from_application_identity_registration,
+    daemon_job_summary_from_application_key_registration,
     daemon_job_summary_from_create_object_store, daemon_job_summary_from_endpoint_inventory,
     daemon_job_summary_from_local_admin, daemon_job_summary_from_prepare_enclosure,
     daemon_job_summary_from_profile_binding, daemon_job_summary_from_service_lifecycle,
@@ -117,6 +119,7 @@ pub struct DaemonRequestHandler<S, C> {
     cancelled_job_ids: Arc<Mutex<BTreeSet<String>>>,
     profile_binding_registry_path: PathBuf,
     application_identity_registry_path: PathBuf,
+    application_key_registry_path: PathBuf,
 }
 impl<S, C> DaemonRequestHandler<S, C>
 where
@@ -151,6 +154,7 @@ where
             application_identity_registry_path: application_identity_registry_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            application_key_registry_path: application_key_registry_path(DEFAULT_DAEMON_STATE_DIR),
         }
     }
     pub fn new_with_admin_job_registry(
@@ -185,6 +189,7 @@ where
             application_identity_registry_path: application_identity_registry_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            application_key_registry_path: application_key_registry_path(DEFAULT_DAEMON_STATE_DIR),
         }
     }
     pub fn with_registry_paths(
@@ -216,6 +221,13 @@ where
         application_identity_registry_path: impl Into<PathBuf>,
     ) -> Self {
         self.application_identity_registry_path = application_identity_registry_path.into();
+        self
+    }
+    pub fn with_application_key_registry_path(
+        mut self,
+        application_key_registry_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.application_key_registry_path = application_key_registry_path.into();
         self
     }
     pub fn with_appliance_telemetry_state_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -1000,21 +1012,21 @@ mod tests {
     };
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
-        ApplicationIdentityRegistrationRequest, AssignLocalUserToLocalGroupRequest,
-        AssignLocalUserToLocalGroupResponse, CapacityAdmissionDecision, CapacityAdmissionRequest,
-        CapacityAdmissionResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
-        CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
-        DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-        DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
-        DaemonRequestValidationError, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest, ObjectBrowserDelegatedActor,
-        ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
-        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
-        ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
+        ApplicationIdentityRegistrationRequest, ApplicationKeyRegistrationRequest,
+        AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+        CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
+        CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
+        DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
+        DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+        DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
+        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest,
+        ObjectBrowserDelegatedActor, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
+        ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
@@ -1045,7 +1057,8 @@ mod tests {
     use crate::AdminJobRegistry;
     use dasobjectstore_core::application_auth::{
         ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
-        ApplicationOperation, ApplicationScope, APPLICATION_AUTH_SCHEMA_VERSION,
+        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
+        APPLICATION_AUTH_SCHEMA_VERSION,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
@@ -3628,6 +3641,28 @@ mod tests {
         }
     }
 
+    fn application_key_registration_request_for_auth_test(
+        application_id: &str,
+        key_id: &str,
+    ) -> ApplicationKeyRegistrationRequest {
+        ApplicationKeyRegistrationRequest {
+            key: ApplicationKeyDescriptor {
+                schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+                application_id: application_id.to_string(),
+                key_id: key_id.to_string(),
+                algorithm: ApplicationKeyAlgorithm::Ed25519,
+                public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+                issued_at_unix_seconds: 1_000,
+                expires_at_unix_seconds: 100_000,
+                active: true,
+            },
+            dry_run: false,
+            client_request_id: Some(format!("{application_id}-{key_id}-request")),
+            administrator_actor: Some("spoofed-request-actor".to_string()),
+            confirmation_marker: APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION.to_string(),
+        }
+    }
+
     #[test]
     fn rejects_profile_binding_without_authenticated_administrator() {
         let root = temp_root("profile-binding-no-actor");
@@ -3776,6 +3811,72 @@ mod tests {
             .expect("registration");
         let DaemonApiResponse::RegisterApplicationIdentity(response) = response else {
             panic!("expected application identity response");
+        };
+        assert_eq!(response.administrator_actor.as_deref(), Some("root"));
+        assert!(!response.replaced);
+        let serialized = serde_json::to_string(&response).expect("response serializes");
+        assert!(!serialized.contains("spoofed-request-actor"));
+        assert!(!serialized.contains("private_key"));
+        assert!(registry.exists());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn application_key_registration_requires_authenticated_administrator() {
+        let root = temp_root("application-key-auth");
+        let registry = root.join("application-keys.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:02:32Z"),
+        )
+        .with_application_key_registry_path(&registry);
+        let request = application_key_registration_request_for_auth_test("no-actor", "key-1");
+        let unauthenticated = handler
+            .handle(DaemonApiRequest::RegisterApplicationKey(request.clone()))
+            .expect("request handled");
+        assert!(matches!(
+            unauthenticated,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+        let operator = DaemonLocalActor::new(1000).with_groups(["bioinformatics"]);
+        let unauthorized = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterApplicationKey(request),
+                Some(&operator),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            unauthorized,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authorization_required"
+        ));
+        assert!(!registry.exists());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn application_key_registration_persists_descriptor_and_redacts_request_actor() {
+        let root = temp_root("application-key-admin");
+        let registry = root.join("application-keys.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:02:33Z"),
+        )
+        .with_application_key_registry_path(&registry);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterApplicationKey(
+                    application_key_registration_request_for_auth_test("admin", "key-1"),
+                ),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("registration");
+        let DaemonApiResponse::RegisterApplicationKey(response) = response else {
+            panic!("expected application key response");
         };
         assert_eq!(response.administrator_actor.as_deref(), Some("root"));
         assert!(!response.replaced);
