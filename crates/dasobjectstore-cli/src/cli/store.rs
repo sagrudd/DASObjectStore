@@ -20,6 +20,9 @@ impl StoreArgs {
 pub(crate) enum StoreCommand {
     /// Adopt portable object stores from a DAS SSD on this host.
     Adopt(StoreAdoptArgs),
+    /// Register a daemon-owned folder or drive profile binding from a manifest.
+    #[command(name = "profile-binding")]
+    ProfileBinding(StoreProfileBindingArgs),
     /// Inspect objects and aggregate folder sizes in a store.
     #[command(alias = "objects", alias = "list-contents")]
     Contents(StoreContentsArgs),
@@ -49,6 +52,61 @@ pub(crate) enum StoreCommand {
     S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
     Validate(StoreValidateArgs),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum StoreProfileBindingOperation {
+    Create,
+    Adopt,
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileBindingArgs {
+    /// JSON file containing a versioned ObjectStore manifest.
+    #[arg(long)]
+    manifest: PathBuf,
+    /// Daemon-visible canonical backend root for this profile.
+    #[arg(long)]
+    backend_root: PathBuf,
+    /// Optional daemon-visible SSD staging root for external ingress.
+    #[arg(long)]
+    ssd_staging_root: Option<PathBuf>,
+    /// Explicit profile lifecycle operation.
+    #[arg(long, value_enum, default_value_t = StoreProfileBindingOperation::Create)]
+    operation: StoreProfileBindingOperation,
+    /// Perform validation without writing the daemon registry.
+    #[arg(long)]
+    dry_run: bool,
+    /// Required confirmation marker for the daemon mutation.
+    #[arg(long, default_value = "confirm profile binding")]
+    confirm: String,
+    /// Emit the daemon response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileBindingArgs {
+    pub(crate) fn manifest(&self) -> &Path {
+        &self.manifest
+    }
+    pub(crate) fn backend_root(&self) -> &Path {
+        &self.backend_root
+    }
+    pub(crate) fn ssd_staging_root(&self) -> Option<&Path> {
+        self.ssd_staging_root.as_deref()
+    }
+    pub(crate) fn operation(&self) -> StoreProfileBindingOperation {
+        self.operation
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -588,7 +646,7 @@ impl StoreContentsArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{StoreCommand, StoreIngestMode, StoreS3UploadAuth};
+    use super::{StoreCommand, StoreIngestMode, StoreProfileBindingOperation, StoreS3UploadAuth};
     use crate::cli::{Cli, Command};
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -685,6 +743,35 @@ mod tests {
         };
         assert_eq!(capacity.store_id().as_str(), "generated-data");
         assert!(capacity.json());
+    }
+
+    #[test]
+    fn parses_profile_binding_create_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-binding",
+            "--manifest",
+            "/tmp/manifest.json",
+            "--backend-root",
+            "/tmp/store",
+            "--operation",
+            "adopt",
+            "--dry-run",
+            "--json",
+        ])
+        .expect("profile binding parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileBinding(binding)) = args.command() else {
+            panic!("expected profile binding command")
+        };
+        assert_eq!(binding.manifest(), Path::new("/tmp/manifest.json"));
+        assert_eq!(binding.backend_root(), Path::new("/tmp/store"));
+        assert_eq!(binding.operation(), StoreProfileBindingOperation::Adopt);
+        assert!(binding.dry_run());
+        assert!(binding.json());
     }
 
     #[test]

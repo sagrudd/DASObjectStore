@@ -3,6 +3,50 @@
 use super::*;
 use dasobjectstore_core::store::{CapacityBehavior, ExportPolicy, RetentionPolicy};
 
+pub(super) fn run_store_profile_binding(
+    args: &StoreProfileBindingArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let manifest_json = fs::read_to_string(args.manifest()).map_err(CliError::Io)?;
+    let manifest = ObjectStoreManifest::decode_json(&manifest_json)
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let operation = match args.operation() {
+        StoreProfileBindingOperation::Create => ProfileBindingOperation::Create,
+        StoreProfileBindingOperation::Adopt => ProfileBindingOperation::Adopt,
+    };
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .register_profile_binding(ProfileBindingRequest {
+            operation,
+            manifest,
+            backend_root: args.backend_root().to_path_buf(),
+            ssd_staging_root: args.ssd_staging_root().map(Path::to_path_buf),
+            dry_run: args.dry_run(),
+            client_request_id: None,
+            administrator_actor: std::env::var("USER").ok(),
+            confirmation_marker: args.confirm().to_string(),
+        })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(
+            writer,
+            "Profile binding {}",
+            if args.dry_run() {
+                "validated"
+            } else {
+                "registered"
+            }
+        )?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Profile: {}", response.deployment_profile.name())?;
+        writeln!(writer, "Backend root: {}", response.backend_root.display())?;
+        writeln!(writer, "Job: {}", response.accepted.job_id)?;
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_drain(
     args: &StoreDrainArgs,
     writer: &mut impl Write,

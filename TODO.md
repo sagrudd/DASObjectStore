@@ -297,6 +297,10 @@ completion.
     typed CLI/client transport without leaking host paths into consumer
     storage definitions. Backend opening, quota-ledger initialization, and
     store-registry publication remain an ordered orchestration follow-up.
+  - [x] Add the ``store profile-binding`` CLI workflow with portable-manifest
+    decoding, explicit create/adopt operation, dry-run confirmation, and
+    daemon-client submission; backend opening and publication ordering remain
+    daemon orchestration follow-up.
 - [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
