@@ -17,6 +17,7 @@ mod object_mutation;
 mod object_store;
 mod profile_binding;
 mod profile_capabilities;
+mod profile_inspection;
 mod remote_easyconnect;
 mod service;
 mod storage_mutation;
@@ -123,6 +124,10 @@ pub use profile_capabilities::{
     discover_profile_capabilities, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, ObjectStoreCapabilityValidationError,
 };
+pub use profile_inspection::{
+    ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
+    PROFILE_INSPECTION_SCHEMA_VERSION,
+};
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
     remote_easyconnect_object_store_grants_for_actor,
@@ -206,6 +211,7 @@ pub enum DaemonApiRequest {
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
+    ProfileInspection(ProfileInspectionRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
     CapacityStatus(CapacityStatusRequest),
@@ -254,6 +260,7 @@ impl DaemonApiRequest {
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
+            Self::ProfileInspection(_) => "profile_inspection",
             Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::CapacityAdmission(_) => "capacity_admission",
             Self::CapacityStatus(_) => "capacity_status",
@@ -320,6 +327,7 @@ impl DaemonApiRequest {
             Self::RegisterProfileBinding(request) => {
                 request.validate().map_err(profile_binding_validation_error)
             }
+            Self::ProfileInspection(_) => Ok(()),
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
                 .validate()
@@ -405,6 +413,7 @@ pub enum DaemonApiResponse {
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
+    ProfileInspection(ProfileInspectionResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),
     CapacityStatus(CapacityStatusResponse),

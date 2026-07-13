@@ -25,7 +25,8 @@ use crate::api::{
     ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
     ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, RemoteEasyconnectApprovePairingRequest,
+    ProfileBindingRequest, ProfileBindingResponse, ProfileInspectionRequest,
+    ProfileInspectionResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
     RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
@@ -384,6 +385,16 @@ where
         }
     }
 
+    pub fn profile_inspection(
+        &self,
+        request: ProfileInspectionRequest,
+    ) -> Result<ProfileInspectionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileInspection(request))? {
+            DaemonApiResponse::ProfileInspection(response) => Ok(response),
+            response => Err(unexpected("profile_inspection", response)),
+        }
+    }
+
     pub fn profile_capabilities(
         &self,
         request: ObjectStoreCapabilityDiscoveryRequest,
@@ -598,6 +609,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
+        DaemonApiResponse::ProfileInspection(_) => "profile_inspection",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
         DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",
         DaemonApiResponse::CapacityStatus(_) => "capacity_status",
@@ -649,6 +661,7 @@ mod tests {
         ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
         ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
         RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
         RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
@@ -684,6 +697,38 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::StoreInventory(_)]
+        ));
+    }
+
+    #[test]
+    fn profile_inspection_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ProfileInspection(
+                ProfileInspectionResponse {
+                    schema_version: crate::api::PROFILE_INSPECTION_SCHEMA_VERSION.to_string(),
+                    store_id: StoreId::new("codex").expect("store id"),
+                    deployment_profile: dasobjectstore_core::deployment::DeploymentProfile::Folder,
+                    host_mode: dasobjectstore_core::deployment::HostMode::PerUser,
+                    protection: dasobjectstore_core::protection::ProtectionPolicy::LocalOnly,
+                    root_state: ProfileInspectionRootState::Available,
+                    unmanaged_path_count: 1,
+                    unsafe_path_count: 0,
+                    warnings: Vec::new(),
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+        let response = client
+            .profile_inspection(ProfileInspectionRequest {
+                store_id: StoreId::new("codex").expect("store id"),
+            })
+            .expect("profile inspection response");
+        assert_eq!(response.unmanaged_path_count, 1);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ProfileInspection(_)]
         ));
     }
 

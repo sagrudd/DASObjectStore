@@ -13,7 +13,8 @@ use crate::api::{
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, RemoteEasyconnectApprovePairingRequest,
+    ProfileBindingRequest, ProfileBindingResponse, ProfileInspectionResponse,
+    ProfileInspectionRootState, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
     RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
@@ -36,7 +37,7 @@ use crate::auth::{
 use crate::runtime::{
     appliance_telemetry_state_path, default_endpoint_registry_path, default_hdd_root,
     default_ssd_root, discover_managed_hdd_roots, provision_garage_store_registry,
-    query_object_browser_metadata, read_object_browser_metadata,
+    query_object_browser_metadata, read_object_browser_metadata, read_profile_binding_record,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
     upsert_endpoint_inventory_record, upsert_profile_binding, validate_profile_binding_claim,
@@ -997,7 +998,8 @@ mod tests {
         ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileBindingOperation, ProfileBindingRequest, RemoteEasyconnectApprovePairingRequest,
+        ProfileBindingOperation, ProfileBindingRequest, ProfileInspectionRequest,
+        ProfileInspectionRootState, RemoteEasyconnectApprovePairingRequest,
         RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
         RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
@@ -3656,6 +3658,103 @@ mod tests {
         let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains("backend_root"));
         assert!(!serialized.contains("ssd_staging_root"));
+        assert!(!serialized.contains(root.to_string_lossy().as_ref()));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn profile_inspection_requires_authenticated_actor_and_redacts_paths() {
+        let root = temp_root("profile-inspection-auth");
+        fs::create_dir_all(&root).expect("backend root");
+        fs::write(root.join("user.txt"), b"unmanaged").expect("user file");
+        let registry = root.with_extension("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:03:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+        let binding_request = profile_binding_request_for_auth_test("inspect", root.clone());
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(binding_request),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("binding registration");
+
+        let unauthenticated = handler
+            .handle(DaemonApiRequest::ProfileInspection(
+                ProfileInspectionRequest {
+                    store_id: StoreId::new("inspect").expect("store id"),
+                },
+            ))
+            .expect("request handled");
+        assert!(matches!(
+            unauthenticated,
+            DaemonApiResponse::Error(error)
+                if error.code == "profile_inspection_authentication_required"
+        ));
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileInspection(ProfileInspectionRequest {
+                    store_id: StoreId::new("inspect").expect("store id"),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("inspection");
+        let DaemonApiResponse::ProfileInspection(response) = response else {
+            panic!("expected profile inspection response");
+        };
+        assert_eq!(response.root_state, ProfileInspectionRootState::Available);
+        assert_eq!(response.unmanaged_path_count, 1);
+        let serialized = serde_json::to_string(&response).expect("response serializes");
+        assert!(!serialized.contains(root.to_string_lossy().as_ref()));
+        assert!(!serialized.contains("backend_root"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn profile_inspection_missing_root_is_read_only_and_redacted() {
+        let root = temp_root("profile-inspection-missing");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend root");
+        let registry = root.with_extension("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:04:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
+                    "missing",
+                    backend.clone(),
+                )),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("binding registration");
+        fs::remove_dir_all(&backend).expect("remove backend");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileInspection(ProfileInspectionRequest {
+                    store_id: StoreId::new("missing").expect("store id"),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("inspection");
+        let DaemonApiResponse::ProfileInspection(response) = response else {
+            panic!("expected profile inspection response");
+        };
+        assert_eq!(response.root_state, ProfileInspectionRootState::Missing);
+        assert!(!backend.exists());
+        let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains(root.to_string_lossy().as_ref()));
         cleanup(&root);
     }

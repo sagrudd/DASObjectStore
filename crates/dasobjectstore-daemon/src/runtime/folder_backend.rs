@@ -64,6 +64,24 @@ impl FolderInspectionReport {
 }
 
 impl FolderBackend {
+    /// Inspect an existing folder root without creating the private managed
+    /// namespace or catalogue. This is used by read-only diagnostics when a
+    /// persisted binding may refer to an unmounted or missing root.
+    pub fn inspect_user_tree_at(
+        root: impl AsRef<Path>,
+    ) -> Result<FolderInspectionReport, BackendError> {
+        let root = root.as_ref();
+        let metadata = fs::symlink_metadata(root).map_err(io_error)?;
+        if !metadata.is_dir() {
+            return Err(BackendError::InvalidRequest(
+                "folder inspection root is not a directory".to_string(),
+            ));
+        }
+        let mut report = FolderInspectionReport::default();
+        inspect_user_tree(root, root, &mut report)?;
+        Ok(report)
+    }
+
     pub fn open(
         root: impl Into<PathBuf>,
         manifest: ObjectStoreManifest,

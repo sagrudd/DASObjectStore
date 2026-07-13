@@ -133,6 +133,86 @@ where
             handler.record_admin_job(daemon_job_summary_from_profile_binding(&response))?;
             Ok(DaemonApiResponse::RegisterProfileBinding(response))
         }
+        DaemonApiRequest::ProfileInspection(request) => {
+            let Some(actor) = actor else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_inspection_authentication_required",
+                    "profile inspection requires an authenticated daemon actor",
+                )));
+            };
+            if !actor.is_administrator()
+                && handler
+                    .authorize_endpoint_read(Some(actor), &request.store_id)
+                    .is_err()
+            {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_inspection_authorization_required",
+                    "profile inspection requires administrator authority or store read access",
+                )));
+            }
+            let binding = match read_profile_binding_record(
+                &handler.profile_binding_registry_path,
+                request.store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_binding_not_found",
+                        "no persisted profile binding exists for this ObjectStore",
+                    )))
+                }
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_inspection_unavailable",
+                        "the persisted profile binding could not be inspected",
+                    )))
+                }
+            };
+            let mut response = ProfileInspectionResponse {
+                schema_version: crate::api::PROFILE_INSPECTION_SCHEMA_VERSION.to_string(),
+                store_id: binding.manifest.store_id.clone(),
+                deployment_profile: binding.manifest.deployment_profile,
+                host_mode: binding.manifest.host_mode,
+                protection: binding.manifest.protection,
+                root_state: ProfileInspectionRootState::Available,
+                unmanaged_path_count: 0,
+                unsafe_path_count: 0,
+                warnings: Vec::new(),
+            };
+            match fs::symlink_metadata(&binding.backend_root) {
+                Ok(metadata) if !metadata.is_dir() => {
+                    response.root_state = ProfileInspectionRootState::NotDirectory;
+                }
+                Ok(_) if binding.manifest.deployment_profile == DeploymentProfile::Folder => {
+                    match FolderBackend::inspect_user_tree_at(&binding.backend_root) {
+                        Ok(report) => {
+                            response.unmanaged_path_count = report.unmanaged_paths.len();
+                            response.unsafe_path_count = report.unsafe_paths.len();
+                        }
+                        Err(_) => {
+                            response.root_state = ProfileInspectionRootState::Unreadable;
+                            response.warnings.push(
+                                "folder drift could not be read without changing the managed namespace"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    response.root_state = ProfileInspectionRootState::Missing;
+                }
+                Err(_) => {
+                    response.root_state = ProfileInspectionRootState::Unreadable;
+                }
+            }
+            response.validate().map_err(|error| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation { operation: error },
+                )
+            })?;
+            Ok(DaemonApiResponse::ProfileInspection(response))
+        }
         DaemonApiRequest::UpsertEndpointInventory(request) => {
             let now = handler.clock.now_utc();
             let response = handler

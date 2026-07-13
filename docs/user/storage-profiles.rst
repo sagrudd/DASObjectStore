@@ -46,6 +46,14 @@ SQLite catalogue. A profile-aware registry and metadata contract must be
 approved before folder rows are exposed through the shared ObjectBrowser/Web
 surface.
 
+The daemon also exposes an authenticated ``profile_inspection`` request for
+operator drift checks. It returns only the profile identity, root availability,
+and unmanaged/unsafe entry counts; daemon-owned filesystem paths and
+user-relative keys are never serialized. A missing or unmounted root is
+reported without recreating ``.dasobjectstore`` or its catalogue. Mutating
+profile operations remain administrator-authorized and require their separate
+confirmation contract.
+
 The private ``.dasobjectstore`` namespace and its object/staging descendants
 are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized
 payload files use ``0600``. The user-selected folder root is never chmod'ed;

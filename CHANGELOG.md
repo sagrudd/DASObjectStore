@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.8 - 2026-07-13
+
+- Add authenticated redacted profile inspection for folder drift and missing
+  roots without exposing daemon-owned paths or recreating storage namespaces.
+
 ## 0.76.7 - 2026-07-13
 
 - Require authenticated local administrator authorization for profile-binding

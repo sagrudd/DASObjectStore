@@ -511,6 +511,9 @@ completion.
   - [x] Preserve a non-canonical persisted binding read for missing/unmounted
     roots so diagnostics can report drift; capacity probes and backend opens
     continue to fail closed on unavailable roots.
+  - [x] Add an authenticated, redacted ``profile_inspection`` transport that
+    reports root state and drift counts without host paths or user-relative
+    keys; missing roots are inspected without recreating the private namespace.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.
