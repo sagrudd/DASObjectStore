@@ -25,8 +25,8 @@ use crate::api::{
     ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
     ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, ProfileInspectionRequest,
-    ProfileInspectionResponse, RemoteEasyconnectApprovePairingRequest,
+    ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
+    ProfileInspectionRequest, ProfileInspectionResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
     RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
@@ -395,6 +395,16 @@ where
         }
     }
 
+    pub fn profile_browser(
+        &self,
+        request: ProfileBrowserRequest,
+    ) -> Result<ProfileBrowserResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileBrowser(request))? {
+            DaemonApiResponse::ProfileBrowser(response) => Ok(response),
+            response => Err(unexpected("profile_browser", response)),
+        }
+    }
+
     pub fn profile_capabilities(
         &self,
         request: ObjectStoreCapabilityDiscoveryRequest,
@@ -609,6 +619,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
+        DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
         DaemonApiResponse::ProfileInspection(_) => "profile_inspection",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
         DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",
@@ -661,7 +672,8 @@ mod tests {
         ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
         ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
+        ProfileBrowserRequest, ProfileBrowserResponse, ProfileInspectionRequest,
+        ProfileInspectionResponse, ProfileInspectionRootState,
         RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
         RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
         RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
@@ -729,6 +741,41 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::ProfileInspection(_)]
+        ));
+    }
+
+    #[test]
+    fn profile_browser_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ProfileBrowser(ProfileBrowserResponse {
+                schema_version: crate::api::PROFILE_BROWSER_SCHEMA_VERSION.to_string(),
+                store_id: StoreId::new("codex").expect("store id"),
+                profile: dasobjectstore_core::deployment::DeploymentProfile::Folder,
+                entries: Vec::new(),
+                next_offset: None,
+                total_entries: 0,
+            }))
+        });
+        let client = DaemonClient::new(transport);
+        let response = client
+            .profile_browser(ProfileBrowserRequest {
+                store_id: StoreId::new("codex").expect("store id"),
+                prefix: Some("reads".to_string()),
+                search: None,
+                offset: 0,
+                limit: 100,
+                delegated_actor: None,
+            })
+            .expect("profile browser response");
+        assert_eq!(
+            response.profile,
+            dasobjectstore_core::deployment::DeploymentProfile::Folder
+        );
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ProfileBrowser(_)]
         ));
     }
 

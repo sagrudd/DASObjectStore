@@ -54,6 +54,21 @@ pub struct FolderCatalogue {
 }
 
 impl FolderCatalogue {
+    /// Open an existing private catalogue without creating a namespace. This
+    /// is the read-only browser boundary used by profile transports.
+    pub fn open_existing(
+        path: impl Into<PathBuf>,
+        store_id: impl Into<String>,
+    ) -> Result<Self, BackendError> {
+        let path = path.into();
+        if !path.is_file() {
+            return Err(BackendError::NotFound(
+                "folder catalogue is unavailable".to_string(),
+            ));
+        }
+        Self::open(path, store_id)
+    }
+
     pub fn open(
         path: impl Into<PathBuf>,
         store_id: impl Into<String>,
@@ -116,17 +131,30 @@ impl FolderCatalogue {
                 "folder catalogue page limit exceeds {MAX_BROWSER_PAGE_SIZE}"
             )));
         }
-        let prefix = query.prefix.as_deref().unwrap_or_default();
-        let search = query.search.as_deref().unwrap_or_default();
         Ok(self
-            .records()
+            .matching_records(query)
             .into_iter()
-            .filter(|record| record.key.object_id.starts_with(prefix))
-            .filter(|record| search.is_empty() || record.key.object_id.contains(search))
             .skip(query.offset)
             .take(limit)
             .map(FolderCatalogueBrowserEntry::from)
             .collect())
+    }
+
+    pub fn browser_entry_count(
+        &self,
+        query: &FolderCatalogueBrowserQuery,
+    ) -> Result<u64, BackendError> {
+        Ok(self.matching_records(query).len() as u64)
+    }
+
+    fn matching_records(&self, query: &FolderCatalogueBrowserQuery) -> Vec<BackendObjectRecord> {
+        let prefix = query.prefix.as_deref().unwrap_or_default();
+        let search = query.search.as_deref().unwrap_or_default();
+        self.records()
+            .into_iter()
+            .filter(|record| record.key.object_id.starts_with(prefix))
+            .filter(|record| search.is_empty() || record.key.object_id.contains(search))
+            .collect()
     }
 
     pub fn commit_records(
@@ -269,6 +297,15 @@ mod tests {
             checksum: "sha256:abcd".to_string(),
             location: ".dasobjectstore/objects/incoming/data.txt".to_string(),
         }
+    }
+
+    #[test]
+    fn open_existing_does_not_create_missing_catalogue() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        assert!(FolderCatalogue::open_existing(&path, "codex").is_err());
+        assert!(!path.exists());
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

@@ -16,6 +16,7 @@ mod object_browser;
 mod object_mutation;
 mod object_store;
 mod profile_binding;
+mod profile_browser;
 mod profile_capabilities;
 mod profile_inspection;
 mod remote_easyconnect;
@@ -120,6 +121,10 @@ pub use profile_binding::{
     ProfileBindingOperation, ProfileBindingRequest, ProfileBindingResponse,
     ProfileBindingValidationError, PROFILE_BINDING_CONFIRMATION,
 };
+pub use profile_browser::{
+    ProfileBrowserEntry, ProfileBrowserRequest, ProfileBrowserResponse,
+    PROFILE_BROWSER_MAX_PAGE_LIMIT, PROFILE_BROWSER_SCHEMA_VERSION,
+};
 pub use profile_capabilities::{
     discover_profile_capabilities, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, ObjectStoreCapabilityValidationError,
@@ -211,6 +216,7 @@ pub enum DaemonApiRequest {
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
+    ProfileBrowser(ProfileBrowserRequest),
     ProfileInspection(ProfileInspectionRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
@@ -260,6 +266,7 @@ impl DaemonApiRequest {
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
+            Self::ProfileBrowser(_) => "profile_browser",
             Self::ProfileInspection(_) => "profile_inspection",
             Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::CapacityAdmission(_) => "capacity_admission",
@@ -327,6 +334,7 @@ impl DaemonApiRequest {
             Self::RegisterProfileBinding(request) => {
                 request.validate().map_err(profile_binding_validation_error)
             }
+            Self::ProfileBrowser(request) => request.validate(),
             Self::ProfileInspection(_) => Ok(()),
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
@@ -413,6 +421,7 @@ pub enum DaemonApiResponse {
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
+    ProfileBrowser(ProfileBrowserResponse),
     ProfileInspection(ProfileInspectionResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),
@@ -825,13 +834,14 @@ mod tests {
         DaemonServiceProvisionRequest, DaemonServiceStatusRequest, DaemonSsdPressure,
         IngestControlRequest, ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort,
         ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, ProfileBrowserRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        UpsertEndpointInventoryRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
@@ -1063,6 +1073,22 @@ mod tests {
         assert_eq!(encoded["command"], "object_browser");
         assert_eq!(encoded["payload"]["prefix"], "ENA/Xenognostikon");
         assert_eq!(encoded["payload"]["page"]["limit"], 100);
+    }
+
+    #[test]
+    fn profile_browser_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::ProfileBrowser(ProfileBrowserRequest {
+            store_id: StoreId::new("codex").expect("store id"),
+            prefix: Some("reads".to_string()),
+            search: None,
+            offset: 0,
+            limit: 100,
+            delegated_actor: None,
+        });
+        request.validate().expect("request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["command"], "profile_browser");
+        assert_eq!(encoded["payload"]["limit"], 100);
     }
 
     #[test]

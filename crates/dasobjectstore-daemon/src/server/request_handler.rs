@@ -13,8 +13,8 @@ use crate::api::{
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, ProfileInspectionResponse,
-    ProfileInspectionRootState, RemoteEasyconnectApprovePairingRequest,
+    ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
+    ProfileInspectionResponse, ProfileInspectionRootState, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
     RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
@@ -28,7 +28,7 @@ use crate::api::{
     StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    UpsertEndpointInventoryResponse, PROFILE_BROWSER_SCHEMA_VERSION,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,
@@ -37,23 +37,24 @@ use crate::auth::{
 use crate::runtime::{
     appliance_telemetry_state_path, default_endpoint_registry_path, default_hdd_root,
     default_ssd_root, discover_managed_hdd_roots, provision_garage_store_registry,
-    query_object_browser_metadata, read_object_browser_metadata, read_profile_binding_record,
-    remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
-    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    upsert_endpoint_inventory_record, upsert_profile_binding, validate_profile_binding_claim,
-    AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
-    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    FolderBackend, FolderInspectionReport, GarageServiceController, LocalAdminRuntimeError,
-    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
-    ObjectBrowserQueryError, ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    query_object_browser_metadata, read_object_browser_metadata, read_profile_binding,
+    read_profile_binding_record, remote_easyconnect_pairing_store_path,
+    remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
+    resolve_object_folder_download_with_hdd_root, upsert_endpoint_inventory_record,
+    upsert_profile_binding, validate_profile_binding_claim, AdminJobRegistry,
+    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, FolderBackend, FolderCatalogue,
+    FolderCatalogueBrowserQuery, FolderInspectionReport, GarageServiceController,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, ObjectBrowserQueryError, ReconciliationManifest,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
@@ -998,16 +999,16 @@ mod tests {
         ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileBindingOperation, ProfileBindingRequest, ProfileInspectionRequest,
-        ProfileInspectionRootState, RemoteEasyconnectApprovePairingRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
+        ProfileInspectionRequest, ProfileInspectionRootState,
+        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
         ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
@@ -3756,6 +3757,76 @@ mod tests {
         assert!(!backend.exists());
         let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains(root.to_string_lossy().as_ref()));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn profile_browser_reads_folder_catalogue_without_exposing_backend_metadata() {
+        let root = temp_root("profile-browser");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend root");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "browser", Some("users"));
+        let profile_registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:06:00Z"),
+        )
+        .with_registry_paths(store_registry, subobject_registry)
+        .with_profile_binding_registry_path(&profile_registry);
+        let actor = DaemonLocalActor::new(0)
+            .with_username("root")
+            .with_groups(["users"]);
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
+                    "browser",
+                    backend.clone(),
+                )),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("binding registration");
+
+        let catalogue_path = backend.join(".dasobjectstore/catalogue.json");
+        let mut catalogue =
+            crate::runtime::FolderCatalogue::open_existing(&catalogue_path, "browser")
+                .expect("catalogue exists");
+        catalogue
+            .commit_records([dasobjectstore_core::backend::BackendObjectRecord {
+                key: dasobjectstore_core::backend::BackendObjectKey {
+                    object_id: "nested/sample.fastq".to_string(),
+                    version: 1,
+                },
+                size_bytes: 42,
+                checksum: "sha256:sample".to_string(),
+                location: ".dasobjectstore/objects/nested/sample.fastq".to_string(),
+            }])
+            .expect("catalogue record");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileBrowser(ProfileBrowserRequest {
+                    store_id: StoreId::new("browser").expect("store id"),
+                    prefix: Some("nested".to_string()),
+                    search: None,
+                    offset: 0,
+                    limit: 10,
+                    delegated_actor: None,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile browser");
+        let DaemonApiResponse::ProfileBrowser(response) = response else {
+            panic!("expected profile browser response");
+        };
+        assert_eq!(response.entries.len(), 1);
+        assert_eq!(response.entries[0].key.object_id, "nested/sample.fastq");
+        assert_eq!(response.total_entries, 1);
+        let serialized = serde_json::to_string(&response).expect("response serializes");
+        assert!(!serialized.contains("backend_root"));
+        assert!(!serialized.contains("location"));
         cleanup(&root);
     }
 

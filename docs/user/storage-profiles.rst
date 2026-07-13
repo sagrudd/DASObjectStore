@@ -269,6 +269,19 @@ The CLI exposes the same contract through ``dasobjectstore store capabilities``
 (``--json`` is available for automation); it does not bypass daemon authority
 or claim that an appliance is reachable.
 
+Profile catalogue browsing
+--------------------------
+
+Folder and drive profiles keep their authoritative catalogue separate from
+appliance placement metadata. Consumers that need a read-only listing should
+use the typed daemon ``profile_browser`` request for a bounded folder profile.
+It supports prefix/search paging and returns only immutable object keys,
+versions, logical sizes, and checksums. Backend roots, staging paths,
+credentials, object-type guesses, lifecycle claims, and placement are not
+returned. A missing catalogue is reported as unavailable without creating a
+namespace. Drive browsing remains unavailable until the daemon can validate the
+live filesystem/device identity guard for that request.
+
 Per-user macOS service plans
 ----------------------------
 

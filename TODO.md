@@ -592,6 +592,11 @@ completion.
     keys, sizes, checksums, and private locations are preserved; appliance-only
     object type, lifecycle, and placement fields remain explicitly unknown.
     Profile-aware registry selection and shared SQLite authority remain open.
+  - [x] Wire a typed, daemon-authorized profile-browser transport for bounded
+    folder catalogues. The versioned response preserves keys, versions, sizes,
+    and checksums while omitting private locations and unsupported appliance
+    metadata; missing catalogues never get created and drive browsing remains
+    guarded until live identity probing is available.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

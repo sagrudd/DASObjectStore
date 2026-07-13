@@ -251,6 +251,117 @@ where
                 .map(DaemonApiResponse::ObjectBrowser)
                 .map_err(Into::into)
         }
+        DaemonApiRequest::ProfileBrowser(request) => {
+            let delegated_actor = match handler
+                .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
+            {
+                Ok(actor) => actor,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let effective_actor = delegated_actor.as_ref().or(actor);
+            let store_id = match handler.authorize_endpoint_read(effective_actor, &request.store_id)
+            {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_browser_unavailable",
+                        "profile browser requires a registered bounded folder profile",
+                    )));
+                }
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_browser_unavailable",
+                        "profile browser could not load the registered profile",
+                    )));
+                }
+            };
+            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_browser_unavailable",
+                    "profile browser is available for bounded folder profiles only",
+                )));
+            }
+            let catalogue_path = binding.backend_root.join(".dasobjectstore/catalogue.json");
+            let catalogue = match FolderCatalogue::open_existing(&catalogue_path, store_id.as_str())
+            {
+                Ok(catalogue) => catalogue,
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_browser_unavailable",
+                        "profile catalogue is unavailable",
+                    )));
+                }
+            };
+            let offset = match usize::try_from(request.offset) {
+                Ok(offset) => offset,
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_browser_unavailable",
+                        "profile browser offset is too large",
+                    )));
+                }
+            };
+            let query = FolderCatalogueBrowserQuery {
+                prefix: request.prefix.clone(),
+                search: request.search.clone(),
+                offset,
+                limit: usize::from(request.limit),
+            };
+            let entries = match catalogue.browser_entries(&query) {
+                Ok(entries) => entries
+                    .into_iter()
+                    .map(|entry| ProfileBrowserEntry {
+                        key: entry.key,
+                        size_bytes: entry.size_bytes,
+                        checksum: entry.checksum,
+                    })
+                    .collect(),
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_browser_unavailable",
+                        "profile catalogue query failed",
+                    )));
+                }
+            };
+            let total_entries = match catalogue.browser_entry_count(&query) {
+                Ok(total_entries) => total_entries,
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_browser_unavailable",
+                        "profile catalogue count failed",
+                    )));
+                }
+            };
+            let next_offset = request
+                .offset
+                .checked_add(u64::from(request.limit))
+                .filter(|next| *next < total_entries);
+            Ok(DaemonApiResponse::ProfileBrowser(ProfileBrowserResponse {
+                schema_version: PROFILE_BROWSER_SCHEMA_VERSION.to_string(),
+                store_id,
+                profile: DeploymentProfile::Folder,
+                entries,
+                next_offset,
+                total_entries,
+            }))
+        }
         DaemonApiRequest::ObjectDownload(request) => {
             let delegated_actor = match handler
                 .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())

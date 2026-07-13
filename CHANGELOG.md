@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.16 - 2026-07-13
+
+- Add an authorized, profile-neutral folder catalogue browser transport that
+  preserves logical identity and checksums without exposing backend paths.
+
 ## 0.76.15 - 2026-07-13
 
 - Add core capacity-ledger regressions for contended admission, quota
