@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.82 - 2026-07-13
+
+- Add the typed Web client getter and encoded path helper for authenticated
+  store-scoped live capacity status.
+
 ## 0.72.81 - 2026-07-13
 
 - Add an authenticated store-scoped Web capacity-status route through the

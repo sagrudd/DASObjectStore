@@ -103,9 +103,23 @@ pub async fn get_cached_home_dashboard(
     get_json(path).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn get_store_capacity(path: &str) -> Result<ObjectStoreCapacityStatusResponse, ApiError> {
+    get_json(path).await
+}
+
 #[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 pub fn cached_home_dashboard_api_path(api_base_path: &str) -> String {
     format!("{}/dashboard/status", api_base_path.trim_end_matches('/'))
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub fn store_capacity_api_path(api_base_path: &str, store_id: &str) -> String {
+    format!(
+        "{}/dashboard/object-stores/{}/capacity",
+        api_base_path.trim_end_matches('/'),
+        percent_encode(store_id.trim())
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -590,12 +604,12 @@ mod tests {
         activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
         auth_path, cached_home_dashboard_api_path, endpoint_inventory_upsert_path,
         object_browser_api_path, object_download_api_path, object_folder_download_api_path,
-        object_store_create_path, object_store_ingest_policy_path, ActivityWorkspaceResponse,
-        AdminJobCancelResponse, AdminJobStatusResponse, BioinformaticsWorkspaceResponse,
-        CreateObjectStoreResponse, EnclosurePrepareResponse, EnclosuresPageResponse,
-        EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse, GuiActionPlanResponse,
-        HomeDashboardResponse, LocalGroupAdminResponse, ObjectStoresPageResponse,
-        RemoteUploadWorkspaceResponse, UsersGroupsWorkspaceResponse,
+        object_store_create_path, object_store_ingest_policy_path, store_capacity_api_path,
+        ActivityWorkspaceResponse, AdminJobCancelResponse, AdminJobStatusResponse,
+        BioinformaticsWorkspaceResponse, CreateObjectStoreResponse, EnclosurePrepareResponse,
+        EnclosuresPageResponse, EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse,
+        GuiActionPlanResponse, HomeDashboardResponse, LocalGroupAdminResponse,
+        ObjectStoresPageResponse, RemoteUploadWorkspaceResponse, UsersGroupsWorkspaceResponse,
     };
     use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 
@@ -620,6 +634,14 @@ mod tests {
         assert_eq!(
             cached_home_dashboard_api_path("/products/dasobjectstore/api/v1/"),
             "/products/dasobjectstore/api/v1/dashboard/status"
+        );
+    }
+
+    #[test]
+    fn builds_store_capacity_status_route() {
+        assert_eq!(
+            store_capacity_api_path("/products/dasobjectstore/api/v1/", "ENA Primary"),
+            "/products/dasobjectstore/api/v1/dashboard/object-stores/ENA%20Primary/capacity"
         );
     }
 

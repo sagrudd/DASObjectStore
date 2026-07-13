@@ -241,7 +241,8 @@ completion.
     unavailable until the authenticated daemon bridge is wired.
   - [x] Add the authenticated dashboard store-capacity route through the
     shared bounded daemon bridge, preserving typed busy/circuit/deadline
-    responses; the Web client getter and appliance-backed acceptance remain.
+    responses; add the typed Web client getter/path helper; appliance-backed
+    acceptance remains.
   - [x] Add transport-neutral daemon capacity admission request/decision DTOs
     with stable snake_case reasons, observed-capacity fields, and direct-ingress
     SSD fields optional; SSD-first/direct behavior is derived from the typed
