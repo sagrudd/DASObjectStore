@@ -115,11 +115,7 @@ impl ProfileS3MultipartCompletion {
                 "multipart reservation_id must not be blank".to_string(),
             ));
         }
-        if self.key.object_id.trim().is_empty() || self.key.object_id.starts_with('/') {
-            return Err(BackendError::InvalidRequest(
-                "multipart object key must be a relative logical key".to_string(),
-            ));
-        }
+        validate_runtime_key(&self.key)?;
         if self.expected_size_bytes == 0 || self.parts.is_empty() {
             return Err(BackendError::InvalidRequest(
                 "multipart completion requires a non-empty object and parts".to_string(),
@@ -439,6 +435,7 @@ pub fn head_profile_object(
     backend: &dyn ProfileS3ReadBackend,
     key: &BackendObjectKey,
 ) -> Result<ProfileS3Object, BackendError> {
+    validate_runtime_key(key)?;
     backend
         .records()?
         .into_iter()
@@ -566,6 +563,7 @@ pub fn delete_profile_object(
     backend: &mut dyn ProfileS3WriteBackend,
     key: &BackendObjectKey,
 ) -> Result<bool, BackendError> {
+    validate_runtime_key(key)?;
     if backend
         .records()?
         .into_iter()
@@ -633,6 +631,7 @@ pub fn put_profile_object(
     source: &mut dyn Read,
     size_bytes: u64,
 ) -> Result<BackendObjectRecord, BackendError> {
+    validate_runtime_key(key)?;
     backend.reserve(reservation_id, size_bytes)?;
     let staged = match backend.stage(reservation_id, key, source) {
         Ok(staged) => staged,
@@ -669,6 +668,7 @@ pub fn put_profile_object_with_capacity_provider(
     source: &mut dyn Read,
     size_bytes: u64,
 ) -> Result<BackendObjectRecord, BackendError> {
+    validate_runtime_key(key)?;
     let store_id = StoreId::new(store_id.to_string()).map_err(|error| {
         BackendError::InvalidRequest(format!("invalid profile S3 ObjectStore id: {error}"))
     })?;
@@ -728,6 +728,29 @@ pub fn put_profile_object_with_capacity_provider(
             ))
         })?;
     Ok(finalized)
+}
+
+fn validate_runtime_key(key: &BackendObjectKey) -> Result<(), BackendError> {
+    if key.version == 0 {
+        return Err(BackendError::InvalidRequest(
+            "profile S3 object version must be greater than zero".to_string(),
+        ));
+    }
+    if key.object_id.trim().is_empty()
+        || key.object_id.starts_with('/')
+        || key.object_id.ends_with('/')
+        || key.object_id.contains('\\')
+        || key.object_id.contains('\0')
+        || key
+            .object_id
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(BackendError::InvalidRequest(
+            "profile S3 object key must be a relative logical key".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn combine_cleanup(
@@ -1020,6 +1043,27 @@ mod tests {
             5
         );
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn runtime_entry_points_reject_unsafe_profile_keys_before_backend_mutation() {
+        let (mut backend, root) = backend();
+        let unsafe_key = BackendObjectKey {
+            object_id: "../escape".to_string(),
+            version: 1,
+        };
+        assert!(head_profile_object(&backend, &unsafe_key).is_err());
+        assert!(delete_profile_object(&mut backend, &unsafe_key).is_err());
+        assert!(put_profile_object(
+            &mut backend,
+            "unsafe-key",
+            &unsafe_key,
+            &mut &b"payload"[..],
+            7,
+        )
+        .is_err());
+        assert!(backend.records().expect("catalogue reads").is_empty());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

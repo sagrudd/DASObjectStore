@@ -779,8 +779,9 @@ completion.
   - [x] Add a provider-neutral profile PUT adapter requiring a known content
     length, transactional quota reservation, in-flight hashing, staged
     fsync/rename finalization, and catalogue commit; failed staging/finalization
-    releases reservations without exposing private paths. HTTP gateway and
-    multipart wiring remain separate.
+    releases reservations without exposing private paths. Runtime PUT, HEAD,
+    DELETE, and multipart entry points now fail closed on the same unsafe-key
+    and zero-version rules; HTTP gateway and multipart routing remain separate.
   - [x] Wire profile PUT through the daemon-owned logical capacity admission
     provider before backend staging; logical and backend reservations commit in
     order, and failures before durable finalization release both ledgers.

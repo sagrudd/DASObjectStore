@@ -1266,6 +1266,8 @@ all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
 list prefixes apply the same relative-namespace boundary while allowing a
 trailing slash for ordinary namespace queries;
+provider-neutral runtime PUT, HEAD, DELETE, and multipart entry points enforce
+the same key boundary before backend mutation;
 the daemon socket now dispatches authenticated bounded profile-S3 list requests
 through the registered folder binding and daemon-owned capacity policy, while
 the standalone authenticated Web route delegates through the same bounded
