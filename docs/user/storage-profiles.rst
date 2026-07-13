@@ -65,6 +65,11 @@ health projection remains provider-neutral and path-free;
 when a daemon capacity provider is present, deletion reconciles logical used
 bytes from the post-delete catalogue while retaining in-flight reservations;
 provider listings and private filesystem paths are not trusted or returned.
+The daemon's versioned profile-S3 list request/response contract carries only
+the logical store ID, prefix, bounded continuation offset, object keys,
+versions, sizes, and checksums. It is path-free and is the serialization seam
+for a future authenticated Web/S3 route; defining that route does not grant a
+consumer direct access to managed roots or provider credentials.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
 checked against the in-flight SHA-256 stage. The backend then performs its

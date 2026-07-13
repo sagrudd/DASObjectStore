@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.26 - 2026-07-13
+
+- Add a versioned, path-free profile-S3 list transport contract with bounded
+  request/response validation for future authenticated Web/S3 routing.
+
 ## 0.76.25 - 2026-07-13
 
 - Make provider-neutral profile catalogue listings deterministic by sorting

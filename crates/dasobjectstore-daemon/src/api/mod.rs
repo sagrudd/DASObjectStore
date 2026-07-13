@@ -19,6 +19,7 @@ mod profile_binding;
 mod profile_browser;
 mod profile_capabilities;
 mod profile_inspection;
+mod profile_s3;
 mod remote_easyconnect;
 mod service;
 mod storage_mutation;
@@ -132,6 +133,10 @@ pub use profile_capabilities::{
 pub use profile_inspection::{
     ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
     PROFILE_INSPECTION_SCHEMA_VERSION,
+};
+pub use profile_s3::{
+    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3ObjectView, PROFILE_S3_MAX_KEYS,
+    PROFILE_S3_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
