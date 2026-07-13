@@ -22,6 +22,31 @@ evidence and detailed source tasks.
   read-only isolation boundaries: continue locally actionable work only in
   untouched files, leave the edits untouched, and record the boundary; stop
   only when the active slice overlaps or must integrate with them.
+- Use `[~]` for a gate or milestone with meaningful delivered slices and
+  explicitly recorded remaining work; `[ ]` means no accepted slice has yet
+  closed that item. A partial gate remains open until every required child task
+  is implemented, validated, documented, committed, and pushed.
+
+### Current campaign gate status (2026-07-13)
+
+- `[~]` Gate 0 — local Docker rendering, daemon bootstrap, and offline
+  validation are delivered; Docker Desktop file sharing and appliance soak
+  remain unavailable from this workstation.
+- `[~]` Gate 1 — profile/backend/manifest contracts and bounded folder/drive
+  seams are delivered; appliance placement and shared catalogue wiring remain.
+- `[~]` Gate 2 — logical quota ledger, reservations, capacity APIs, and profile
+  admission slices are delivered; complete daemon/S3/multipart wiring remains.
+- `[~]` Gate 3 — bounded folder profile, adoption, inspection, browser, and
+  user-service planning are delivered; package/system-service/container
+  acceptance remains.
+- `[~]` Gate 4 — guarded SSD drive backend and provider-neutral operations are
+  delivered; live mount identity, SMART/NVMe health, and replacement tests
+  require hardware.
+- `[~]` Gate 5 — provider-neutral S3 read/write/delete/verify/health contracts,
+  capacity reconciliation, and list transport DTOs are delivered; authenticated
+  HTTP gateway, multipart routing, and appliance migration adapters remain.
+- `[ ]` Gate 6 — integration and market-readiness acceptance awaits the
+  blocked deployment, security, stress, and product-workflow matrices.
 
 ## Current External Blockers (2026-07-12)
 
