@@ -9,11 +9,16 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::PathBuf;
 
+mod admission;
 mod backpressure;
 mod resource;
 mod scheduling;
 mod telemetry;
 
+pub use admission::{
+    decide_ingest_admission, DaemonIngestAdmissionAction, DaemonIngestAdmissionDecision,
+    DaemonIngestAdmissionInput, DaemonIngestAdmissionReason,
+};
 pub use backpressure::{
     DaemonIngestErrorRate, DaemonSourceReadBackpressureAction,
     DaemonSourceReadBackpressureDecision, DaemonSourceReadBackpressureInput,

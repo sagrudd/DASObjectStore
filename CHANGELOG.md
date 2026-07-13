@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.74 - 2026-07-13
+
+- Add a daemon ingest admission contract combining source-read backpressure and
+  adaptive worker scheduling into typed run/throttle/block decisions.
+
 ## 0.72.73 - 2026-07-13
 
 - Add an authenticated cached dashboard status contract with explicit

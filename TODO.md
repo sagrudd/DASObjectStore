@@ -1307,6 +1307,10 @@ list until every temporary size-budget exception has been removed.
     last-successful snapshot, explicit ``stale``/retry metadata, and fail-closed
     cold-start behavior; appliance-backed soak and telemetry freshness remain.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
+  - [x] Add a typed daemon admission decision that combines source-read error/
+    pressure backpressure with adaptive worker scheduling and reports run,
+    throttle, or block plus the limiting reason and schedule snapshot. Runtime
+    resource reservations, live host telemetry, and call-site wiring remain.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
 - [ ] Add an authenticated, daemon-owned emergency `ingest pause/throttle/resume` operation that safely stops new source reads while preserving staged data, in-flight checksum/durability rules, and a responsive WebUI. Do not require a service restart or raw process priority changes during an incident.

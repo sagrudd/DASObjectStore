@@ -56,9 +56,11 @@ pub use health::{
 };
 pub use ingest::DaemonIngestHddTransferPhase;
 pub use ingest::{
-    CancelIngestJobRequest, CancelIngestJobResponse, DaemonIngestAdaptiveSchedulerInput,
-    DaemonIngestAdaptiveSchedulingLimit, DaemonIngestAdaptiveWorkerSchedule,
-    DaemonIngestBottleneck, DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
+    decide_ingest_admission, CancelIngestJobRequest, CancelIngestJobResponse,
+    DaemonIngestAdaptiveSchedulerInput, DaemonIngestAdaptiveSchedulingLimit,
+    DaemonIngestAdaptiveWorkerSchedule, DaemonIngestAdmissionAction, DaemonIngestAdmissionDecision,
+    DaemonIngestAdmissionInput, DaemonIngestAdmissionReason, DaemonIngestBottleneck,
+    DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
     DaemonIngestCompletionFraction, DaemonIngestConflictAction, DaemonIngestConflictDecision,
     DaemonIngestConflictPolicy, DaemonIngestConflictReason, DaemonIngestErrorRate,
     DaemonIngestHddActiveTransfer, DaemonIngestHddQueueState, DaemonIngestHddTargetQueue,

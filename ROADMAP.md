@@ -927,6 +927,11 @@ asset cache headers. The authenticated dashboard status route now retains a
 last-successful snapshot and reports stale/retry metadata, while cold starts
 fail closed. Appliance soak and telemetry freshness remain open.
 
+The daemon API also exposes a typed ingest admission decision combining
+source-read pressure/error backpressure with adaptive worker scheduling. It
+reports run/throttle/block and the limiting schedule reason; live host resource
+reservations, telemetry, and runtime call-site wiring remain open.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.
