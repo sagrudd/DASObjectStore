@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.88 - 2026-07-13
+
+- Add a bounded, profile-neutral folder catalogue browser projection that
+  preserves authoritative keys, versions, sizes, checksums, and locations
+  without inventing appliance-only placement metadata.
+
 ## 0.72.87 - 2026-07-13
 
 - Add a compact ``ingest control --tui`` acknowledgement with typed state,

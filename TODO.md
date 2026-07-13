@@ -401,6 +401,11 @@ completion.
     shared SQLite/object-service catalogue integration remains open. Folder
     reopen now derives used-byte accounting from the durable catalogue and
     rejects conflicting supplied accounting before filesystem use.
+  - [x] Add a profile-neutral, read-only browser projection over authoritative
+    folder catalogue records with bounded prefix/search/page queries. Nested
+    keys, sizes, checksums, and private locations are preserved; appliance-only
+    object type, lifecycle, and placement fields remain explicitly unknown.
+    Profile-aware registry selection and shared SQLite authority remain open.
 - [ ] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots

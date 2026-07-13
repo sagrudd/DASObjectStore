@@ -10,6 +10,31 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const FOLDER_CATALOGUE_SCHEMA_VERSION: u32 = 1;
 
+const MAX_BROWSER_PAGE_SIZE: usize = 1_000;
+
+/// Read-only query for the profile-neutral folder catalogue view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FolderCatalogueBrowserQuery {
+    pub prefix: Option<String>,
+    pub search: Option<String>,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+/// Authoritative folder fields suitable for a future profile-aware browser
+/// adapter. Appliance-only metadata is explicit `None`; callers must not
+/// infer an HDD placement, lifecycle state, or object type from a folder row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FolderCatalogueBrowserEntry {
+    pub key: BackendObjectKey,
+    pub size_bytes: u64,
+    pub checksum: String,
+    pub location: String,
+    pub object_type: Option<String>,
+    pub lifecycle_state: Option<String>,
+    pub placement: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct FolderCatalogueSnapshot {
     schema_version: u32,
@@ -65,6 +90,37 @@ impl FolderCatalogue {
 
     pub fn records(&self) -> Vec<BackendObjectRecord> {
         self.records.values().cloned().collect()
+    }
+
+    /// Query the private folder catalogue without walking user files or
+    /// mutating metadata. Results are deterministic by object key/version and
+    /// are intentionally not an ObjectBrowser response: profile-specific
+    /// placement and lifecycle fields remain unknown.
+    pub fn browser_entries(
+        &self,
+        query: &FolderCatalogueBrowserQuery,
+    ) -> Result<Vec<FolderCatalogueBrowserEntry>, BackendError> {
+        let limit = if query.limit == 0 {
+            MAX_BROWSER_PAGE_SIZE
+        } else {
+            query.limit
+        };
+        if limit > MAX_BROWSER_PAGE_SIZE {
+            return Err(BackendError::InvalidRequest(format!(
+                "folder catalogue page limit exceeds {MAX_BROWSER_PAGE_SIZE}"
+            )));
+        }
+        let prefix = query.prefix.as_deref().unwrap_or_default();
+        let search = query.search.as_deref().unwrap_or_default();
+        Ok(self
+            .records()
+            .into_iter()
+            .filter(|record| record.key.object_id.starts_with(prefix))
+            .filter(|record| search.is_empty() || record.key.object_id.contains(search))
+            .skip(query.offset)
+            .take(limit)
+            .map(FolderCatalogueBrowserEntry::from)
+            .collect())
     }
 
     pub fn commit_records(
@@ -140,6 +196,20 @@ impl FolderCatalogue {
     }
 }
 
+impl From<BackendObjectRecord> for FolderCatalogueBrowserEntry {
+    fn from(record: BackendObjectRecord) -> Self {
+        Self {
+            key: record.key,
+            size_bytes: record.size_bytes,
+            checksum: record.checksum,
+            location: record.location,
+            object_type: None,
+            lifecycle_state: None,
+            placement: None,
+        }
+    }
+}
+
 fn catalogue_key(key: &BackendObjectKey) -> String {
     format!("{}@{}", key.object_id, key.version)
 }
@@ -150,7 +220,7 @@ fn io_error(error: std::io::Error) -> BackendError {
 
 #[cfg(test)]
 mod tests {
-    use super::FolderCatalogue;
+    use super::{FolderCatalogue, FolderCatalogueBrowserQuery};
     use dasobjectstore_core::backend::{BackendObjectKey, BackendObjectRecord};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -245,6 +315,58 @@ mod tests {
         )
         .expect("wrong-store catalogue writes");
         assert!(FolderCatalogue::open(&path, "codex").is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn browser_entries_are_authoritative_and_profile_fields_remain_unknown() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        let mut catalogue = FolderCatalogue::open(&path, "codex").expect("catalogue opens");
+        catalogue
+            .commit_records([
+                record(),
+                BackendObjectRecord {
+                    key: BackendObjectKey {
+                        object_id: "incoming/second.dat".to_string(),
+                        version: 2,
+                    },
+                    size_bytes: 7,
+                    checksum: "sha256:efgh".to_string(),
+                    location: ".dasobjectstore/objects/incoming/second.dat".to_string(),
+                },
+            ])
+            .expect("records commit");
+
+        let entries = catalogue
+            .browser_entries(&FolderCatalogueBrowserQuery {
+                prefix: Some("incoming/".to_string()),
+                search: Some("second".to_string()),
+                offset: 0,
+                limit: 10,
+            })
+            .expect("browser query");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key.object_id, "incoming/second.dat");
+        assert_eq!(entries[0].size_bytes, 7);
+        assert_eq!(entries[0].object_type, None);
+        assert_eq!(entries[0].lifecycle_state, None);
+        assert_eq!(entries[0].placement, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn browser_page_limit_is_bounded() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        let catalogue = FolderCatalogue::open(&path, "codex").expect("catalogue opens");
+        let error = catalogue
+            .browser_entries(&FolderCatalogueBrowserQuery {
+                limit: 1_001,
+                ..FolderCatalogueBrowserQuery::default()
+            })
+            .expect_err("oversized browser page rejected");
+        assert!(error.to_string().contains("page limit"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

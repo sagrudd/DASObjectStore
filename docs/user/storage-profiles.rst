@@ -37,6 +37,15 @@ before rename and failed validation leaves the reservation recoverable.
 Catalogue registration and user-facing profile creation still require the
 subsequent daemon contract and explicit adoption workflow.
 
+Folder catalogue rows can be queried through a bounded, read-only profile
+projection for future browser adapters. It preserves nested object keys,
+versions, sizes, checksums, and private locations. Appliance-only object type,
+lifecycle, and placement fields are deliberately reported as unknown; the
+projection does not enumerate private payload files or write the appliance
+SQLite catalogue. A profile-aware registry and metadata contract must be
+approved before folder rows are exposed through the shared ObjectBrowser/Web
+surface.
+
 The private ``.dasobjectstore`` namespace and its object/staging descendants
 are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized
 payload files use ``0600``. The user-selected folder root is never chmod'ed;
