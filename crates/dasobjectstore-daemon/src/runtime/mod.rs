@@ -53,9 +53,11 @@ pub use appliance_telemetry::{
     DEFAULT_STANDALONE_AUTH_ROOT,
 };
 pub use application_capability_replay::{
-    application_capability_replay_path, consume_upload_completion_capability,
-    default_application_capability_replay_path, APPLICATION_CAPABILITY_REPLAY_ENV,
-    APPLICATION_CAPABILITY_REPLAY_FILE_NAME, APPLICATION_CAPABILITY_REPLAY_SCHEMA,
+    application_capability_replay_path, complete_upload_with_capability,
+    consume_upload_completion_capability, default_application_capability_replay_path,
+    release_upload_completion_capability, UploadCompletionCapabilityOutcome,
+    APPLICATION_CAPABILITY_REPLAY_ENV, APPLICATION_CAPABILITY_REPLAY_FILE_NAME,
+    APPLICATION_CAPABILITY_REPLAY_SCHEMA,
 };
 pub use application_identity_registry::{
     application_identity_registry_path, deactivate_application_identity,

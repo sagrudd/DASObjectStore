@@ -22,6 +22,12 @@ pub const APPLICATION_CAPABILITY_REPLAY_ENV: &str = "DASOBJECTSTORE_APPLICATION_
 
 static REPLAY_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UploadCompletionCapabilityOutcome {
+    Committed,
+    AlreadyConsumed,
+}
+
 pub fn default_application_capability_replay_path(state_dir: impl AsRef<Path>) -> PathBuf {
     state_dir
         .as_ref()
@@ -110,6 +116,59 @@ pub fn consume_upload_completion_capability(
             .cmp(&right.application_id)
             .then_with(|| left.capability_id.cmp(&right.capability_id))
     });
+    write_registry(path, &registry)?;
+    Ok(true)
+}
+
+/// Execute the authority-side completion ordering. Provider verification runs
+/// before replay consumption; a failed catalogue commit releases the pending
+/// capability so a client can retry safely. A prior committed capability is
+/// reported as idempotently consumed.
+pub fn complete_upload_with_capability<VerifyProvider, CommitCatalogue>(
+    path: impl AsRef<Path>,
+    capability: &UploadCompletionCapability,
+    now_unix_seconds: u64,
+    verify_provider: VerifyProvider,
+    commit_catalogue: CommitCatalogue,
+) -> Result<UploadCompletionCapabilityOutcome, DaemonServiceRuntimeError>
+where
+    VerifyProvider: FnOnce(&UploadCompletionCapability) -> Result<(), String>,
+    CommitCatalogue: FnOnce(&UploadCompletionCapability) -> Result<(), String>,
+{
+    verify_provider(capability).map_err(|message| {
+        completion_operation_error(format!("provider verification failed: {message}"))
+    })?;
+    if !consume_upload_completion_capability(&path, capability, now_unix_seconds)? {
+        return Ok(UploadCompletionCapabilityOutcome::AlreadyConsumed);
+    }
+    if let Err(message) = commit_catalogue(capability) {
+        release_upload_completion_capability(&path, capability)?;
+        return Err(completion_operation_error(format!(
+            "catalogue completion failed: {message}"
+        )));
+    }
+    Ok(UploadCompletionCapabilityOutcome::Committed)
+}
+
+pub fn release_upload_completion_capability(
+    path: impl AsRef<Path>,
+    capability: &UploadCompletionCapability,
+) -> Result<bool, DaemonServiceRuntimeError> {
+    let _guard = REPLAY_REGISTRY_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| invalid_replay("application capability replay lock poisoned"))?;
+    let path = path.as_ref();
+    let mut registry = read_registry(path)?;
+    let before = registry.records.len();
+    registry.records.retain(|record| {
+        !(record.application_id == capability.application_id
+            && record.capability_id == capability.capability_id
+            && record.nonce == capability.nonce)
+    });
+    if registry.records.len() == before {
+        return Ok(false);
+    }
     write_registry(path, &registry)?;
     Ok(true)
 }
@@ -207,11 +266,19 @@ fn registry_io(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
     }
 }
 
+fn completion_operation_error(message: impl Into<String>) -> DaemonServiceRuntimeError {
+    DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!("application upload completion: {}", message.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        application_capability_replay_path, consume_upload_completion_capability,
-        default_application_capability_replay_path, APPLICATION_CAPABILITY_REPLAY_SCHEMA,
+        application_capability_replay_path, complete_upload_with_capability,
+        consume_upload_completion_capability, default_application_capability_replay_path,
+        release_upload_completion_capability, UploadCompletionCapabilityOutcome,
+        APPLICATION_CAPABILITY_REPLAY_SCHEMA,
     };
     use dasobjectstore_core::application_auth::UploadCompletionCapability;
     use dasobjectstore_core::ids::StoreId;
@@ -281,5 +348,47 @@ mod tests {
         assert!(encoded.contains(APPLICATION_CAPABILITY_REPLAY_SCHEMA));
         assert!(!encoded.contains("private_key"));
         assert!(!encoded.contains("analysis/run-1.fastq"));
+    }
+
+    #[test]
+    fn completion_verifies_provider_before_consuming_and_releases_failed_catalogue() {
+        let path = root("completion").join("replay.json");
+        let capability = capability("cap-1", "nonce-1", 1_000, 1_800);
+        let provider_failed = complete_upload_with_capability(
+            &path,
+            &capability,
+            1_100,
+            |_| Err("checksum mismatch".to_string()),
+            |_| panic!("catalogue must not run"),
+        );
+        assert!(provider_failed.is_err());
+        assert!(!path.exists());
+
+        let catalogue_failed = complete_upload_with_capability(
+            &path,
+            &capability,
+            1_100,
+            |_| Ok(()),
+            |_| Err("database unavailable".to_string()),
+        );
+        assert!(catalogue_failed.is_err());
+        assert!(release_upload_completion_capability(&path, &capability).is_ok());
+
+        assert_eq!(
+            complete_upload_with_capability(&path, &capability, 1_100, |_| Ok(()), |_| Ok(()))
+                .expect("completion"),
+            UploadCompletionCapabilityOutcome::Committed
+        );
+        assert_eq!(
+            complete_upload_with_capability(
+                &path,
+                &capability,
+                1_100,
+                |_| Ok(()),
+                |_| panic!("idempotent replay must not commit")
+            )
+            .expect("replay"),
+            UploadCompletionCapabilityOutcome::AlreadyConsumed
+        );
     }
 }

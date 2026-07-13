@@ -47,7 +47,9 @@ same idempotent terminal result. The daemon now has a durable,
 expiry-pruned replay registry for capability IDs and nonces; proof verification
 and catalogue completion wiring remain authority-side work. Core token issuance
 requires an explicit proof-verifier implementation and rejects unverified
-proofs. A failed
+proofs. The completion helper verifies provider state before consuming a
+capability and releases it when catalogue commit fails, so retries remain safe.
+A failed
 catalogue commit never reports success.
 
 Renewal tokens are not accepted as bearer credentials for this operation.

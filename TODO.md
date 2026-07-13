@@ -816,10 +816,14 @@ completion.
     to registered public-key material and fingerprints; private key custody,
     mTLS transport verification, and public exchange endpoint wiring remain.
     Do not issue long-lived broadly scoped bearer access tokens.
-  - [ ] Issue one-time upload-completion capabilities bound to the paired
+  - [~] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
     audience, expiry, and nonce; verify provider state before atomic catalogue
     commit and make retries idempotent.
+    The daemon completion authority now verifies provider state before replay
+    consumption, releases pending capabilities on catalogue failure, and
+    returns an idempotent already-consumed outcome; public endpoint and live
+    catalogue wiring remain.
   - [~] Add explicit expiry, revocation, rotation, replay protection, and
     redacted audit events for every credential class. Upload-completion
     capability consumption now has a daemon-owned, state-scoped atomic replay

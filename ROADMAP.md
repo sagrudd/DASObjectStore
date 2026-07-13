@@ -116,7 +116,10 @@ Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.
 The daemon now also provides a state-scoped, expiry-pruned single-use replay
 registry for completion capabilities; proof verification, revocation APIs, and
-audit events remain part of the authority boundary.
+audit events remain part of the authority boundary. Its completion helper
+verifies provider state before consuming, releases on catalogue failure, and
+returns an idempotent replay result; public endpoint and live catalogue wiring
+remain.
 
 ### Current delivered baseline
 
