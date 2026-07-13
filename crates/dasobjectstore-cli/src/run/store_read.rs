@@ -103,6 +103,29 @@ pub(super) fn run_store_profile_head(
     Ok(())
 }
 
+pub(super) fn run_store_profile_health(
+    args: &StoreProfileHealthArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let store_id = StoreId::new(args.store_id())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_s3_health(ProfileS3HealthRequest { store_id })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Profile health")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "State: {}", response.health.state)?;
+        if let Some(message) = response.health.message {
+            writeln!(writer, "Message: {message}")?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_user_service_plan(
     args: &StoreUserServicePlanArgs,
     writer: &mut impl Write,

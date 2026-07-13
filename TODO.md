@@ -787,6 +787,8 @@ completion.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
     daemon bridge; SMART/NVMe and appliance topology remain separate.
+  - [x] Expose profile health through ``store profile-health`` with human and
+    JSON output so CLI, Web, and daemon consumers share the same response.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.

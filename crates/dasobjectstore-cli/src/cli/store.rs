@@ -32,6 +32,9 @@ pub(crate) enum StoreCommand {
     /// Inspect one catalogue-authoritative profile object without reading payload bytes.
     #[command(name = "profile-head")]
     ProfileHead(StoreProfileHeadArgs),
+    /// Inspect provider-neutral health for a bounded profile.
+    #[command(name = "profile-health")]
+    ProfileHealth(StoreProfileHealthArgs),
     /// Render a validated per-user macOS launchd service plan without installing it.
     #[command(name = "user-service-plan")]
     UserServicePlan(StoreUserServicePlanArgs),
@@ -216,6 +219,24 @@ impl StoreProfileHeadArgs {
     }
     pub(crate) fn version(&self) -> u64 {
         self.version
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileHealthArgs {
+    /// Logical ObjectStore identifier.
+    store_id: String,
+    /// Emit the typed response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileHealthArgs {
+    pub(crate) fn store_id(&self) -> &str {
+        &self.store_id
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -1011,6 +1032,26 @@ mod tests {
         assert_eq!(head.key(), "reads/sample.fastq");
         assert_eq!(head.version(), 3);
         assert!(head.json());
+    }
+
+    #[test]
+    fn parses_profile_health_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-health",
+            "generated-data",
+            "--json",
+        ])
+        .expect("profile health parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileHealth(health)) = args.command() else {
+            panic!("expected profile health command")
+        };
+        assert_eq!(health.store_id(), "generated-data");
+        assert!(health.json());
     }
 
     #[test]

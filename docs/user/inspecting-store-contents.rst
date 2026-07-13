@@ -147,6 +147,13 @@ The response contains provider-neutral ``state`` and optional ``message``
 fields. It does not claim appliance SMART/NVMe or enclosure health; those
 remain separate deployment-gated telemetry surfaces.
 
+The same projection is available to local automation:
+
+.. code-block:: console
+
+   dasobjectstore store profile-health generated-data
+   dasobjectstore store profile-health generated-data --json
+
 Download Folder Archives From the Web API
 -----------------------------------------
 
