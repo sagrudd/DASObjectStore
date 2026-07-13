@@ -98,8 +98,9 @@ where
                     },
                 )
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
-                let inspection = ensure_profile_backend(&request)
-                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                let inspection =
+                    ensure_profile_backend(&request, &handler.profile_binding_registry_path)
+                        .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 handler
                     .service_orchestrator
                     .initialize_profile_capacity(
@@ -115,8 +116,10 @@ where
                 register_profile_binding(request, &handler.profile_binding_registry_path, &now)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             if let Some(inspection) = inspection {
-                response.unmanaged_path_count = inspection.unmanaged_paths.len();
-                response.unsafe_path_count = inspection.unsafe_paths.len();
+                response.unmanaged_path_count = inspection.inspection.unmanaged_paths.len();
+                response.unsafe_path_count = inspection.inspection.unsafe_paths.len();
+                response.adopted_object_count = inspection.adopted_object_count;
+                response.adopted_bytes = inspection.adopted_bytes;
             }
             if let Some(definition) = store_definition {
                 if !response.accepted.dry_run {

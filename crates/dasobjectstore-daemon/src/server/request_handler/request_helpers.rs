@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::ProfileBindingOperation;
 
 pub(super) fn create_object_store_with_registry(
     request: CreateObjectStoreRequest,
@@ -98,26 +99,75 @@ pub(super) fn register_profile_binding(
 
 /// Create the daemon-private folder namespace for a new bounded folder store.
 ///
-/// Adoption deliberately remains binding-only here: it needs a caller-owned
-/// reconciliation checkpoint and action-time confirmation before any user
-/// files can be copied into the managed namespace.
+/// Create the private namespace and, for explicit adoption, execute the
+/// daemon-owned restart-safe reconciliation checkpoint before publishing the
+/// binding.
 pub(super) fn ensure_profile_backend(
     request: &ProfileBindingRequest,
-) -> Result<Option<FolderInspectionReport>, DaemonServiceRuntimeError> {
+    profile_registry_path: &Path,
+) -> Result<Option<ProfileBackendPreparation>, DaemonServiceRuntimeError> {
     if request.manifest.deployment_profile != DeploymentProfile::Folder {
         return Ok(None);
     }
-    FolderBackend::open(
+    let mut backend = FolderBackend::open(
         request.backend_root.clone(),
         request.manifest.clone(),
         request.capacity.clone(),
         0,
     )
-    .and_then(|backend| backend.inspect_user_tree())
-    .map(Some)
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
-        operation: format!("inspect profile backend: {error}"),
-    })
+        operation: format!("open profile backend: {error}"),
+    })?;
+    let inspection = backend.inspect_user_tree().map_err(|error| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!("inspect profile backend: {error}"),
+        }
+    })?;
+    let mut preparation = ProfileBackendPreparation {
+        inspection,
+        adopted_object_count: 0,
+        adopted_bytes: 0,
+    };
+    if request.operation == ProfileBindingOperation::Adopt {
+        let checkpoint_root = profile_registry_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("profile-reconciliation")
+            .join(request.manifest.store_id.as_str());
+        let checkpoint_path = checkpoint_root.join(format!("{}.json", request.manifest.store_id));
+        let mut manifest = if checkpoint_path.exists() {
+            ReconciliationManifest::load(&checkpoint_path).map_err(|error| {
+                DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!("load profile reconciliation checkpoint: {error}"),
+                }
+            })?
+        } else {
+            ReconciliationManifest::new(request.manifest.store_id.as_str(), None)
+        };
+        let records = backend
+            .adopt_user_tree_reconciliation(
+                &checkpoint_path,
+                &mut manifest,
+                &format!("profile-adopt-{}", request.manifest.store_id),
+            )
+            .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!("adopt profile backend: {error}"),
+            })?;
+        preparation.adopted_object_count = records.len();
+        preparation.adopted_bytes = records.iter().map(|record| record.size_bytes).sum();
+        preparation.inspection = backend.inspect_user_tree().map_err(|error| {
+            DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!("inspect adopted profile backend: {error}"),
+            }
+        })?;
+    }
+    Ok(Some(preparation))
+}
+
+pub(super) struct ProfileBackendPreparation {
+    pub inspection: FolderInspectionReport,
+    pub adopted_object_count: usize,
+    pub adopted_bytes: u64,
 }
 
 pub(super) fn resolve_authorization_store_id(

@@ -571,6 +571,10 @@ completion.
     and restart-safe manifest checkpoints. User files remain untouched and
     failed attempts are checkpointed without silently becoming authoritative;
     catalogue transaction handoff remains a separate shared metadata task.
+  - [x] Wire explicit profile-binding ``adopt`` through the daemon: the
+    daemon-owned checkpoint and reservation namespace are restart-safe, source
+    files remain untouched, and the response reports adopted object/byte counts
+    without exposing checkpoint paths.
   - [x] Add a versioned, private folder-profile catalogue snapshot with
     idempotent conflict-checked commits and file/directory fsync+rename; folder
     adoption commits the finalized record before its Complete checkpoint.

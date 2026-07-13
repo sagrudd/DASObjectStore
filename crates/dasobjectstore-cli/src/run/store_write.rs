@@ -49,6 +49,8 @@ pub(super) fn run_store_profile_binding(
         // Backend paths are daemon-owned implementation details and must not
         // cross the profile-binding transport boundary.
         writeln!(writer, "Backend root: daemon-managed")?;
+        writeln!(writer, "Adopted objects: {}", response.adopted_object_count)?;
+        writeln!(writer, "Adopted bytes: {}", response.adopted_bytes)?;
         writeln!(writer, "Job: {}", response.accepted.job_id)?;
     }
     Ok(())

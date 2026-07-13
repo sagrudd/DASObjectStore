@@ -35,7 +35,9 @@ Managed-object enumeration and verification compare the open file identity and
 stable size/timestamps with the path after hashing; staged files are rechecked
 before rename and failed validation leaves the reservation recoverable.
 Catalogue registration and user-facing profile creation still require the
-subsequent daemon contract and explicit adoption workflow.
+daemon-owned profile contract. Explicit ``adopt`` now runs the resumable
+folder reconciliation checkpoint behind that daemon boundary; source files
+remain untouched and only redacted adoption counts cross the API.
 
 Folder catalogue rows can be queried through a bounded, read-only profile
 projection for future browser adapters. It preserves nested object keys,
@@ -121,9 +123,9 @@ The daemon contract also provides a ledger-backed evaluation path: logical
 usage and outstanding reservations are read from the daemon's reservation
 ledger, while backend and SSD free-space values come from daemon-owned probes.
 Folder inspection can now also produce a durable-planner-ready reconciliation
-manifest for unmanaged regular files. This remains read-only: unsafe entries
-stay report-only, user files are not adopted, and an explicit product adoption
-decision is still required before authority changes.
+manifest for unmanaged regular files. Unsafe entries stay report-only and user
+files remain untouched; explicit ``adopt`` is action-time confirmed and runs
+through the daemon-owned checkpoint before catalogue authority is updated.
 Checkpointed plans carry a stable source revision (file identity and metadata on
 Unix, size/mtime fallback elsewhere). Complete or in-progress work is reused
 only when that revision matches; changed or legacy revision-less entries safely

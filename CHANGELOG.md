@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.10 - 2026-07-13
+
+- Wire authenticated bounded-folder adoption through a daemon-owned,
+  restart-safe reconciliation checkpoint with redacted adoption counts.
+
 ## 0.76.9 - 2026-07-13
 
 - Expose redacted profile inspection through the typed CLI without leaking

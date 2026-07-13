@@ -46,7 +46,7 @@ use crate::runtime::{
     FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
     FolderBackend, FolderInspectionReport, GarageServiceController, LocalAdminRuntimeError,
     LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
-    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
+    ObjectBrowserQueryError, ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
     RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
     RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
     RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
@@ -3756,6 +3756,59 @@ mod tests {
         assert!(!backend.exists());
         let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains(root.to_string_lossy().as_ref()));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn folder_profile_adopt_executes_checkpointed_reconciliation_without_mutating_source() {
+        let root = temp_root("profile-adopt");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend root");
+        let source = backend.join("nested/input.txt");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("source directory");
+        fs::write(&source, b"adopted").expect("source file");
+        let registry = root.join("state/profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:05:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let mut request = profile_binding_request_for_auth_test("adopt", backend.clone());
+        request.operation = ProfileBindingOperation::Adopt;
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(request.clone()),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("adopt profile");
+        let DaemonApiResponse::RegisterProfileBinding(response) = response else {
+            panic!("expected profile binding response");
+        };
+        assert_eq!(response.adopted_object_count, 1);
+        assert_eq!(response.adopted_bytes, 7);
+        assert_eq!(response.unmanaged_path_count, 1);
+        assert_eq!(fs::read(&source).expect("source remains"), b"adopted");
+        assert!(backend
+            .join(".dasobjectstore/objects/nested/input.txt")
+            .exists());
+        assert!(root
+            .join("state/profile-reconciliation/adopt/adopt.json")
+            .exists());
+
+        let second = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(request),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("idempotent adopt");
+        let DaemonApiResponse::RegisterProfileBinding(second) = second else {
+            panic!("expected profile binding response");
+        };
+        assert_eq!(second.adopted_object_count, 0);
         cleanup(&root);
     }
 
