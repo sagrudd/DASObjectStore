@@ -1203,6 +1203,9 @@ validation); stream assembly, provider injection, and HTTP dispatch remain.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 authenticated HTTP routing and runtime store dispatch remain separate.
+Stable profile-S3 route constants now identify bounded object listing and
+reservation-bound multipart completion without introducing an HTTP listener;
+listener authentication, request routing, and runtime store dispatch remain.
 Capacity-enabled local ingest also rejects a client copy-count override before
 any source read when it differs from the daemon ObjectStore policy; legacy
 standalone executor paths retain their explicit override behavior.

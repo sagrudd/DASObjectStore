@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 pub const PROFILE_S3_SCHEMA_VERSION: &str = "dasobjectstore.profile_s3.v1";
 pub const PROFILE_S3_MAX_KEYS: u16 = 1_000;
 pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = 10_000;
+pub const PROFILE_S3_ROUTE_PREFIX: &str = "/api/v1/profile-s3";
+pub const PROFILE_S3_OBJECTS_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects";
+pub const PROFILE_S3_MULTIPART_COMPLETE_ROUTE: &str =
+    "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete";
 
 /// Bounded catalogue query for the future profile-S3/Web transport. The
 /// request contains logical identity only; backend roots and provider
@@ -307,5 +311,15 @@ mod tests {
             committed: true,
         };
         response.validate().expect("response validates");
+    }
+
+    #[test]
+    fn profile_s3_routes_are_stable_and_keep_identity_in_the_path() {
+        assert_eq!(PROFILE_S3_ROUTE_PREFIX, "/api/v1/profile-s3");
+        assert!(PROFILE_S3_OBJECTS_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
+        assert!(PROFILE_S3_OBJECTS_ROUTE.contains("{store_id}"));
+        assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
+        assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{store_id}"));
+        assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{reservation_id}"));
     }
 }

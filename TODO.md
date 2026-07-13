@@ -786,6 +786,9 @@ completion.
     and acknowledgement DTOs with the same bounded validation contract;
     authenticated HTTP routing, stream assembly, and runtime store dispatch
     remain open.
+  - [x] Publish stable profile-S3 route constants for bounded object listing
+    and reservation-bound multipart completion; listener authentication,
+    request routing, and runtime store dispatch remain open.
 - [ ] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic.
