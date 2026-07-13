@@ -96,6 +96,9 @@ completion.
     upload worker; a successful provider transfer is not reported complete when
     the injected manifest/catalogue handoff fails. Concrete catalogue wiring
     and public paired-session authorization remain open.
+  - [x] Release an admitted remote-upload capacity reservation when daemon job
+    or progress setup fails before transfer execution; invalid-job regression
+    coverage proves no reservation leak.
   - [ ] Complete appliance/provider soak acceptance (blocked while the
     DASServer, Garage appliance, and deployment credentials are unavailable).
 - [~] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,

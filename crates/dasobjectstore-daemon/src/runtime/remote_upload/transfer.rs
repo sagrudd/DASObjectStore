@@ -229,16 +229,39 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             None
         };
 
-        let running_job = running_daemon_job_for_s3_transfer(
+        let running_job = match running_daemon_job_for_s3_transfer(
             &job,
             submitted_at_utc.clone(),
             started_at_utc.clone(),
             actor.clone(),
-        )?;
+        ) {
+            Ok(job) => job,
+            Err(error) => {
+                if let Some(provider) = capacity_reservation.as_ref() {
+                    return Err(release_capacity_on_error(
+                        provider.as_ref(),
+                        &job.object_store,
+                        &job.job_id,
+                        error,
+                    ));
+                }
+                return Err(error);
+            }
+        };
         let running_event = daemon_job_event_for_summary(running_job.clone());
-        self.registry.record(running_job)?;
+        if let Err(error) = self.registry.record(running_job) {
+            if let Some(provider) = capacity_reservation.as_ref() {
+                return Err(release_capacity_on_error(
+                    provider.as_ref(),
+                    &job.object_store,
+                    &job.job_id,
+                    error,
+                ));
+            }
+            return Err(error);
+        }
 
-        let mut progress_reporter = RemoteUploadS3TransferProgressReporter::new(
+        let mut progress_reporter = match RemoteUploadS3TransferProgressReporter::new(
             self.registry,
             Arc::clone(&self.gate),
             job.job_id.clone(),
@@ -247,7 +270,20 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             submitted_at_utc.clone(),
             started_at_utc,
             actor.clone(),
-        )?;
+        ) {
+            Ok(reporter) => reporter,
+            Err(error) => {
+                if let Some(provider) = capacity_reservation.as_ref() {
+                    return Err(release_capacity_on_error(
+                        provider.as_ref(),
+                        &job.object_store,
+                        &job.job_id,
+                        error,
+                    ));
+                }
+                return Err(error);
+            }
+        };
 
         let transfer_result = transfer(&mut progress_reporter).map_err(|error| error.to_string());
         let transfer_result = transfer_result.and_then(|()| {
@@ -334,6 +370,28 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             runtime_after: summary.runtime_after,
             cleanup_report,
         })
+    }
+}
+
+fn release_capacity_on_error(
+    provider: &dyn CapacityAdmissionProvider,
+    object_store: &str,
+    reservation_id: &str,
+    error: DaemonServiceRuntimeError,
+) -> DaemonServiceRuntimeError {
+    let store_id = match StoreId::new(object_store.to_string()) {
+        Ok(store_id) => store_id,
+        Err(store_error) => {
+            return DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!("{error}; capacity release unavailable: {store_error}"),
+            }
+        }
+    };
+    match provider.release(&store_id, reservation_id) {
+        Ok(()) => error,
+        Err(release_error) => DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!("{error}; capacity release failed: {release_error}"),
+        },
     }
 }
 

@@ -923,6 +923,10 @@ remain part of the open Milestone 24 work.
 The no-target state also offers a direct return action to ObjectStores, keeping
 the target-scoped workflow navigable without exposing an unscoped upload form.
 
+Remote-upload setup failures now release already-admitted capacity reservations
+before returning, with an invalid-job regression; public completion metadata and
+authentication remain contract-gated.
+
 Guarded direct-to-HDD imports now use the shared inline-hash copy primitive;
 optional source metadata is checked after the single read, preserving the
 direct-ingress policy without a strict pre-copy hash pass.

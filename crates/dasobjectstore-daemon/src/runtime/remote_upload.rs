@@ -1002,6 +1002,38 @@ mod tests {
     }
 
     #[test]
+    fn capacity_admission_is_released_when_job_setup_fails() {
+        let root = temp_root("remote-upload-capacity-setup-failure");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Admitted,
+            message: None,
+        });
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+            .with_capacity_admission_provider(provider.clone());
+
+        let error = worker
+            .run(worker_request(""), || Ok::<(), &'static str>(()))
+            .expect_err("invalid job ID rejects before transfer");
+        assert!(matches!(
+            error,
+            DaemonServiceRuntimeError::InvalidJobId(value) if value.is_empty()
+        ));
+        assert_eq!(gate.snapshot().active_s3_transfers, 0);
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:42:",
+                "release:zymo_fecal_2025.05:",
+            ]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn typed_multipart_byte_transfer_uses_capacity_lifecycle() {
         let root = temp_root("remote-upload-multipart-capacity-lifecycle");
         let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));

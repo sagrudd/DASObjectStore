@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.112 - 2026-07-13
+
+- Release remote-upload capacity reservations when daemon job/progress setup
+  fails before transfer execution.
+
 ## 0.72.111 - 2026-07-13
 
 - Add focused Web source/component contracts for Mnemosyne footer mounting,
