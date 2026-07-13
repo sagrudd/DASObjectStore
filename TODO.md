@@ -2185,9 +2185,9 @@ list until every temporary size-budget exception has been removed.
 - [ ] Add end-to-end appliance acceptance coverage for upload, root-tree
   refresh, folder navigation, individual download, and content/checksum
   verification; cover both managed-HDD and provider-backed uploads.
-- [ ] Document the operator recovery workflow for backend objects absent from
+- [x] Document the operator recovery workflow for backend objects absent from
   the browser catalogue and the acceptance path proving an uploaded file can
-  be browsed and downloaded.
+  be browsed and downloaded; appliance execution remains deployment-gated.
 
 ## Milestone 22: Remote Easyconnect Uploads and Ingress Policy Simplification
 

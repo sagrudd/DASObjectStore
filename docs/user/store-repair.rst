@@ -69,6 +69,28 @@ stable rediscovery and true byte-level resume are delivered.
 If a repair reports partial duplicates, keep the source media and the payload
 files intact and investigate the corresponding ingest job before retrying.
 
+Acceptance path for a recovered upload
+---------------------------------------
+
+After a successful reconciliation, prove the catalogue and browser handoff in
+this order before treating the upload as product-ready:
+
+.. code-block:: console
+
+   dasobjectstore store contents alleleanchor_mvp --json
+   dasobjectstore store verify alleleanchor_mvp --hash --json
+
+The contents response must contain the recovered relative key, and verification
+must report the recorded checksum without an orphan or size-mismatch warning.
+Then use the authenticated standalone Web browser to refresh that
+ObjectStore, open the recovered folder, and download one recovered object from
+the ObjectBrowser download action. The download response must be served by the
+daemon-authorized endpoint and match the verified checksum; never select a
+filesystem path or a provider URL in the browser. If the object is still
+SSD-only or lacks a verified settled copy, the daemon must return an unavailable
+state and the operator should wait for settlement/repair rather than bypassing
+the authority boundary.
+
 Verification and checksum cleanup
 ---------------------------------
 
