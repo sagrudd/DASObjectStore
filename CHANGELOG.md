@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.69 - 2026-07-13
+
+- Move authentication shell and login form styles into a feature-owned Web
+  stylesheet while retaining shared primitives in the base sheet.
+
 ## 0.72.68 - 2026-07-13
 
 - Add a macOS full-filesystem capacity-provider fixture using real ``statvfs``

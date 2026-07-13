@@ -804,6 +804,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Correct the screenshot runner’s footer assertion to accept the approved
     report-style sans-serif footer and reject only an accidental monospace
     treatment; full Playwright artifact execution remains environment-gated.
+  - [x] Move authentication shell/form selectors into feature-owned
+    ``styles/auth.css`` while retaining shared card/session primitives in the
+    base sheet; registration and source-contract coverage preserve load order.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 

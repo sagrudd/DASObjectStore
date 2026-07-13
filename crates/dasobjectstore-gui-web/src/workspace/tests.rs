@@ -24,6 +24,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/activity.css"),
         include_str!("../../styles/local-access.css"),
         include_str!("../../styles/endpoints.css"),
+        include_str!("../../styles/auth.css"),
         include_str!("../../styles.css"),
     ]
     .concat()
@@ -60,6 +61,18 @@ fn shared_web_primitives_cover_panes_tables_status_and_responsive_surfaces() {
         assert!(
             css.contains(selector),
             "missing shared Web selector {selector}"
+        );
+    }
+    let auth_css = include_str!("../../styles/auth.css");
+    for selector in [
+        ".dos-auth-shell",
+        ".dos-auth-form",
+        ".dos-auth-submit",
+        ".dos-auth-error",
+    ] {
+        assert!(
+            auth_css.contains(selector),
+            "missing auth CSS selector {selector}"
         );
     }
     assert!(source.contains("dos-table-wrap"));
