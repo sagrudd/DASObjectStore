@@ -121,6 +121,18 @@ pub fn get_profile_object_range(
     Ok(Box::new(reader.take(length)))
 }
 
+/// Delete one catalogue-authoritative profile object through the daemon-owned
+/// backend. A missing catalogue record is rejected before touching the
+/// backend, so provider listings or private paths cannot be used to mutate an
+/// object outside the logical ObjectStore view.
+pub fn delete_profile_object(
+    backend: &mut dyn ProfileS3WriteBackend,
+    key: &BackendObjectKey,
+) -> Result<(), BackendError> {
+    head_profile_object(backend, key)?;
+    backend.remove(key)
+}
+
 fn discard_prefix(reader: &mut dyn Read, mut remaining: u64) -> Result<(), BackendError> {
     let mut buffer = [0_u8; 64 * 1024];
     while remaining != 0 {
@@ -272,8 +284,8 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 #[cfg(test)]
 mod tests {
     use super::{
-        get_profile_object, get_profile_object_range, head_profile_object, list_profile_objects,
-        put_profile_object, put_profile_object_with_capacity_provider,
+        delete_profile_object, get_profile_object, get_profile_object_range, head_profile_object,
+        list_profile_objects, put_profile_object, put_profile_object_with_capacity_provider,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -552,6 +564,29 @@ mod tests {
     }
 
     #[test]
+    fn delete_requires_catalogue_authority_and_debits_folder_capacity() {
+        let (mut backend, root) = backend();
+        let key = BackendObjectKey {
+            object_id: "deletes/sample.fastq".to_string(),
+            version: 1,
+        };
+        put_profile_object(
+            &mut backend,
+            "profile-s3-delete",
+            &key,
+            &mut &b"delete"[..],
+            6,
+        )
+        .expect("put");
+        assert_eq!(backend.capacity().used_bytes, 6);
+        delete_profile_object(&mut backend, &key).expect("delete");
+        assert_eq!(backend.capacity().used_bytes, 0);
+        assert!(head_profile_object(&backend, &key).is_err());
+        assert!(delete_profile_object(&mut backend, &key).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn drive_profile_uses_the_same_s3_adapter_and_fails_closed_on_guard_loss() {
         let (mut backend, guard, root) = drive_backend();
         let key = BackendObjectKey {
@@ -575,6 +610,26 @@ mod tests {
         assert_eq!(head_profile_object(&backend, &key).unwrap().size_bytes, 5);
         guard.0.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(list_profile_objects(&backend, None).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn drive_profile_delete_fails_closed_when_guard_is_lost() {
+        let (mut backend, guard, root) = drive_backend();
+        let key = BackendObjectKey {
+            object_id: "drive/delete.fastq".to_string(),
+            version: 1,
+        };
+        put_profile_object(
+            &mut backend,
+            "profile-s3-drive-delete",
+            &key,
+            &mut &b"drive"[..],
+            5,
+        )
+        .expect("put");
+        guard.0.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(delete_profile_object(&mut backend, &key).is_err());
         std::fs::remove_dir_all(root).ok();
     }
 

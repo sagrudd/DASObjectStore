@@ -673,6 +673,9 @@ completion.
   - [x] Exercise the shared provider-neutral S3 list/HEAD/GET/PUT adapter
     against a guarded drive backend, including fail-closed reads after
     simulated identity drift; physical disk probing remains hardware-gated.
+  - [x] Require guarded drive reservations and profile DELETE mutations to
+    validate live identity before changing capacity or payload state; guard
+    loss remains fail-closed in the provider-neutral adapter.
   - [x] Expose guarded read-only planning, restart-safe replanning, and
     explicit user-tree adoption through the drive backend wrapper. Adoption
     preserves source files and delegates durable checkpointing and catalogue
@@ -704,6 +707,10 @@ completion.
     catalogue first, rejects out-of-bounds starts, and preserves the private
     path boundary. Provider-native range optimization remains an implementation
     detail below this seam.
+  - [x] Add provider-neutral profile DELETE semantics that authorize through
+    the catalogue before backend removal, debit folder capacity transactionally,
+    and fail closed on guarded-drive identity loss; HTTP gateway wiring remains
+    open.
 - [ ] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic.

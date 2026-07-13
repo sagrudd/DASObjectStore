@@ -187,6 +187,7 @@ impl ObjectStoreBackend for DriveBackend {
     }
 
     fn reserve(&mut self, reservation_id: &str, bytes: u64) -> Result<(), BackendError> {
+        self.guard()?;
         self.folder.reserve(reservation_id, bytes)
     }
 
@@ -345,9 +346,7 @@ mod tests {
         )
         .expect("drive backend opens");
         guard_state.0.store(false, Ordering::SeqCst);
-        backend
-            .reserve("blocked-upload", 1)
-            .expect("reservation is memory-only");
+        assert!(backend.reserve("blocked-upload", 1).is_err());
         let key = BackendObjectKey {
             object_id: "blocked.txt".to_string(),
             version: 1,

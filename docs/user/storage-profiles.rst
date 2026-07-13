@@ -56,8 +56,9 @@ reported without recreating ``.dasobjectstore`` or its catalogue. Mutating
 profile operations remain administrator-authorized and require their separate
 confirmation contract.
 
-Profile-backed S3 reads use a provider-neutral daemon adapter. List, HEAD, and
-GET derive from the authoritative profile catalogue and backend read contract;
+Profile-backed S3 reads and deletion use a provider-neutral daemon adapter.
+List, HEAD, and GET derive from the authoritative profile catalogue and backend
+read contract; DELETE uses the same catalogue authority before backend removal;
 provider listings and private filesystem paths are not trusted or returned.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
@@ -69,7 +70,10 @@ adapter also has a daemon-capacity-provider wrapper: logical admission is
 reserved before backend staging and committed only after the catalogue, while
 pre-finalization failures release both ledgers. It exposes bounded range reads
 for consumers that need resumable object access. It is not an HTTP gateway and
-does not implement multipart completion.
+does not implement multipart completion. Profile DELETE first requires a
+catalogue-authoritative HEAD; folder deletion persists the catalogue debit
+before unlinking the payload, and drive deletion fails closed when its runtime
+identity guard is unavailable.
 
 The private ``.dasobjectstore`` namespace and its object/staging descendants
 are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized
