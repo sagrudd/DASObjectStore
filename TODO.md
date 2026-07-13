@@ -807,6 +807,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Move authentication shell/form selectors into feature-owned
     ``styles/auth.css`` while retaining shared card/session primitives in the
     base sheet; registration and source-contract coverage preserve load order.
+  - [x] Move enclosure inventory, drive detail, and responsive layout rules
+    into ``styles/enclosures.css``; mixed/shared primitives remain in the base
+    sheet and source tests reject enclosure selector leakage.
 
 ## Milestone 1: Workspace, Naming, and Release Baseline
 

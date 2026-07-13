@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.70 - 2026-07-13
+
+- Move enclosure inventory, drive detail, and responsive layout rules into a
+  feature-owned Web stylesheet with load-order and leakage tests.
+
 ## 0.72.69 - 2026-07-13
 
 - Move authentication shell and login form styles into a feature-owned Web

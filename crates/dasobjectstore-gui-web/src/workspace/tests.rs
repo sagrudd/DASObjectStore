@@ -25,6 +25,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/local-access.css"),
         include_str!("../../styles/endpoints.css"),
         include_str!("../../styles/auth.css"),
+        include_str!("../../styles/enclosures.css"),
         include_str!("../../styles.css"),
     ]
     .concat()
@@ -2120,7 +2121,7 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
     assert!(css.contains(".dos-metric-grid,\n.dos-store-grid,\n.dos-attention-grid {"));
     assert!(css.contains("grid-template-columns: repeat(4, minmax(0, 1fr));"));
     assert!(css.contains(".dos-card {\n  min-height: 140px;"));
-    assert!(css.contains(".dos-metric-card strong,\n.dos-enclosure-card strong,"));
+    assert!(css.contains(".dos-metric-card strong,\n.dos-store-card strong {"));
     assert!(css.contains("overflow-wrap: anywhere;"));
     assert!(css.contains(".dos-home-telemetry-toolbar {\n  display: flex;\n  flex-wrap: wrap;"));
     assert!(css.contains(".dos-window-segments {\n  display: flex;\n  flex-wrap: wrap;"));
@@ -2152,6 +2153,41 @@ fn home_telemetry_dom_contract_prevents_jitter_overlap_and_mobile_breakage() {
         ".dos-activity-grid,\n  .dos-activity-queues {\n    grid-template-columns: 1fr;"
     ));
     assert!(css.contains("grid-template-columns: 1fr;"));
+}
+
+#[test]
+fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
+    let html = include_str!("../../index.html");
+    let enclosures_link = "styles/enclosures.css";
+    assert_eq!(html.matches(enclosures_link).count(), 1);
+    assert!(html.find(enclosures_link).unwrap() < html.find("styles.css").unwrap());
+
+    let css = include_str!("../../styles/enclosures.css");
+    for selector in [
+        ".dos-two-column",
+        ".dos-enclosure-card",
+        ".dos-detail-list",
+        ".dos-drive-card",
+        ".dos-slot-list",
+    ] {
+        assert!(
+            css.contains(selector),
+            "missing enclosure CSS selector {selector}"
+        );
+    }
+    let base = include_str!("../../styles.css");
+    for selector in [
+        ".dos-two-column",
+        ".dos-enclosure-card",
+        ".dos-detail-list",
+        ".dos-drive-card",
+        ".dos-slot-list",
+    ] {
+        assert!(
+            !base.contains(selector),
+            "enclosure selector leaked into base CSS: {selector}"
+        );
+    }
 }
 
 #[test]
