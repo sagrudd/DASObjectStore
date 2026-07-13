@@ -2179,9 +2179,12 @@ list until every temporary size-budget exception has been removed.
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
   headers.
-- [ ] Show explicit browser diagnostics for a genuinely empty store versus
+- [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
-  reconciliation time, and actionable failure details.
+  reconciliation time, and actionable failure details. The daemon-owned
+  ``profile_diagnostics`` projection and authenticated standalone Web route
+  compare the authoritative catalogue with bounded backend enumeration without
+  exposing private paths or mutating either side.
 - [ ] Add end-to-end appliance acceptance coverage for upload, root-tree
   refresh, folder navigation, individual download, and content/checksum
   verification; cover both managed-HDD and provider-backed uploads.

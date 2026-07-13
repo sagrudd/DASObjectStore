@@ -13,6 +13,7 @@ use dasobjectstore_core::backend::{
 };
 use dasobjectstore_core::ids::StoreId;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::io::Read;
 
 pub const PROFILE_S3_MAX_KEYS: usize = 1_000;
@@ -61,6 +62,17 @@ pub struct ProfileS3Object {
 pub struct ProfileS3ListPage {
     pub objects: Vec<ProfileS3Object>,
     pub next_offset: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileDiagnosticsSummary {
+    pub state: crate::api::ProfileDiagnosticsState,
+    pub catalogue_object_count: u64,
+    pub backend_object_count: u64,
+    pub uncatalogued_backend_object_count: u64,
+    pub catalogue_missing_backend_object_count: u64,
+    pub last_reconciliation_at_unix_seconds: Option<u64>,
+    pub actionable_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -372,6 +384,57 @@ pub fn list_profile_objects_page(
     })
 }
 
+/// Compare the authoritative logical catalogue with the provider-neutral
+/// backend enumeration without exposing backend locations. The comparison is
+/// diagnostic only: it never imports, deletes, or rewrites either side.
+pub fn profile_diagnostics(
+    backend: &dyn ProfileS3ReadBackend,
+    last_reconciliation_at_unix_seconds: Option<u64>,
+) -> Result<ProfileDiagnosticsSummary, BackendError> {
+    let catalogue = backend.records()?;
+    let backend_records = backend.enumerate(None)?;
+    let catalogue_keys = catalogue
+        .iter()
+        .map(|record| format!("{}#{}", record.key.object_id, record.key.version))
+        .collect::<BTreeSet<_>>();
+    let backend_keys = backend_records
+        .iter()
+        .map(|record| format!("{}#{}", record.key.object_id, record.key.version))
+        .collect::<BTreeSet<_>>();
+    let uncatalogued = backend_keys.difference(&catalogue_keys).count() as u64;
+    let missing = catalogue_keys.difference(&backend_keys).count() as u64;
+    let state = if catalogue.is_empty() && backend_records.is_empty() {
+        crate::api::ProfileDiagnosticsState::Empty
+    } else if uncatalogued != 0 {
+        crate::api::ProfileDiagnosticsState::UncataloguedBackendObjects
+    } else if missing != 0 {
+        crate::api::ProfileDiagnosticsState::CatalogueMissingBackendObjects
+    } else {
+        crate::api::ProfileDiagnosticsState::Synchronized
+    };
+    let actionable_message = match state {
+        crate::api::ProfileDiagnosticsState::Empty => None,
+        crate::api::ProfileDiagnosticsState::Synchronized => None,
+        crate::api::ProfileDiagnosticsState::UncataloguedBackendObjects => Some(
+            "backend objects are absent from the authoritative catalogue; run guarded reconciliation"
+                .to_string(),
+        ),
+        crate::api::ProfileDiagnosticsState::CatalogueMissingBackendObjects => Some(
+            "catalogue records have no matching backend payload; run verification and repair"
+                .to_string(),
+        ),
+    };
+    Ok(ProfileDiagnosticsSummary {
+        state,
+        catalogue_object_count: catalogue.len() as u64,
+        backend_object_count: backend_records.len() as u64,
+        uncatalogued_backend_object_count: uncatalogued,
+        catalogue_missing_backend_object_count: missing,
+        last_reconciliation_at_unix_seconds,
+        actionable_message,
+    })
+}
+
 pub fn head_profile_object(
     backend: &dyn ProfileS3ReadBackend,
     key: &BackendObjectKey,
@@ -646,10 +709,11 @@ mod tests {
         assemble_profile_s3_multipart, checksum_string, complete_profile_s3_multipart,
         complete_profile_s3_multipart_with_capacity_provider, delete_profile_object,
         delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
-        head_profile_object, list_profile_objects, list_profile_objects_page, profile_health,
-        profile_s3_list_response, put_profile_object, put_profile_object_with_capacity_provider,
-        verify_profile_object, ProfileS3MultipartCompletion, ProfileS3MultipartPart,
-        ProfileS3MultipartPartSource, PROFILE_S3_MAX_KEYS,
+        head_profile_object, list_profile_objects, list_profile_objects_page, profile_diagnostics,
+        profile_health, profile_s3_list_response, put_profile_object,
+        put_profile_object_with_capacity_provider, verify_profile_object,
+        ProfileS3MultipartCompletion, ProfileS3MultipartPart, ProfileS3MultipartPartSource,
+        PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -956,6 +1020,28 @@ mod tests {
         assert_eq!(second.next_offset, None);
         assert!(list_profile_objects_page(&backend, None, 0, PROFILE_S3_MAX_KEYS + 1).is_err());
         assert!(list_profile_objects_page(&backend, None, 4, 1).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn profile_diagnostics_distinguishes_empty_and_uncatalogued_backend() {
+        let (backend, root) = backend();
+        let empty = profile_diagnostics(&backend, None).expect("empty diagnostics");
+        assert_eq!(empty.state, crate::api::ProfileDiagnosticsState::Empty);
+        assert_eq!(empty.catalogue_object_count, 0);
+        assert_eq!(empty.backend_object_count, 0);
+
+        let orphan = root.join(".dasobjectstore/objects/orphan.fastq");
+        std::fs::create_dir_all(orphan.parent().expect("orphan parent")).expect("objects dir");
+        std::fs::write(&orphan, b"orphan").expect("orphan payload");
+        let diagnostics = profile_diagnostics(&backend, Some(42)).expect("orphan diagnostics");
+        assert_eq!(
+            diagnostics.state,
+            crate::api::ProfileDiagnosticsState::UncataloguedBackendObjects
+        );
+        assert_eq!(diagnostics.uncatalogued_backend_object_count, 1);
+        assert_eq!(diagnostics.last_reconciliation_at_unix_seconds, Some(42));
+        assert!(diagnostics.actionable_message.is_some());
         std::fs::remove_dir_all(root).ok();
     }
 

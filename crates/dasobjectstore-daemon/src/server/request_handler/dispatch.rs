@@ -57,6 +57,7 @@ where
         | DaemonApiRequest::ObjectBrowser(_)
         | DaemonApiRequest::ProfileBrowser(_)
         | DaemonApiRequest::ProfileS3List(_)
+        | DaemonApiRequest::ProfileDiagnostics(_)
         | DaemonApiRequest::ObjectDownload(_)
         | DaemonApiRequest::ObjectFolderDownload(_)) => {
             storage::request(handler, storage_request, actor, emit_progress)

@@ -19,6 +19,7 @@ mod object_store;
 mod profile_binding;
 mod profile_browser;
 mod profile_capabilities;
+mod profile_diagnostics;
 mod profile_inspection;
 mod profile_s3;
 mod remote_easyconnect;
@@ -139,6 +140,10 @@ pub use profile_capabilities::{
     discover_profile_capabilities, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, ObjectStoreCapabilityValidationError,
 };
+pub use profile_diagnostics::{
+    ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileDiagnosticsState,
+    PROFILE_DIAGNOSTICS_SCHEMA_VERSION,
+};
 pub use profile_inspection::{
     ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
     PROFILE_INSPECTION_SCHEMA_VERSION,
@@ -237,6 +242,7 @@ pub enum DaemonApiRequest {
     RegisterProfileBinding(ProfileBindingRequest),
     ProfileBrowser(ProfileBrowserRequest),
     ProfileS3List(ProfileS3ListRequest),
+    ProfileDiagnostics(ProfileDiagnosticsRequest),
     ProfileInspection(ProfileInspectionRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
@@ -291,6 +297,7 @@ impl DaemonApiRequest {
             Self::RegisterProfileBinding(_) => "register_profile_binding",
             Self::ProfileBrowser(_) => "profile_browser",
             Self::ProfileS3List(_) => "profile_s3_list",
+            Self::ProfileDiagnostics(_) => "profile_diagnostics",
             Self::ProfileInspection(_) => "profile_inspection",
             Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::CapacityAdmission(_) => "capacity_admission",
@@ -369,6 +376,7 @@ impl DaemonApiRequest {
             }
             Self::ProfileBrowser(request) => request.validate(),
             Self::ProfileS3List(request) => request.validate(),
+            Self::ProfileDiagnostics(request) => request.validate(),
             Self::ProfileInspection(_) => Ok(()),
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
@@ -460,6 +468,7 @@ pub enum DaemonApiResponse {
     RegisterProfileBinding(ProfileBindingResponse),
     ProfileBrowser(ProfileBrowserResponse),
     ProfileS3List(ProfileS3ListResponse),
+    ProfileDiagnostics(ProfileDiagnosticsResponse),
     ProfileInspection(ProfileInspectionResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),

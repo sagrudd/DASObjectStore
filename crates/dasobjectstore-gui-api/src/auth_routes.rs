@@ -74,6 +74,8 @@ use dasobjectstore_daemon::{
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest,
     PrepareEnclosureResponse as DaemonPrepareEnclosureResponse,
+    ProfileDiagnosticsRequest as DaemonProfileDiagnosticsRequest,
+    ProfileDiagnosticsResponse as DaemonProfileDiagnosticsResponse,
     ProfileS3ListRequest as DaemonProfileS3ListRequest,
     ProfileS3ListResponse as DaemonProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
@@ -257,6 +259,33 @@ async fn standalone_profile_s3_list(
         .await
         .map(Json)
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_list_failed"))
+}
+
+async fn standalone_profile_s3_diagnostics(
+    Path(store_id): Path<String>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonProfileDiagnosticsResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = StoreId::new(store_id).map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_store_id",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .profile_diagnostics(DaemonProfileDiagnosticsRequest { store_id })
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "profile_s3_diagnostics_failed")
+        })
 }
 
 async fn standalone_enclosures_dashboard(
@@ -1434,6 +1463,30 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/profile-s3/stores/generated-data/objects")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_diagnostics_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-diagnostics-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profile-s3/stores/generated-data/diagnostics")
                     .body(Body::empty())
                     .expect("request builds"),
             )

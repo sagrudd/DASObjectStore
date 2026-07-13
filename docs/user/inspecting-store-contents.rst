@@ -88,6 +88,26 @@ SSD-only, or otherwise lacks a verified managed HDD placement, the API returns a
 clear unavailable/not-found error instead of serving an arbitrary filesystem
 path.
 
+Inspect Profile Catalogue Diagnostics
+-------------------------------------
+
+The standalone Web API exposes a read-only diagnostics projection for bounded
+folder profiles:
+
+.. code-block:: text
+
+   GET /api/v1/profile-s3/stores/<store>/diagnostics
+
+The request requires the same authenticated browser session as profile listing.
+``dasobjectstored`` compares the authoritative catalogue with a bounded backend
+enumeration and reports whether the store is ``empty``, ``synchronized``,
+``uncatalogued_backend_objects``, or ``catalogue_missing_backend_objects``.
+The response includes catalogue/backend counts, drift counts, the last
+reconciliation timestamp when available, and an actionable message. It never
+returns private disk paths and does not mutate the catalogue or backend. Use
+the message and timestamp to decide whether to run the documented reconciliation
+workflow before treating an empty browser view as data loss.
+
 Download Folder Archives From the Web API
 -----------------------------------------
 

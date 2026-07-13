@@ -446,6 +446,94 @@ where
                 store_id, page,
             )))
         }
+        DaemonApiRequest::ProfileDiagnostics(request) => {
+            let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_diagnostics_unavailable",
+                        "profile diagnostics requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_diagnostics_unavailable",
+                    "profile diagnostics is available for bounded folder profiles only",
+                )));
+            }
+            let capacity = match read_store_registry(&handler.store_registry_path) {
+                Ok(definitions) => definitions
+                    .into_iter()
+                    .find(|definition| definition.store_id == store_id)
+                    .map(|definition| definition.policy.capacity),
+                Err(_) => None,
+            };
+            let Some(capacity) = capacity else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_diagnostics_unavailable",
+                    "profile diagnostics capacity policy is unavailable",
+                )));
+            };
+            let backend =
+                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_diagnostics_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let reconciliation_path = handler
+                .profile_binding_registry_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("profile-reconciliation")
+                .join(store_id.as_str())
+                .join(format!("{}.json", store_id));
+            let last_reconciliation_at_unix_seconds =
+                ReconciliationManifest::load(&reconciliation_path)
+                    .ok()
+                    .map(|manifest| manifest.updated_at_unix_seconds);
+            let summary = match profile_diagnostics(&backend, last_reconciliation_at_unix_seconds) {
+                Ok(summary) => summary,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_diagnostics_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileDiagnostics(
+                ProfileDiagnosticsResponse {
+                    schema_version: crate::api::PROFILE_DIAGNOSTICS_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    profile: DeploymentProfile::Folder,
+                    state: summary.state,
+                    catalogue_object_count: summary.catalogue_object_count,
+                    backend_object_count: summary.backend_object_count,
+                    uncatalogued_backend_object_count: summary.uncatalogued_backend_object_count,
+                    catalogue_missing_backend_object_count: summary
+                        .catalogue_missing_backend_object_count,
+                    last_reconciliation_at_unix_seconds: summary
+                        .last_reconciliation_at_unix_seconds,
+                    actionable_message: summary.actionable_message,
+                },
+            ))
+        }
         DaemonApiRequest::ObjectDownload(request) => {
             let delegated_actor = match handler
                 .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())

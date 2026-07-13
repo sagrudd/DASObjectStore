@@ -1212,7 +1212,10 @@ completion request and acknowledgement DTOs with the same bounded validation;
 the daemon socket now dispatches authenticated bounded profile-S3 list requests
 through the registered folder binding and daemon-owned capacity policy, while
 the standalone authenticated Web route delegates through the same bounded
-daemon bridge. Multipart HTTP routing remains separate.
+daemon bridge. A path-free profile diagnostics projection and authenticated Web
+route now distinguish empty, synchronized, uncatalogued, and catalogue-missing
+states with counts and reconciliation timestamps. Multipart HTTP routing
+remains separate.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.
