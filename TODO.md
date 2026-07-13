@@ -2364,6 +2364,10 @@ non-destructive close, and restores focus to its trigger when closed.
   - [x] Replace the legacy screenshot fixture users/groups selectors and add
     endpoint inventory/upsert fixture responses plus users-first workflow
     assertions; full Playwright artifact execution remains environment-gated.
+  - [x] Add a focused source contract proving target-scoped Remote Upload does
+    not expose a dropzone before an explicitly authorized writable target and
+    does not silently select the first writable store; visual artifact
+    execution remains environment-gated.
 - [ ] Add focused component/API tests for: footer content on login and each
   authenticated shell state; one decorative partial mark only; keyboard open,
   Escape close, and focus return for every task pane; Local Access per-user

@@ -2550,6 +2550,12 @@ fn remote_upload_component_contract_covers_drag_drop_agent_handoff() {
     assert!(source.contains("data-target-store-id"));
     assert!(source.contains("paired_agent_ingress_origin"));
     assert!(source.contains("capacity: {} used; {} free"));
+    assert!(source.contains("let selected_target = ready_stores"));
+    assert!(source.contains("if selected_target.is_some()"));
+    assert!(
+        source.contains("Select a writable ObjectStore from ObjectStores before choosing files.")
+    );
+    assert!(!source.contains("ready_stores.first()"));
 
     assert!(css.contains(".dos-remote-upload-panel"));
     assert!(css.contains(".dos-remote-upload-grid"));

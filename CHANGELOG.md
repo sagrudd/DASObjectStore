@@ -6,7 +6,7 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
-## 0.72.95 - 2026-07-13
+## 0.72.96 - 2026-07-13
 
 - Correct the capacity-gate status to reflect the delivered TUI and
   authenticated bounded Web bridge, while retaining open external adapter and
@@ -18,6 +18,9 @@ agreement before landing.
 - Add the strict, profile-neutral ``portable_object_catalogue.v1`` companion
   contract for object versions, provenance, lifecycle/protection, and folder,
   drive, appliance, or provider placements without changing manifest v1.
+- Add a focused Remote Upload source contract proving the dropzone stays hidden
+  until an explicit writable target is authorized and no first-store fallback
+  can silently select a destination.
 
 ## 0.72.92 - 2026-07-13
 
