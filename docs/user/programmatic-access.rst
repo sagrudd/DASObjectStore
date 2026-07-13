@@ -18,10 +18,12 @@ by the daemon and are never accepted as a substitute for the signed exchange
 proof. Long-lived identity metadata is therefore distinct from short-lived
 storage authority.
 
-The current exchange is available through the authenticated daemon transport
-for local integration tests and service adapters. Public HTTPS/mTLS listener
-wiring is a separate deployment slice. Do not place private keys, proofs, or
-access-token claims in manifests, logs, shell history, or support tickets.
+The standalone Web API also exposes the canonical proof-bearing route
+``/api/v1/application-auth/access-token`` and forwards it to the same daemon
+authority. The deployment listener must still provide the configured TLS/mTLS
+boundary before exposing this route beyond a trusted local integration. Do not
+place private keys, proofs, or access-token claims in manifests, logs, shell
+history, or support tickets.
 
 For local integrations, the CLI can submit a path-free request document to the
 same daemon boundary. The request document contains public identity metadata or
@@ -39,12 +41,18 @@ the confirmation marker required by the typed request:
      --request ./credential-revocation.json --json
 
 An application signs the proof-free exchange payload using its private key and
-submits the resulting request without exposing that key to DASObjectStore:
+submits the resulting request without exposing that key to DASObjectStore. The
+same JSON request can be posted to the standalone HTTPS route when its listener
+is configured for the deployment's TLS/mTLS policy:
 
 .. code-block:: console
 
    dasobjectstore application-auth exchange \
      --request ./access-token-exchange.json --json
+
+   curl --cert ./client.crt --key ./client.key \
+     --data @./access-token-exchange.json \
+     https://localhost:8443/api/v1/application-auth/access-token
 
 The daemon verifies identity/key membership, proof, scope, and lifetime before
 returning the typed access-token claims. The CLI does not sign requests, store

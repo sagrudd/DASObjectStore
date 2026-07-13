@@ -56,6 +56,8 @@ use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_daemon::runtime::LOCAL_ADMIN_CONFIRMATION_MARKER;
 use dasobjectstore_daemon::{
+    ApplicationAccessTokenExchangeRequest as DaemonApplicationAccessTokenExchangeRequest,
+    ApplicationAccessTokenExchangeResponse as DaemonApplicationAccessTokenExchangeResponse,
     AssignLocalUserToLocalGroupRequest as DaemonAssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse as DaemonAssignLocalUserToLocalGroupResponse,
     CapacityStatusRequest as DaemonCapacityStatusRequest,
@@ -1048,6 +1050,45 @@ mod tests {
             .expect("response body");
         let error: crate::AuthRouteError = serde_json::from_slice(&bytes).expect("error JSON");
         assert_eq!(error.code, "invalid_remote_authenticate_request");
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn application_access_token_exchange_rejects_invalid_shape_before_daemon_call() {
+        let root = temp_root("application-access-token-exchange-validation");
+        let app = test_auth_router(LocalAuthStore::new(&root), Vec::new());
+        let response = post_json_response(
+            app,
+            dasobjectstore_daemon::api::APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
+            &serde_json::json!({
+                "exchange": {
+                    "schema_version": "",
+                    "application_id": "app",
+                    "key_id": "key",
+                    "audience": "dasobjectstore",
+                    "requested_issued_at_unix_seconds": 0,
+                    "requested_expires_at_unix_seconds": 1,
+                    "scope": {
+                        "store_ids": ["codex"],
+                        "prefixes": [],
+                        "object_types": [],
+                        "operations": ["read"],
+                        "ingress_origin": "synoptikon",
+                        "max_object_bytes": null,
+                        "max_total_bytes": null
+                    },
+                    "proof": "proof"
+                }
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("response body");
+        let error: crate::AuthRouteError = serde_json::from_slice(&bytes).expect("error JSON");
+        assert_eq!(error.code, "invalid_application_access_token_exchange");
         cleanup(&root);
     }
 

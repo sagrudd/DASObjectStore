@@ -122,8 +122,9 @@ scope, and lifetime. Core issuance now requires an explicit proof verifier
 implementation and rejects unverified proofs. The daemon now ships a
 ring-backed Ed25519/P-256 verifier bound to registered public-key material and
 fingerprints, and its daemon socket now performs proof-verified short-lived
-issuance without persisting bearer tokens. mTLS transport verification and
-public HTTP exchange endpoint wiring remain. Native DEB/RPM build scripts also compile the
+issuance without persisting bearer tokens. The standalone Web API now dispatches
+the canonical proof-bearing exchange route through the daemon; mTLS transport
+verification remains a listener concern. Native DEB/RPM build scripts also compile the
 daemon with `--no-default-features`, making the package boundary explicit.
 Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.
@@ -131,13 +132,13 @@ The daemon now also provides a state-scoped, expiry-pruned single-use replay
 registry for completion capabilities and a ring-backed proof verifier bound to
 registered public keys. Its completion helper verifies provider state before
 consuming, releases on catalogue failure, and returns an idempotent replay
-result; public endpoint and live catalogue wiring remain.
+result; live catalogue wiring remains.
 The daemon API now publishes a confirmation-bound, path-free revocation
 request/response contract for identities and individual public keys, and
 authenticated administrator dispatch applies atomic identity/key deactivation.
 Credential registration and revocation now append atomically persisted,
 reason-digest audit events without secrets or paths; mTLS transport verification
-and public endpoint wiring remain listener work.
+remains listener work.
 
 ### Current delivered baseline
 
@@ -1273,8 +1274,9 @@ Static profile-capability discovery is also available through authenticated
 Web at ``/api/v1/profile-capabilities``; the response remains a versioned
 catalogue and never implies provisioning or live hardware health.
 The application access-token contract now publishes one canonical versioned
-HTTPS exchange route for clients and adapters; listener authentication, mTLS
-verification, and runtime HTTP dispatch remain deployment-layer work.
+HTTPS exchange route for clients and adapters, and the standalone Web API
+dispatches it through the daemon; listener authentication and mTLS verification
+remain deployment-layer work.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.

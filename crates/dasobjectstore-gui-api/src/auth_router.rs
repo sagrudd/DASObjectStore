@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Extension, Router,
 };
+use dasobjectstore_daemon::api::APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE;
 
 pub fn standalone_gui_api_router(auth_store: LocalAuthStore) -> Router {
     gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store)
@@ -38,6 +39,10 @@ pub(crate) fn standalone_auth_router_with_state(state: StandaloneAuthRouteState)
     Router::new()
         .route("/api/register", post(register))
         .route("/api/login", post(login))
+        .route(
+            APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
+            post(exchange_application_access_token),
+        )
         .route("/api/v1/remote/authenticate", post(remote_authenticate))
         .route("/api/logout", post(logout))
         .route("/api/session", post(session))

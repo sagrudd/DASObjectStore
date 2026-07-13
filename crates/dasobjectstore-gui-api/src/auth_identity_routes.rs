@@ -73,6 +73,36 @@ pub(super) async fn login(
         .map_err(auth_route_error)
 }
 
+/// Exchange a registered application's signed proof for a short-lived access
+/// token through the daemon authority. The proof is the request credential;
+/// this route deliberately does not accept a local GUI session token.
+pub(super) async fn exchange_application_access_token(
+    Json(request): Json<DaemonApplicationAccessTokenExchangeRequest>,
+) -> Result<Json<DaemonApplicationAccessTokenExchangeResponse>, (StatusCode, Json<AuthRouteError>)>
+{
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_application_access_token_exchange",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ));
+            client
+                .exchange_application_access_token(request)
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "application_access_token_exchange_failed")
+        })
+}
+
 /// Authenticate a remote user and issue one daemon-owned, store-scoped S3
 /// session. The password is used only for this request and never crosses the
 /// daemon boundary or gets persisted in the remote-client configuration.

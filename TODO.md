@@ -237,8 +237,10 @@ completion.
   - [x] Add a provider-independent completion-commit gate to the daemon remote
     upload worker; a successful provider transfer is not reported complete when
     the injected manifest/catalogue handoff fails. Concrete catalogue wiring,
-    service-principal/token-exchange implementation, and public endpoint wiring
-    remain open under the approved authentication contract. The handoff now
+    service-principal/token-exchange completion and public listener integration
+    remain open under the approved authentication contract. The standalone
+    proof-bearing HTTP route now dispatches through the daemon; mTLS/listener
+    binding and live catalogue wiring remain. The handoff now
     also rejects blank job/ObjectStore identifiers before invoking catalogue
     code, so malformed completion records fail closed without creating an
     unreconcilable catalogue transaction.
@@ -890,8 +892,9 @@ completion.
     proofs. The daemon now provides a ring-backed Ed25519/P-256 verifier bound
     to registered public-key material and fingerprints. The daemon socket now
     performs proof-verified issuance without persisting bearer tokens; private
-    key custody, mTLS transport verification, and public HTTP exchange endpoint
-    wiring remain.
+    key custody and mTLS transport verification remain; the standalone Web API
+    now dispatches the canonical proof-bearing exchange route through the
+    daemon.
     Do not issue long-lived broadly scoped bearer access tokens.
   - [~] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
@@ -899,8 +902,8 @@ completion.
     commit and make retries idempotent.
     The daemon completion authority now verifies provider state before replay
     consumption, releases pending capabilities on catalogue failure, and
-    returns an idempotent already-consumed outcome; public endpoint and live
-    catalogue wiring remain.
+    returns an idempotent already-consumed outcome; live catalogue wiring and
+    provider-backed completion remain.
   - [~] Add explicit expiry, revocation, rotation, replay protection, and
     redacted audit events for every credential class. Upload-completion
     capability consumption now has a daemon-owned, state-scoped atomic replay
@@ -909,8 +912,8 @@ completion.
     now published and wired through authenticated administrator dispatch to
     atomic identity/key deactivation; redacted, reason-digest audit events are
     now persisted atomically for registration, rotation, revocation, and
-    access-token issuance, and completion paths, while mTLS/public endpoint
-    wiring remains.
+    access-token issuance, and completion paths, while mTLS listener binding
+    remains.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
@@ -919,9 +922,9 @@ completion.
     Native DEB/RPM build scripts now explicitly compile the daemon with
     ``--no-default-features`` as an additional package-boundary safeguard.
     The daemon socket exchange now verifies registered key proofs; the
-    canonical versioned HTTPS exchange route constant is also published for
-    clients and adapters. Listener authentication, mTLS verification, and
-    runtime HTTP dispatch remain open.
+    canonical versioned HTTPS exchange route is published and dispatched by
+    the standalone Web API. Listener authentication and mTLS verification
+    remain open.
   - [x] Publish versioned, non-secret JSON contract fixtures for identity,
     public-key descriptor, exchange request, scoped access token, renewal-only
     token, and upload-completion capability adapters. The exchange fixture
@@ -2228,7 +2231,9 @@ list until every temporary size-budget exception has been removed.
   approved contract uses a short-lived, single-use upload capability rather
   than a renewal-token bearer credential. The daemon has tested paired-session
   completion authorization; service-principal/token-exchange implementation,
-  provider verification, and public endpoint wiring remain.
+  provider verification and live catalogue/provider wiring remain; the
+  standalone proof-bearing HTTP route now dispatches through the daemon
+  authority.
   - [~] Add a guarded, resumable reconciliation operation for already-uploaded
   S3/object-service keys missing from the ObjectBrowser catalogue; report
   collisions, malformed keys, and inaccessible objects without silently
