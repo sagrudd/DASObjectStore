@@ -315,6 +315,7 @@ pub fn list_profile_objects(
     prefix: Option<&str>,
 ) -> Result<Vec<ProfileS3Object>, BackendError> {
     let prefix = prefix.unwrap_or_default();
+    validate_runtime_prefix(prefix)?;
     backend.records().map(|mut records| {
         records.sort_by(|left, right| {
             left.key
@@ -349,6 +350,7 @@ pub fn list_profile_objects_page(
         )));
     }
     let prefix = prefix.unwrap_or_default();
+    validate_runtime_prefix(prefix)?;
     let mut records = backend
         .records()?
         .into_iter()
@@ -753,6 +755,24 @@ fn validate_runtime_key(key: &BackendObjectKey) -> Result<(), BackendError> {
     Ok(())
 }
 
+fn validate_runtime_prefix(prefix: &str) -> Result<(), BackendError> {
+    if prefix.starts_with('/') || prefix.contains('\\') || prefix.contains('\0') {
+        return Err(BackendError::InvalidRequest(
+            "profile S3 list prefix must be a relative logical namespace".to_string(),
+        ));
+    }
+    let without_trailing_separator = prefix.strip_suffix('/').unwrap_or(prefix);
+    if without_trailing_separator
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(BackendError::InvalidRequest(
+            "profile S3 list prefix must not contain traversal or empty segments".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn combine_cleanup(
     first: Result<(), BackendError>,
     second: Result<(), BackendError>,
@@ -1122,6 +1142,16 @@ mod tests {
         assert_eq!(second.next_offset, None);
         assert!(list_profile_objects_page(&backend, None, 0, PROFILE_S3_MAX_KEYS + 1).is_err());
         assert!(list_profile_objects_page(&backend, None, 4, 1).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn runtime_list_rejects_unsafe_prefixes_before_catalogue_reads() {
+        let (backend, root) = backend();
+        for prefix in ["/reads", "reads/../escape", "reads\\escape", "reads/./"] {
+            assert!(list_profile_objects(&backend, Some(prefix)).is_err());
+            assert!(list_profile_objects_page(&backend, Some(prefix), 0, 1).is_err());
+        }
         std::fs::remove_dir_all(root).ok();
     }
 
