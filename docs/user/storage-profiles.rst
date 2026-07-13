@@ -68,7 +68,12 @@ Per-user host mode derives state beneath ``XDG_STATE_HOME`` or
 run without a runtime directory, but socket resolution fails explicitly rather
 than falling back to shared ``/tmp``. System and integrated modes retain the
 packaged daemon state/runtime roots. Directory ownership, permissions, and user
-service installation remain deployment-layer responsibilities.
+service installation remain deployment-layer responsibilities. The daemon
+runtime exposes a render-only ``launchd`` user-service plan for macOS that
+validates absolute executable/config/state paths, restricts the service label,
+and XML-escapes plist values. A deployment adapter may write that plist beneath
+the user's ``~/Library/LaunchAgents`` and invoke ``launchctl``; the core plan
+never performs service installation or mutates the host.
 
 For local validation, set
 ``DASOBJECTSTORE_CODEX_VALIDATION_ROOT=/Users/stephen/.dasobjectstore-codex-validation``

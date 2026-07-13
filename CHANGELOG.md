@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.12 - 2026-07-13
+
+- Add a validated, render-only macOS `launchd` user-service plan for per-user
+  folder stores without performing host service mutations.
+
 ## 0.76.11 - 2026-07-13
 
 - Add guarded drive-profile reconciliation planning and explicit adoption with

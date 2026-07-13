@@ -12,6 +12,54 @@ pub struct FolderHostPaths {
     pub runtime_dir: Option<PathBuf>,
 }
 
+/// A render-only per-user service definition. The daemon owns the executable
+/// and config paths; deployment code may write the rendered plist under the
+/// user's LaunchAgents directory and invoke `launchctl` separately.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserServicePlan {
+    pub label: String,
+    pub executable: PathBuf,
+    pub config_path: PathBuf,
+    pub state_dir: PathBuf,
+}
+
+impl UserServicePlan {
+    pub fn launchd_plist(&self) -> Result<String, FolderHostPathError> {
+        validate_service_label(&self.label)?;
+        require_absolute("service executable", &self.executable)?;
+        require_absolute("service config", &self.config_path)?;
+        require_absolute("service state", &self.state_dir)?;
+        let stdout = self.state_dir.join("logs/dasobjectstored.stdout.log");
+        let stderr = self.state_dir.join("logs/dasobjectstored.stderr.log");
+        Ok(format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>{}</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{}</string>\n    <string>--config</string>\n    <string>{}</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n  <key>StandardOutPath</key>\n  <string>{}</string>\n  <key>StandardErrorPath</key>\n  <string>{}</string>\n</dict>\n</plist>\n",
+            xml_escape(&self.label),
+            xml_escape(&self.executable.display().to_string()),
+            xml_escape(&self.config_path.display().to_string()),
+            xml_escape(&stdout.display().to_string()),
+            xml_escape(&stderr.display().to_string()),
+        ))
+    }
+}
+
+pub fn user_service_plan(
+    paths: &FolderHostPaths,
+    executable: impl Into<PathBuf>,
+    config_path: impl Into<PathBuf>,
+    label: impl Into<String>,
+) -> Result<UserServicePlan, FolderHostPathError> {
+    let plan = UserServicePlan {
+        label: label.into(),
+        executable: executable.into(),
+        config_path: config_path.into(),
+        state_dir: paths.state_dir.clone(),
+    };
+    plan.launchd_plist()?;
+    Ok(plan)
+}
+
 impl FolderHostPaths {
     pub fn socket_path(&self, socket_name: &str) -> Result<PathBuf, FolderHostPathError> {
         if socket_name.trim().is_empty() {
@@ -75,12 +123,33 @@ fn require_absolute(field: &'static str, path: &Path) -> Result<(), FolderHostPa
     }
 }
 
+fn validate_service_label(label: &str) -> Result<(), FolderHostPathError> {
+    if label.is_empty()
+        || !label
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+    {
+        return Err(FolderHostPathError::InvalidServiceLabel(label.to_string()));
+    }
+    Ok(())
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FolderHostPathError {
     MissingHomeDirectory,
     MissingRuntimeDirectory,
     BlankSocketName,
     SocketPathTooLong(PathBuf),
+    InvalidServiceLabel(String),
     RelativePath { field: &'static str, path: PathBuf },
 }
 
@@ -100,6 +169,9 @@ impl Display for FolderHostPathError {
                     "folder socket path is too long: {}",
                     path.display()
                 )
+            }
+            Self::InvalidServiceLabel(label) => {
+                write!(formatter, "invalid per-user service label: {label}")
             }
             Self::RelativePath { field, path } => {
                 write!(formatter, "{field} must be absolute: {}", path.display())
@@ -201,5 +273,62 @@ mod tests {
             user_without_runtime.socket_path("socket"),
             Err(FolderHostPathError::MissingRuntimeDirectory)
         );
+    }
+
+    #[test]
+    fn renders_escaped_launchd_user_service_plan_without_installing_it() {
+        let paths = folder_host_paths(
+            HostMode::PerUser,
+            Some(Path::new("/Users/tester")),
+            Some(Path::new("/Users/tester/Library/User & State")),
+            Some(Path::new("/tmp/user-runtime")),
+            Path::new("/var/lib/dasobjectstore"),
+            Path::new("/run/dasobjectstore"),
+        )
+        .expect("per-user paths derive");
+        let plan = user_service_plan(
+            &paths,
+            "/Users/tester/bin/dasobjectstored",
+            "/Users/tester/Library/Config/dasobjectstore.json",
+            "org.dasobjectstore.dasobjectstored",
+        )
+        .expect("launchd plan validates");
+        let plist = plan.launchd_plist().expect("plist renders");
+        assert!(plist.contains("<key>RunAtLoad</key>\n  <true/>"));
+        assert!(plist.contains("org.dasobjectstore.dasobjectstored"));
+        assert!(plist.contains("User &amp; State/dasobjectstore/logs"));
+        assert!(plist.contains("--config"));
+        assert!(!plist.contains("/etc/dasobjectstore"));
+    }
+
+    #[test]
+    fn rejects_invalid_launchd_service_plan_inputs() {
+        let paths = folder_host_paths(
+            HostMode::PerUser,
+            Some(Path::new("/Users/tester")),
+            None,
+            Some(Path::new("/tmp/user-runtime")),
+            Path::new("/var/lib/dasobjectstore"),
+            Path::new("/run/dasobjectstore"),
+        )
+        .expect("per-user paths derive");
+        assert!(matches!(
+            user_service_plan(
+                &paths,
+                "relative/dasobjectstored",
+                "/Users/tester/config.json",
+                "org.dasobjectstore.dasobjectstored",
+            ),
+            Err(FolderHostPathError::RelativePath { .. })
+        ));
+        assert!(matches!(
+            user_service_plan(
+                &paths,
+                "/Users/tester/bin/dasobjectstored",
+                "/Users/tester/config.json",
+                "org/dasobjectstore",
+            ),
+            Err(FolderHostPathError::InvalidServiceLabel(_))
+        ));
     }
 }

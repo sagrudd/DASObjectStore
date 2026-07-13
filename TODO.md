@@ -604,6 +604,10 @@ completion.
     state falls back beneath HOME, missing XDG runtime remains explicitly
     unavailable (never shared `/tmp`), and socket length/name validation is
     covered locally; service-manager creation and ownership checks remain.
+  - [x] Add a render-only, validated macOS `launchd` user-service plan with
+    absolute executable/config/state paths, safe labels, escaped plist values,
+    and no `launchctl` side effects; deployment-layer installation and
+    ownership checks remain separate.
 - [ ] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
 
