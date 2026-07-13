@@ -795,6 +795,10 @@ completion.
 - [ ] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.
+  - [x] Add the versioned, path-free core identity, scoped access-token,
+    renewal-token, and upload-completion capability contracts with fail-closed
+    scope/lifetime validation. Daemon registration, cryptographic custody, and
+    exchange wiring remain open.
   - [ ] Register service principals with owner, purpose, allowed ObjectStores
     and namespaces, operation set, ingress origin, byte/object limits, expiry,
     and audit metadata; never expose private host paths.

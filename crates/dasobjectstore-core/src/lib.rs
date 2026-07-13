@@ -1,5 +1,6 @@
 //! Core domain types for DASObjectStore.
 
+pub mod application_auth;
 pub mod backend;
 pub mod capacity;
 pub mod config;
@@ -23,6 +24,13 @@ pub mod store;
 pub mod subobject_capacity;
 pub mod utc;
 
+pub use application_auth::{
+    AccessTokenClaims, ApplicationAuthValidationError, ApplicationCredentialKind,
+    ApplicationEnvironment, ApplicationIdentity, ApplicationOperation, ApplicationScope,
+    RenewalTokenClaims, UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION,
+    MAX_ACCESS_TOKEN_TTL_SECONDS, MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS,
+    MAX_UPLOAD_COMPLETION_TTL_SECONDS,
+};
 pub use backend::{
     catalogue_logical_used_bytes, BackendCapabilities, BackendError, BackendHealth,
     BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority, ObjectStoreBackend,
