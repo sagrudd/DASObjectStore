@@ -797,6 +797,8 @@ completion.
   - [x] Add the versioned, path-free profile-S3 list request/response DTO with
     the same bounded key count and validation contract; the standalone
     authenticated Web route now delegates through the bounded daemon bridge.
+    Prefix requests reject absolute, traversal, and backslash forms while
+    preserving normal namespace trailing-slash queries.
   - [x] Add the canonical runtime-to-transport list projection helper so Web
     and S3 handlers cannot diverge or leak backend locations; authenticated
     Web routing now uses the typed daemon projection.

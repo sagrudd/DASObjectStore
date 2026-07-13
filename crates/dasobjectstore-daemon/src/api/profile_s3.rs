@@ -135,12 +135,16 @@ impl ProfileS3ListRequest {
         if self.store_id.as_str().trim().is_empty() {
             return Err(DaemonRequestValidationError::BlankField { field: "store_id" });
         }
-        if self
-            .prefix
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        {
-            return Err(DaemonRequestValidationError::BlankField { field: "prefix" });
+        if let Some(prefix) = self.prefix.as_deref() {
+            if prefix.trim().is_empty() {
+                return Err(DaemonRequestValidationError::BlankField { field: "prefix" });
+            }
+            if let Err(value) = validate_prefix(prefix) {
+                return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                    field: "prefix",
+                    value,
+                });
+            }
         }
         if self.limit == 0 || self.limit > PROFILE_S3_MAX_KEYS {
             return Err(DaemonRequestValidationError::UnsupportedFieldValue {
@@ -326,6 +330,20 @@ fn validate_object_key(key: &BackendObjectKey) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_prefix(prefix: &str) -> Result<(), String> {
+    if prefix.starts_with('/') || prefix.contains('\\') || prefix.contains('\0') {
+        return Err(prefix.to_string());
+    }
+    let without_trailing_separator = prefix.strip_suffix('/').unwrap_or(prefix);
+    if without_trailing_separator
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(prefix.to_string());
+    }
+    Ok(())
+}
+
 fn is_sha256_checksum(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|digest| {
         digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -354,6 +372,27 @@ mod tests {
             request.validate(),
             Err(DaemonRequestValidationError::UnsupportedFieldValue { field: "limit", .. })
         ));
+    }
+
+    #[test]
+    fn list_request_rejects_unsafe_prefixes_but_allows_namespace_trailing_slash() {
+        let mut request = ProfileS3ListRequest {
+            store_id: StoreId::new("codex").expect("store id"),
+            prefix: Some("reads/".to_string()),
+            offset: 0,
+            limit: 100,
+        };
+        request.validate().expect("namespace prefix validates");
+        for prefix in ["/reads", "reads/../escape", "reads\\escape", "reads/./"] {
+            request.prefix = Some(prefix.to_string());
+            assert!(matches!(
+                request.validate(),
+                Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                    field: "prefix",
+                    ..
+                })
+            ));
+        }
     }
 
     #[test]

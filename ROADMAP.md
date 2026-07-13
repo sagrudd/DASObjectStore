@@ -1264,6 +1264,8 @@ The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
+list prefixes apply the same relative-namespace boundary while allowing a
+trailing slash for ordinary namespace queries;
 the daemon socket now dispatches authenticated bounded profile-S3 list requests
 through the registered folder binding and daemon-owned capacity policy, while
 the standalone authenticated Web route delegates through the same bounded
