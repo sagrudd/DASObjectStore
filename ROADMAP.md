@@ -1208,7 +1208,9 @@ validation) and a streaming assembler that verifies each declared part;
 provider injection and HTTP dispatch remain.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
-authenticated HTTP routing and runtime store dispatch remain separate.
+the daemon socket now dispatches authenticated bounded profile-S3 list requests
+through the registered folder binding and daemon-owned capacity policy, while
+authenticated HTTP routing and multipart runtime dispatch remain separate.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
 listener authentication, request routing, and runtime store dispatch remain.

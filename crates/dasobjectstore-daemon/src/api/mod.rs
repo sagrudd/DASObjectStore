@@ -236,6 +236,7 @@ pub enum DaemonApiRequest {
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
     ProfileBrowser(ProfileBrowserRequest),
+    ProfileS3List(ProfileS3ListRequest),
     ProfileInspection(ProfileInspectionRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
@@ -289,6 +290,7 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
             Self::ProfileBrowser(_) => "profile_browser",
+            Self::ProfileS3List(_) => "profile_s3_list",
             Self::ProfileInspection(_) => "profile_inspection",
             Self::ProfileCapabilities(_) => "profile_capabilities",
             Self::CapacityAdmission(_) => "capacity_admission",
@@ -366,6 +368,7 @@ impl DaemonApiRequest {
                 request.validate().map_err(profile_binding_validation_error)
             }
             Self::ProfileBrowser(request) => request.validate(),
+            Self::ProfileS3List(request) => request.validate(),
             Self::ProfileInspection(_) => Ok(()),
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
@@ -456,6 +459,7 @@ pub enum DaemonApiResponse {
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
     ProfileBrowser(ProfileBrowserResponse),
+    ProfileS3List(ProfileS3ListResponse),
     ProfileInspection(ProfileInspectionResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),
@@ -893,13 +897,13 @@ mod tests {
         IngestControlRequest, ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort,
         ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, ProfileBrowserRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
-        UpsertEndpointInventoryRequest, ENCLOSURE_PREPARE_CONFIRMATION,
-        ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
+        ProfileS3ListRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
@@ -1146,6 +1150,20 @@ mod tests {
         request.validate().expect("request validates");
         let encoded = serde_json::to_value(request).expect("request serializes");
         assert_eq!(encoded["command"], "profile_browser");
+        assert_eq!(encoded["payload"]["limit"], 100);
+    }
+
+    #[test]
+    fn profile_s3_list_command_uses_stable_command_name() {
+        let request = DaemonApiRequest::ProfileS3List(ProfileS3ListRequest {
+            store_id: StoreId::new("codex").expect("store id"),
+            prefix: Some("reads".to_string()),
+            offset: 0,
+            limit: 100,
+        });
+        request.validate().expect("request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["command"], "profile_s3_list");
         assert_eq!(encoded["payload"]["limit"], 100);
     }
 

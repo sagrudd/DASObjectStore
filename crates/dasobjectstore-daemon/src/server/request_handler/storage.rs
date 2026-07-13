@@ -362,6 +362,90 @@ where
                 total_entries,
             }))
         }
+        DaemonApiRequest::ProfileS3List(request) => {
+            let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        "profile S3 requires a registered bounded folder profile",
+                    )));
+                }
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        "profile S3 could not load the registered profile",
+                    )));
+                }
+            };
+            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_unavailable",
+                    "profile S3 is available for bounded folder profiles only",
+                )));
+            }
+            let capacity = match read_store_registry(&handler.store_registry_path) {
+                Ok(definitions) => definitions
+                    .into_iter()
+                    .find(|definition| definition.store_id == store_id)
+                    .map(|definition| definition.policy.capacity),
+                Err(_) => None,
+            };
+            let Some(capacity) = capacity else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_unavailable",
+                    "profile S3 capacity policy is unavailable",
+                )));
+            };
+            let backend =
+                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let offset = match usize::try_from(request.offset) {
+                Ok(offset) => offset,
+                Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_invalid_request",
+                        "profile S3 list offset is too large",
+                    )));
+                }
+            };
+            let page = match list_profile_objects_page(
+                &backend,
+                request.prefix.as_deref(),
+                offset,
+                usize::from(request.limit),
+            ) {
+                Ok(page) => page,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_list_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileS3List(profile_s3_list_response(
+                store_id, page,
+            )))
+        }
         DaemonApiRequest::ObjectDownload(request) => {
             let delegated_actor = match handler
                 .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())

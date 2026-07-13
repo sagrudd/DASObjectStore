@@ -29,7 +29,8 @@ use crate::api::{
     ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
     ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
-    ProfileInspectionRequest, ProfileInspectionResponse, RemoteEasyconnectApprovePairingRequest,
+    ProfileInspectionRequest, ProfileInspectionResponse, ProfileS3ListRequest,
+    ProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
     RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
@@ -204,6 +205,16 @@ where
         match self.send(DaemonApiRequest::ObjectPut(request))? {
             DaemonApiResponse::ObjectPut(response) => Ok(response),
             response => Err(unexpected("object_put", response)),
+        }
+    }
+
+    pub fn profile_s3_list(
+        &self,
+        request: ProfileS3ListRequest,
+    ) -> Result<ProfileS3ListResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3List(request))? {
+            DaemonApiResponse::ProfileS3List(response) => Ok(response),
+            response => Err(unexpected("profile_s3_list", response)),
         }
     }
 
@@ -656,6 +667,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
+        DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
         DaemonApiResponse::ProfileInspection(_) => "profile_inspection",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
         DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",

@@ -43,8 +43,9 @@ evidence and detailed source tasks.
   delivered; live mount identity, SMART/NVMe health, and replacement tests
   require hardware.
 - `[~]` Gate 5 — provider-neutral S3 read/write/delete/verify/health contracts,
-  capacity reconciliation, and list transport DTOs are delivered; authenticated
-  HTTP gateway, multipart routing, and appliance migration adapters remain.
+  capacity reconciliation, list transport DTOs, and authenticated daemon list
+  dispatch are delivered; authenticated HTTP gateway, multipart routing, and
+  appliance migration adapters remain.
 - `[ ]` Gate 6 — integration and market-readiness acceptance awaits the
   blocked deployment, security, stress, and product-workflow matrices.
 
@@ -761,10 +762,14 @@ completion.
     continuation offset and prefix filtering; HTTP serialization remains open.
   - [x] Add the versioned, path-free profile-S3 list request/response DTO with
     the same bounded key count and validation contract; authenticated HTTP
-    routing and runtime store dispatch remain open.
+    routing remains open.
   - [x] Add the canonical runtime-to-transport list projection helper so Web
     and S3 handlers cannot diverge or leak backend locations; authenticated
-    routing and runtime store dispatch remain open.
+    HTTP routing remains open.
+  - [x] Route the bounded profile-S3 list command through the daemon's
+    authenticated storage dispatcher, resolving the registered folder binding
+    and daemon-owned capacity policy before querying the authoritative
+    catalogue; HTTP listener routing remains open.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.
