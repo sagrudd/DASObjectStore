@@ -934,7 +934,8 @@ unrelated saturated daemon bridge. The authenticated dashboard status route
 now retains a last-successful snapshot and reports stale/retry metadata, while
 cold starts fail closed. Authenticated Web cancellation also retains its
 reserved priority bridge while routine admin capacity is saturated. Appliance
-soak and telemetry freshness remain open.
+soak and telemetry freshness remain open; a daemon-backed object-browser
+request now has a deterministic typed-429 saturation regression as well.
 
 The daemon API also exposes a typed ingest admission decision combining
 source-read pressure/error backpressure with adaptive worker scheduling. It

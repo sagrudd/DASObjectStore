@@ -790,6 +790,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn object_browser_route_fails_fast_when_daemon_bridge_is_saturated() {
+        let root = temp_root("object-browser-saturated");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_browser_client();
+        let bridge = Arc::new(DaemonBridge::with_capacity_and_deadline(
+            1,
+            std::time::Duration::from_secs(1),
+        ));
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let saturated_bridge = bridge.clone();
+        let worker = tokio::spawn(async move {
+            saturated_bridge
+                .call_message(move || {
+                    entered_sender.send(()).expect("saturation signal sent");
+                    let _ = release_receiver.blocking_recv();
+                    Ok::<_, String>(())
+                })
+                .await
+        });
+        entered_receiver.await.expect("daemon bridge saturated");
+
+        let app = test_router_with_bridge(auth_store, client.clone(), bridge);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/browser")
+                    .header(STANDALONE_USERNAME_HEADER, "admin")
+                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "daemon_bridge_busy");
+        assert!(client.requests().is_empty());
+
+        release_sender.send(()).expect("daemon worker released");
+        worker
+            .await
+            .expect("daemon worker joins")
+            .expect("daemon bridge call succeeds");
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn object_browser_route_rejects_invalid_query_before_daemon() {
         let root = temp_root("object-browser-invalid");
         let auth_store = registered_auth_store(&root);
@@ -1133,11 +1184,19 @@ mod tests {
         auth_store: LocalAuthStore,
         client: Arc<RecordingObjectBrowserClient>,
     ) -> axum::Router {
+        test_router_with_bridge(auth_store, client, Arc::new(DaemonBridge::packaged()))
+    }
+
+    fn test_router_with_bridge(
+        auth_store: LocalAuthStore,
+        client: Arc<RecordingObjectBrowserClient>,
+        daemon_bridge: Arc<DaemonBridge>,
+    ) -> axum::Router {
         standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState {
             auth_store,
             object_browser_client: Some(client),
             local_user_provider: Arc::new(FixedObjectBrowserLocalUserProvider),
-            daemon_bridge: Arc::new(DaemonBridge::packaged()),
+            daemon_bridge,
         })
     }
 

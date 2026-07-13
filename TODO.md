@@ -1379,6 +1379,10 @@ list until every temporary size-budget exception has been removed.
     the reserved priority bridge accepts cancellation while the routine admin
     bridge is saturated; full daemon/I/O and accept-queue measurements remain
     appliance acceptance work.
+  - [x] Add a deterministic daemon-backed object-browser regression proving a
+    saturated bridge returns the typed HTTP 429 response before invoking the
+    client; appliance I/O saturation and accept-queue measurements remain
+    acceptance work.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [x] Document operator triage for an ingest-pressure incident, including SSD
   pressure, queue/verification indicators, safe daemon throttle/pause/resume
