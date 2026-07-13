@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.24 - 2026-07-13
+
+- Reject duplicate managed-HDD telemetry marker identities before producing
+  ambiguous per-disk IO samples.
+
 ## 0.76.23 - 2026-07-13
 
 - Add bounded, catalogue-authoritative profile S3 list pages, verification,

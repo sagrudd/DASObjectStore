@@ -2325,6 +2325,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Reject path-bearing `diskstats_device` marker values before sysfs alias
     resolution so fixture and host traversal remains bounded to the configured
     telemetry roots; malformed markers return a typed diagnostic.
+  - [x] Reject duplicate managed-HDD `disk_id` markers before telemetry
+    collection so per-disk samples cannot be ambiguous; preserve the typed
+    marker diagnostic for operator remediation.
 - [x] Model first-sample warm-up separately from unavailable telemetry: retain
   the first counter snapshot, report `first_sample_warmup` for per-disk IO, and
   never present a zero or missing rate as a confirmed idle disk.

@@ -236,6 +236,27 @@ fn disk_io_marker_rejects_path_bearing_diskstats_device() {
 }
 
 #[test]
+fn disk_io_markers_reject_duplicate_disk_ids() {
+    let root = temp_root("appliance-telemetry-duplicate-disk-id");
+    let hdd_root = root.join("hdd");
+    for directory in ["disk-a", "disk-b"] {
+        let disk_root = hdd_root.join(directory);
+        fs::create_dir_all(disk_root.join(".dasobjectstore")).expect("marker directory");
+        fs::write(
+            disk_root.join(".dasobjectstore/device.env"),
+            "role=hdd:qnap-a\ndevice=/dev/sda\n",
+        )
+        .expect("device marker written");
+    }
+    let current = parse_linux_diskstats(PROC_DISKSTATS_1).expect("diskstats parse");
+
+    let error = collect_linux_disk_io_telemetry(&hdd_root, &current, None, 6)
+        .expect_err("duplicate disk id rejected");
+    fs::remove_dir_all(&root).expect("fixture root removed");
+    assert!(error.to_string().contains("duplicate managed HDD disk id"));
+}
+
+#[test]
 fn telemetry_cadence_accepts_initial_supported_values() {
     validate_appliance_telemetry_cadence(6).expect("fast cadence accepted");
     validate_appliance_telemetry_cadence(30).expect("normal cadence accepted");

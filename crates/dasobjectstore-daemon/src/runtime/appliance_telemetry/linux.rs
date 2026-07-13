@@ -540,6 +540,7 @@ fn managed_hdd_markers(
         }
     };
     let mut markers = Vec::new();
+    let mut disk_ids = std::collections::BTreeSet::new();
     for entry in entries {
         let entry = entry.map_err(|error| ApplianceTelemetryCollectorError::Io {
             path: hdd_root.to_path_buf(),
@@ -568,6 +569,12 @@ fn managed_hdd_markers(
             }
         };
         if let Some(marker) = parse_managed_hdd_marker(&mount_path, &marker_path, &marker)? {
+            if !disk_ids.insert(marker.disk_id.clone()) {
+                return Err(ApplianceTelemetryCollectorError::InvalidDeviceMarker {
+                    path: marker_path,
+                    message: format!("duplicate managed HDD disk id: {}", marker.disk_id),
+                });
+            }
             markers.push(marker);
         }
     }
