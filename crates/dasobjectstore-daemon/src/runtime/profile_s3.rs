@@ -202,7 +202,12 @@ pub fn put_profile_object_with_capacity_provider(
         ));
     }
 
-    backend.reserve(reservation_id, size_bytes)?;
+    if let Err(error) = backend.reserve(reservation_id, size_bytes) {
+        let cleanup = capacity_provider
+            .release(&store_id, reservation_id)
+            .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+        return Err(with_cleanup_error(error, cleanup));
+    }
     let staged = match backend.stage(reservation_id, key, source) {
         Ok(staged) => staged,
         Err(error) => {
@@ -284,16 +289,22 @@ mod tests {
     use std::io::Read;
     use std::path::PathBuf;
     use std::sync::Mutex;
-    use std::sync::{atomic::AtomicBool, Arc};
+    use std::sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    };
+
+    static TEST_ROOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn backend() -> (FolderBackend, PathBuf) {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
+        let sequence = TEST_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "dasobjectstore-profile-s3-{}-{nonce}",
-            std::process::id()
+            "dasobjectstore-profile-s3-{}-{nonce}-{sequence}",
+            std::process::id(),
         ));
         let manifest = ObjectStoreManifest {
             schema_version: 1,
@@ -328,9 +339,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
+        let sequence = TEST_ROOT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "dasobjectstore-profile-s3-drive-{}-{nonce}",
-            std::process::id()
+            "dasobjectstore-profile-s3-drive-{}-{nonce}-{sequence}",
+            std::process::id(),
         ));
         let manifest = ObjectStoreManifest {
             schema_version: 1,
@@ -357,9 +369,23 @@ mod tests {
         (backend, guard, root)
     }
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     struct RecordingCapacityProvider {
         events: Mutex<Vec<String>>,
+        logical_limit_bytes: u64,
+        backend_free_bytes: u64,
+        ssd_free_bytes: u64,
+    }
+
+    impl Default for RecordingCapacityProvider {
+        fn default() -> Self {
+            Self {
+                events: Mutex::new(Vec::new()),
+                logical_limit_bytes: 1024,
+                backend_free_bytes: 1024,
+                ssd_free_bytes: 1024,
+            }
+        }
     }
 
     impl CapacityAdmissionProvider for RecordingCapacityProvider {
@@ -375,15 +401,15 @@ mod tests {
             ));
             CapacityAdmissionResponse::evaluate(
                 &request,
-                &CapacityPolicy::bounded(1024, 0),
+                &CapacityPolicy::bounded(self.logical_limit_bytes, 0),
                 dasobjectstore_core::store::CapacityAdmissionInput {
                     requested_bytes: request.requested_bytes,
                     copy_count: request.copy_count,
                     requires_ssd_staging: request.ingress_origin.requires_ssd_staging(),
                     used_bytes: 0,
                     reserved_bytes: 0,
-                    backend_free_bytes: 1024,
-                    ssd_free_bytes: 1024,
+                    backend_free_bytes: self.backend_free_bytes,
+                    ssd_free_bytes: self.ssd_free_bytes,
                 },
             )
             .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
@@ -555,7 +581,12 @@ mod tests {
     #[test]
     fn put_with_capacity_provider_commits_logical_and_backend_reservations() {
         let (mut backend, root) = backend();
-        let provider = RecordingCapacityProvider::default();
+        let provider = RecordingCapacityProvider {
+            logical_limit_bytes: 4096,
+            backend_free_bytes: 4096,
+            ssd_free_bytes: 4096,
+            ..RecordingCapacityProvider::default()
+        };
         let key = BackendObjectKey {
             object_id: "provider/sample.fastq".to_string(),
             version: 1,
@@ -605,6 +636,40 @@ mod tests {
             vec![
                 "admit:profile-s3:7:profile-s3-provider-mismatch",
                 "release:profile-s3:profile-s3-provider-mismatch"
+            ]
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn put_with_capacity_provider_releases_logical_reservation_when_backend_reserve_fails() {
+        let (mut backend, root) = backend();
+        let provider = RecordingCapacityProvider {
+            logical_limit_bytes: 4096,
+            backend_free_bytes: 4096,
+            ssd_free_bytes: 4096,
+            ..RecordingCapacityProvider::default()
+        };
+        let key = BackendObjectKey {
+            object_id: "provider/over-capacity.fastq".to_string(),
+            version: 1,
+        };
+        assert!(put_profile_object_with_capacity_provider(
+            &provider,
+            "profile-s3",
+            &mut backend,
+            "profile-s3-provider-over-capacity",
+            &key,
+            &mut &b"provider"[..],
+            2048,
+        )
+        .is_err());
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:profile-s3:2048:profile-s3-provider-over-capacity",
+                "release:profile-s3:profile-s3-provider-over-capacity"
             ]
         );
         std::fs::remove_dir_all(root).ok();
