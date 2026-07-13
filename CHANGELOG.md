@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.77 - 2026-07-13
+
+- Add the typed Web client contract and path helper for the authenticated
+  cached dashboard status endpoint.
+
 ## 0.72.76 - 2026-07-13
 
 - Show the daemon ingest admission action, limiting reason, and worker schedule

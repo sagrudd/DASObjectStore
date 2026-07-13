@@ -1306,6 +1306,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Add authenticated ``/api/v1/dashboard/status`` with a bounded in-process
     last-successful snapshot, explicit ``stale``/retry metadata, and fail-closed
     cold-start behavior; appliance-backed soak and telemetry freshness remain.
+  - [x] Add the typed Web client response contract, WASM getter, and path helper
+    for cached dashboard status; existing Home-page loading remains unchanged.
 - [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
   - [x] Add a typed daemon admission decision that combines source-read error/
     pressure backpressure with adaptive worker scheduling and reports run,

@@ -73,6 +73,14 @@ pub struct HomeDashboardResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[allow(dead_code)]
+pub struct CachedHomeDashboardResponse {
+    pub snapshot: HomeDashboardResponse,
+    pub stale: bool,
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct TelemetryWindowControlResponse {
     pub selected: String,
     pub selected_label: String,

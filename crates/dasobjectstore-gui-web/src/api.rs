@@ -97,6 +97,18 @@ pub async fn get_home_dashboard(path: &str) -> Result<HomeDashboardResponse, Api
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn get_cached_home_dashboard(
+    path: &str,
+) -> Result<CachedHomeDashboardResponse, ApiError> {
+    get_json(path).await
+}
+
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub fn cached_home_dashboard_api_path(api_base_path: &str) -> String {
+    format!("{}/dashboard/status", api_base_path.trim_end_matches('/'))
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn get_enclosures_dashboard(path: &str) -> Result<EnclosuresPageResponse, ApiError> {
     get_json(path).await
 }
@@ -576,14 +588,14 @@ where
 mod tests {
     use super::{
         activity_performance_report_upload_path, admin_job_cancel_path, admin_job_status_path,
-        auth_path, endpoint_inventory_upsert_path, object_browser_api_path,
-        object_download_api_path, object_folder_download_api_path, object_store_create_path,
-        object_store_ingest_policy_path, ActivityWorkspaceResponse, AdminJobCancelResponse,
-        AdminJobStatusResponse, BioinformaticsWorkspaceResponse, CreateObjectStoreResponse,
-        EnclosurePrepareResponse, EnclosuresPageResponse, EndpointInventoryUpsertResponse,
-        EndpointsWorkspaceResponse, GuiActionPlanResponse, HomeDashboardResponse,
-        LocalGroupAdminResponse, ObjectStoresPageResponse, RemoteUploadWorkspaceResponse,
-        UsersGroupsWorkspaceResponse,
+        auth_path, cached_home_dashboard_api_path, endpoint_inventory_upsert_path,
+        object_browser_api_path, object_download_api_path, object_folder_download_api_path,
+        object_store_create_path, object_store_ingest_policy_path, ActivityWorkspaceResponse,
+        AdminJobCancelResponse, AdminJobStatusResponse, BioinformaticsWorkspaceResponse,
+        CreateObjectStoreResponse, EnclosurePrepareResponse, EnclosuresPageResponse,
+        EndpointInventoryUpsertResponse, EndpointsWorkspaceResponse, GuiActionPlanResponse,
+        HomeDashboardResponse, LocalGroupAdminResponse, ObjectStoresPageResponse,
+        RemoteUploadWorkspaceResponse, UsersGroupsWorkspaceResponse,
     };
     use prosopikon_core::{ProsopikonAuthenticationFramework, ProsopikonDeviceTokenRequirement};
 
@@ -600,6 +612,14 @@ mod tests {
         assert_eq!(
             activity_performance_report_upload_path("/products/dasobjectstore/api/v1/"),
             "/products/dasobjectstore/api/v1/workspaces/activity/reporting/performance-report"
+        );
+    }
+
+    #[test]
+    fn builds_cached_home_dashboard_status_route() {
+        assert_eq!(
+            cached_home_dashboard_api_path("/products/dasobjectstore/api/v1/"),
+            "/products/dasobjectstore/api/v1/dashboard/status"
         );
     }
 

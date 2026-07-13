@@ -941,6 +941,10 @@ The TUI now renders an optional daemon admission action, limiting reason, and
 worker schedule alongside live ingest telemetry; Web bridging and host-level
 availability counters remain open.
 
+The Web client now has a typed cached-status response and path helper/getter;
+the existing Home page remains on its live response until stale-data UX is
+intentionally adopted.
+
 ## Milestone 27: Universal Capacity and Reservation Policy
 
 Goal: make every ObjectStore explicitly capacity-governed.
