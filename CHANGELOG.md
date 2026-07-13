@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.86 - 2026-07-13
+
+- Document operator triage for SSD/HDD ingest pressure and safe daemon control
+  actions, including escalation evidence and blocked soak boundaries.
+
 ## 0.72.85 - 2026-07-13
 
 - Add a deterministic bridge-saturation regression proving daemon-independent

@@ -508,6 +508,32 @@ The authenticated Web administrator route mirrors the CLI contract at
 control bridge and returns a typed ``paused``, ``throttled``, or ``running``
 state; it never mutates storage directly.
 
+Operator triage for ingest pressure
+-----------------------------------
+
+Use the following sequence when ingest pressure threatens Web or daemon
+responsiveness:
+
+1. Inspect ``dasobjectstore ingest status`` and the TUI progress snapshot. Look
+   for ``High``/``Critical`` SSD pressure, growing HDD settlement queues,
+   stalled verification, or a control-plane degraded warning.
+2. Apply ``ingest control --action throttle`` first when forward progress is
+   still desirable. Apply ``pause`` when Web/API latency or queue growth is
+   worsening. Both actions stop only new source-object admission; an object
+   already being checksummed, fsynced, or atomically renamed is allowed to
+   finish.
+3. Confirm liveness and authenticated dashboard access, then monitor queue
+   depth and pressure while staged work drains. Use ``resume`` only after the
+   limiting condition is stable.
+4. Capture the CLI/TUI state, timestamps, pressure, queue depths, and any typed
+   degraded response for escalation. Do not kill the daemon, delete staging
+   files, or restart services as the default recovery action.
+
+Provider-specific S3 workers keep their own admission gate; the emergency
+control documented here governs daemon file-ingest source reads. Appliance
+throughput, PSI, and full-disk acceptance still require the separate quiescent
+DASServer soak campaign.
+
 The operations TUI provides the console workflow contract for planning,
 confirmation, launch, monitoring, reconnect, and completion review. It uses the
 same daemon job model as the CLI and Web UI, with visibility into file counts,

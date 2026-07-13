@@ -1356,7 +1356,12 @@ list until every temporary size-budget exception has been removed.
     releases. Full appliance I/O saturation, static/login soak, and accept
     queue measurements remain hardware/deployment acceptance work.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
-- [ ] Document operator triage for an ingest-pressure incident, including the availability indicators, safe daemon throttle/pause action, expected degraded WebUI behavior, and escalation evidence. Do not prescribe killing an ingest or restarting the daemon as the default recovery path.
+- [x] Document operator triage for an ingest-pressure incident, including SSD
+  pressure, queue/verification indicators, safe daemon throttle/pause/resume
+  actions, expected degraded WebUI behavior, and escalation evidence. The
+  runbook explicitly preserves in-flight durability and does not prescribe
+  killing ingest or restarting the daemon; appliance p95/PSI evidence remains
+  part of the blocked soak acceptance.
 
 ## Milestone 16: Native Mneion Storage Endpoint and External NAS Support
 
