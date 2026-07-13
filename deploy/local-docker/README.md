@@ -11,6 +11,14 @@ the storage authority boundary intact:
   Linux package paths remain valid without writing to the macOS host `/etc`;
 - all persistent profile state is under the configured Seagate root.
 
+Secret-bearing daemon configuration and Garage credential state are kept under
+the Mac's private APFS home volume (by default
+``$HOME/.config/dasobjectstore/<profile>``). This is intentional: the attached
+Seagate volume is ExFAT in the supported macOS setup and cannot enforce POSIX
+``0600`` permissions. The profile mounts only that private object-service
+directory into the daemon; object data and non-secret store metadata remain on
+Seagate.
+
 This is a local single-node development profile, not an appliance durability or
 multi-disk-redundancy claim. The generated store uses `generated_data` policy
 with one copy because the profile has one Garage node and one USB volume.
@@ -28,16 +36,25 @@ with one copy because the profile has one Garage node and one USB volume.
 4. A built host CLI, or a `dasobjectstore` binary on `PATH`.
 
 The script never downloads data, stores credentials in Git, or prints secret
-values. Generated files are written below:
+values. Generated object data and non-secret state are written below, while
+private configuration and credentials use the APFS path shown next:
 
 ```text
 /Volumes/Seagate/DASObjectStore/alleleanchor-mvp/
-  config/       daemon.json, Garage config, nested Compose file
-  state/        daemon metadata, writable store registry, and private Garage credential registry
-  credentials/  mode-0600 Garage and AlleleAnchor credential files
+  state/        daemon metadata and writable store registry
   garage-meta/  Garage metadata
   garage-data/  Garage object data
+
+$HOME/.config/dasobjectstore/alleleanchor-mvp/
+  config/       daemon.json, Garage config, nested Compose file
+  credentials/  mode-0600 Garage and AlleleAnchor credential files
+  object-service/ private daemon credential registry
 ```
+
+The daemon control socket lives in a container-local ``tmpfs`` at
+``/run/dasobjectstore``. Docker Desktop cannot create Unix sockets reliably on
+an APFS/USB bind mount; persistent state and object data remain on the Seagate
+profile above.
 
 ## Build and start
 
@@ -94,6 +111,9 @@ DASOBJECTSTORE_BUILD_CONTEXT=/Users/stephen/Projects \
 
 Set `DASOBJECTSTORE_BIN` when using a release binary from another checkout.
 Set `DASOBJECTSTORE_LOCAL_API_PORT` if port 3900 is already occupied.
+Set `DASOBJECTSTORE_LOCAL_PRIVATE_ROOT` to place the private APFS config and
+credential root somewhere other than ``$HOME/.config/dasobjectstore``. Do not
+set it to the ExFAT Seagate volume.
 
 ## Platform boundary
 

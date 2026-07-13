@@ -143,6 +143,18 @@ completion.
     the entrypoint but failed on missing ``libpam.so.0``. The image now
     installs the small runtime set (PAM, OpenSSL, zlib, libstdc++, and CA
     certificates) before startup.
+  - [x] Keep the generated Garage Compose project aligned with daemon
+    provisioning. **COMPLETED (2026-07-13):** the CLI lifecycle path used the
+    generated project name while daemon credential provisioning uses the
+    canonical ``dasobjectstore`` project; the local profile now defaults Garage
+    to that project and permits an explicit
+    ``DASOBJECTSTORE_LOCAL_GARAGE_PROJECT`` override.
+  - [x] Keep local secrets off the attached ExFAT volume. **COMPLETED
+    (2026-07-13):** `/Volumes/Seagate` is ExFAT and cannot enforce POSIX mode
+    `0600`; the local profile now stores daemon/Garage config, exported client
+    credentials, and the daemon credential registry under the Mac APFS private
+    root (default `$HOME/.config/dasobjectstore/<profile>`), while object data
+    and non-secret store state remain on Seagate.
 
 - [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or

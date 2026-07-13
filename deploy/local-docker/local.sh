@@ -13,18 +13,21 @@ ROOT="${DASOBJECTSTORE_LOCAL_ROOT:-/Volumes/Seagate/DASObjectStore}"
 VALIDATION_ROOT="${HOME:-/Users/stephen}/.dasobjectstore-codex-validation"
 PROFILE="${DASOBJECTSTORE_LOCAL_PROFILE:-alleleanchor-mvp}"
 PROJECT="${DASOBJECTSTORE_LOCAL_PROJECT:-dasobjectstore-local}"
+GARAGE_PROJECT="${DASOBJECTSTORE_LOCAL_GARAGE_PROJECT:-dasobjectstore}"
 API_PORT="${DASOBJECTSTORE_LOCAL_API_PORT:-3900}"
 GARAGE_IMAGE="${DASOBJECTSTORE_GARAGE_IMAGE:-dxflrs/garage:v2.3.0}"
 DAEMON_IMAGE="${DASOBJECTSTORE_LOCAL_IMAGE:-dasobjectstore-local:dev}"
 
 PROFILE_ROOT="$ROOT/$PROFILE"
-CONFIG_DIR="$PROFILE_ROOT/config"
+PRIVATE_ROOT="${DASOBJECTSTORE_LOCAL_PRIVATE_ROOT:-${HOME:-/Users/stephen}/.config/dasobjectstore}/$PROFILE"
+CONFIG_DIR="$PRIVATE_ROOT/config"
 STATE_DIR="$PROFILE_ROOT/state"
 RUNTIME_DIR="$PROFILE_ROOT/runtime"
 LOG_DIR="$PROFILE_ROOT/logs"
 META_DIR="$PROFILE_ROOT/garage-meta"
 DATA_DIR="$PROFILE_ROOT/garage-data"
-CREDENTIALS_DIR="$PROFILE_ROOT/credentials"
+CREDENTIALS_DIR="$PRIVATE_ROOT/credentials"
+OBJECT_SERVICE_DIR="$PRIVATE_ROOT/object-service"
 REGISTRY_PATH="$STATE_DIR/stores.json"
 DEVICE_MARKER="$PROFILE_ROOT/.dasobjectstore/device.env"
 GARAGE_PROJECT_DIR="$STATE_DIR/garage"
@@ -34,7 +37,7 @@ DAEMON_CONFIG="$CONFIG_DIR/daemon.json"
 STACK_COMPOSE="$PROFILE_ROOT/compose.yml"
 GARAGE_SECRETS="$CREDENTIALS_DIR/garage.env"
 ALLELEANCHOR_CONFIG="$CREDENTIALS_DIR/alleleanchor-store.toml"
-GARAGE_CREDENTIAL_REGISTRY="$STATE_DIR/object-service/garage-credentials.json"
+GARAGE_CREDENTIAL_REGISTRY="$OBJECT_SERVICE_DIR/garage-credentials.json"
 
 die() {
     printf 'error: %s\n' "$*" >&2
@@ -134,9 +137,10 @@ ensure_profile_dirs() {
     require_volume_root
     mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUNTIME_DIR" "$LOG_DIR" \
         "$META_DIR" "$DATA_DIR" "$CREDENTIALS_DIR" "$GARAGE_PROJECT_DIR" \
-        "$(dirname "$REGISTRY_PATH")" "$(dirname "$DEVICE_MARKER")"
-    chmod 700 "$PROFILE_ROOT" "$CONFIG_DIR" "$STATE_DIR" "$RUNTIME_DIR" \
-        "$LOG_DIR" "$META_DIR" "$DATA_DIR" "$CREDENTIALS_DIR"
+        "$OBJECT_SERVICE_DIR" "$(dirname "$REGISTRY_PATH")" "$(dirname "$DEVICE_MARKER")"
+    chmod 700 "$PROFILE_ROOT" "$PRIVATE_ROOT" "$CONFIG_DIR" "$STATE_DIR" \
+        "$RUNTIME_DIR" "$LOG_DIR" "$META_DIR" "$DATA_DIR" "$CREDENTIALS_DIR" \
+        "$OBJECT_SERVICE_DIR"
 }
 
 ensure_local_ssd_marker() {
@@ -232,17 +236,20 @@ services:
       dockerfile: "DASObjectStore/deploy/local-docker/Dockerfile"
     init: true
     restart: unless-stopped
-    command: ["dasobjectstored", "--config", "/etc/dasobjectstore/daemon.json"]
+    # The image entrypoint is already dasobjectstored; pass only its arguments.
+    command: ["--config", "/etc/dasobjectstore/daemon.json"]
     environment:
       DASOBJECTSTORE_STORE_REGISTRY_PATH: /var/lib/dasobjectstore/stores.json
       DASOBJECTSTORE_SUBOBJECT_REGISTRY_PATH: /var/lib/dasobjectstore/subobjects.json
     volumes:
       - "$CONFIG_DIR:/etc/dasobjectstore:ro"
       - "$STATE_DIR:/var/lib/dasobjectstore"
-      - "$RUNTIME_DIR:/run/dasobjectstore"
+      - "$OBJECT_SERVICE_DIR:/var/lib/dasobjectstore/object-service"
       - "$LOG_DIR:/var/log/dasobjectstore"
       - "$ROOT:/Volumes/Seagate/DASObjectStore"
       - "/var/run/docker.sock:/var/run/docker.sock"
+    tmpfs:
+      - /run/dasobjectstore
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/dasobjectstore/dasobjectstored.sock"]
       interval: 5s
@@ -256,6 +263,7 @@ EOF
 render_profile() {
     validate_profile_name "DASOBJECTSTORE_LOCAL_PROFILE" "$PROFILE"
     validate_profile_name "DASOBJECTSTORE_LOCAL_PROJECT" "$PROJECT"
+    validate_profile_name "DASOBJECTSTORE_LOCAL_GARAGE_PROJECT" "$GARAGE_PROJECT"
     validate_port
     ensure_profile_dirs
     require_build_context
@@ -273,7 +281,7 @@ render_profile() {
         --json >/dev/null
     "$bin" service render-compose \
         --stores-file "$REGISTRY_PATH" \
-        --project-name "$PROJECT" \
+        --project-name "$GARAGE_PROJECT" \
         --ssd-metadata-path "$META_DIR" \
         --hdd-data-path "$DATA_DIR" \
         --provider garage \

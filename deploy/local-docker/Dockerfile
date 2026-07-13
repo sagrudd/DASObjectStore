@@ -22,6 +22,13 @@ FROM docker:27.5.1-cli AS docker-cli
 FROM almalinux:9-minimal
 
 WORKDIR /opt/dasobjectstore
+RUN microdnf install -y \
+        ca-certificates \
+        libstdc++ \
+        openssl-libs \
+        pam \
+        zlib \
+    && microdnf clean all
 COPY --from=builder /src/DASObjectStore/target/release/dasobjectstore /usr/local/bin/dasobjectstore
 COPY --from=builder /src/DASObjectStore/target/release/dasobjectstored /usr/local/bin/dasobjectstored
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
