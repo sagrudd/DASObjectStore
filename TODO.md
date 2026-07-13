@@ -230,6 +230,9 @@ completion.
     logical used/reserved/available bytes, backend and SSD availability, copy
     amplification, thresholds, and admission-block reasons; the Web adapter
     remains pending live daemon-provider wiring.
+  - [x] Add an optional Web ``capacity_status`` detail with explicit
+    unavailable fallback and old-payload compatibility; live values remain
+    unavailable until the authenticated daemon bridge is wired.
   - [x] Add transport-neutral daemon capacity admission request/decision DTOs
     with stable snake_case reasons, observed-capacity fields, and direct-ingress
     SSD fields optional; SSD-first/direct behavior is derived from the typed

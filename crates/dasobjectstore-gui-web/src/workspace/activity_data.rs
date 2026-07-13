@@ -180,6 +180,7 @@ pub struct ObjectStoreCardSummary {
     pub access: String,
     pub policy: String,
     pub capacity: String,
+    pub capacity_status: String,
     pub objects: String,
     pub writer_group: String,
     pub endpoint: String,

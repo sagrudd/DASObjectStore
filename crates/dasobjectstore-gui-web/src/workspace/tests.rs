@@ -1067,6 +1067,21 @@ fn object_stores_live_payload_maps_to_card_summaries() {
                 "free_tib": "87.5",
                 "used_percent_basis_points": 1250
             },
+            "capacity_status": {
+                "pressure": "warning",
+                "logical_limit_bytes": 1000000,
+                "used_bytes": 400000,
+                "reserved_bytes": 100000,
+                "logical_available_bytes": 500000,
+                "backend_free_bytes": 2000000,
+                "backend_available_bytes": 1900000,
+                "ssd_available_bytes": 700000,
+                "copy_count": 2,
+                "requires_ssd_staging": true,
+                "warning_threshold_basis_points": 7500,
+                "critical_threshold_basis_points": 9000,
+                "admission_block_reason": null
+            },
             "placement_policy": "fractional_free_space",
             "endpoint_export_mode": "s3_bucket",
             "writer_group": "bioinformatics",
@@ -1110,6 +1125,8 @@ fn object_stores_live_payload_maps_to_card_summaries() {
     assert_eq!(summaries[0].access, "private / writeable");
     assert!(summaries[0].policy.contains("2 required copy/copies"));
     assert!(summaries[0].capacity.contains("12.5 TiB used"));
+    assert!(summaries[0].capacity_status.contains("warning"));
+    assert!(summaries[0].capacity_status.contains("logical used 400000"));
     assert_eq!(summaries[0].writer_group, "bioinformatics");
     assert_eq!(summaries[0].endpoint, "s3_bucket");
     assert!(summaries[0].upload_allowed);
@@ -1159,6 +1176,11 @@ fn object_browser_payload_maps_to_dense_view_summaries() {
         "warnings": []
     }))
     .expect("object store view decodes");
+    let store_summaries = object_store_card_summaries(&view);
+    assert_eq!(
+        store_summaries[0].capacity_status,
+        "live capacity status unavailable (daemon provider not connected)"
+    );
     let folders = vec![ObjectBrowserFolderNodeResponse {
         name: "Xenognostikon".to_string(),
         prefix: "Xenognostikon".to_string(),

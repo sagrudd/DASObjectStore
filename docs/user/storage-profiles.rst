@@ -244,6 +244,12 @@ and backend availability, includes copy amplification and warning/critical
 thresholds, and shows an admission-block reason. During daemon reconnects the
 snapshot is omitted rather than inferred from stale physical counters.
 
+Web ObjectStore cards accept the same detail as an optional ``capacity_status``
+field. Older payloads and deployments without a daemon bridge render an
+explicit ``live capacity status unavailable`` message while retaining the
+static SQLite-backed used/free summary; they never turn an unavailable value
+into zero.
+
 Product-owned policy templates
 ------------------------------
 

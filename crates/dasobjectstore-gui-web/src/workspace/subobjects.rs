@@ -347,6 +347,7 @@ pub(super) fn render_object_store_card(
             <p>{ format!("type: {} · access: {}", store.object_type, store.access) }</p>
             <p>{ store.policy }</p>
             <p>{ store.capacity }</p>
+            <p>{ format!("live capacity: {}", store.capacity_status) }</p>
             <p>{ format!("{} · writer group: {}", store.objects, store.writer_group) }</p>
             <p>{ store.writer_policy }</p>
             <p>{ format!("endpoint: {} · last ingest: {}", store.endpoint, store.last_ingested) }</p>

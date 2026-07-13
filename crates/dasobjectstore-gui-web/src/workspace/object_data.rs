@@ -437,6 +437,45 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                     )
                 })
                 .unwrap_or_else(|| "capacity pending".to_string());
+            let capacity_status = store
+                .capacity_status
+                .as_ref()
+                .map(|status| {
+                    let logical_available = status
+                        .logical_available_bytes
+                        .map(|bytes| bytes.to_string())
+                        .unwrap_or_else(|| "unbounded".to_string());
+                    let logical_limit = status
+                        .logical_limit_bytes
+                        .map(|bytes| bytes.to_string())
+                        .unwrap_or_else(|| "unbounded".to_string());
+                    let block = status
+                        .admission_block_reason
+                        .as_deref()
+                        .map(|reason| format!("; blocked {reason}"))
+                        .unwrap_or_default();
+                    format!(
+                        "{}: logical used {} · reserved {} · available {} / limit {} · backend {} · SSD {} · {} copies · thresholds {}/{}{}",
+                        status.pressure,
+                        status.used_bytes,
+                        status.reserved_bytes,
+                        logical_available,
+                        logical_limit,
+                        status
+                            .backend_available_bytes
+                            .map(|bytes| bytes.to_string())
+                            .unwrap_or_else(|| "unavailable".to_string()),
+                        status
+                            .ssd_available_bytes
+                            .map(|bytes| bytes.to_string())
+                            .unwrap_or_else(|| "not required".to_string()),
+                        status.copy_count,
+                        status.warning_threshold_basis_points,
+                        status.critical_threshold_basis_points,
+                        block,
+                    )
+                })
+                .unwrap_or_else(|| "live capacity status unavailable (daemon provider not connected)".to_string());
 
             ObjectStoreCardSummary {
                 id: store.store_id.clone(),
@@ -466,6 +505,7 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                         .unwrap_or("placement pending")
                 ),
                 capacity,
+                capacity_status,
                 objects: format!("{} object(s)", store.object_count),
                 writer_group: store
                     .writer_group

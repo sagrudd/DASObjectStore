@@ -741,6 +741,10 @@ pub struct ObjectStoreCardResponse {
     pub required_copies: Option<u8>,
     pub object_count: usize,
     pub capacity: Option<CapacitySummaryResponse>,
+    /// Optional daemon-owned logical-capacity detail. Older API payloads omit
+    /// this field; omission is rendered as unavailable rather than zero.
+    #[serde(default)]
+    pub capacity_status: Option<ObjectStoreCapacityStatusResponse>,
     pub placement_policy: Option<String>,
     pub endpoint_export_mode: Option<String>,
     #[serde(default)]
@@ -753,6 +757,23 @@ pub struct ObjectStoreCardResponse {
     #[serde(default)]
     pub writer_policy: Option<WriterPolicyReadinessResponse>,
     pub warnings: Vec<DashboardWarning>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct ObjectStoreCapacityStatusResponse {
+    pub pressure: String,
+    pub logical_limit_bytes: Option<u64>,
+    pub used_bytes: u64,
+    pub reserved_bytes: u64,
+    pub logical_available_bytes: Option<u64>,
+    pub backend_free_bytes: Option<u64>,
+    pub backend_available_bytes: Option<u64>,
+    pub ssd_available_bytes: Option<u64>,
+    pub copy_count: u8,
+    pub requires_ssd_staging: bool,
+    pub warning_threshold_basis_points: u16,
+    pub critical_threshold_basis_points: u16,
+    pub admission_block_reason: Option<String>,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

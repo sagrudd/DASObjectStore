@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.66 - 2026-07-13
+
+- Add an optional Web ObjectStore capacity-status contract with explicit
+  unavailable fallback while authenticated daemon-provider wiring is pending.
+
 ## 0.72.65 - 2026-07-13
 
 - Render daemon-owned ObjectStore capacity snapshots in the TUI, including
