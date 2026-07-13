@@ -56,6 +56,14 @@ where
             handler.record_admin_job(daemon_job_summary_from_create_object_store(&response))?;
             Ok(DaemonApiResponse::CreateObjectStore(response))
         }
+        DaemonApiRequest::RegisterProfileBinding(request) => {
+            let now = handler.clock.now_utc();
+            let response =
+                register_profile_binding(request, &handler.profile_binding_registry_path, &now)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            handler.record_admin_job(daemon_job_summary_from_profile_binding(&response))?;
+            Ok(DaemonApiResponse::RegisterProfileBinding(response))
+        }
         DaemonApiRequest::UpsertEndpointInventory(request) => {
             let now = handler.clock.now_utc();
             let response = handler

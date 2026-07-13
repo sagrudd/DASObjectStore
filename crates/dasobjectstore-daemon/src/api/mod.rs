@@ -15,6 +15,7 @@ mod local_admin;
 mod object_browser;
 mod object_mutation;
 mod object_store;
+mod profile_binding;
 mod profile_capabilities;
 mod remote_easyconnect;
 mod service;
@@ -114,6 +115,10 @@ pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
     OBJECT_STORE_CREATE_CONFIRMATION,
 };
+pub use profile_binding::{
+    ProfileBindingOperation, ProfileBindingRequest, ProfileBindingResponse,
+    ProfileBindingValidationError, PROFILE_BINDING_CONFIRMATION,
+};
 pub use profile_capabilities::{
     discover_profile_capabilities, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, ObjectStoreCapabilityValidationError,
@@ -200,6 +205,7 @@ pub enum DaemonApiRequest {
     ServiceProvision(DaemonServiceProvisionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
+    RegisterProfileBinding(ProfileBindingRequest),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryRequest),
     CapacityAdmission(CapacityAdmissionRequest),
     CapacityStatus(CapacityStatusRequest),
@@ -221,6 +227,56 @@ pub enum DaemonApiRequest {
 }
 
 impl DaemonApiRequest {
+    pub(crate) fn command_name(&self) -> &'static str {
+        match self {
+            Self::HealthSummary(_) => "health_summary",
+            Self::DiskRetire(_) => "disk_retire",
+            Self::DiskForceRetire(_) => "disk_force_retire",
+            Self::StoreInventory(_) => "store_inventory",
+            Self::StoreDrain(_) => "store_drain",
+            Self::StoreDelete(_) => "store_delete",
+            Self::StoreVerify(_) => "store_verify",
+            Self::StoreDeduplicate(_) => "store_deduplicate",
+            Self::StoreRepair(_) => "store_repair",
+            Self::ObjectPut(_) => "object_put",
+            Self::IngestQueueDrain(_) => "ingest_queue_drain",
+            Self::IngestControl(_) => "ingest_control",
+            Self::SubmitIngestFiles(_) => "submit_ingest_files",
+            Self::IngestJobStatus(_) => "ingest_job_status",
+            Self::CancelIngestJob(_) => "cancel_ingest_job",
+            Self::JobList(_) => "job_list",
+            Self::JobStatus(_) => "job_status",
+            Self::CancelJob(_) => "cancel_job",
+            Self::ServiceStatus(_) => "service_status",
+            Self::ApplianceTelemetry(_) => "appliance_telemetry",
+            Self::ServiceLifecycle(_) => "service_lifecycle",
+            Self::ServiceProvision(_) => "service_provision",
+            Self::PrepareEnclosure(_) => "prepare_enclosure",
+            Self::CreateObjectStore(_) => "create_object_store",
+            Self::RegisterProfileBinding(_) => "register_profile_binding",
+            Self::ProfileCapabilities(_) => "profile_capabilities",
+            Self::CapacityAdmission(_) => "capacity_admission",
+            Self::CapacityStatus(_) => "capacity_status",
+            Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
+            Self::ObjectBrowser(_) => "object_browser",
+            Self::ObjectDownload(_) => "object_download",
+            Self::ObjectFolderDownload(_) => "object_folder_download",
+            Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
+            Self::CreateLocalGroup(_) => "create_local_group",
+            Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
+            Self::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
+            Self::RemoteEasyconnectCreatePairing(_) => "remote_easyconnect_create_pairing",
+            Self::RemoteEasyconnectApprovePairing(_) => "remote_easyconnect_approve_pairing",
+            Self::RemoteEasyconnectExchangePairing(_) => "remote_easyconnect_exchange_pairing",
+            Self::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
+            Self::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
+            Self::RemoteEasyconnectUploadAdmission(_) => "remote_easyconnect_upload_admission",
+            Self::RemoteEasyconnectSubmitAwsCliUpload(_) => {
+                "remote_easyconnect_submit_aws_cli_upload"
+            }
+        }
+    }
+
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         match self {
             Self::DiskRetire(request) => request.validate().map_err(disk_retire_validation_error),
@@ -261,6 +317,9 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(request) => request
                 .validate()
                 .map_err(create_object_store_validation_error),
+            Self::RegisterProfileBinding(request) => {
+                request.validate().map_err(profile_binding_validation_error)
+            }
             Self::ProfileCapabilities(_) => Ok(()),
             Self::CapacityAdmission(request) => request
                 .validate()
@@ -345,6 +404,7 @@ pub enum DaemonApiResponse {
     ServiceProvision(DaemonServiceProvisionResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
+    RegisterProfileBinding(ProfileBindingResponse),
     ProfileCapabilities(ObjectStoreCapabilityDiscoveryResponse),
     CapacityAdmission(CapacityAdmissionResponse),
     CapacityStatus(CapacityStatusResponse),
@@ -498,6 +558,32 @@ fn create_object_store_validation_error(
         }
         CreateObjectStoreValidationError::InvalidPolicy { message } => {
             DaemonRequestValidationError::InvalidPolicy { message }
+        }
+    }
+}
+
+fn profile_binding_validation_error(
+    err: ProfileBindingValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        ProfileBindingValidationError::InvalidManifest(message) => {
+            DaemonRequestValidationError::InvalidPolicy { message }
+        }
+        ProfileBindingValidationError::RelativePath { field, path } => {
+            DaemonRequestValidationError::RelativePath { field, path }
+        }
+        ProfileBindingValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+        ProfileBindingValidationError::BlankAdministratorActor => {
+            DaemonRequestValidationError::BlankField {
+                field: "administrator_actor",
+            }
+        }
+        ProfileBindingValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: PROFILE_BINDING_CONFIRMATION,
+            }
         }
     }
 }

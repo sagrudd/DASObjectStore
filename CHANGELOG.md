@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.73.0 - 2026-07-13
+
+- Add daemon-owned profile binding create/adopt registration transport with
+  typed manifest/root validation and atomic registry persistence.
+
 ## 0.72.120 - 2026-07-13
 
 - Add explicit fail-closed profile-binding admission mode while preserving

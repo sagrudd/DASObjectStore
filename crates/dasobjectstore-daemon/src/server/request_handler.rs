@@ -13,12 +13,12 @@ use crate::api::{
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    ProfileBindingRequest, ProfileBindingResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
@@ -39,18 +39,19 @@ use crate::runtime::{
     query_object_browser_metadata, read_object_browser_metadata,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    upsert_endpoint_inventory_record, AdminJobRegistry, ApplianceTelemetrySampleSet,
-    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
-    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
-    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
-    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
-    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
-    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
-    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
+    upsert_endpoint_inventory_record, upsert_profile_binding, AdminJobRegistry,
+    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
+    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
+    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
+    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -83,13 +84,14 @@ mod storage_reconciliation;
 use self::job_projection::{
     daemon_job_summary_from_create_object_store, daemon_job_summary_from_endpoint_inventory,
     daemon_job_summary_from_local_admin, daemon_job_summary_from_prepare_enclosure,
-    daemon_job_summary_from_service_lifecycle, daemon_job_summary_from_service_provision,
+    daemon_job_summary_from_profile_binding, daemon_job_summary_from_service_lifecycle,
+    daemon_job_summary_from_service_provision,
     daemon_job_summary_from_update_object_store_ingest_policy,
     remote_easyconnect_aws_cli_upload_job_request,
 };
 pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
-    create_object_store_with_capacity, resolve_authorization_store_id,
+    create_object_store_with_capacity, register_profile_binding, resolve_authorization_store_id,
     rotated_easyconnect_renewal_token, stable_easyconnect_id,
 };
 pub struct DaemonRequestHandler<S, C> {
@@ -106,6 +108,7 @@ pub struct DaemonRequestHandler<S, C> {
     credential_registry_path: PathBuf,
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
     cancelled_job_ids: Arc<Mutex<BTreeSet<String>>>,
+    profile_binding_registry_path: PathBuf,
 }
 impl<S, C> DaemonRequestHandler<S, C>
 where
@@ -134,6 +137,9 @@ where
                 dasobjectstore_object_service::default_garage_credential_registry_path(),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
             cancelled_job_ids: Arc::new(Mutex::new(BTreeSet::new())),
+            profile_binding_registry_path: crate::runtime::profile_binding_registry_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
         }
     }
     pub fn new_with_admin_job_registry(
@@ -162,6 +168,9 @@ where
                 dasobjectstore_object_service::default_garage_credential_registry_path(),
             remote_upload_admission_gate: Arc::new(RemoteUploadAdmissionGate::new()),
             cancelled_job_ids: Arc::new(Mutex::new(BTreeSet::new())),
+            profile_binding_registry_path: crate::runtime::profile_binding_registry_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
         }
     }
     pub fn with_registry_paths(
@@ -179,6 +188,13 @@ where
     }
     pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
         self.hdd_root_path = hdd_root_path.into();
+        self
+    }
+    pub fn with_profile_binding_registry_path(
+        mut self,
+        profile_binding_registry_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.profile_binding_registry_path = profile_binding_registry_path.into();
         self
     }
     pub fn with_appliance_telemetry_state_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -947,56 +963,6 @@ fn default_live_sqlite_path() -> PathBuf {
         })
 }
 
-impl DaemonApiRequest {
-    fn command_name(&self) -> &'static str {
-        match self {
-            Self::HealthSummary(_) => "health_summary",
-            Self::DiskRetire(_) => "disk_retire",
-            Self::DiskForceRetire(_) => "disk_force_retire",
-            Self::StoreInventory(_) => "store_inventory",
-            Self::StoreDrain(_) => "store_drain",
-            Self::StoreDelete(_) => "store_delete",
-            Self::StoreVerify(_) => "store_verify",
-            Self::StoreDeduplicate(_) => "store_deduplicate",
-            Self::StoreRepair(_) => "store_repair",
-            Self::ObjectPut(_) => "object_put",
-            Self::IngestQueueDrain(_) => "ingest_queue_drain",
-            Self::IngestControl(_) => "ingest_control",
-            Self::SubmitIngestFiles(_) => "submit_ingest_files",
-            Self::IngestJobStatus(_) => "ingest_job_status",
-            Self::CancelIngestJob(_) => "cancel_ingest_job",
-            Self::JobList(_) => "job_list",
-            Self::JobStatus(_) => "job_status",
-            Self::CancelJob(_) => "cancel_job",
-            Self::ServiceStatus(_) => "service_status",
-            Self::ApplianceTelemetry(_) => "appliance_telemetry",
-            Self::ServiceLifecycle(_) => "service_lifecycle",
-            Self::ServiceProvision(_) => "service_provision",
-            Self::PrepareEnclosure(_) => "prepare_enclosure",
-            Self::CreateObjectStore(_) => "create_object_store",
-            Self::ProfileCapabilities(_) => "profile_capabilities",
-            Self::CapacityAdmission(_) => "capacity_admission",
-            Self::CapacityStatus(_) => "capacity_status",
-            Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
-            Self::ObjectBrowser(_) => "object_browser",
-            Self::ObjectDownload(_) => "object_download",
-            Self::ObjectFolderDownload(_) => "object_folder_download",
-            Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
-            Self::CreateLocalGroup(_) => "create_local_group",
-            Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
-            Self::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
-            Self::RemoteEasyconnectCreatePairing(_) => "remote_easyconnect_create_pairing",
-            Self::RemoteEasyconnectApprovePairing(_) => "remote_easyconnect_approve_pairing",
-            Self::RemoteEasyconnectExchangePairing(_) => "remote_easyconnect_exchange_pairing",
-            Self::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
-            Self::RemoteEasyconnectRenewSession(_) => "remote_easyconnect_renew_session",
-            Self::RemoteEasyconnectUploadAdmission(_) => "remote_easyconnect_upload_admission",
-            Self::RemoteEasyconnectSubmitAwsCliUpload(_) => {
-                "remote_easyconnect_submit_aws_cli_upload"
-            }
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::{

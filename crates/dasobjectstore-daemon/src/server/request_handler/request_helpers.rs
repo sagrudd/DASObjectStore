@@ -54,6 +54,48 @@ where
     create_object_store_with_registry(request, default_store_registry_path(), accepted_at_utc)
 }
 
+pub(super) fn register_profile_binding(
+    request: ProfileBindingRequest,
+    registry_path: impl AsRef<Path>,
+    accepted_at_utc: &str,
+) -> Result<ProfileBindingResponse, DaemonServiceRuntimeError> {
+    request.validate().map_err(|error| {
+        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
+            error.to_string(),
+        ))
+    })?;
+    if !request.dry_run {
+        upsert_profile_binding(
+            registry_path,
+            BackendProfileBinding {
+                manifest: request.manifest.clone(),
+                backend_root: request.backend_root.clone(),
+                ssd_staging_root: request.ssd_staging_root.clone(),
+            },
+        )?;
+    }
+    let job_id_value = format!(
+        "profile-binding-{}",
+        accepted_at_utc
+            .chars()
+            .map(|character| if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_ascii_lowercase()
+    );
+    let job_id = crate::api::DaemonJobId::new(job_id_value.clone())
+        .map_err(|_| DaemonServiceRuntimeError::InvalidJobId(job_id_value))?;
+    Ok(ProfileBindingResponse::accepted(
+        job_id,
+        accepted_at_utc,
+        request,
+    ))
+}
+
 pub(super) fn resolve_authorization_store_id(
     endpoint: &StoreId,
     store_registry_path: &Path,

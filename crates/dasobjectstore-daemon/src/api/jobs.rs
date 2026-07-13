@@ -71,6 +71,7 @@ pub enum DaemonJobKind {
     DiskReplace,
     EnclosurePreparation,
     ObjectStoreCreation,
+    ProfileBinding,
     Repair,
     EndpointValidation,
     ServiceOperation,

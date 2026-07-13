@@ -25,20 +25,20 @@ use crate::api::{
     ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
     ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    ProfileBindingRequest, ProfileBindingResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
+    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -374,6 +374,16 @@ where
         }
     }
 
+    pub fn register_profile_binding(
+        &self,
+        request: ProfileBindingRequest,
+    ) -> Result<ProfileBindingResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RegisterProfileBinding(request))? {
+            DaemonApiResponse::RegisterProfileBinding(response) => Ok(response),
+            response => Err(unexpected("register_profile_binding", response)),
+        }
+    }
+
     pub fn profile_capabilities(
         &self,
         request: ObjectStoreCapabilityDiscoveryRequest,
@@ -587,6 +597,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ServiceProvision(_) => "service_provision",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
+        DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",
         DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",
         DaemonApiResponse::CapacityStatus(_) => "capacity_status",

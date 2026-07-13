@@ -106,9 +106,11 @@ are likewise explicit and profile-independent. New bounded ObjectStores now
 initialize their daemon-owned quota ledger before
 the store registry definition is published, so creation cannot expose a finite
 quota without durable admission state. Per-profile manifest/root registration
-and probe-path selection now have a daemon-owned binding registry; profile-aware
-creation/adoption transport remains the next capacity/profile seam. The binding
-registry path is state-scoped with an explicit environment override; strict
+and probe-path selection now have a daemon-owned binding registry; explicit
+typed create/adopt binding registration transport is now available. Backend
+opening, quota-ledger initialization, and store-registry publication remain
+the next ordered capacity/profile seam. The binding registry path is state-scoped
+with an explicit environment override; strict
 missing-binding rejection is deferred until local-Docker bootstrap can persist
 container-visible roots rather than host-only paths. The provider now exposes an
 explicit fail-closed requirement mode for profile-aware callers while legacy

@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::ProfileBindingOperation;
 
 pub(super) fn daemon_job_summary_from_service_lifecycle(
     response: &DaemonServiceLifecycleResponse,
@@ -63,6 +64,27 @@ pub(super) fn daemon_job_summary_from_create_object_store(
         format!(
             "ObjectStore {} creation accepted for writer group {}",
             response.store_id, response.writer_group
+        ),
+    )
+}
+
+pub(super) fn daemon_job_summary_from_profile_binding(
+    response: &ProfileBindingResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "profile binding {} {} for ObjectStore {}",
+            match response.operation {
+                ProfileBindingOperation::Create => "created",
+                ProfileBindingOperation::Adopt => "adopted",
+            },
+            response.deployment_profile.name(),
+            response.store_id
         ),
     )
 }

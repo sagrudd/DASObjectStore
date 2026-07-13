@@ -214,7 +214,9 @@ fn admin_job_kind_label(kind: DaemonJobKind) -> &'static str {
         DaemonJobKind::DiskReplace => "disk_replace",
         DaemonJobKind::EnclosurePreparation => "enclosure_preparation",
         DaemonJobKind::EndpointValidation => "endpoint_validation",
-        DaemonJobKind::ObjectStoreCreation => "object_store_creation",
+        DaemonJobKind::ObjectStoreCreation | DaemonJobKind::ProfileBinding => {
+            "object_store_creation"
+        }
         DaemonJobKind::Repair => "repair",
         DaemonJobKind::RemoteUpload => "remote_upload",
         DaemonJobKind::ServiceOperation => "service_operation",
