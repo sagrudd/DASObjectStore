@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.103 - 2026-07-13
+
+- Centralize checked logical used-byte accounting through the shared catalogue
+  authority contract for folder-profile initialization.
+
 ## 0.72.102 - 2026-07-13
 
 - Adapt the SSD-backed drive profile to the shared catalogue authority and

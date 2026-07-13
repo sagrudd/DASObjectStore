@@ -71,6 +71,23 @@ pub trait ObjectCatalogueAuthority {
     fn remove_record(&mut self, key: &BackendObjectKey) -> Result<(), BackendError>;
 }
 
+/// Sum logical object-version sizes using the catalogue authority's records.
+///
+/// This is deliberately independent of physical copies or deduplication and
+/// fails closed if the logical total would overflow `u64`.
+pub fn catalogue_logical_used_bytes(
+    authority: &dyn ObjectCatalogueAuthority,
+) -> Result<u64, BackendError> {
+    authority
+        .records()?
+        .into_iter()
+        .try_fold(0_u64, |total, record| {
+            total.checked_add(record.size_bytes).ok_or_else(|| {
+                BackendError::InvalidRequest("catalogue logical size overflowed".to_string())
+            })
+        })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BackendError {
     Manifest(ObjectStoreManifestValidationError),
@@ -132,7 +149,10 @@ pub trait ObjectStoreBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackendCapabilities, ObjectStoreBackend};
+    use super::{
+        catalogue_logical_used_bytes, BackendCapabilities, BackendObjectKey, BackendObjectRecord,
+        ObjectCatalogueAuthority, ObjectStoreBackend,
+    };
 
     #[test]
     fn complete_capability_set_covers_every_contract_operation() {
@@ -150,6 +170,43 @@ mod tests {
 
         fn accepts_contract<T: ObjectStoreBackend>() {}
         let _ = accepts_contract::<TestBackend>;
+    }
+
+    #[test]
+    fn catalogue_logical_used_bytes_sums_versions_and_rejects_overflow() {
+        struct Catalogue(Vec<BackendObjectRecord>);
+        impl ObjectCatalogueAuthority for Catalogue {
+            fn records(&self) -> Result<Vec<BackendObjectRecord>, super::BackendError> {
+                Ok(self.0.clone())
+            }
+            fn commit_batch(
+                &mut self,
+                _records: &[BackendObjectRecord],
+            ) -> Result<(), super::BackendError> {
+                Ok(())
+            }
+            fn remove_record(
+                &mut self,
+                _key: &BackendObjectKey,
+            ) -> Result<(), super::BackendError> {
+                Ok(())
+            }
+        }
+
+        let record = |object_id: &str, size_bytes| BackendObjectRecord {
+            key: BackendObjectKey {
+                object_id: object_id.to_string(),
+                version: 1,
+            },
+            size_bytes,
+            checksum: "sha256:test".to_string(),
+            location: format!(".dasobjectstore/objects/{object_id}"),
+        };
+        let catalogue = Catalogue(vec![record("one", 7), record("two", 11)]);
+        assert_eq!(catalogue_logical_used_bytes(&catalogue).unwrap(), 18);
+
+        let overflowing = Catalogue(vec![record("large-a", u64::MAX), record("large-b", 1)]);
+        assert!(catalogue_logical_used_bytes(&overflowing).is_err());
     }
 
     struct TestBackend;

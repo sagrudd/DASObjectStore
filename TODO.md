@@ -177,6 +177,8 @@ completion.
     a conflicting existing version cannot partially add a new record.
   - [x] Adapt the SSD-backed drive profile to the same authority contract and
     fail closed on drive-guard loss for catalogue reads and mutations.
+  - [x] Centralize checked logical used-byte accounting through the authority
+    contract; FolderBackend now uses the shared overflow-safe helper.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

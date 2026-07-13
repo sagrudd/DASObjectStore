@@ -8,8 +8,8 @@ use super::reconciliation::{
     ReconciliationObject, ReconciliationPlan,
 };
 use dasobjectstore_core::backend::{
-    BackendCapabilities, BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord,
-    ObjectStoreBackend,
+    catalogue_logical_used_bytes, BackendCapabilities, BackendError, BackendHealth,
+    BackendObjectKey, BackendObjectRecord, ObjectStoreBackend,
 };
 use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
 use dasobjectstore_core::store::{CapacityPolicy, CapacityReservationLedger};
@@ -97,15 +97,7 @@ impl FolderBackend {
         ensure_private_directory(&objects_root)?;
         ensure_private_directory(&staging_root)?;
         let catalogue = FolderCatalogue::open(catalogue_path, manifest.store_id.as_str())?;
-        let catalogued_used_bytes = catalogue
-            .records()
-            .into_iter()
-            .try_fold(0_u64, |total, record| total.checked_add(record.size_bytes))
-            .ok_or_else(|| {
-                BackendError::InvalidRequest(
-                    "folder catalogue used-byte accounting overflowed".to_string(),
-                )
-            })?;
+        let catalogued_used_bytes = catalogue_logical_used_bytes(&catalogue)?;
         if used_bytes != 0 && used_bytes != catalogued_used_bytes {
             return Err(BackendError::InvalidRequest(format!(
                 "folder catalogue used bytes {catalogued_used_bytes} do not match supplied accounting {used_bytes}"

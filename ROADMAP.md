@@ -943,6 +943,9 @@ partially persist a companion record.
 The SSD-backed drive profile now delegates the same authority contract through
 its validated folder engine and rejects reads or mutations when the drive
 runtime guard reports loss of the mounted device.
+Logical used-byte accounting now uses one overflow-safe authority helper for
+folder-profile initialization; daemon registry/provider reconciliation remains
+open.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 
