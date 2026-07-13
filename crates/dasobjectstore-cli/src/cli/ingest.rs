@@ -26,6 +26,8 @@ pub(crate) enum IngestCommand {
     Queue(IngestQueueArgs),
     /// Cancel active queued ingest jobs for a store.
     DrainQueue(IngestDrainQueueArgs),
+    /// Pause, throttle, or resume new daemon-owned source reads.
+    Control(IngestControlArgs),
     /// Request a policy-gated direct-to-HDD import from the DAS server.
     DirectImport(IngestDirectImportArgs),
 }
@@ -205,6 +207,39 @@ impl IngestDrainQueueArgs {
     }
     pub(crate) fn reason(&self) -> &str {
         &self.reason
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct IngestControlArgs {
+    /// Desired state: pause, throttle, or resume.
+    #[arg(long, value_parser = ["pause", "throttle", "resume"])]
+    action: String,
+    #[arg(long, default_value = "operator ingest control")]
+    reason: String,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long, default_value = "")]
+    confirm: String,
+    #[arg(long)]
+    json: bool,
+}
+
+impl IngestControlArgs {
+    pub(crate) fn action(&self) -> &str {
+        &self.action
+    }
+    pub(crate) fn reason(&self) -> &str {
+        &self.reason
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -420,6 +455,33 @@ mod tests {
         assert!(drain.allow_ingest_queue_drain());
         assert_eq!(drain.confirm(), "confirm ingest queue drain");
         assert!(drain.json());
+    }
+
+    #[test]
+    fn parses_ingest_control_actions() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "control",
+            "--action",
+            "pause",
+            "--reason",
+            "protect Web availability",
+            "--confirm",
+            "confirm ingest control",
+            "--json",
+        ])
+        .expect("ingest control parses");
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command")
+        };
+        let Some(IngestCommand::Control(control)) = args.command() else {
+            panic!("expected control command")
+        };
+        assert_eq!(control.action(), "pause");
+        assert_eq!(control.reason(), "protect Web availability");
+        assert_eq!(control.confirm(), "confirm ingest control");
+        assert!(control.json());
     }
 
     #[test]

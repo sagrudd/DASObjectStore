@@ -35,22 +35,22 @@ use crate::auth::{
 };
 use crate::runtime::{
     appliance_telemetry_state_path, default_endpoint_registry_path, default_hdd_root,
-    default_ssd_root, provision_garage_store_registry, query_object_browser_metadata,
-    read_object_browser_metadata, remote_easyconnect_pairing_store_path,
-    remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
-    resolve_object_folder_download_with_hdd_root, upsert_endpoint_inventory_record,
-    AdminJobRegistry, ApplianceTelemetrySampleSet, DaemonIngestFilesRuntimeError,
-    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
-    FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
-    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
-    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    default_ssd_root, discover_managed_hdd_roots, provision_garage_store_registry,
+    query_object_browser_metadata, read_object_browser_metadata,
+    remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
+    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+    upsert_endpoint_inventory_record, AdminJobRegistry, ApplianceTelemetrySampleSet,
+    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
+    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -961,6 +961,7 @@ impl DaemonApiRequest {
             Self::StoreRepair(_) => "store_repair",
             Self::ObjectPut(_) => "object_put",
             Self::IngestQueueDrain(_) => "ingest_queue_drain",
+            Self::IngestControl(_) => "ingest_control",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
             Self::CancelIngestJob(_) => "cancel_ingest_job",
@@ -996,7 +997,6 @@ impl DaemonApiRequest {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2194,6 +2194,28 @@ mod tests {
                     dry_run: false,
                     allow_ingest_queue_drain: true,
                     confirmation_marker: crate::api::INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+    }
+
+    #[test]
+    fn rejects_destructive_ingest_control_without_authenticated_administrator() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let response = handler
+            .handle(DaemonApiRequest::IngestControl(
+                crate::api::IngestControlRequest {
+                    action: crate::api::DaemonIngestControlAction::Pause,
+                    reason: "operator incident".to_string(),
+                    dry_run: false,
+                    confirmation_marker: crate::api::INGEST_CONTROL_CONFIRMATION.to_string(),
                 },
             ))
             .expect("request handled");

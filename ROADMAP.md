@@ -54,7 +54,9 @@ is not yet an atomic catalogue transaction; Garage reconciliation now uses
 durable provider-independent manifest/checkpoint planning plus a per-key Garage
 transfer worker with progress and administrator cancellation checks between
 provider transfers, while stable byte-range resume, non-Garage providers, and
-appliance soak acceptance remain open; control/Web capacity is not fully
+appliance soak acceptance remain open; daemon/CLI file-ingest pause/throttle/
+resume is now available between source objects (Web/TUI action wiring remains);
+control/Web capacity is not fully
 reserved under ingest; telemetry device mapping and appliance acceptance remain
 incomplete; and UI/design work remains. The module-size guard now passes with no
 exceptions. Hardware-only acceptance is deferred while travelling without DAS

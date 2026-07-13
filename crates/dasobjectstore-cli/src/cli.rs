@@ -17,8 +17,8 @@ pub(crate) use disk::{
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs,
 };
 pub(crate) use ingest::{
-    IngestArgs, IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs,
-    IngestQueueArgs, IngestStatusArgs,
+    IngestArgs, IngestCommand, IngestControlArgs, IngestDirectImportArgs, IngestDrainQueueArgs,
+    IngestFilesArgs, IngestQueueArgs, IngestStatusArgs,
 };
 pub(crate) use object::{
     ObjectArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs,

@@ -479,6 +479,30 @@ Queue drain marks active ingest jobs as ``Cancelled`` and records a failure
 message; it does not delete queue rows. This preserves an audit trail while
 stopping accidental work from continuing through the settlement path.
 
+Emergency ingest control
+-------------------------
+
+During an I/O or control-plane incident, a local administrator can pause new
+source reads without interrupting the object currently being checksummed or
+finalized. Staged data remains durable and the daemon resumes from the next
+source object after the incident is cleared:
+
+.. code-block:: console
+
+   sudo dasobjectstore ingest control --action pause \
+     --reason "protect Web availability" \
+     --confirm "confirm ingest control"
+
+Use ``throttle`` to keep ingest moving with a bounded delay between source
+objects, or ``resume`` to return to normal admission. The operation is
+daemon-owned and authenticated; it does not kill jobs, remove staged files, or
+require a service restart. Use ``--dry-run`` to preview the resulting state.
+The control is process-local and returns to ``running`` after a daemon restart;
+it currently gates daemon file-ingest source reads (including direct-HDD
+imports), while provider-specific S3 workers retain their own admission gate.
+The Web/TUI surfaces should be treated as degraded until the state returns to
+``running``.
+
 The operations TUI provides the console workflow contract for planning,
 confirmation, launch, monitoring, reconnect, and completion review. It uses the
 same daemon job model as the CLI and Web UI, with visibility into file counts,

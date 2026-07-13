@@ -3,16 +3,16 @@ use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
     DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
-    IngestCommand, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs,
-    IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs,
-    ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder,
-    PerformanceFileSelection, PerformanceReportArgs, PerformanceScenarioSelection,
-    PerformanceTestArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs,
-    ServiceCommand, ServiceRenderComposeArgs, StoreAdoptArgs, StoreCapabilitiesArgs,
-    StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs,
-    StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs,
-    StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
-    SubobjectCreateArgs,
+    IngestCommand, IngestControlArgs, IngestDirectImportArgs, IngestDrainQueueArgs,
+    IngestFilesArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs,
+    MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs,
+    ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection, PerformanceReportArgs,
+    PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand, PoolImportArgs,
+    PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceRenderComposeArgs,
+    StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs,
+    StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
+    StoreIngestPolicyArgs, StoreListArgs, StoreRepairArgs, StoreS3UploadArgs, StoreValidateArgs,
+    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod command_handlers;
 mod connection_status;
@@ -167,9 +167,10 @@ use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, CapacityStatusRequest, CreateObjectStoreRequest,
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
-    DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
-    DiskForceRetireRequest as DaemonDiskForceRetireRequest,
+    DaemonIngestControlAction, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
+    DaemonRuntimeConfig, DiskForceRetireRequest as DaemonDiskForceRetireRequest,
     DiskRetireRequest as DaemonDiskRetireRequest,
+    IngestControlRequest as DaemonIngestControlRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     ObjectPutRequest as DaemonObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
@@ -310,6 +311,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(IngestCommand::DrainQueue(args)) => {
                 ingest_queue::run_ingest_drain_queue(args, writer)
             }
+            Some(IngestCommand::Control(args)) => run_ingest_control(args, writer),
             Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
             None => Cli::write_subcommand_help("ingest", writer).map_err(CliError::Io),
         },
@@ -560,6 +562,36 @@ fn run_ingest_status(args: &IngestStatusArgs, writer: &mut impl Write) -> Result
 
     write_ingest_status(&capacity, &policy, pressure, &destage_policy, writer)?;
 
+    Ok(())
+}
+
+fn run_ingest_control(args: &IngestControlArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let action = match args.action() {
+        "pause" => DaemonIngestControlAction::Pause,
+        "throttle" => DaemonIngestControlAction::Throttle,
+        "resume" => DaemonIngestControlAction::Resume,
+        value => {
+            return Err(CliError::CommandFailed(format!(
+                "unsupported ingest control action: {value}"
+            )))
+        }
+    };
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.ingest_control(DaemonIngestControlRequest {
+        action,
+        reason: args.reason().to_string(),
+        dry_run: args.dry_run(),
+        confirmation_marker: args.confirm().to_string(),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Ingest control: {:?}", response.state)?;
+        writeln!(writer, "Changed: {}", response.changed)?;
+        writeln!(writer, "Reason: {}", response.reason)?;
+    }
     Ok(())
 }
 

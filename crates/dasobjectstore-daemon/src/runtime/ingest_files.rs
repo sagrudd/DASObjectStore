@@ -28,7 +28,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
-
 const HDD_SETTLEMENT_QUEUE_CAPACITY: usize = 4;
 const SSD_FLUSH_QUEUE_CAPACITY: usize = 2;
 const HDD_WRITE_RATE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
@@ -361,6 +360,7 @@ impl LocalFileIngestExecutor {
             )? {
                 continue;
             }
+            crate::api::ingest_control::wait_for_source_admission();
             capacity_reservations.admit(job_id, entry, copies, ingress_origin)?;
             wait_for_ssd_admission(
                 &self.ssd_root,
@@ -578,6 +578,7 @@ impl LocalFileIngestExecutor {
                 )?;
                 continue;
             }
+            crate::api::ingest_control::wait_for_source_admission();
             capacity_reservations.admit(job_id, entry, copies, ingress_origin)?;
             state.staged_files = state.staged_files.saturating_add(1);
             state.hdd_queued = state.hdd_queued.saturating_add(1);
@@ -996,7 +997,6 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
         Self::Capacity(err)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::{

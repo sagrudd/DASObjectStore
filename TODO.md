@@ -100,10 +100,10 @@ completion.
     DASServer, Garage appliance, and deployment credentials are unavailable).
 - [~] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
-  during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, and
-  strict cancellation are delivered; configured runtime resource-policy
-  injection is now wired; async HTTP bridging and appliance soak acceptance
-  remain.
+  during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, strict
+  cancellation, configured runtime resource-policy injection, and the daemon/
+  CLI file-ingest emergency control are delivered; authenticated Web/TUI action
+  bridging, async HTTP bridging, and appliance soak acceptance remain.
   - [x] Load the versioned ingest resource policy from daemon configuration,
     inject its CPU/memory/socket/I/O budget into packaged local ingest, and
     retain a backward-compatible safe default when the field is absent. The
@@ -1333,13 +1333,20 @@ list until every temporary size-budget exception has been removed.
     automatic lease release; runtime policy injection and live telemetry remain.
   - [x] Wire packaged local file ingest through the shared resource gate before
     source enumeration, preserving automatic release on dry-run, failure, and
-    successful settlement; dynamic policy injection remains.
+    successful settlement; dynamic policy injection is complete for the
+    packaged path.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
   - [x] Surface the optional daemon ingest admission action, limiting reason,
     source-read worker count, HDD queue depth, and verification parallelism in
     the TUI; Web bridge and live host telemetry remain.
-- [ ] Add an authenticated, daemon-owned emergency `ingest pause/throttle/resume` operation that safely stops new source reads while preserving staged data, in-flight checksum/durability rules, and a responsive WebUI. Do not require a service restart or raw process priority changes during an incident.
+- [x] Add the daemon-owned and CLI emergency file-ingest control contract for
+  `pause`, `throttle`, and `resume`. It requires exact action-time
+  confirmation, allows dry-run preview, gates both SSD-first and direct-HDD
+  source reads between objects, and leaves in-flight checksum/fsync/rename
+  work untouched. The control is process-local (restart returns to `running`)
+  and provider-specific S3 workers retain their separate admission gate;
+  authenticated Web/TUI action wiring remains open.
 - [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [ ] Document operator triage for an ingest-pressure incident, including the availability indicators, safe daemon throttle/pause action, expected degraded WebUI behavior, and escalation evidence. Do not prescribe killing an ingest or restarting the daemon as the default recovery path.

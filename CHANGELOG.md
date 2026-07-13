@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.83 - 2026-07-13
+
+- Add daemon-owned and CLI emergency file-ingest pause/throttle/resume control
+  with confirmation, dry-run preview, and safe between-object admission.
+
 ## 0.72.82 - 2026-07-13
 
 - Add the typed Web client getter and encoded path helper for authenticated

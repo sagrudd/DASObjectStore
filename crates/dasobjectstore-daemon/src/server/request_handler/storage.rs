@@ -6,9 +6,8 @@ use super::storage_reconciliation::{
     emit_reconciliation_progress, reconciliation_job_summary, reconciliation_registration_report,
 };
 use super::*;
-use crate::runtime::discover_managed_hdd_roots;
-
-/// Handles storage inventory, telemetry, ingest, and object browser requests.
+#[path = "storage_control.rs"]
+mod storage_control;
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
     request: DaemonApiRequest,
@@ -141,6 +140,7 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::IngestControl(request) => Ok(storage_control::response(request, actor)),
         DaemonApiRequest::IngestQueueDrain(request) => {
             match handler.ingest_queue_drain_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::IngestQueueDrain(response)),

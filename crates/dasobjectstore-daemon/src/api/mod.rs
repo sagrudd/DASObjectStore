@@ -7,6 +7,8 @@ mod enclosure;
 mod endpoint;
 mod health;
 mod ingest;
+#[path = "ingest/control.rs"]
+pub(crate) mod ingest_control;
 mod ingest_mutation;
 mod jobs;
 mod local_admin;
@@ -79,6 +81,10 @@ pub use ingest::{
     DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy,
     DaemonSourceToSsdQueueUsage, IngestJobStatusRequest, IngestJobStatusResponse,
     SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+};
+pub use ingest_control::{
+    DaemonIngestControlAction, DaemonIngestControlState, IngestControlRequest,
+    IngestControlResponse, IngestControlValidationError, INGEST_CONTROL_CONFIRMATION,
 };
 pub use ingest_mutation::{
     IngestQueueDrainRequest, IngestQueueDrainResponse, IngestQueueDrainValidationError,
@@ -181,6 +187,7 @@ pub enum DaemonApiRequest {
     StoreRepair(StoreRepairRequest),
     ObjectPut(ObjectPutRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
+    IngestControl(IngestControlRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
     CancelIngestJob(CancelIngestJobRequest),
@@ -221,6 +228,9 @@ impl DaemonApiRequest {
                 request.validate().map_err(disk_retire_validation_error)
             }
             Self::SubmitIngestFiles(request) => request.validate(),
+            Self::IngestControl(request) => {
+                request.validate().map_err(ingest_control_validation_error)
+            }
             Self::StoreDrain(request) => request.validate().map_err(store_drain_validation_error),
             Self::StoreDelete(request) => request.validate().map_err(store_delete_validation_error),
             Self::StoreRepair(request) => {
@@ -322,6 +332,7 @@ pub enum DaemonApiResponse {
     StoreRepair(StoreRepairResponse),
     ObjectPut(ObjectPutResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
+    IngestControl(IngestControlResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
     CancelIngestJob(CancelIngestJobResponse),
@@ -655,6 +666,21 @@ fn ingest_queue_drain_validation_error(
     }
 }
 
+fn ingest_control_validation_error(
+    err: IngestControlValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        IngestControlValidationError::BlankReason => {
+            DaemonRequestValidationError::BlankField { field: "reason" }
+        }
+        IngestControlValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: INGEST_CONTROL_CONFIRMATION,
+            }
+        }
+    }
+}
+
 fn generic_job_validation_error(err: DaemonJobValidationError) -> DaemonRequestValidationError {
     match err {
         DaemonJobValidationError::BlankCancellationReason => {
@@ -684,19 +710,19 @@ mod tests {
         ApplianceTelemetryRequest, ApplianceTelemetryWindow, AssignLocalUserToLocalGroupRequest,
         CapacityAdmissionRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
         DaemonApiRequest, DaemonEndpointKind, DaemonEndpointValidation,
-        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonIngressOrigin,
-        DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest, DaemonJobStatusRequest,
-        DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceStatusRequest, DaemonSsdPressure, ObjectBrowserPageRequest,
-        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectFolderDownloadRequest, PrepareEnclosureFilesystem, PrepareEnclosureHddDevice,
-        PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
+        DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonIngestControlAction,
+        DaemonIngressOrigin, DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest,
+        DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceStatusRequest, DaemonSsdPressure,
+        IngestControlRequest, ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort,
+        ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
         RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
         RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
         StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use dasobjectstore_core::ids::{ObjectId, StoreId};
@@ -728,6 +754,20 @@ mod tests {
         assert_eq!(encoded["command"], "capacity_admission");
         assert_eq!(encoded["payload"]["store_id"], "codex");
         assert_eq!(encoded["payload"]["ingress_origin"], "remote_s3");
+    }
+
+    #[test]
+    fn ingest_control_command_uses_stable_shape() {
+        let request = DaemonApiRequest::IngestControl(IngestControlRequest {
+            action: DaemonIngestControlAction::Pause,
+            reason: "protect Web availability".to_string(),
+            dry_run: false,
+            confirmation_marker: INGEST_CONTROL_CONFIRMATION.to_string(),
+        });
+        request.validate().expect("control request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["command"], "ingest_control");
+        assert_eq!(encoded["payload"]["action"], "pause");
     }
 
     #[test]

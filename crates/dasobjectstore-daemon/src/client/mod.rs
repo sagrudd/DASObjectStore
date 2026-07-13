@@ -19,25 +19,26 @@ use crate::api::{
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
-    DiskRetireRequest, DiskRetireResponse, IngestJobStatusRequest, IngestJobStatusResponse,
-    IngestQueueDrainRequest, IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse,
-    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
-    ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
-    ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
-    PrepareEnclosureRequest, PrepareEnclosureResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
-    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
-    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    DiskRetireRequest, DiskRetireResponse, IngestControlRequest, IngestControlResponse,
+    IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
+    IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest,
+    ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
+    ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
+    ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
+    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -209,6 +210,16 @@ where
         match self.send(DaemonApiRequest::IngestQueueDrain(request))? {
             DaemonApiResponse::IngestQueueDrain(response) => Ok(response),
             response => Err(unexpected("ingest_queue_drain", response)),
+        }
+    }
+
+    pub fn ingest_control(
+        &self,
+        request: IngestControlRequest,
+    ) -> Result<IngestControlResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::IngestControl(request))? {
+            DaemonApiResponse::IngestControl(response) => Ok(response),
+            response => Err(unexpected("ingest_control", response)),
         }
     }
 
@@ -563,6 +574,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::StoreRepair(_) => "store_repair",
         DaemonApiResponse::ObjectPut(_) => "object_put",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",
+        DaemonApiResponse::IngestControl(_) => "ingest_control",
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",
         DaemonApiResponse::CancelIngestJob(_) => "cancel_ingest_job",
