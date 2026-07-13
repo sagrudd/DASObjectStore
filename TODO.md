@@ -814,11 +814,11 @@ completion.
     commit and make retries idempotent.
   - [ ] Add explicit expiry, revocation, rotation, replay protection, and
     redacted audit events for every credential class.
-  - [ ] Add development self-signing only for local workspace/local-Docker
-    generated-data tests with bounded rights and expiry. Reject it for
-    appliance/production/non-local listeners and keep keys, issuers,
-    configuration, and enablement switches out of RPM/DEB artifacts; add
-    package-content regression tests.
+  - [~] Add development self-signing only for local workspace/local-Docker
+    generated-data tests with bounded rights and expiry. The shared RPM/DEB
+    payload guard and regression test now reject development keys, issuers,
+    configuration, and enablement switches; the local-only self-signing
+    implementation and listener/store policy remain open.
   - [ ] Publish versioned contract fixtures for consumer adapters and retain
     DASObjectStore as the authority for policy, quota, placement, catalogue,
     and health mutations.

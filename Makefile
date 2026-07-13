@@ -10,7 +10,7 @@ FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
 REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
 GRAMMATEUS_REPORT_PROVIDER ?= grammateus_report_provider
 
-.PHONY: help pull build web web-screenshots report-provider test fmt check check-lockfile module-size deb rpm remote remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots report-provider package-auth-guard test fmt check check-lockfile module-size deb rpm remote remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -30,6 +30,7 @@ help:
 	@printf '  make remote-deb Build a remote-only Debian package; package suggests awscli and easyconnect opens a browser when available\n'
 	@printf '  make remote-rpm Build a remote-only RPM package; package recommends awscli and easyconnect opens a browser when available\n'
 	@printf '  make package    Build both DEB and RPM packages\n'
+	@printf '  make package-auth-guard Run the RPM/DEB development-auth exclusion regression test\n'
 	@printf '  make clean      Remove Cargo build artifacts\n'
 	@printf '  make distclean  Remove Cargo and package build artifacts\n'
 
@@ -93,7 +94,10 @@ report-provider:
 		exit 1; \
 	fi
 
-test:
+package-auth-guard:
+	bash packaging/tests/application-authentication-package-guard.sh
+
+test: package-auth-guard
 	cargo test --workspace
 
 fmt:

@@ -40,6 +40,8 @@ install -m 0644 "$repo_root/docs/user/remote-s3-uploads.rst" \
   "$payload_root/usr/share/doc/$package_name/remote-s3-uploads.rst"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 
+bash "$repo_root/packaging/validate-package-auth-content.sh" "$payload_root"
+
 install -d "$rpm_root/BUILD" "$rpm_root/RPMS" "$rpm_root/SOURCES" "$rpm_root/SPECS" "$rpm_root/SRPMS"
 tar -C "$staging_root" -czf "$source_path" "$payload_name"
 

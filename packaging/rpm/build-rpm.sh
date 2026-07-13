@@ -94,6 +94,8 @@ install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
 cp -a "$web_dist/." "$payload_root/opt/dasobjectstore/web/"
 
+bash "$repo_root/packaging/validate-package-auth-content.sh" "$payload_root"
+
 install -d "$rpm_root/BUILD" "$rpm_root/RPMS" "$rpm_root/SOURCES" "$rpm_root/SPECS" "$rpm_root/SRPMS"
 tar -C "$staging_root" -czf "$source_path" "$payload_name"
 

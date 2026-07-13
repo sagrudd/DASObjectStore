@@ -34,6 +34,8 @@ install -m 0644 "$repo_root/docs/user/remote-client.rst" \
 install -m 0644 "$repo_root/docs/user/remote-s3-uploads.rst" \
   "$build_root/usr/share/doc/$package_name/remote-s3-uploads.rst"
 
+bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
+
 cat >"$build_root/DEBIAN/control" <<CONTROL
 Package: $package_name
 Version: $version

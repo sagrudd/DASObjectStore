@@ -20,6 +20,7 @@ build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
 build_remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
 build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
 prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
+package_auth_guard="$repo_root/packaging/validate-package-auth-content.sh"
 
 require_file() {
   local path="$1"
@@ -56,6 +57,7 @@ require_file "$build_rpm"
 require_file "$build_remote_deb"
 require_file "$build_remote_rpm"
 require_file "$prepare_web_dist"
+require_file "$package_auth_guard"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -211,3 +213,7 @@ require_text "$prepare_web_dist" "prosopikon-core must expose the auth and pam f
 require_text "$prepare_web_dist" "*.wasm"
 require_text "$prepare_web_dist" "--allow-fallback"
 require_text "$prepare_web_dist" "target/web-fallback/dist"
+require_text "$build_deb" "validate-package-auth-content.sh"
+require_text "$build_rpm" "validate-package-auth-content.sh"
+require_text "$build_remote_deb" "validate-package-auth-content.sh"
+require_text "$build_remote_rpm" "validate-package-auth-content.sh"

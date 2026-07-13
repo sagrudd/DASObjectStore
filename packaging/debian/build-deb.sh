@@ -89,6 +89,8 @@ install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
 cp -a "$web_dist/." "$build_root/opt/dasobjectstore/web/"
 install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 
+bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
+
 cat >"$build_root/DEBIAN/control" <<CONTROL
 Package: $package_name
 Version: $version
