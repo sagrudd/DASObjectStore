@@ -8,7 +8,7 @@ use crate::api::CapacityAdmissionDecision;
 use crate::runtime::capacity_provider::CapacityAdmissionProvider;
 use crate::runtime::{DriveBackend, FolderBackend};
 use dasobjectstore_core::backend::{
-    BackendError, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
+    BackendError, BackendHealth, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
     ObjectStoreBackend,
 };
 use dasobjectstore_core::ids::StoreId;
@@ -141,6 +141,28 @@ pub fn head_profile_object(
         .ok_or_else(|| {
             BackendError::NotFound(format!("profile object {} not found", key.object_id))
         })
+}
+
+/// Verify a catalogue-authoritative profile object and reject any payload
+/// drift from its recorded size or checksum.
+pub fn verify_profile_object(
+    backend: &dyn ProfileS3ReadBackend,
+    key: &BackendObjectKey,
+) -> Result<ProfileS3Object, BackendError> {
+    let expected = head_profile_object(backend, key)?;
+    let actual = backend.verify(key)?;
+    if actual.size_bytes != expected.size_bytes || actual.checksum != expected.checksum {
+        return Err(BackendError::InvalidRequest(format!(
+            "profile object {} failed catalogue verification",
+            key.object_id
+        )));
+    }
+    Ok(expected)
+}
+
+/// Return provider-neutral profile health without exposing backend paths.
+pub fn profile_health(backend: &dyn ProfileS3ReadBackend) -> Result<BackendHealth, BackendError> {
+    backend.health()
 }
 
 pub fn get_profile_object(
@@ -347,8 +369,8 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 mod tests {
     use super::{
         delete_profile_object, get_profile_object, get_profile_object_range, head_profile_object,
-        list_profile_objects, list_profile_objects_page, put_profile_object,
-        put_profile_object_with_capacity_provider, PROFILE_S3_MAX_KEYS,
+        list_profile_objects, list_profile_objects_page, profile_health, put_profile_object,
+        put_profile_object_with_capacity_provider, verify_profile_object, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -556,6 +578,33 @@ mod tests {
             version: 1,
         };
         assert!(head_profile_object(&backend, &missing).is_err());
+        assert_eq!(profile_health(&backend).expect("health").state, "healthy");
+        assert_eq!(
+            verify_profile_object(&backend, &key)
+                .expect("verify")
+                .size_bytes,
+            5
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn verify_rejects_payload_drift_against_catalogue() {
+        let (mut backend, root) = backend();
+        let key = BackendObjectKey {
+            object_id: "verify/sample.fastq".to_string(),
+            version: 1,
+        };
+        let record = put_profile_object(
+            &mut backend,
+            "profile-s3-verify",
+            &key,
+            &mut &b"stable"[..],
+            6,
+        )
+        .expect("put");
+        std::fs::write(root.join(record.location), b"changed").expect("tamper");
+        assert!(verify_profile_object(&backend, &key).is_err());
         std::fs::remove_dir_all(root).ok();
     }
 

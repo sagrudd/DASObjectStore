@@ -60,6 +60,8 @@ Profile-backed S3 reads and deletion use a provider-neutral daemon adapter.
 List, HEAD, and GET derive from the authoritative profile catalogue and backend
 read contract; list pages are stably ordered and capped at 1,000 keys; DELETE
 uses the same catalogue authority before backend removal;
+verification re-hashes the payload and rejects size/checksum drift, while the
+health projection remains provider-neutral and path-free;
 provider listings and private filesystem paths are not trusted or returned.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and

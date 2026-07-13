@@ -113,9 +113,9 @@ pub use profile_registry::{
 };
 pub use profile_s3::{
     delete_profile_object, get_profile_object, get_profile_object_range, head_profile_object,
-    list_profile_objects, list_profile_objects_page, put_profile_object,
-    put_profile_object_with_capacity_provider, ProfileS3ListPage, ProfileS3Object,
-    ProfileS3ReadBackend, ProfileS3WriteBackend, PROFILE_S3_MAX_KEYS,
+    list_profile_objects, list_profile_objects_page, profile_health, put_profile_object,
+    put_profile_object_with_capacity_provider, verify_profile_object, ProfileS3ListPage,
+    ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend, PROFILE_S3_MAX_KEYS,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,
