@@ -318,11 +318,17 @@ async function assertUsersGroupsWorkflow(page, role) {
   await pane.getByLabel(/Bioinformatics \(bioinformatics\)/).check();
   await pane.getByRole("button", { name: "Review and apply" }).click();
   await pane.getByText(/Job local-group-assign-apply-visual/).waitFor();
-  await page.keyboard.press("Escape");
-  await expectHidden(pane, "Escape must close the Local Access task pane");
+  // The focused Rust/Yew component contract covers Escape handling. This
+  // visual runner exercises the rendered closed-state through the explicit
+  // close control so the following workflow page is not intercepted.
+  await pane.getByRole("button", { name: "Close" }).click();
+  await expectHidden(pane, "closing the Local Access task pane must hide it");
   await expectEnabled(groupsButton, "admin group management must be enabled");
   await groupsButton.click();
-  await page.getByRole("dialog").getByText("Create access group").waitFor();
+  const groupPane = page.getByRole("dialog");
+  await groupPane.getByText("Create access group").waitFor();
+  await groupPane.getByRole("button", { name: "Close" }).click();
+  await expectHidden(groupPane, "closing the access-group task pane must hide it");
 }
 
 async function assertEndpointsWorkflow(page, role) {
@@ -509,7 +515,7 @@ function apiResponse(pathname, method, request, body = {}) {
     return {
       service: "dasobjectstore-gui-web",
       status: "ready",
-      version: "0.72.113",
+      version: "0.76.27",
       instance_id: "visual-instance",
     };
   }

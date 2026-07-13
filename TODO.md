@@ -2669,7 +2669,7 @@ non-destructive close, and restores focus to its trigger when closed.
 
 ### 24.5 Verification and documentation
 
-- [ ] Update `crates/dasobjectstore-gui-web/src/workspace/tests.rs` and the
+- [x] Update `crates/dasobjectstore-gui-web/src/workspace/tests.rs` and the
   visual runner under `tools/web-screenshot-regression.mjs`. The runner’s old
   Local Access assertions still expect separate dry-run preview controls that
   no longer match the current Yew screen; replace them with the canonical
@@ -2681,7 +2681,8 @@ non-destructive close, and restores focus to its trigger when closed.
     remains environment-gated.
   - [x] Replace the legacy screenshot fixture users/groups selectors and add
     endpoint inventory/upsert fixture responses plus users-first workflow
-    assertions; full Playwright artifact execution remains environment-gated.
+    assertions; the fixture now tracks the workspace version so authenticated
+    visual sessions are not rejected as stale.
   - [x] Add a focused source contract proving target-scoped Remote Upload does
     not expose a dropzone before an explicitly authorized writable target and
     does not silently select the first writable store; visual artifact
@@ -2693,20 +2694,20 @@ non-destructive close, and restores focus to its trigger when closed.
   and remote-upload rejection without an explicit target. Source/component
   contracts plus existing footer/API route tests cover these boundaries;
   runtime visual artifact execution remains environment-gated.
-- [ ] Add desktop and 390 px mobile visual/DOM regression coverage for the
+- [x] Add desktop and 390 px mobile visual/DOM regression coverage for the
   closed and open Local Access, Endpoints, and target-scoped Remote Upload
   workflows. Assert no overlap, horizontal overflow, hidden primary form,
   unreadable footer text, or visible upload dropzone before target selection.
   - [x] Refresh the screenshot fixture health response, home telemetry
     readiness selector, users-first selector, and ObjectStore enclosure
-    inventory so the runner reaches authenticated workflow pages;
-    desktop/mobile artifact assertions remain open until the runner completes.
+    inventory so the runner reaches authenticated workflow pages; the runner
+    now completes both desktop and 390px mobile matrices.
   - [x] Make screenshot task-pane hidden assertions await the asynchronous
     daemon-response state transition instead of sampling visibility immediately.
-  - [ ] Full Playwright artifact execution remains blocked on this macOS
-    checkout: `packaging/web/prepare-web-dist.sh` currently exits after Trunk
-    build without producing a JavaScript bundle; the last successful run then
-    advanced to endpoint workflow checks before the async pane assertion fix.
+  - [x] Full Playwright artifact execution now passes on macOS after the Trunk
+    build emits the JavaScript bundle; the fixture version and task-pane
+    workflow cleanup keep all desktop/mobile pages reachable and produce the
+    expected 30 artifacts under `target/web-screenshots/`.
 - [x] Update `docs/user/web-interface.rst` and `docs/user/remote-upload.rst`
   with the task-pane interaction, Local Access qualification flow, endpoint
   inventory/add-edit workflow, and ObjectStore-first upload flow. State that
