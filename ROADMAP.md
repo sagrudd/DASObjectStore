@@ -140,6 +140,9 @@ versioned path-free list transport projection; authenticated HTTP gateway and
 multipart dispatch remain deliberately separate. An authenticated profile-S3
 HEAD transport now exposes bounded logical key/version/size/checksum metadata
 through the same daemon bridge without revealing backend paths.
+The same authenticated route family now exposes provider-neutral bounded-profile
+health state and message fields; physical SMART/NVMe and appliance topology
+remain deployment-gated.
 
 ### Open technical debt
 

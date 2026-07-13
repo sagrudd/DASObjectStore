@@ -31,21 +31,22 @@ use crate::api::{
     ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
     ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
     ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileInspectionRequest,
-    ProfileInspectionResponse, ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3ListRequest,
-    ProfileS3ListResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
-    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
-    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    ProfileInspectionResponse, ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest,
+    ProfileS3HealthResponse, ProfileS3ListRequest, ProfileS3ListResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
+    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -227,6 +228,16 @@ where
         match self.send(DaemonApiRequest::ProfileS3Head(request))? {
             DaemonApiResponse::ProfileS3Head(response) => Ok(response),
             response => Err(unexpected("profile_s3_head", response)),
+        }
+    }
+
+    pub fn profile_s3_health(
+        &self,
+        request: ProfileS3HealthRequest,
+    ) -> Result<ProfileS3HealthResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3Health(request))? {
+            DaemonApiResponse::ProfileS3Health(response) => Ok(response),
+            response => Err(unexpected("profile_s3_health", response)),
         }
     }
 
@@ -702,6 +713,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",
+        DaemonApiResponse::ProfileS3Health(_) => "profile_s3_health",
         DaemonApiResponse::ProfileDiagnostics(_) => "profile_diagnostics",
         DaemonApiResponse::ProfileInspection(_) => "profile_inspection",
         DaemonApiResponse::ProfileCapabilities(_) => "profile_capabilities",

@@ -784,6 +784,9 @@ completion.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
+  - [x] Add an authenticated profile-S3 health projection for bounded folder
+    bindings, returning only provider-neutral state/message fields through the
+    daemon bridge; SMART/NVMe and appliance topology remain separate.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.

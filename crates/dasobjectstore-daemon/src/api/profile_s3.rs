@@ -1,5 +1,5 @@
 use crate::api::DaemonRequestValidationError;
-use dasobjectstore_core::backend::BackendObjectKey;
+use dasobjectstore_core::backend::{BackendHealth, BackendObjectKey};
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,7 @@ pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = 10_000;
 pub const PROFILE_S3_ROUTE_PREFIX: &str = "/api/v1/profile-s3";
 pub const PROFILE_S3_OBJECTS_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects";
 pub const PROFILE_S3_OBJECT_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects/{key}";
+pub const PROFILE_S3_HEALTH_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/health";
 pub const PROFILE_S3_MULTIPART_COMPLETE_ROUTE: &str =
     "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete";
 
@@ -53,6 +54,39 @@ pub struct ProfileS3HeadResponse {
     pub schema_version: String,
     pub store_id: StoreId,
     pub object: ProfileS3ObjectView,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3HealthRequest {
+    pub store_id: StoreId,
+}
+
+impl ProfileS3HealthRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.store_id.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "store_id" });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3HealthResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub health: BackendHealth,
+}
+
+impl ProfileS3HealthResponse {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != PROFILE_S3_SCHEMA_VERSION {
+            return Err("unsupported profile S3 schema".to_string());
+        }
+        if self.store_id.as_str().trim().is_empty() || self.health.state.trim().is_empty() {
+            return Err("profile S3 health identity and state must not be blank".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl ProfileS3HeadResponse {
@@ -363,6 +397,8 @@ mod tests {
         assert!(PROFILE_S3_OBJECTS_ROUTE.contains("{store_id}"));
         assert!(PROFILE_S3_OBJECT_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
         assert!(PROFILE_S3_OBJECT_ROUTE.contains("{key}"));
+        assert!(PROFILE_S3_HEALTH_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
+        assert!(PROFILE_S3_HEALTH_ROUTE.contains("{store_id}"));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{store_id}"));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{reservation_id}"));

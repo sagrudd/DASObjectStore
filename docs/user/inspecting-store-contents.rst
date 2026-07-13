@@ -134,6 +134,19 @@ available through the CLI:
 This command reports metadata only and never reads or prints private backend
 paths.
 
+Inspect profile health
+----------------------
+
+An authenticated health projection is available for bounded profiles:
+
+.. code-block:: text
+
+   GET /api/v1/profile-s3/stores/<store>/health
+
+The response contains provider-neutral ``state`` and optional ``message``
+fields. It does not claim appliance SMART/NVMe or enclosure health; those
+remain separate deployment-gated telemetry surfaces.
+
 Download Folder Archives From the Web API
 -----------------------------------------
 
