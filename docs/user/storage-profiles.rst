@@ -56,6 +56,12 @@ reported without recreating ``.dasobjectstore`` or its catalogue. Mutating
 profile operations remain administrator-authorized and require their separate
 confirmation contract.
 
+Profile-backed S3 reads use a provider-neutral daemon adapter. List, HEAD, and
+GET derive from the authoritative profile catalogue and backend read contract;
+provider listings and private filesystem paths are not trusted or returned.
+This adapter is not an HTTP gateway and does not yet implement S3 PUT or
+multipart completion.
+
 The private ``.dasobjectstore`` namespace and its object/staging descendants
 are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized
 payload files use ``0600``. The user-selected folder root is never chmod'ed;

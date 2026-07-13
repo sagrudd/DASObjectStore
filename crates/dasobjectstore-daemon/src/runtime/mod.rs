@@ -18,6 +18,7 @@ mod object_browser;
 mod object_download;
 mod performance_policy;
 mod profile_registry;
+mod profile_s3;
 mod reconciliation;
 mod remote_pairings;
 mod remote_sessions;
@@ -109,6 +110,9 @@ pub use profile_registry::{
     read_profile_binding_record, upsert_profile_binding, validate_profile_binding_claim,
     BackendProfileBinding, PROFILE_BINDING_REGISTRY_ENV, PROFILE_BINDING_REGISTRY_FILE_NAME,
     PROFILE_BINDING_REGISTRY_SCHEMA,
+};
+pub use profile_s3::{
+    get_profile_object, head_profile_object, list_profile_objects, ProfileS3Object,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.19 - 2026-07-13
+
+- Add a provider-neutral profile S3 read adapter deriving list, HEAD, and GET
+  from daemon-authoritative folder/drive catalogues.
+
 ## 0.76.18 - 2026-07-13
 
 - Fail closed when an existing per-user service state directory is owned by a

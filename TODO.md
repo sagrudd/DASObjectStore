@@ -685,6 +685,10 @@ completion.
 - [ ] Route S3 PUT and multipart completion through quota reservation, daemon
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
   catalogue state rather than provider listings.
+  - [x] Add a provider-neutral profile read adapter for authoritative
+    list/HEAD/GET semantics over folder and drive backends; it never consults
+    provider listings or exposes private backend paths. HTTP gateway, PUT, and
+    multipart wiring remain separate.
 - [ ] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic.
