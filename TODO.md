@@ -745,6 +745,9 @@ completion.
   - [x] Add the versioned, path-free profile-S3 list request/response DTO with
     the same bounded key count and validation contract; authenticated HTTP
     routing and runtime store dispatch remain open.
+  - [x] Add the canonical runtime-to-transport list projection helper so Web
+    and S3 handlers cannot diverge or leak backend locations; authenticated
+    routing and runtime store dispatch remain open.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.

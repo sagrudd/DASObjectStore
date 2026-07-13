@@ -61,6 +61,29 @@ pub struct ProfileS3ListPage {
     pub next_offset: Option<usize>,
 }
 
+/// Project an authoritative runtime page into the versioned daemon transport
+/// shape. Only logical keys, sizes, checksums, and continuation state cross
+/// this boundary; backend locations remain daemon-private.
+pub fn profile_s3_list_response(
+    store_id: StoreId,
+    page: ProfileS3ListPage,
+) -> crate::api::ProfileS3ListResponse {
+    crate::api::ProfileS3ListResponse {
+        schema_version: crate::api::PROFILE_S3_SCHEMA_VERSION.to_string(),
+        store_id,
+        objects: page
+            .objects
+            .into_iter()
+            .map(|object| crate::api::ProfileS3ObjectView {
+                key: object.key,
+                size_bytes: object.size_bytes,
+                checksum: object.checksum,
+            })
+            .collect(),
+        next_offset: page.next_offset.map(|offset| offset as u64),
+    }
+}
+
 pub fn list_profile_objects(
     backend: &dyn ProfileS3ReadBackend,
     prefix: Option<&str>,
@@ -404,7 +427,7 @@ mod tests {
     use super::{
         delete_profile_object, delete_profile_object_with_capacity_provider, get_profile_object,
         get_profile_object_range, head_profile_object, list_profile_objects,
-        list_profile_objects_page, profile_health, put_profile_object,
+        list_profile_objects_page, profile_health, profile_s3_list_response, put_profile_object,
         put_profile_object_with_capacity_provider, verify_profile_object, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
@@ -697,6 +720,13 @@ mod tests {
             .expect("put");
         }
         let first = list_profile_objects_page(&backend, Some("reads/"), 0, 1).expect("page");
+        let response =
+            profile_s3_list_response(StoreId::new("profile-s3").expect("store id"), first.clone());
+        response
+            .validate()
+            .expect("profile list response validates");
+        assert_eq!(response.objects.len(), 1);
+        assert_eq!(response.next_offset, Some(1));
         assert_eq!(first.objects[0].key.object_id, "reads/a");
         assert_eq!(first.next_offset, Some(1));
         let second = list_profile_objects_page(&backend, Some("reads/"), 1, 1).expect("page");

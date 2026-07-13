@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.27 - 2026-07-13
+
+- Add the canonical runtime-to-transport projection for bounded profile-S3
+  list pages, preserving the path-free response contract.
+
 ## 0.76.26 - 2026-07-13
 
 - Add a versioned, path-free profile-S3 list transport contract with bounded
