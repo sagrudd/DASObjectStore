@@ -168,8 +168,10 @@ The active baseline still has release-relevant gaps: provider upload completion
 is not yet an atomic catalogue transaction; Garage reconciliation now uses
 durable provider-independent manifest/checkpoint planning plus a per-key Garage
 transfer worker with progress and administrator cancellation checks between
-provider transfers, while stable byte-range resume, non-Garage providers, and
-appliance soak acceptance remain open; daemon/CLI file-ingest pause/throttle/
+provider transfers. Retry jobs now rediscover the newest incomplete manifest
+for the same store/prefix scope without following symlinks, while stable
+byte-range resume, non-Garage providers, and appliance soak acceptance remain
+open; daemon/CLI file-ingest pause/throttle/
 resume is now available between source objects and through an authenticated Web
 admin action (the compact ``ingest control --tui`` acknowledgement is now
 available; interactive keyboard controls and live state refresh remain);

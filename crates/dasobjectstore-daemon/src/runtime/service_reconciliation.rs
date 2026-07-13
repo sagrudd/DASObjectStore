@@ -2,8 +2,9 @@
 
 use super::capacity_provider::CapacityAdmissionProvider;
 use super::reconciliation::{
-    plan_reconciliation, ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
-    ReconciliationManifestError, ReconciliationObject,
+    discover_incomplete_reconciliation_manifest, plan_reconciliation, ReconciliationAction,
+    ReconciliationEntryState, ReconciliationManifest, ReconciliationManifestError,
+    ReconciliationObject,
 };
 use super::service::{DaemonServiceRuntimeError, GarageServiceRuntimeConfig, ServiceCommandRunner};
 use crate::api::{
@@ -52,11 +53,12 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
             }
         })
         .collect::<String>();
-    let staging_path = crate::runtime::default_ssd_root()
+    let reconciliation_root = crate::runtime::default_ssd_root()
         .join(".dasobjectstore")
         .join("remote-s3-reconcile")
-        .join(store_id.as_str())
-        .join(stage_name);
+        .join(store_id.as_str());
+    let requested_staging_path = reconciliation_root.join(stage_name);
+    let mut staging_path = requested_staging_path.clone();
     let manifest_path = staging_path
         .join(".dasobjectstore")
         .join("reconciliation-manifest.json");
@@ -70,6 +72,29 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
             dry_run: true,
         });
     }
+
+    let manifest_path = if let Some(existing_manifest) =
+        discover_incomplete_reconciliation_manifest(
+            &reconciliation_root,
+            store_id.as_str(),
+            prefix.as_deref(),
+        )
+        .map_err(reconciliation_manifest_error)?
+    {
+        staging_path = existing_manifest
+            .parent()
+            .and_then(|path| path.parent())
+            .map(std::path::Path::to_path_buf)
+            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "reconciliation checkpoint has no staging root: {}",
+                    existing_manifest.display()
+                ),
+            })?;
+        existing_manifest
+    } else {
+        manifest_path
+    };
 
     let credential_registry = read_managed_credential_registry(
         default_garage_credential_registry_path(),

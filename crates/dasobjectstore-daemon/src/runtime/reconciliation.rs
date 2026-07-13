@@ -137,6 +137,76 @@ impl ReconciliationManifest {
     }
 }
 
+/// Find the newest incomplete checkpoint for one provider reconciliation
+/// scope. Each job gets its own staging directory, but restart/retry must be
+/// able to rediscover an interrupted job instead of silently starting a fresh
+/// transfer. The daemon-owned root is scanned only one level deep and
+/// symlinked entries are ignored to keep discovery inside the managed root.
+pub fn discover_incomplete_reconciliation_manifest(
+    reconciliation_root: &Path,
+    store_id: &str,
+    prefix: Option<&str>,
+) -> Result<Option<PathBuf>, ReconciliationManifestError> {
+    let entries = match fs::read_dir(reconciliation_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(ReconciliationManifestError::Io {
+                path: reconciliation_root.to_path_buf(),
+                message: error.to_string(),
+            })
+        }
+    };
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| ReconciliationManifestError::Io {
+            path: reconciliation_root.to_path_buf(),
+            message: error.to_string(),
+        })?;
+        let entry_type = entry
+            .file_type()
+            .map_err(|error| ReconciliationManifestError::Io {
+                path: entry.path(),
+                message: error.to_string(),
+            })?;
+        if !entry_type.is_dir() || entry_type.is_symlink() {
+            continue;
+        }
+        let manifest_path = entry
+            .path()
+            .join(".dasobjectstore")
+            .join("reconciliation-manifest.json");
+        let manifest_type = match fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(ReconciliationManifestError::Io {
+                    path: manifest_path,
+                    message: error.to_string(),
+                })
+            }
+        };
+        if !manifest_type.is_file() || manifest_type.file_type().is_symlink() {
+            continue;
+        }
+        let manifest = ReconciliationManifest::load(&manifest_path)?;
+        if manifest.store_id != store_id || manifest.prefix.as_deref() != prefix {
+            continue;
+        }
+        if manifest
+            .entries
+            .values()
+            .any(|entry| !matches!(entry.state, ReconciliationEntryState::Complete))
+        {
+            candidates.push((manifest.updated_at_unix_seconds, manifest_path));
+        }
+    }
+    Ok(candidates
+        .into_iter()
+        .max_by(|left, right| left.cmp(right))
+        .map(|(_, path)| path))
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReconciliationManifestEntry {
     pub source_key: String,
@@ -541,6 +611,104 @@ mod tests {
             ReconciliationAction::SkipComplete { .. }
         ));
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn discovers_newest_incomplete_manifest_for_store_and_prefix() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-reconciliation-discovery-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let older = root.join("older/.dasobjectstore/reconciliation-manifest.json");
+        let newer = root.join("newer/.dasobjectstore/reconciliation-manifest.json");
+        let wrong = root.join("wrong/.dasobjectstore/reconciliation-manifest.json");
+        for path in [&older, &newer, &wrong] {
+            fs::create_dir_all(path.parent().unwrap()).expect("manifest parent");
+        }
+        let mut older_manifest = ReconciliationManifest::new("store-1", Some("reads".into()));
+        older_manifest.entries.insert(
+            "older.bin".into(),
+            ReconciliationManifestEntry {
+                source_key: "older.bin".into(),
+                relative_path: Some("older.bin".into()),
+                size_bytes: Some(1),
+                source_revision: Some("revision-1".into()),
+                state: ReconciliationEntryState::InProgress,
+                downloaded_bytes: 0,
+                message: None,
+            },
+        );
+        older_manifest.updated_at_unix_seconds = 10;
+        fs::write(
+            &older,
+            serde_json::to_vec(&older_manifest).expect("older JSON"),
+        )
+        .expect("older manifest");
+        let mut newer_manifest = ReconciliationManifest::new("store-1", Some("reads".into()));
+        newer_manifest.entries.insert(
+            "newer.bin".into(),
+            ReconciliationManifestEntry {
+                source_key: "newer.bin".into(),
+                relative_path: Some("newer.bin".into()),
+                size_bytes: Some(1),
+                source_revision: Some("revision-2".into()),
+                state: ReconciliationEntryState::Failed,
+                downloaded_bytes: 0,
+                message: Some("interrupted".into()),
+            },
+        );
+        newer_manifest.updated_at_unix_seconds = 20;
+        fs::write(
+            &newer,
+            serde_json::to_vec(&newer_manifest).expect("newer JSON"),
+        )
+        .expect("newer manifest");
+        let mut wrong_manifest = ReconciliationManifest::new("other", Some("reads".into()));
+        wrong_manifest.updated_at_unix_seconds = 30;
+        fs::write(
+            &wrong,
+            serde_json::to_vec(&wrong_manifest).expect("wrong JSON"),
+        )
+        .expect("wrong manifest");
+
+        let discovered =
+            discover_incomplete_reconciliation_manifest(&root, "store-1", Some("reads"))
+                .expect("discovery")
+                .expect("checkpoint");
+        assert_eq!(discovered, newer);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn complete_manifests_are_not_selected_for_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-reconciliation-complete-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let path = root.join("complete/.dasobjectstore/reconciliation-manifest.json");
+        fs::create_dir_all(path.parent().unwrap()).expect("manifest parent");
+        let mut manifest = ReconciliationManifest::new("store-1", None);
+        manifest.entries.insert(
+            "reads.bin".into(),
+            ReconciliationManifestEntry {
+                source_key: "reads.bin".into(),
+                relative_path: Some("reads.bin".into()),
+                size_bytes: Some(1),
+                source_revision: Some("revision-1".into()),
+                state: ReconciliationEntryState::Complete,
+                downloaded_bytes: 1,
+                message: None,
+            },
+        );
+        manifest.save_atomic(&path).expect("manifest");
+
+        assert_eq!(
+            discover_incomplete_reconciliation_manifest(&root, "store-1", None).expect("discovery"),
+            None
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

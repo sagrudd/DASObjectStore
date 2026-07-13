@@ -2226,13 +2226,14 @@ list until every temporary size-budget exception has been removed.
   than a renewal-token bearer credential. The daemon has tested paired-session
   completion authorization; service-principal/token-exchange implementation,
   provider verification, and public endpoint wiring remain.
-- [~] Add a guarded, resumable reconciliation operation for already-uploaded
+  - [~] Add a guarded, resumable reconciliation operation for already-uploaded
   S3/object-service keys missing from the ObjectBrowser catalogue; report
   collisions, malformed keys, and inaccessible objects without silently
   overwriting metadata. ``store repair STORE --reconcile-s3 --apply`` now
   performs a safe SSD-first Garage import and catalogue registration with
-  per-key manifests, collision reporting, and durable checkpoints; remaining
-  work is stable cross-job manifest rediscovery, byte-range continuation,
+    per-key manifests, collision reporting, and durable checkpoints; daemon
+    retries now rediscover the newest incomplete per-store/prefix manifest
+    without following symlinks; remaining work is byte-range continuation,
   non-Garage providers, and appliance acceptance.
 - [~] Make `store repair --reconcile-s3` terminate naturally with a persisted
   terminal job state and final CLI response. Garage reconciliation now forwards
