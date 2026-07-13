@@ -1,14 +1,14 @@
 use crate::api::{
     query_appliance_telemetry, remote_easyconnect_renew_after_offset_seconds,
     resolve_remote_easyconnect_session_lifetime_seconds, ApplianceTelemetryRequest,
-    ApplianceTelemetryResponse, ApplicationCredentialRevocationResponse,
-    ApplicationIdentityRegistrationResponse, ApplicationKeyRegistrationResponse,
-    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
-    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
-    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    ApplianceTelemetryResponse, ApplicationAccessTokenExchangeResponse,
+    ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationResponse,
+    ApplicationKeyRegistrationResponse, AssignLocalUserToLocalGroupRequest,
+    AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
+    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobId, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
+    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
@@ -1027,22 +1027,22 @@ mod tests {
     };
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
-        ApplicationCredentialRevocationRequest, ApplicationIdentityRegistrationRequest,
-        ApplicationKeyRegistrationRequest, AssignLocalUserToLocalGroupRequest,
-        AssignLocalUserToLocalGroupResponse, CapacityAdmissionDecision, CapacityAdmissionRequest,
-        CapacityAdmissionResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
-        CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId, DaemonJobKind,
-        DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-        DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
-        DaemonRequestValidationError, DaemonServiceLifecycleRequest,
-        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
-        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
-        DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest, ObjectBrowserDelegatedActor,
-        ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
-        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
-        ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
+        ApplicationAccessTokenExchangeRequest, ApplicationCredentialRevocationRequest,
+        ApplicationIdentityRegistrationRequest, ApplicationKeyRegistrationRequest,
+        AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+        CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
+        CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
+        DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
+        DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+        DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
+        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
+        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest,
+        ObjectBrowserDelegatedActor, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
+        ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
@@ -1073,10 +1073,12 @@ mod tests {
         RemoteUploadAdmissionGate,
     };
     use crate::AdminJobRegistry;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine;
     use dasobjectstore_core::application_auth::{
-        ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
-        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
-        APPLICATION_AUTH_SCHEMA_VERSION,
+        AccessTokenExchangeRequest, ApplicationCredentialKind, ApplicationEnvironment,
+        ApplicationIdentity, ApplicationKeyAlgorithm, ApplicationKeyDescriptor,
+        ApplicationOperation, ApplicationScope, APPLICATION_AUTH_SCHEMA_VERSION,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
@@ -1095,7 +1097,9 @@ mod tests {
         ManagedStoreCredentialRecord, ObjectServiceProviderId, ServiceState,
         StoreServiceDefinition,
     };
+    use ring::signature::{Ed25519KeyPair, KeyPair};
     use rusqlite::{params, Connection};
+    use sha2::{Digest, Sha256};
     use std::cell::RefCell;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -3907,6 +3911,78 @@ mod tests {
         assert!(!serialized.contains("spoofed-request-actor"));
         assert!(!serialized.contains("private_key"));
         assert!(registry.exists());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn application_access_token_exchange_verifies_registered_key_without_actor() {
+        let root = temp_root("application-access-token-exchange");
+        let identity_registry = root.join("application-identities.json");
+        let key_registry = root.join("application-keys.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:02:35Z"),
+        )
+        .with_application_identity_registry_path(&identity_registry)
+        .with_application_key_registry_path(&key_registry)
+        .with_application_audit_log_path(root.join("application-audit.json"));
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let application_id = "exchange-app";
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterApplicationIdentity(
+                    application_identity_registration_request_for_auth_test(application_id),
+                ),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("identity registration");
+
+        let signing_key = Ed25519KeyPair::from_seed_unchecked(&[9_u8; 32]).expect("signing key");
+        let public_key = signing_key.public_key().as_ref();
+        let fingerprint = format!(
+            "sha256:{}",
+            Sha256::digest(public_key)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        let mut key_request =
+            application_key_registration_request_for_auth_test(application_id, "exchange-key");
+        key_request.key.public_key_material = Some(BASE64.encode(public_key));
+        key_request.key.public_key_fingerprint = fingerprint;
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterApplicationKey(key_request),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("key registration");
+
+        let mut exchange = AccessTokenExchangeRequest {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: application_id.to_string(),
+            key_id: "exchange-key".to_string(),
+            audience: "dasobjectstore".to_string(),
+            requested_issued_at_unix_seconds: 2_000,
+            requested_expires_at_unix_seconds: 2_600,
+            scope: application_identity_registration_request_for_auth_test(application_id)
+                .identity
+                .scope,
+            proof: String::new(),
+        };
+        exchange.proof = BASE64.encode(signing_key.sign(&exchange.signing_payload()).as_ref());
+        let response = handler
+            .handle(DaemonApiRequest::ExchangeApplicationAccessToken(
+                ApplicationAccessTokenExchangeRequest { exchange },
+            ))
+            .expect("exchange handled");
+        let DaemonApiResponse::ExchangeApplicationAccessToken(response) = response else {
+            panic!("expected access-token response");
+        };
+        assert_eq!(response.claims.application_id, application_id);
+        assert_eq!(response.claims.audience, "dasobjectstore");
+        assert_eq!(response.claims.expires_at_unix_seconds, 2_600);
         cleanup(&root);
     }
 

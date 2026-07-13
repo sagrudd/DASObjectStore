@@ -221,6 +221,22 @@ pub trait ApplicationExchangeProofVerifier {
 }
 
 impl AccessTokenExchangeRequest {
+    /// Validate fields that are independent of any daemon-owned identity or
+    /// key registry. The daemon performs this check before looking up either
+    /// authority, while `validate_against` adds membership, lifetime, scope,
+    /// and active-state checks.
+    pub fn validate_shape(&self) -> Result<(), ApplicationAuthValidationError> {
+        validate_schema(&self.schema_version)?;
+        validate_slug("application_id", &self.application_id)?;
+        validate_slug("key_id", &self.key_id)?;
+        validate_text("audience", &self.audience)?;
+        validate_opaque_proof(&self.proof)?;
+        validate_lifetime(
+            self.requested_issued_at_unix_seconds,
+            self.requested_expires_at_unix_seconds,
+        )
+    }
+
     /// Return the deterministic, proof-free bytes that a key implementation
     /// must sign. The struct field order is part of the versioned contract.
     pub fn signing_payload(&self) -> Vec<u8> {
@@ -234,15 +250,7 @@ impl AccessTokenExchangeRequest {
         identity: &ApplicationIdentity,
         key: &ApplicationKeyDescriptor,
     ) -> Result<(), ApplicationAuthValidationError> {
-        validate_schema(&self.schema_version)?;
-        validate_slug("application_id", &self.application_id)?;
-        validate_slug("key_id", &self.key_id)?;
-        validate_text("audience", &self.audience)?;
-        validate_opaque_proof(&self.proof)?;
-        validate_lifetime(
-            self.requested_issued_at_unix_seconds,
-            self.requested_expires_at_unix_seconds,
-        )?;
+        self.validate_shape()?;
         identity.validate()?;
         key.validate()?;
         if !identity.active {

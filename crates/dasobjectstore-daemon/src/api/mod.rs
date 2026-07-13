@@ -2,6 +2,7 @@
 
 mod appliance_telemetry;
 mod application_identity;
+mod application_token;
 mod capacity;
 mod disk_mutation;
 mod enclosure;
@@ -47,6 +48,9 @@ pub use application_identity::{
     ApplicationKeyRegistrationRequest, ApplicationKeyRegistrationResponse,
     ApplicationKeyRegistrationValidationError, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
     APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
+};
+pub use application_token::{
+    ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
 };
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
@@ -237,6 +241,7 @@ pub enum DaemonApiRequest {
     RegisterApplicationIdentity(ApplicationIdentityRegistrationRequest),
     RegisterApplicationKey(ApplicationKeyRegistrationRequest),
     RevokeApplicationCredential(ApplicationCredentialRevocationRequest),
+    ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
@@ -292,6 +297,7 @@ impl DaemonApiRequest {
             Self::RegisterApplicationIdentity(_) => "register_application_identity",
             Self::RegisterApplicationKey(_) => "register_application_key",
             Self::RevokeApplicationCredential(_) => "revoke_application_credential",
+            Self::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
@@ -365,6 +371,7 @@ impl DaemonApiRequest {
             Self::RevokeApplicationCredential(request) => request
                 .validate()
                 .map_err(application_credential_revocation_validation_error),
+            Self::ExchangeApplicationAccessToken(request) => request.validate(),
             Self::PrepareEnclosure(request) => request
                 .validate()
                 .map_err(prepare_enclosure_validation_error),
@@ -463,6 +470,7 @@ pub enum DaemonApiResponse {
     RegisterApplicationIdentity(ApplicationIdentityRegistrationResponse),
     RegisterApplicationKey(ApplicationKeyRegistrationResponse),
     RevokeApplicationCredential(ApplicationCredentialRevocationResponse),
+    ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
@@ -896,9 +904,9 @@ impl DaemonApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplianceTelemetryRequest, ApplianceTelemetryWindow, AssignLocalUserToLocalGroupRequest,
-        CapacityAdmissionRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonApiRequest, DaemonEndpointKind, DaemonEndpointValidation,
+        ApplianceTelemetryRequest, ApplianceTelemetryWindow, ApplicationAccessTokenExchangeRequest,
+        AssignLocalUserToLocalGroupRequest, CapacityAdmissionRequest, CreateLocalGroupRequest,
+        CreateObjectStoreRequest, DaemonApiRequest, DaemonEndpointKind, DaemonEndpointValidation,
         DaemonEndpointValidationState, DaemonIngestConflictPolicy, DaemonIngestControlAction,
         DaemonIngressOrigin, DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest,
         DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
@@ -1174,6 +1182,43 @@ mod tests {
         let encoded = serde_json::to_value(request).expect("request serializes");
         assert_eq!(encoded["command"], "profile_s3_list");
         assert_eq!(encoded["payload"]["limit"], 100);
+    }
+
+    #[test]
+    fn application_access_token_exchange_uses_stable_command_name() {
+        let request = DaemonApiRequest::ExchangeApplicationAccessToken(
+            ApplicationAccessTokenExchangeRequest {
+                exchange: dasobjectstore_core::application_auth::AccessTokenExchangeRequest {
+                    schema_version:
+                        dasobjectstore_core::application_auth::APPLICATION_AUTH_SCHEMA_VERSION
+                            .to_string(),
+                    application_id: "synoptikon".to_string(),
+                    key_id: "key-1".to_string(),
+                    audience: "dasobjectstore".to_string(),
+                    requested_issued_at_unix_seconds: 10,
+                    requested_expires_at_unix_seconds: 20,
+                    scope: dasobjectstore_core::application_auth::ApplicationScope {
+                        store_ids: vec![StoreId::new("codex").expect("store id")],
+                        prefixes: Vec::new(),
+                        object_types: Vec::new(),
+                        operations: vec![
+                            dasobjectstore_core::application_auth::ApplicationOperation::Read,
+                        ],
+                        ingress_origin: dasobjectstore_core::ingress::IngressOrigin::Synoptikon,
+                        max_object_bytes: Some(10),
+                        max_total_bytes: Some(100),
+                    },
+                    proof: "proof".to_string(),
+                },
+            },
+        );
+        request.validate().expect("exchange request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["command"], "exchange_application_access_token");
+        assert_eq!(
+            encoded["payload"]["exchange"]["application_id"],
+            "synoptikon"
+        );
     }
 
     #[test]

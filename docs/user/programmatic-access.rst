@@ -6,6 +6,23 @@ pipelines, and workstation tools that access an S3-exported DASObjectStore.
 The appliance remains the storage authority: clients use a scoped S3 grant and
 never write to managed DAS filesystem roots.
 
+Application identity exchange
+-----------------------------
+
+Unattended integrations use a daemon-registered application identity and an
+active asymmetric public key. The application signs a bounded exchange request
+with its private key; ``dasobjectstored`` verifies the proof against its
+daemon-owned key registry, checks the ObjectStore/prefix/operation scope, and
+returns a short-lived access-token claim. Bearer access tokens are not persisted
+by the daemon and are never accepted as a substitute for the signed exchange
+proof. Long-lived identity metadata is therefore distinct from short-lived
+storage authority.
+
+The current exchange is available through the authenticated daemon transport
+for local integration tests and service adapters. Public HTTPS/mTLS listener
+wiring is a separate deployment slice. Do not place private keys, proofs, or
+access-token claims in manifests, logs, shell history, or support tickets.
+
 Choose an ObjectStore and credential authority
 -----------------------------------------------
 

@@ -39,6 +39,63 @@ where
             handler.record_admin_job(daemon_job_summary_from_service_provision(&response))?;
             Ok(DaemonApiResponse::ServiceProvision(response))
         }
+        DaemonApiRequest::ExchangeApplicationAccessToken(request) => {
+            let exchange = request.exchange;
+            let identity = read_application_identity(
+                &handler.application_identity_registry_path,
+                &exchange.application_id,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+            .ok_or_else(|| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: "application identity is not registered".to_string(),
+                    },
+                )
+            })?;
+            let key = read_application_key(
+                &handler.application_key_registry_path,
+                &exchange.application_id,
+                &exchange.key_id,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+            .ok_or_else(|| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: "application exchange key is not registered".to_string(),
+                    },
+                )
+            })?;
+            let token_id = stable_easyconnect_id(
+                "application-access-token",
+                &exchange.application_id,
+                &format!(
+                    "{}:{}:{}",
+                    exchange.key_id,
+                    exchange.requested_issued_at_unix_seconds,
+                    exchange.requested_expires_at_unix_seconds
+                ),
+            );
+            let claims = exchange
+                .issue_access_token(
+                    &identity,
+                    &key,
+                    token_id,
+                    &crate::application_token_verifier::RingApplicationExchangeProofVerifier,
+                )
+                .map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: format!(
+                                "application access-token exchange rejected: {error}"
+                            ),
+                        },
+                    )
+                })?;
+            Ok(DaemonApiResponse::ExchangeApplicationAccessToken(
+                ApplicationAccessTokenExchangeResponse { claims },
+            ))
+        }
         DaemonApiRequest::RegisterApplicationIdentity(mut request) => {
             // Identity registration mutates daemon-owned authority and is
             // therefore administrator-only. Dry-run validates policy without

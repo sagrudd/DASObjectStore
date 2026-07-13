@@ -817,8 +817,8 @@ completion.
   integrations.
   - [x] Add the versioned, path-free core identity, scoped access-token,
     renewal-token, and upload-completion capability contracts with fail-closed
-    scope/lifetime validation. Daemon registration, cryptographic custody, and
-    exchange wiring remain open.
+    scope/lifetime validation. Daemon registration and exchange wiring are now
+    present; cryptographic custody remains daemon/provider work.
   - [~] Build service-principal registration. The daemon-owned, atomic
     path-free identity registry now persists validated owner, purpose,
     ObjectStore/namespace scope, operation set, ingress origin, byte/object
@@ -833,8 +833,10 @@ completion.
     active identity/key membership, bounded proof shape, lifetime, and scope;
     issuance now requires an explicit verifier boundary and rejects unverified
     proofs. The daemon now provides a ring-backed Ed25519/P-256 verifier bound
-    to registered public-key material and fingerprints; private key custody,
-    mTLS transport verification, and public exchange endpoint wiring remain.
+    to registered public-key material and fingerprints. The daemon socket now
+    performs proof-verified issuance without persisting bearer tokens; private
+    key custody, mTLS transport verification, and public HTTP exchange endpoint
+    wiring remain.
     Do not issue long-lived broadly scoped bearer access tokens.
   - [~] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
@@ -859,7 +861,8 @@ completion.
     reject development keys, issuers, configuration, and enablement switches.
     Native DEB/RPM build scripts now explicitly compile the daemon with
     ``--no-default-features`` as an additional package-boundary safeguard.
-    Daemon listener wiring and token-proof verification remain open.
+    The daemon socket exchange now verifies registered key proofs; public
+    listener wiring remains open.
   - [x] Publish versioned, non-secret JSON contract fixtures for identity,
     public-key descriptor, exchange request, scoped access token, renewal-only
     token, and upload-completion capability adapters. The exchange fixture

@@ -105,12 +105,12 @@ is a test-build facility, not an application authority, and is forbidden from
 RPM/DEB contents including keys, issuers, configuration, and enablement
 switches. Package inspection tests are part of this roadmap slice. The core
 exchange-request contract validates active key membership, bounded proof shape,
-scope, and lifetime; daemon listener wiring, cryptographic proof verification,
-and token issuance remain open. Core issuance now requires an explicit proof
-verifier implementation and rejects unverified proofs. The daemon now ships a
+scope, and lifetime. Core issuance now requires an explicit proof verifier
+implementation and rejects unverified proofs. The daemon now ships a
 ring-backed Ed25519/P-256 verifier bound to registered public-key material and
-fingerprints; mTLS transport verification and public exchange endpoint wiring
-remain. Native DEB/RPM build scripts also compile the
+fingerprints, and its daemon socket now performs proof-verified short-lived
+issuance without persisting bearer tokens. mTLS transport verification and
+public HTTP exchange endpoint wiring remain. Native DEB/RPM build scripts also compile the
 daemon with `--no-default-features`, making the package boundary explicit.
 Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.

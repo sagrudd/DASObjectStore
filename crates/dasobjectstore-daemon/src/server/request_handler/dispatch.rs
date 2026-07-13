@@ -24,6 +24,7 @@ where
         service_request @ (DaemonApiRequest::ServiceStatus(_)
         | DaemonApiRequest::ServiceLifecycle(_)
         | DaemonApiRequest::ServiceProvision(_)
+        | DaemonApiRequest::ExchangeApplicationAccessToken(_)
         | DaemonApiRequest::RegisterApplicationIdentity(_)
         | DaemonApiRequest::RegisterApplicationKey(_)
         | DaemonApiRequest::RevokeApplicationCredential(_)
