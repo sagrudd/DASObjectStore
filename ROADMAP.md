@@ -1291,7 +1291,10 @@ records without inventing appliance placement/lifecycle fields. Daemon-backed
 profile HEAD, verification, capacity, health, readiness, and authenticated Web
 capability/readiness routes are also available without exposing private paths;
 shared SQLite catalogue authority, provider-backed streaming download,
-repair/lifecycle orchestration, and full S3 HTTP integration remain open.
+repair/lifecycle orchestration, and full S3 HTTP integration remain open. The
+provider-neutral runtime now also offers a bounded writer-stream helper that
+checks catalogue authority and exact byte length before success; HTTP framing
+and provider-backed transport remain separate.
 
 Exit criteria: system and per-user deployments can create/adopt, ingest, verify,
 reconcile, browse, expose through S3, restart, and recover a folder store without

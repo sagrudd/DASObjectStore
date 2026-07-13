@@ -14,7 +14,7 @@ use dasobjectstore_core::backend::{
 use dasobjectstore_core::ids::StoreId;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::io::Read;
+use std::io::{Read, Write};
 
 pub const PROFILE_S3_MAX_KEYS: usize = 1_000;
 pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = crate::api::PROFILE_S3_MAX_MULTIPART_PARTS;
@@ -484,6 +484,55 @@ pub fn get_profile_object(
     backend.read(key)
 }
 
+/// Stream one catalogue-authoritative object into a caller-owned sink while
+/// enforcing both the catalogue size and an explicit transport byte bound.
+/// The helper is transport-neutral: HTTP adapters can choose their own bounded
+/// response policy without receiving a private backend path or trusting a
+/// provider listing.
+pub fn stream_profile_object(
+    backend: &dyn ProfileS3ReadBackend,
+    key: &BackendObjectKey,
+    sink: &mut dyn Write,
+    max_bytes: u64,
+) -> Result<u64, BackendError> {
+    let object = head_profile_object(backend, key)?;
+    if object.size_bytes > max_bytes {
+        return Err(BackendError::InvalidRequest(format!(
+            "profile object size {} exceeds stream bound {max_bytes}",
+            object.size_bytes
+        )));
+    }
+    let mut reader = backend.read(key)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut copied = 0_u64;
+    loop {
+        let read = reader.read(&mut buffer).map_err(|error| {
+            BackendError::Io(format!("profile object stream read failed: {error}"))
+        })?;
+        if read == 0 {
+            break;
+        }
+        copied = copied.checked_add(read as u64).ok_or_else(|| {
+            BackendError::InvalidRequest("profile stream size overflow".to_string())
+        })?;
+        if copied > object.size_bytes || copied > max_bytes {
+            return Err(BackendError::InvalidRequest(
+                "profile object stream exceeded its declared size".to_string(),
+            ));
+        }
+        sink.write_all(&buffer[..read]).map_err(|error| {
+            BackendError::Io(format!("profile object stream write failed: {error}"))
+        })?;
+    }
+    if copied != object.size_bytes {
+        return Err(BackendError::InvalidRequest(format!(
+            "profile object stream ended at {copied} bytes, expected {}",
+            object.size_bytes
+        )));
+    }
+    Ok(copied)
+}
+
 /// Read a bounded byte range from a catalogue-authoritative profile object.
 /// The backend contract currently exposes a streaming full-object reader, so
 /// this compatibility seam discards the prefix while preserving the same
@@ -711,7 +760,7 @@ mod tests {
         delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
         head_profile_object, list_profile_objects, list_profile_objects_page, profile_diagnostics,
         profile_health, profile_s3_list_response, put_profile_object,
-        put_profile_object_with_capacity_provider, verify_profile_object,
+        put_profile_object_with_capacity_provider, stream_profile_object, verify_profile_object,
         ProfileS3MultipartCompletion, ProfileS3MultipartPart, ProfileS3MultipartPartSource,
         PROFILE_S3_MAX_KEYS,
     };
@@ -936,6 +985,15 @@ mod tests {
             .read_to_string(&mut body)
             .expect("read body");
         assert_eq!(body, "reads");
+        let mut streamed = Vec::new();
+        assert_eq!(
+            stream_profile_object(&backend, &key, &mut streamed, 5).expect("stream"),
+            5
+        );
+        assert_eq!(streamed, b"reads");
+        let mut bounded = Vec::new();
+        assert!(stream_profile_object(&backend, &key, &mut bounded, 4).is_err());
+        assert!(bounded.is_empty());
         let mut range = String::new();
         get_profile_object_range(&backend, &key, 1, 3)
             .expect("range")
