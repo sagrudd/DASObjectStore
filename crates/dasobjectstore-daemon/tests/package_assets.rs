@@ -103,6 +103,23 @@ fn package_auth_guard_rejects_development_self_signing_payloads() {
         "binary package marker accepted"
     );
 
+    let private_key = root.join("private-key");
+    std::fs::create_dir_all(&private_key).expect("create private-key payload");
+    std::fs::write(
+        private_key.join("issuer.pem"),
+        "-----BEGIN PRIVATE KEY-----\nsynthetic-test-key\n-----END PRIVATE KEY-----\n",
+    )
+    .expect("write private-key payload");
+    let private_key_rejected = std::process::Command::new("bash")
+        .arg(&guard)
+        .arg(&private_key)
+        .output()
+        .expect("run package guard for private-key payload");
+    assert!(
+        !private_key_rejected.status.success(),
+        "private-key PEM package payload accepted"
+    );
+
     std::fs::remove_dir_all(root).expect("remove package auth fixture");
 }
 
