@@ -103,8 +103,9 @@ pub use performance_policy::{
 };
 pub use profile_registry::{
     default_profile_binding_registry_path, profile_binding_registry_path, read_profile_binding,
-    upsert_profile_binding, BackendProfileBinding, PROFILE_BINDING_REGISTRY_ENV,
-    PROFILE_BINDING_REGISTRY_FILE_NAME, PROFILE_BINDING_REGISTRY_SCHEMA,
+    upsert_profile_binding, validate_profile_binding_claim, BackendProfileBinding,
+    PROFILE_BINDING_REGISTRY_ENV, PROFILE_BINDING_REGISTRY_FILE_NAME,
+    PROFILE_BINDING_REGISTRY_SCHEMA,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,

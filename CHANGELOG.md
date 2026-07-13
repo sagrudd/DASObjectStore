@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.3 - 2026-07-13
+
+- Preflight profile-binding root and identity claims before initializing a
+  capacity ledger, preventing rejected registrations from leaving orphaned
+  durable capacity state.
+
 ## 0.76.2 - 2026-07-13
 
 - Reject profile bindings that overlap another store's backend or staging root,

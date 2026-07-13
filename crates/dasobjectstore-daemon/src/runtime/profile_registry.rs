@@ -105,6 +105,26 @@ pub fn upsert_profile_binding(
     binding: BackendProfileBinding,
 ) -> Result<(), DaemonServiceRuntimeError> {
     let path = path.as_ref();
+    let registry = prepare_registry_with_binding(path, binding)?;
+    write_registry(path, &registry)
+}
+
+/// Validate a binding against the current registry without mutating it.
+///
+/// Profile registration uses this preflight before initializing a capacity
+/// ledger.  A claim collision therefore cannot leave durable capacity state
+/// for a binding that the registry will reject.
+pub fn validate_profile_binding_claim(
+    path: impl AsRef<Path>,
+    binding: BackendProfileBinding,
+) -> Result<(), DaemonServiceRuntimeError> {
+    prepare_registry_with_binding(path.as_ref(), binding).map(|_| ())
+}
+
+fn prepare_registry_with_binding(
+    path: &Path,
+    binding: BackendProfileBinding,
+) -> Result<ProfileBindingRegistryFile, DaemonServiceRuntimeError> {
     let binding = binding.validate_and_canonicalize()?;
     let mut registry = read_registry(path)?;
     if let Some(existing) = registry
@@ -123,7 +143,7 @@ pub fn upsert_profile_binding(
             .as_str()
             .cmp(right.manifest.store_id.as_str())
     });
-    write_registry(path, &registry)
+    Ok(registry)
 }
 
 fn read_registry(path: &Path) -> Result<ProfileBindingRegistryFile, DaemonServiceRuntimeError> {

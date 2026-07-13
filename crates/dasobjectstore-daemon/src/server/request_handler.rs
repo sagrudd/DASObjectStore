@@ -39,19 +39,19 @@ use crate::runtime::{
     query_object_browser_metadata, read_object_browser_metadata,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    upsert_endpoint_inventory_record, upsert_profile_binding, AdminJobRegistry,
-    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
-    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
-    FileBackedRemoteEasyconnectPairingStore, GarageServiceController, LocalAdminRuntimeError,
-    LocalGroupAdminController, LocalGroupAdministrationOperation, LocalGroupAdministrationRequest,
-    ObjectBrowserQueryError, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    upsert_endpoint_inventory_record, upsert_profile_binding, validate_profile_binding_claim,
+    AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
+    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
+    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -995,32 +995,38 @@ mod tests {
         ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ProfileBindingOperation, ProfileBindingRequest, RemoteEasyconnectApprovePairingRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
+        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         DIRECT_TO_HDD_POLICY_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION,
         ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
+        PROFILE_BINDING_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
         admin_job_registry_path, remote_easyconnect_pairing_store_path,
-        remote_easyconnect_session_store_path, DaemonIngestFilesRuntimeError,
-        DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
+        remote_easyconnect_session_store_path, upsert_profile_binding, BackendProfileBinding,
+        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
         FileBackedRemoteEasyconnectPairedSessionStore, LocalAdminRuntimeError,
         LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
         RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
         RemoteUploadAdmissionGate,
     };
     use crate::AdminJobRegistry;
-    use dasobjectstore_core::deployment::DeploymentProfile;
+    use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
+    use dasobjectstore_core::manifest::{
+        BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+    };
     use dasobjectstore_core::object_type::ObjectType;
+    use dasobjectstore_core::protection::ProtectionPolicy;
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
@@ -1085,6 +1091,68 @@ mod tests {
         response.validate().expect("capability response validates");
         assert_eq!(response.profiles.len(), 3);
         assert_eq!(response.profiles[0].profile, DeploymentProfile::Folder);
+    }
+
+    #[test]
+    fn profile_claim_collision_is_rejected_before_capacity_initialization() {
+        let root = temp_root("profile-claim-order");
+        let existing_root = root.join("existing");
+        fs::create_dir_all(&existing_root).expect("existing root");
+        let profile_registry = root.join("profile-bindings.json");
+        upsert_profile_binding(
+            &profile_registry,
+            BackendProfileBinding {
+                manifest: ObjectStoreManifest {
+                    schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                    store_id: StoreId::new("existing").expect("store id"),
+                    deployment_profile: DeploymentProfile::Folder,
+                    host_mode: HostMode::PerUser,
+                    protection: ProtectionPolicy::LocalOnly,
+                    backend: BackendReference::Folder {
+                        root_identity: "fsid:existing".to_string(),
+                    },
+                },
+                backend_root: existing_root.clone(),
+                ssd_staging_root: None,
+            },
+        )
+        .expect("existing binding");
+
+        let request = ProfileBindingRequest {
+            operation: ProfileBindingOperation::Create,
+            manifest: ObjectStoreManifest {
+                schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                store_id: StoreId::new("candidate").expect("store id"),
+                deployment_profile: DeploymentProfile::Folder,
+                host_mode: HostMode::PerUser,
+                protection: ProtectionPolicy::LocalOnly,
+                backend: BackendReference::Folder {
+                    root_identity: "fsid:candidate".to_string(),
+                },
+            },
+            capacity: dasobjectstore_core::store::CapacityPolicy::bounded(1024, 64),
+            store_definition: None,
+            backend_root: existing_root,
+            ssd_staging_root: None,
+            dry_run: false,
+            client_request_id: Some("claim-order".to_string()),
+            administrator_actor: Some("codex".to_string()),
+            confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
+        };
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T10:00:00Z"),
+        )
+        .with_profile_binding_registry_path(&profile_registry);
+
+        let result = handler.handle(DaemonApiRequest::RegisterProfileBinding(request));
+        assert!(result.is_err());
+        assert!(handler
+            .service_orchestrator
+            .profile_capacity_calls
+            .borrow()
+            .is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -3614,6 +3682,7 @@ mod tests {
         ingest_calls: RefCell<Vec<(String, String, bool)>>,
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
+        profile_capacity_calls: RefCell<Vec<(StoreId, dasobjectstore_core::store::CapacityPolicy)>>,
         remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize)>>,
         reconciliation_calls: RefCell<Vec<(String, Option<String>, bool, String)>>,
         job_status_calls: RefCell<Vec<String>>,
@@ -3623,6 +3692,17 @@ mod tests {
     }
 
     impl DaemonServiceOrchestrator for FakeService {
+        fn initialize_profile_capacity(
+            &self,
+            store_id: &StoreId,
+            policy: dasobjectstore_core::store::CapacityPolicy,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.profile_capacity_calls
+                .borrow_mut()
+                .push((store_id.clone(), policy));
+            Ok(())
+        }
+
         fn status(
             &self,
             request: DaemonServiceStatusRequest,

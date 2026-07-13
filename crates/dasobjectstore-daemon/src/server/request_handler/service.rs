@@ -60,6 +60,22 @@ where
             let now = handler.clock.now_utc();
             let store_definition = request.store_definition.clone();
             if !request.dry_run {
+                request.validate().map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::ObjectService(
+                            ObjectServiceError::InvalidConfiguration(error.to_string()),
+                        ),
+                    )
+                })?;
+                validate_profile_binding_claim(
+                    &handler.profile_binding_registry_path,
+                    BackendProfileBinding {
+                        manifest: request.manifest.clone(),
+                        backend_root: request.backend_root.clone(),
+                        ssd_staging_root: request.ssd_staging_root.clone(),
+                    },
+                )
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 handler
                     .service_orchestrator
                     .initialize_profile_capacity(

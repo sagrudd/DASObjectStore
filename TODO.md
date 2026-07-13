@@ -311,6 +311,10 @@ completion.
     definitions remain binding-only for staged/adoption planning, and failures
     never publish a store definition. Non-dry-run profile mutations also fail
     closed when no daemon capacity provider is configured.
+  - [x] Preflight profile-binding claims before capacity-ledger initialization;
+    root/identity collisions now fail without leaving an orphaned ledger. The
+    binding and optional store-definition registries are still separate durable
+    files, so cross-file rollback remains an explicit follow-up.
 - [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
