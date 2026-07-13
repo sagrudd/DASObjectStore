@@ -932,7 +932,9 @@ asset cache headers; a deterministic permit-saturation test proves the lane
 fails fast and recovers. Local standalone login remains independent of an
 unrelated saturated daemon bridge. The authenticated dashboard status route
 now retains a last-successful snapshot and reports stale/retry metadata, while
-cold starts fail closed. Appliance soak and telemetry freshness remain open.
+cold starts fail closed. Authenticated Web cancellation also retains its
+reserved priority bridge while routine admin capacity is saturated. Appliance
+soak and telemetry freshness remain open.
 
 The daemon API also exposes a typed ingest admission decision combining
 source-read pressure/error backpressure with adaptive worker scheduling. It

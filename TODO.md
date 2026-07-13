@@ -232,14 +232,16 @@ completion.
     the registry policy, persisted ledger, and daemon-owned statvfs probes;
     authorized readers receive pressure and explicit block reasons without
     mutating reservations. The CLI exposes it as ``store capacity`` (including
-    ``--json``); TUI/Web/adapters remain follow-up presentation work.
+    ``--json``); TUI rendering and the authenticated Web route are delivered,
+    while profile-specific adapters remain follow-up work.
   - [x] Render the daemon-owned capacity snapshot in the embedded TUI with
     logical used/reserved/available bytes, backend and SSD availability, copy
-    amplification, thresholds, and admission-block reasons; the Web adapter
-    remains pending live daemon-provider wiring.
+    amplification, thresholds, and admission-block reasons; the authenticated
+    Web adapter now uses the bounded daemon bridge, while external adapter
+    contracts remain pending.
   - [x] Add an optional Web ``capacity_status`` detail with explicit
-    unavailable fallback and old-payload compatibility; live values remain
-    unavailable until the authenticated daemon bridge is wired.
+    unavailable fallback and old-payload compatibility; live values are
+    obtained through the authenticated bounded daemon bridge when available.
   - [x] Add the authenticated dashboard store-capacity route through the
     shared bounded daemon bridge, preserving typed busy/circuit/deadline
     responses; add the typed Web client getter/path helper; appliance-backed
@@ -1373,6 +1375,10 @@ list until every temporary size-budget exception has been removed.
     login remains HTTP 200 while an unrelated daemon bridge worker is blocked.
     Full static/login soak, saturated-I/O fixtures, and accept-queue
     measurements remain hardware/deployment acceptance work.
+  - [x] Add a deterministic authenticated Web cancellation regression proving
+    the reserved priority bridge accepts cancellation while the routine admin
+    bridge is saturated; full daemon/I/O and accept-queue measurements remain
+    appliance acceptance work.
 - [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [x] Document operator triage for an ingest-pressure incident, including SSD
   pressure, queue/verification indicators, safe daemon throttle/pause/resume

@@ -2564,6 +2564,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_job_cancel_uses_priority_bridge_when_routine_bridge_is_saturated() {
+        let root = temp_root("admin-job-cancel-priority-bridge");
+        let auth_store = registered_auth_store(&root);
+        let login = auth_store.login("admin", "secret").expect("login succeeds");
+        let client = recording_enclosure_client();
+        let routine_bridge = Arc::new(
+            crate::daemon_bridge::DaemonBridge::with_capacity_and_deadline(
+                1,
+                std::time::Duration::from_secs(1),
+            ),
+        );
+        let priority_bridge = Arc::new(crate::daemon_bridge::DaemonBridge::priority_packaged());
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let saturated_bridge = routine_bridge.clone();
+        let worker = tokio::spawn(async move {
+            saturated_bridge
+                .call_message(move || {
+                    entered_sender.send(()).expect("saturation signal sent");
+                    let _ = release_receiver.blocking_recv();
+                    Ok::<_, String>(())
+                })
+                .await
+        });
+        entered_receiver.await.expect("routine bridge saturated");
+
+        let app =
+            standalone_enclosure_admin_router_with_state(StandaloneEnclosureAdminRouteState {
+                auth_store,
+                local_user_provider: Arc::new(FixedLocalUserProvider {
+                    current_user: local_user("operator", vec!["sudo"]),
+                }),
+                enclosure_admin_client: Some(client.clone()),
+                daemon_bridge: routine_bridge,
+                priority_daemon_bridge: priority_bridge,
+            });
+        let response = post_json_with_session::<StandaloneAdminJobCancelResponse>(
+            app,
+            "/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel",
+            "admin",
+            &login.session_token,
+            &CancelAdminJobRequest {
+                reason: Some("operator requested cancellation".to_string()),
+            },
+        )
+        .await;
+
+        assert!(response.accepted);
+        assert_eq!(response.state, "cancelled");
+        assert_eq!(client.cancel_requests().len(), 1);
+
+        release_sender.send(()).expect("routine worker released");
+        worker
+            .await
+            .expect("routine worker joins")
+            .expect("routine bridge call succeeds");
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn synoptikon_integrated_host_mode_omits_local_auth_routes() {
         let root = temp_root("integrated-host-mode");
         let auth_store = LocalAuthStore::new(&root);

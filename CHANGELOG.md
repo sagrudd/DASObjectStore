@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.93 - 2026-07-13
+
+- Correct the capacity-gate status to reflect the delivered TUI and
+  authenticated bounded Web bridge, while retaining open external adapter and
+  multipart/catalogue work.
+- Prove authenticated Web cancellation retains its reserved priority bridge
+  while routine administrator capacity is saturated.
+
 ## 0.72.92 - 2026-07-13
 
 - Add deterministic static-asset permit saturation coverage proving the
