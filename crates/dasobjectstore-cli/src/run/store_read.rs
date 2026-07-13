@@ -71,6 +71,38 @@ pub(super) fn run_store_profile_browser(
     Ok(())
 }
 
+pub(super) fn run_store_profile_head(
+    args: &StoreProfileHeadArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    use dasobjectstore_core::backend::BackendObjectKey;
+
+    let store_id = StoreId::new(args.store_id())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let object_id = args.key().to_string();
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_s3_head(ProfileS3HeadRequest {
+            store_id,
+            key: BackendObjectKey {
+                object_id,
+                version: args.version(),
+            },
+        })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Profile object")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Key: {}", response.object.key.object_id)?;
+        writeln!(writer, "Version: {}", response.object.key.version)?;
+        writeln!(writer, "Size: {}", response.object.size_bytes)?;
+        writeln!(writer, "Checksum: {}", response.object.checksum)?;
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_user_service_plan(
     args: &StoreUserServicePlanArgs,
     writer: &mut impl Write,

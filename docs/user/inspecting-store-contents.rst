@@ -123,6 +123,17 @@ the daemon resolves the registered bounded folder profile. A missing key or
 catalogue/backend failure is returned as an explicit error; clients must not
 infer object existence from provider listings.
 
+For local operator and automation use, the daemon client contract is also
+available through the CLI:
+
+.. code-block:: console
+
+   dasobjectstore store profile-head generated-data reads/sample.fastq
+   dasobjectstore store profile-head generated-data reads/sample.fastq --json
+
+This command reports metadata only and never reads or prints private backend
+paths.
+
 Download Folder Archives From the Web API
 -----------------------------------------
 

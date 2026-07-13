@@ -12,8 +12,8 @@ use crate::cli::{
     StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs,
     StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
     StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBindingOperation,
-    StoreProfileBrowserArgs, StoreProfileInspectionArgs, StoreRepairArgs, StoreS3UploadArgs,
-    StoreUserServicePlanArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
+    StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileInspectionArgs, StoreRepairArgs,
+    StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
     SubobjectCreateArgs,
 };
 mod command_handlers;
@@ -149,8 +149,9 @@ use self::storage_lifecycle::{
 };
 use self::store_read::{
     run_store_capabilities, run_store_capacity, run_store_contents, run_store_defaults,
-    run_store_list, run_store_profile_browser, run_store_profile_inspection, run_store_s3_upload,
-    run_store_user_service_plan, run_store_validate,
+    run_store_list, run_store_profile_browser, run_store_profile_head,
+    run_store_profile_inspection, run_store_s3_upload, run_store_user_service_plan,
+    run_store_validate,
 };
 use self::store_write::{
     run_store_adopt, run_store_create, run_store_deduplicate, run_store_delete, run_store_drain,
@@ -180,7 +181,7 @@ use dasobjectstore_daemon::{
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
     PrepareEnclosureRequest as DaemonPrepareEnclosureRequest, ProfileBindingOperation,
-    ProfileBindingRequest, ProfileBrowserRequest, ProfileInspectionRequest,
+    ProfileBindingRequest, ProfileBrowserRequest, ProfileInspectionRequest, ProfileS3HeadRequest,
     StoreDeduplicateRequest as DaemonStoreDeduplicateRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
@@ -298,6 +299,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
                 run_store_profile_inspection(args, writer)
             }
             Some(StoreCommand::ProfileBrowser(args)) => run_store_profile_browser(args, writer),
+            Some(StoreCommand::ProfileHead(args)) => run_store_profile_head(args, writer),
             Some(StoreCommand::UserServicePlan(args)) => run_store_user_service_plan(args, writer),
             Some(StoreCommand::Contents(args)) => run_store_contents(args, writer),
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),

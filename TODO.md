@@ -781,6 +781,9 @@ completion.
     returns only logical key, version, size, and checksum metadata; backend
     paths and provider listings remain private. Full HTTP PUT/GET/multipart
     gateway wiring remains separate.
+  - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
+    ``store profile-head`` with human and JSON output; payload reads remain
+    separate from this metadata-only command.
   - [x] Add catalogue-authorized provider-neutral profile verification and
     health projections; checksum/size drift is rejected before consumers see a
     verified object, with no backend path disclosure.

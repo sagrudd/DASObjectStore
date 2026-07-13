@@ -29,6 +29,9 @@ pub(crate) enum StoreCommand {
     /// Browse a bounded folder profile through the daemon-owned catalogue.
     #[command(name = "profile-browser")]
     ProfileBrowser(StoreProfileBrowserArgs),
+    /// Inspect one catalogue-authoritative profile object without reading payload bytes.
+    #[command(name = "profile-head")]
+    ProfileHead(StoreProfileHeadArgs),
     /// Render a validated per-user macOS launchd service plan without installing it.
     #[command(name = "user-service-plan")]
     UserServicePlan(StoreUserServicePlanArgs),
@@ -184,6 +187,35 @@ impl StoreProfileBrowserArgs {
     }
     pub(crate) fn limit(&self) -> u16 {
         self.limit
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileHeadArgs {
+    /// Logical ObjectStore identifier.
+    store_id: String,
+    /// Relative logical object key.
+    key: String,
+    /// Object version to inspect.
+    #[arg(long, default_value_t = 1)]
+    version: u64,
+    /// Emit the typed response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileHeadArgs {
+    pub(crate) fn store_id(&self) -> &str {
+        &self.store_id
+    }
+    pub(crate) fn key(&self) -> &str {
+        &self.key
+    }
+    pub(crate) fn version(&self) -> u64 {
+        self.version
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -954,6 +986,31 @@ mod tests {
         assert_eq!(browser.offset(), 10);
         assert_eq!(browser.limit(), 25);
         assert!(browser.json());
+    }
+
+    #[test]
+    fn parses_profile_head_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-head",
+            "generated-data",
+            "reads/sample.fastq",
+            "--version",
+            "3",
+            "--json",
+        ])
+        .expect("profile head parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileHead(head)) = args.command() else {
+            panic!("expected profile head command")
+        };
+        assert_eq!(head.store_id(), "generated-data");
+        assert_eq!(head.key(), "reads/sample.fastq");
+        assert_eq!(head.version(), 3);
+        assert!(head.json());
     }
 
     #[test]
