@@ -98,7 +98,12 @@ exceptions. Hardware-only acceptance is deferred while travelling without DAS
 access, but offline design, domain, metadata, API, test, and packaging work
 should continue.
 
-New bounded ObjectStores now initialize their daemon-owned quota ledger before
+The profile creation/adoption semantics are now approved and documented: one
+bounded folder root maps to one logical ObjectStore, unmanaged edits are
+read-only drift until an explicit confirmed reconcile/adopt, and no profile
+authority is inferred from a path or name. Protection and compatibility rules
+are likewise explicit and profile-independent. New bounded ObjectStores now
+initialize their daemon-owned quota ledger before
 the store registry definition is published, so creation cannot expose a finite
 quota without durable admission state. Per-profile manifest/root registration
 and probe-path selection now have a daemon-owned binding registry; profile-aware

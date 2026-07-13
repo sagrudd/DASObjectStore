@@ -248,8 +248,13 @@ completion.
   system, or integrated authority. The additive `DeploymentProfile` and
   `HostMode` enums use stable snake-case wire names and are not yet persisted
   into existing store metadata.
-- [ ] Decide and document profile creation/adoption semantics, including whether
+- [x] Decide and document profile creation/adoption semantics, including that
   one folder root maps exactly to one ObjectStore and how existing data drifts.
+  Approved semantics are one bounded root per logical store, read-only drift
+  inspection for unmanaged edits, and explicit confirmed reconcile/adopt. The
+  daemon profile-aware creation/adoption transport remains a follow-up
+  implementation seam; legacy appliance creation does not infer profile
+  authority from a path or profile name.
 - [ ] Define a capability-based backend contract for validation, reservation,
   staging, durable finalization, reads, enumeration, verification, health,
   reconciliation, and removal.
@@ -286,13 +291,13 @@ completion.
     registry path is now daemon-state scoped with an explicit environment
     override; local-Docker bootstrap must still register container-visible roots
     before strict missing-binding enforcement can replace legacy fallback.
-- [ ] Define protection policies independently from profiles: local-only,
+- [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
   - [x] Add the profile-independent `ProtectionPolicy` vocabulary and carry it
     in the versioned portable ObjectStore manifest; physical profile selection
     no longer implies protection semantics.
-- [ ] Document compatibility and migration rules before changing persistent
+- [x] Document compatibility and migration rules before changing persistent
   metadata, public APIs, CLI behavior, or existing appliance pools.
   - [x] Document version-1 manifest compatibility, fail-closed future-schema
     handling, untouched legacy metadata, explicit adoption/migration writes,
