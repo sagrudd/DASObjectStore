@@ -841,8 +841,8 @@ completion.
     registry with expiry pruning and single-use nonce/capability checks;
     a confirmation-bound, path-free revocation request/response contract is
     now published and wired through authenticated administrator dispatch to
-    atomic identity/key deactivation; cryptographic proof verification and
-    redacted audit events remain.
+    atomic identity/key deactivation; redacted, reason-digest audit events are
+    now persisted atomically, while mTLS/public endpoint wiring remains.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and

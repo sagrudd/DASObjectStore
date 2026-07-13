@@ -37,29 +37,29 @@ use crate::auth::{
     DaemonStoreAccessPolicy,
 };
 use crate::runtime::{
-    appliance_telemetry_state_path, application_identity_registry_path,
+    appliance_telemetry_state_path, application_audit_log_path, application_identity_registry_path,
     application_key_registry_path, deactivate_application_identity, deactivate_application_key,
     default_endpoint_registry_path, default_hdd_root, default_ssd_root, discover_managed_hdd_roots,
     provision_garage_store_registry, query_object_browser_metadata, read_application_identity,
     read_application_key, read_object_browser_metadata, read_profile_binding,
-    read_profile_binding_record, remote_easyconnect_pairing_store_path,
-    remote_easyconnect_session_store_path, resolve_object_download_with_hdd_root,
-    resolve_object_folder_download_with_hdd_root, upsert_application_identity,
-    upsert_application_key, upsert_endpoint_inventory_record, upsert_profile_binding,
-    validate_profile_binding_claim, AdminJobRegistry, ApplianceTelemetrySampleSet,
-    BackendProfileBinding, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    read_profile_binding_record, record_application_audit_event,
+    remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
+    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+    upsert_application_identity, upsert_application_key, upsert_endpoint_inventory_record,
+    upsert_profile_binding, validate_profile_binding_claim, AdminJobRegistry,
+    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, FolderBackend, FolderCatalogue,
+    FolderCatalogueBrowserQuery, FolderInspectionReport, GarageServiceController,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, ObjectBrowserQueryError, ReconciliationManifest,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadProgressTelemetry, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
@@ -123,6 +123,7 @@ pub struct DaemonRequestHandler<S, C> {
     profile_binding_registry_path: PathBuf,
     application_identity_registry_path: PathBuf,
     application_key_registry_path: PathBuf,
+    application_audit_log_path: PathBuf,
 }
 impl<S, C> DaemonRequestHandler<S, C>
 where
@@ -158,6 +159,7 @@ where
                 DEFAULT_DAEMON_STATE_DIR,
             ),
             application_key_registry_path: application_key_registry_path(DEFAULT_DAEMON_STATE_DIR),
+            application_audit_log_path: application_audit_log_path(DEFAULT_DAEMON_STATE_DIR),
         }
     }
     pub fn new_with_admin_job_registry(
@@ -193,6 +195,7 @@ where
                 DEFAULT_DAEMON_STATE_DIR,
             ),
             application_key_registry_path: application_key_registry_path(DEFAULT_DAEMON_STATE_DIR),
+            application_audit_log_path: application_audit_log_path(DEFAULT_DAEMON_STATE_DIR),
         }
     }
     pub fn with_registry_paths(
@@ -231,6 +234,13 @@ where
         application_key_registry_path: impl Into<PathBuf>,
     ) -> Self {
         self.application_key_registry_path = application_key_registry_path.into();
+        self
+    }
+    pub fn with_application_audit_log_path(
+        mut self,
+        application_audit_log_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.application_audit_log_path = application_audit_log_path.into();
         self
     }
     pub fn with_appliance_telemetry_state_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -3766,7 +3776,8 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:02:30Z"),
         )
-        .with_application_identity_registry_path(&registry);
+        .with_application_identity_registry_path(&registry)
+        .with_application_audit_log_path(root.join("application-audit.json"));
         let request = application_identity_registration_request_for_auth_test("no-actor");
 
         let unauthenticated = handler
@@ -3805,7 +3816,8 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:02:31Z"),
         )
-        .with_application_identity_registry_path(&registry);
+        .with_application_identity_registry_path(&registry)
+        .with_application_audit_log_path(root.join("application-audit.json"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         let response = handler
             .handle_with_progress_for_actor(
@@ -3836,7 +3848,8 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:02:32Z"),
         )
-        .with_application_key_registry_path(&registry);
+        .with_application_key_registry_path(&registry)
+        .with_application_audit_log_path(root.join("application-audit.json"));
         let request = application_key_registration_request_for_auth_test("no-actor", "key-1");
         let unauthenticated = handler
             .handle(DaemonApiRequest::RegisterApplicationKey(request.clone()))
@@ -3871,7 +3884,8 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:02:33Z"),
         )
-        .with_application_key_registry_path(&registry);
+        .with_application_key_registry_path(&registry)
+        .with_application_audit_log_path(root.join("application-audit.json"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         let response = handler
             .handle_with_progress_for_actor(
@@ -3904,7 +3918,8 @@ mod tests {
             FixedDaemonClock::new("2026-07-13T11:02:34Z"),
         )
         .with_application_identity_registry_path(&identity_registry)
-        .with_application_key_registry_path(&key_registry);
+        .with_application_key_registry_path(&key_registry)
+        .with_application_audit_log_path(root.join("application-audit.json"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         handler
             .handle_with_progress_for_actor(

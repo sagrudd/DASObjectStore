@@ -73,6 +73,17 @@ where
                 )
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             }
+            record_application_audit_event(
+                &handler.application_audit_log_path,
+                &now,
+                "register_identity",
+                &application_id,
+                None,
+                request.administrator_actor.as_deref(),
+                "application identity registration",
+                request.dry_run,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             let job_id_value = format!(
                 "application-identity-{}",
                 now.chars()
@@ -127,6 +138,17 @@ where
                 upsert_application_key(&handler.application_key_registry_path, request.key.clone())
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             }
+            record_application_audit_event(
+                &handler.application_audit_log_path,
+                &now,
+                "register_key",
+                &application_id,
+                Some(&key_id),
+                request.administrator_actor.as_deref(),
+                "application key registration",
+                request.dry_run,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             let job_id_value = format!(
                 "application-key-{}",
                 now.chars()
@@ -199,6 +221,17 @@ where
                 )
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?
             };
+            record_application_audit_event(
+                &handler.application_audit_log_path,
+                &now,
+                "revoke_credential",
+                &request.application_id,
+                request.key_id.as_deref(),
+                request.administrator_actor.as_deref(),
+                &request.reason,
+                request.dry_run,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             let job_id_value = format!(
                 "application-revocation-{}",
                 now.chars()

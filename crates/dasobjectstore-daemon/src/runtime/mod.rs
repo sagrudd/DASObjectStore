@@ -2,6 +2,7 @@
 
 mod admin_jobs;
 mod appliance_telemetry;
+mod application_audit;
 mod application_capability_replay;
 mod application_identity_registry;
 mod application_key_registry;
@@ -51,6 +52,11 @@ pub use appliance_telemetry::{
     APPLIANCE_TELEMETRY_SCHEMA_VERSION, DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT,
     DEFAULT_LOCAL_GROUP_PATH, DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH,
     DEFAULT_STANDALONE_AUTH_ROOT,
+};
+pub use application_audit::{
+    application_audit_log_path, read_application_audit_events, record_application_audit_event,
+    ApplicationAuditEvent, APPLICATION_AUDIT_FILE_NAME, APPLICATION_AUDIT_MAX_EVENTS,
+    APPLICATION_AUDIT_PATH_ENV, APPLICATION_AUDIT_SCHEMA,
 };
 pub use application_capability_replay::{
     application_capability_replay_path, complete_upload_with_capability,

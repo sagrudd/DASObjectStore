@@ -115,16 +115,16 @@ daemon with `--no-default-features`, making the package boundary explicit.
 Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.
 The daemon now also provides a state-scoped, expiry-pruned single-use replay
-registry for completion capabilities; proof verification, revocation APIs, and
-audit events remain part of the authority boundary. Its completion helper
-verifies provider state before consuming, releases on catalogue failure, and
-returns an idempotent replay result; public endpoint and live catalogue wiring
-remain.
+registry for completion capabilities and a ring-backed proof verifier bound to
+registered public keys. Its completion helper verifies provider state before
+consuming, releases on catalogue failure, and returns an idempotent replay
+result; public endpoint and live catalogue wiring remain.
 The daemon API now publishes a confirmation-bound, path-free revocation
-request/response contract for identities and individual public keys; dispatch,
-authenticated administrator dispatch now applies atomic identity/key
-deactivation; proof verification and redacted audit persistence remain
-separate follow-ups.
+request/response contract for identities and individual public keys, and
+authenticated administrator dispatch applies atomic identity/key deactivation.
+Credential registration and revocation now append atomically persisted,
+reason-digest audit events without secrets or paths; mTLS transport verification
+and public endpoint wiring remain listener work.
 
 ### Current delivered baseline
 
