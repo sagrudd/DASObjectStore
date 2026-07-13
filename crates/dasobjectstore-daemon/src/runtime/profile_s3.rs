@@ -4,11 +4,14 @@
 //! derives list, HEAD, and GET views from the daemon-authoritative backend
 //! catalogue and never consults a provider listing or exposes private paths.
 
+use crate::api::CapacityAdmissionDecision;
+use crate::runtime::capacity_provider::CapacityAdmissionProvider;
 use crate::runtime::{DriveBackend, FolderBackend};
 use dasobjectstore_core::backend::{
     BackendError, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
     ObjectStoreBackend,
 };
+use dasobjectstore_core::ids::StoreId;
 use std::io::Read;
 
 pub trait ProfileS3ReadBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
@@ -169,6 +172,89 @@ pub fn put_profile_object(
     Ok(finalized)
 }
 
+/// Put one profile object while also participating in the daemon-owned
+/// logical admission provider. The provider reservation is committed only
+/// after backend catalogue persistence. If physical staging/finalization fails,
+/// both reservations are released; after durable finalization, failures are
+/// retained for reconciliation rather than risking accounting drift.
+pub fn put_profile_object_with_capacity_provider(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    backend: &mut dyn ProfileS3WriteBackend,
+    reservation_id: &str,
+    key: &BackendObjectKey,
+    source: &mut dyn Read,
+    size_bytes: u64,
+) -> Result<BackendObjectRecord, BackendError> {
+    let store_id = StoreId::new(store_id.to_string()).map_err(|error| {
+        BackendError::InvalidRequest(format!("invalid profile S3 ObjectStore id: {error}"))
+    })?;
+    let admission = capacity_provider
+        .admit_remote_upload(store_id.as_str(), size_bytes, reservation_id)
+        .map_err(|error| {
+            BackendError::InvalidRequest(format!("profile S3 capacity admission failed: {error}"))
+        })?;
+    if admission.decision != CapacityAdmissionDecision::Admitted {
+        return Err(BackendError::InvalidRequest(
+            admission
+                .message
+                .unwrap_or_else(|| "profile S3 capacity admission rejected".to_string()),
+        ));
+    }
+
+    backend.reserve(reservation_id, size_bytes)?;
+    let staged = match backend.stage(reservation_id, key, source) {
+        Ok(staged) => staged,
+        Err(error) => {
+            let backend_cleanup = backend.abort_profile_s3_object(reservation_id, None);
+            let provider_cleanup = capacity_provider
+                .release(&store_id, reservation_id)
+                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            return Err(with_cleanup_error(
+                error,
+                combine_cleanup(backend_cleanup, provider_cleanup),
+            ));
+        }
+    };
+    let finalized = match backend.finalize(staged.clone()) {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            let backend_cleanup = backend.abort_profile_s3_object(reservation_id, Some(&staged));
+            let provider_cleanup = capacity_provider
+                .release(&store_id, reservation_id)
+                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            return Err(with_cleanup_error(
+                error,
+                combine_cleanup(backend_cleanup, provider_cleanup),
+            ));
+        }
+    };
+    // Do not release either reservation here: the payload is durable even if
+    // catalogue persistence or logical admission commit subsequently fails.
+    backend.commit_batch(std::slice::from_ref(&finalized))?;
+    capacity_provider
+        .commit(&store_id, reservation_id)
+        .map_err(|error| {
+            BackendError::InvalidRequest(format!(
+                "profile S3 capacity commit failed after durable finalization: {error}"
+            ))
+        })?;
+    Ok(finalized)
+}
+
+fn combine_cleanup(
+    first: Result<(), BackendError>,
+    second: Result<(), BackendError>,
+) -> Result<(), BackendError> {
+    match (first, second) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(first), Err(second)) => Err(BackendError::InvalidRequest(format!(
+            "backend cleanup failed ({first}); capacity cleanup failed ({second})"
+        ))),
+    }
+}
+
 fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) -> BackendError {
     match cleanup {
         Ok(()) => error,
@@ -182,8 +268,10 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 mod tests {
     use super::{
         get_profile_object, get_profile_object_range, head_profile_object, list_profile_objects,
-        put_profile_object,
+        put_profile_object, put_profile_object_with_capacity_provider,
     };
+    use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
+    use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
     use crate::runtime::{DriveBackend, DriveRuntimeGuard, FolderBackend};
     use dasobjectstore_core::backend::{
         BackendObjectKey, ObjectCatalogueAuthority, ObjectStoreBackend,
@@ -195,6 +283,7 @@ mod tests {
     use dasobjectstore_core::store::CapacityPolicy;
     use std::io::Read;
     use std::path::PathBuf;
+    use std::sync::Mutex;
     use std::sync::{atomic::AtomicBool, Arc};
 
     fn backend() -> (FolderBackend, PathBuf) {
@@ -266,6 +355,65 @@ mod tests {
         )
         .expect("drive backend");
         (backend, guard, root)
+    }
+
+    #[derive(Debug, Default)]
+    struct RecordingCapacityProvider {
+        events: Mutex<Vec<String>>,
+    }
+
+    impl CapacityAdmissionProvider for RecordingCapacityProvider {
+        fn admit(
+            &self,
+            request: CapacityAdmissionRequest,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            self.events.lock().expect("events lock").push(format!(
+                "admit:{}:{}:{}",
+                request.store_id,
+                request.requested_bytes,
+                request.client_request_id.clone().unwrap()
+            ));
+            CapacityAdmissionResponse::evaluate(
+                &request,
+                &CapacityPolicy::bounded(1024, 0),
+                dasobjectstore_core::store::CapacityAdmissionInput {
+                    requested_bytes: request.requested_bytes,
+                    copy_count: request.copy_count,
+                    requires_ssd_staging: request.ingress_origin.requires_ssd_staging(),
+                    used_bytes: 0,
+                    reserved_bytes: 0,
+                    backend_free_bytes: 1024,
+                    ssd_free_bytes: 1024,
+                },
+            )
+            .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: error.to_string(),
+            })
+        }
+
+        fn commit(
+            &self,
+            store_id: &StoreId,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("commit:{store_id}:{reservation_id}"));
+            Ok(())
+        }
+
+        fn release(
+            &self,
+            store_id: &StoreId,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events
+                .lock()
+                .expect("events lock")
+                .push(format!("release:{store_id}:{reservation_id}"));
+            Ok(())
+        }
     }
 
     #[test]
@@ -401,6 +549,64 @@ mod tests {
         assert_eq!(head_profile_object(&backend, &key).unwrap().size_bytes, 5);
         guard.0.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(list_profile_objects(&backend, None).is_err());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn put_with_capacity_provider_commits_logical_and_backend_reservations() {
+        let (mut backend, root) = backend();
+        let provider = RecordingCapacityProvider::default();
+        let key = BackendObjectKey {
+            object_id: "provider/sample.fastq".to_string(),
+            version: 1,
+        };
+        put_profile_object_with_capacity_provider(
+            &provider,
+            "profile-s3",
+            &mut backend,
+            "profile-s3-provider",
+            &key,
+            &mut &b"provider"[..],
+            8,
+        )
+        .expect("provider-backed put");
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:profile-s3:8:profile-s3-provider",
+                "commit:profile-s3:profile-s3-provider"
+            ]
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn put_with_capacity_provider_releases_both_reservations_before_finalize() {
+        let (mut backend, root) = backend();
+        let provider = RecordingCapacityProvider::default();
+        let key = BackendObjectKey {
+            object_id: "provider/mismatch.fastq".to_string(),
+            version: 1,
+        };
+        assert!(put_profile_object_with_capacity_provider(
+            &provider,
+            "profile-s3",
+            &mut backend,
+            "profile-s3-provider-mismatch",
+            &key,
+            &mut &b"provider"[..],
+            7,
+        )
+        .is_err());
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:profile-s3:7:profile-s3-provider-mismatch",
+                "release:profile-s3:profile-s3-provider-mismatch"
+            ]
+        );
         std::fs::remove_dir_all(root).ok();
     }
 }

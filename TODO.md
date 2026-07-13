@@ -696,6 +696,9 @@ completion.
     fsync/rename finalization, and catalogue commit; failed staging/finalization
     releases reservations without exposing private paths. HTTP gateway and
     multipart wiring remain separate.
+  - [x] Wire profile PUT through the daemon-owned logical capacity admission
+    provider before backend staging; logical and backend reservations commit in
+    order, and failures before durable finalization release both ledgers.
   - [x] Add a bounded provider-neutral profile range-read helper for consumers
     such as AlleleAnchor's `get/range/list` contract; it authorizes through the
     catalogue first, rejects out-of-bounds starts, and preserves the private

@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.22 - 2026-07-13
+
+- Wire profile S3 PUT through the daemon-owned logical capacity admission
+  provider before backend staging and catalogue commit.
+
 ## 0.76.21 - 2026-07-13
 
 - Add a bounded provider-neutral profile range-read adapter for consumers that

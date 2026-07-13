@@ -113,7 +113,8 @@ pub use profile_registry::{
 };
 pub use profile_s3::{
     get_profile_object, get_profile_object_range, head_profile_object, list_profile_objects,
-    put_profile_object, ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend,
+    put_profile_object, put_profile_object_with_capacity_provider, ProfileS3Object,
+    ProfileS3ReadBackend, ProfileS3WriteBackend,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,
