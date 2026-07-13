@@ -133,6 +133,7 @@ pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
     backend_probe_root: PathBuf,
     ssd_probe_root: PathBuf,
     profile_binding_registry_path: Option<PathBuf>,
+    require_profile_binding: bool,
     probe: P,
     ledgers: Mutex<HashMap<String, CapacityReservationLedger>>,
 }
@@ -164,6 +165,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             backend_probe_root: backend_probe_root.into(),
             ssd_probe_root: ssd_probe_root.into(),
             profile_binding_registry_path: None,
+            require_profile_binding: false,
             probe,
             ledgers: Mutex::new(HashMap::new()),
         }
@@ -174,14 +176,27 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         self
     }
 
+    pub fn require_profile_binding(mut self) -> Self {
+        self.require_profile_binding = true;
+        self
+    }
+
     fn probe_roots(
         &self,
         store_id: &StoreId,
     ) -> Result<(PathBuf, PathBuf), DaemonServiceRuntimeError> {
         let Some(registry_path) = &self.profile_binding_registry_path else {
+            if self.require_profile_binding {
+                return Err(unavailable("profile binding registry is not configured"));
+            }
             return Ok((self.backend_probe_root.clone(), self.ssd_probe_root.clone()));
         };
         let Some(binding) = read_profile_binding(registry_path, store_id.as_str())? else {
+            if self.require_profile_binding {
+                return Err(unavailable(format!(
+                    "profile binding is missing for object store {store_id}"
+                )));
+            }
             return Ok((self.backend_probe_root.clone(), self.ssd_probe_root.clone()));
         };
         let staging_root = binding
@@ -835,6 +850,35 @@ mod tests {
             .expect("profile status");
         assert_eq!(status.backend_free_bytes, 2_222);
         assert_eq!(status.ssd_available_bytes, Some(3_333));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn required_profile_binding_fails_closed_when_store_is_unbound() {
+        let root = root("profile-missing");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let ledger =
+            CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
+        save_capacity_ledger(ledger_dir.join("codex.json"), &ledger).expect("ledger seed");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        )
+        .with_profile_binding_registry_path(root.join("profile-bindings.json"))
+        .require_profile_binding();
+        let error = provider
+            .status(CapacityStatusRequest {
+                store_id: "codex".to_string(),
+            })
+            .expect_err("unbound profile must fail closed");
+        assert!(error.to_string().contains("profile binding is missing"));
         let _ = std::fs::remove_dir_all(root);
     }
 

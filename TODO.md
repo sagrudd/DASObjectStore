@@ -388,6 +388,9 @@ completion.
     copy counts remain daemon-authoritative. S3/multipart completion and
     stale-reservation scheduling remain open; registered profile bindings now
     select canonical per-store probe roots without changing consumer DTOs.
+  - [x] Add an explicit profile-binding requirement mode that fails closed for
+    unbound stores while preserving legacy/appliance fallback until
+    profile-aware creation/adoption bootstraps container-visible roots.
   - [x] Initialize a new store's durable capacity ledger before publishing its
     registry definition, with idempotent restart-safe creation and regression
     coverage; per-profile manifest/root probe selection remains a separate
