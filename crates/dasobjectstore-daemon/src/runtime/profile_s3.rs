@@ -504,6 +504,7 @@ pub fn stream_profile_object(
     let mut reader = backend.read(key)?;
     let mut buffer = [0_u8; 64 * 1024];
     let mut copied = 0_u64;
+    let mut hasher = Sha256::new();
     loop {
         let read = reader.read(&mut buffer).map_err(|error| {
             BackendError::Io(format!("profile object stream read failed: {error}"))
@@ -519,6 +520,7 @@ pub fn stream_profile_object(
                 "profile object stream exceeded its declared size".to_string(),
             ));
         }
+        hasher.update(&buffer[..read]);
         sink.write_all(&buffer[..read]).map_err(|error| {
             BackendError::Io(format!("profile object stream write failed: {error}"))
         })?;
@@ -527,6 +529,13 @@ pub fn stream_profile_object(
         return Err(BackendError::InvalidRequest(format!(
             "profile object stream ended at {copied} bytes, expected {}",
             object.size_bytes
+        )));
+    }
+    let checksum = checksum_string(&hasher.finalize());
+    if checksum != object.checksum {
+        return Err(BackendError::InvalidRequest(format!(
+            "profile object {} failed streamed checksum verification",
+            key.object_id
         )));
     }
     Ok(copied)
@@ -1103,6 +1112,8 @@ mod tests {
         .expect("put");
         std::fs::write(root.join(record.location), b"changed").expect("tamper");
         assert!(verify_profile_object(&backend, &key).is_err());
+        let mut streamed = Vec::new();
+        assert!(stream_profile_object(&backend, &key, &mut streamed, 7).is_err());
         std::fs::remove_dir_all(root).ok();
     }
 

@@ -775,7 +775,9 @@ completion.
   catalogue state rather than provider listings.
   - [x] Add a provider-neutral profile read adapter for authoritative
     list/HEAD/GET semantics over folder and drive backends; it never consults
-    provider listings or exposes private backend paths.
+    provider listings or exposes private backend paths. Bounded streaming now
+    hashes bytes in flight and rejects catalogue checksum drift before
+    reporting success.
   - [x] Add a provider-neutral profile PUT adapter requiring a known content
     length, transactional quota reservation, in-flight hashing, staged
     fsync/rename finalization, and catalogue commit; failed staging/finalization
