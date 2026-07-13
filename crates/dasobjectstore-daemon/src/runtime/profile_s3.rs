@@ -765,6 +765,11 @@ fn validate_runtime_key(key: &BackendObjectKey) -> Result<(), BackendError> {
 }
 
 fn validate_runtime_prefix(prefix: &str) -> Result<(), BackendError> {
+    // An empty prefix is the valid unfiltered-list form. Treat it as the
+    // namespace root rather than splitting it into an empty path segment.
+    if prefix.is_empty() {
+        return Ok(());
+    }
     if prefix.starts_with('/') || prefix.contains('\\') || prefix.contains('\0') {
         return Err(BackendError::InvalidRequest(
             "profile S3 list prefix must be a relative logical namespace".to_string(),
@@ -1151,6 +1156,8 @@ mod tests {
         let second = list_profile_objects_page(&backend, Some("reads/"), 1, 1).expect("page");
         assert_eq!(second.objects[0].key.object_id, "reads/z");
         assert_eq!(second.next_offset, None);
+        let unfiltered = list_profile_objects_page(&backend, None, 0, 10).expect("root page");
+        assert_eq!(unfiltered.objects.len(), 3);
         assert!(list_profile_objects_page(&backend, None, 0, PROFILE_S3_MAX_KEYS + 1).is_err());
         assert!(list_profile_objects_page(&backend, None, 4, 1).is_err());
         std::fs::remove_dir_all(root).ok();

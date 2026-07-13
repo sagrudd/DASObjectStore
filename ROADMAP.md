@@ -1266,6 +1266,8 @@ all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
 list prefixes apply the same relative-namespace boundary while allowing a
 trailing slash for ordinary namespace queries;
+the empty prefix remains the valid unfiltered namespace root for list and page
+helpers;
 provider-neutral runtime list/page, PUT, HEAD, DELETE, and multipart entry
 points enforce the same key boundary before backend mutation;
 bounded profile streaming now hashes bytes in flight and rejects catalogue

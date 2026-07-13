@@ -798,7 +798,8 @@ completion.
   - [x] Add a stable, bounded provider-neutral profile list page with a capped
     continuation offset and prefix filtering; runtime list and page adapters
     now reject absolute/traversal prefixes before catalogue reads, while HTTP
-    serialization remains open.
+    serialization remains open. The empty prefix remains the valid unfiltered
+    namespace root for both list helpers.
   - [x] Add the versioned, path-free profile-S3 list request/response DTO with
     the same bounded key count and validation contract; the standalone
     authenticated Web route now delegates through the bounded daemon bridge.
