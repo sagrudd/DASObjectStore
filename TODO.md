@@ -655,8 +655,11 @@ completion.
     ``store profile-browser`` with bounded prefix/search paging and JSON or
     redacted tabular output; the CLI remains a daemon client and never reads
     managed roots directly.
-- [ ] Implement profile-aware browse, download, verify, capacity, health,
-  repair, lifecycle, and common S3 operations.
+- [~] Implement profile-aware browse, download, verify, capacity, health,
+  repair, lifecycle, and common S3 operations. Browse, verify, capacity, and
+  health contracts are delivered for bounded folder profiles; provider-backed
+  streaming download, repair/lifecycle orchestration, and full S3 write/multipart
+  HTTP routing remain open.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots
     from `FolderBackend`; folder-profile catalogue records now reload from the
     private snapshot, while repair/lifecycle/S3 and shared catalogue
@@ -821,9 +824,11 @@ completion.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.
-- [ ] Add profile/capability discovery and idempotent provisioning APIs so a
+- [~] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
-  appliance logic.
+  appliance logic. Static capability discovery and daemon-backed readiness are
+  delivered through CLI, client, and authenticated Web contracts; idempotent
+  provisioning/runtime orchestration remains open.
   - [x] Add a versioned static profile-capability catalogue DTO with separate
     backend-operation, service, host-mode, protection, and requirement fields;
     runtime store readiness and provisioning routes remain separate. The

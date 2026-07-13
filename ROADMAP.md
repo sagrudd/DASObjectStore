@@ -1267,9 +1267,11 @@ verifies and durably finalizes each object, and checkpoints InProgress/Complete/
 Failed states atomically for restart-safe retries. A versioned private folder
 catalogue snapshot is committed idempotently before Complete. A bounded,
 profile-neutral read-only browser projection now queries those authoritative
-records without inventing appliance placement/lifecycle fields; shared SQLite
-catalogue authority, profile-aware registry selection, and S3 integration
-remain open.
+records without inventing appliance placement/lifecycle fields. Daemon-backed
+profile HEAD, verification, capacity, health, readiness, and authenticated Web
+capability/readiness routes are also available without exposing private paths;
+shared SQLite catalogue authority, provider-backed streaming download,
+repair/lifecycle orchestration, and full S3 HTTP integration remain open.
 
 Exit criteria: system and per-user deployments can create/adopt, ingest, verify,
 reconcile, browse, expose through S3, restart, and recover a folder store without
