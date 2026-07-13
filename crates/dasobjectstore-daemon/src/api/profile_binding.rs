@@ -94,8 +94,6 @@ pub struct ProfileBindingResponse {
     pub store_definition_published: bool,
     pub unmanaged_path_count: usize,
     pub unsafe_path_count: usize,
-    pub backend_root: PathBuf,
-    pub ssd_staging_root: Option<PathBuf>,
     pub administrator_actor: Option<String>,
 }
 
@@ -119,8 +117,6 @@ impl ProfileBindingResponse {
             store_definition_published: false,
             unmanaged_path_count: 0,
             unsafe_path_count: 0,
-            backend_root: request.backend_root,
-            ssd_staging_root: request.ssd_staging_root,
             administrator_actor: request.administrator_actor,
         }
     }

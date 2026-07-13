@@ -1147,7 +1147,12 @@ mod tests {
         )
         .with_profile_binding_registry_path(&profile_registry);
 
-        let result = handler.handle(DaemonApiRequest::RegisterProfileBinding(request));
+        let actor = DaemonLocalActor::new(0).with_username("codex");
+        let result = handler.handle_with_progress_for_actor(
+            DaemonApiRequest::RegisterProfileBinding(request),
+            Some(&actor),
+            |_| Ok(()),
+        );
         assert!(result.is_err());
         assert!(handler
             .service_orchestrator
@@ -1192,8 +1197,13 @@ mod tests {
         )
         .with_profile_binding_registry_path(&profile_registry);
 
+        let actor = DaemonLocalActor::new(0).with_username("codex");
         let first_response = handler
-            .handle(DaemonApiRequest::RegisterProfileBinding(request.clone()))
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(request.clone()),
+                Some(&actor),
+                |_| Ok(()),
+            )
             .expect("folder profile create");
         let DaemonApiResponse::RegisterProfileBinding(first_response) = first_response else {
             panic!("expected profile binding response");
@@ -1213,7 +1223,11 @@ mod tests {
             .join(".dasobjectstore/objects/incoming/user.txt")
             .exists());
         let second_response = handler
-            .handle(DaemonApiRequest::RegisterProfileBinding(request))
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(request),
+                Some(&actor),
+                |_| Ok(()),
+            )
             .expect("idempotent folder profile create");
         let DaemonApiResponse::RegisterProfileBinding(second_response) = second_response else {
             panic!("expected profile binding response");
@@ -3529,6 +3543,121 @@ mod tests {
             "dasobjectstore-request-handler-{label}-{}",
             std::process::id()
         ))
+    }
+
+    fn profile_binding_request_for_auth_test(
+        store_id: &str,
+        backend_root: PathBuf,
+    ) -> ProfileBindingRequest {
+        ProfileBindingRequest {
+            operation: ProfileBindingOperation::Create,
+            manifest: ObjectStoreManifest {
+                schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                store_id: StoreId::new(store_id).expect("store id"),
+                deployment_profile: DeploymentProfile::Folder,
+                host_mode: HostMode::PerUser,
+                protection: ProtectionPolicy::LocalOnly,
+                backend: BackendReference::Folder {
+                    root_identity: format!("fsid:{store_id}"),
+                },
+            },
+            capacity: dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64),
+            store_definition: None,
+            backend_root,
+            ssd_staging_root: None,
+            dry_run: false,
+            client_request_id: Some(format!("{store_id}-auth")),
+            administrator_actor: Some("spoofed-request-actor".to_string()),
+            confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
+        }
+    }
+
+    #[test]
+    fn rejects_profile_binding_without_authenticated_administrator() {
+        let root = temp_root("profile-binding-no-actor");
+        fs::create_dir_all(&root).expect("backend root");
+        let registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:00:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+
+        let response = handler
+            .handle(DaemonApiRequest::RegisterProfileBinding(
+                profile_binding_request_for_auth_test("no-actor", root.clone()),
+            ))
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_profile_binding_for_non_admin_actor() {
+        let root = temp_root("profile-binding-non-admin");
+        fs::create_dir_all(&root).expect("backend root");
+        let registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:01:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+        let actor = DaemonLocalActor::new(1000)
+            .with_username("operator")
+            .with_groups(["bioinformatics"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
+                    "non-admin",
+                    root.clone(),
+                )),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authorization_required"
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn profile_binding_response_redacts_paths_and_uses_authenticated_actor() {
+        let root = temp_root("profile-binding-admin");
+        fs::create_dir_all(&root).expect("backend root");
+        let registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:02:00Z"),
+        )
+        .with_profile_binding_registry_path(&registry);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
+                    "admin",
+                    root.clone(),
+                )),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        let DaemonApiResponse::RegisterProfileBinding(response) = response else {
+            panic!("expected profile binding response");
+        };
+        assert_eq!(response.administrator_actor.as_deref(), Some("root"));
+        let serialized = serde_json::to_string(&response).expect("response serializes");
+        assert!(!serialized.contains("backend_root"));
+        assert!(!serialized.contains("ssd_staging_root"));
+        assert!(!serialized.contains(root.to_string_lossy().as_ref()));
+        cleanup(&root);
     }
 
     fn appliance_telemetry_fixture_json() -> &'static str {

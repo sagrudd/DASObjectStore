@@ -4,6 +4,7 @@ use super::*;
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
     request: DaemonApiRequest,
+    actor: Option<&DaemonLocalActor>,
 ) -> Result<DaemonApiResponse, DaemonRequestHandlerError>
 where
     S: DaemonServiceOrchestrator,
@@ -56,7 +57,28 @@ where
             handler.record_admin_job(daemon_job_summary_from_create_object_store(&response))?;
             Ok(DaemonApiResponse::CreateObjectStore(response))
         }
-        DaemonApiRequest::RegisterProfileBinding(request) => {
+        DaemonApiRequest::RegisterProfileBinding(mut request) => {
+            // Profile creation/adoption mutates daemon-owned storage state and
+            // therefore requires a peer-authenticated local administrator.  Do
+            // not trust the actor name carried in the request: it is only
+            // confirmation metadata and may be spoofed by a client.  Dry-run
+            // validation remains available without authentication, but never
+            // echoes an untrusted request actor in its response/job metadata.
+            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "profile binding requires an authenticated local administrator",
+                    )));
+                };
+                if !actor.is_administrator() {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authorization_required",
+                        "profile binding requires root, sudo, or dasobjectstore-admin membership",
+                    )));
+                }
+            }
             let now = handler.clock.now_utc();
             let store_definition = request.store_definition.clone();
             let inspection = if !request.dry_run {

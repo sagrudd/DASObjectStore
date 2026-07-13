@@ -33,7 +33,7 @@ where
         | DaemonApiRequest::ProfileCapabilities(_)
         | DaemonApiRequest::JobList(_)
         | DaemonApiRequest::JobStatus(_)
-        | DaemonApiRequest::CancelJob(_)) => service::request(handler, service_request),
+        | DaemonApiRequest::CancelJob(_)) => service::request(handler, service_request, actor),
         storage_request @ (DaemonApiRequest::StoreInventory(_)
         | DaemonApiRequest::CapacityAdmission(_)
         | DaemonApiRequest::CapacityStatus(_)

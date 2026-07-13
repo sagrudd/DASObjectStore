@@ -46,7 +46,9 @@ pub(super) fn run_store_profile_binding(
         )?;
         writeln!(writer, "Store: {}", response.store_id)?;
         writeln!(writer, "Profile: {}", response.deployment_profile.name())?;
-        writeln!(writer, "Backend root: {}", response.backend_root.display())?;
+        // Backend paths are daemon-owned implementation details and must not
+        // cross the profile-binding transport boundary.
+        writeln!(writer, "Backend root: daemon-managed")?;
         writeln!(writer, "Job: {}", response.accepted.job_id)?;
     }
     Ok(())

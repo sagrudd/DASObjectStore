@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.7 - 2026-07-13
+
+- Require authenticated local administrator authorization for profile-binding
+  mutations and keep daemon-owned backend paths out of consumer responses.
+
 ## 0.76.6 - 2026-07-13
 
 - Preserve a daemon-internal persisted profile-binding read for diagnostics when

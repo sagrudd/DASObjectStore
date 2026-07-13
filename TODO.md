@@ -315,6 +315,10 @@ completion.
     root/identity collisions now fail without leaving an orphaned ledger. The
     binding and optional store-definition registries are still separate durable
     files, so cross-file rollback remains an explicit follow-up.
+  - [x] Require an authenticated local administrator for non-dry-run profile
+    create/adopt requests, derive audit identity from the authenticated actor,
+    and redact daemon-owned backend paths from profile-binding responses and
+    CLI output.
 - [x] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.
