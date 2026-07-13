@@ -112,7 +112,8 @@ unreadable roots remain explicit not-ready reasons rather than optimistic
 success.
 
 Development self-signing is implemented only as a feature-gated local helper
-for workspace and generated-data tests. It is explicit, short-lived,
+for workspace and generated-data tests. It is explicit, short-lived, and
+honors each request's bounded TTL,
 loopback/local-Docker only, and constrained to synthetic validation stores. It
 is a test-build facility, not an application authority, and is forbidden from
 RPM/DEB contents including keys, issuers, configuration, and enablement

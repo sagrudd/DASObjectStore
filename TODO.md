@@ -921,8 +921,9 @@ completion.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
-    ≤24-hour TTL policy; the shared RPM/DEB payload guard and regression test
-    reject development keys, issuers, configuration, and enablement switches.
+    requested ≤24-hour TTL policy at issuance; the shared RPM/DEB payload guard
+    and regression test reject development keys, issuers, configuration, and
+    enablement switches.
     Native DEB/RPM build scripts now explicitly compile the daemon with
     ``--no-default-features`` as an additional package-boundary safeguard;
     ``package_assets`` executes the shared payload guard against safe and

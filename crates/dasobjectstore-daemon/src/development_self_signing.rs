@@ -96,8 +96,7 @@ impl DevelopmentSelfSignedPolicy {
                 max_total_bytes: Some(self.max_total_bytes),
             },
             issued_at_unix_seconds,
-            expires_at_unix_seconds: issued_at_unix_seconds
-                .saturating_add(DEVELOPMENT_SELF_SIGNING_MAX_TTL_SECONDS),
+            expires_at_unix_seconds: issued_at_unix_seconds.saturating_add(self.token_ttl_seconds),
             active: true,
         }
     }
@@ -143,7 +142,7 @@ impl DevelopmentSelfSignedMaterial {
             public_key_material: Some(self.public_key_material.clone()),
             issued_at_unix_seconds,
             expires_at_unix_seconds: issued_at_unix_seconds
-                .saturating_add(DEVELOPMENT_SELF_SIGNING_MAX_TTL_SECONDS),
+                .saturating_add(policy.token_ttl_seconds),
             active: true,
         };
         descriptor
@@ -227,7 +226,24 @@ mod tests {
         );
         assert_eq!(
             identity.expires_at_unix_seconds,
-            1_000 + DEVELOPMENT_SELF_SIGNING_MAX_TTL_SECONDS
+            1_000 + policy.token_ttl_seconds
+        );
+    }
+
+    #[test]
+    fn key_descriptor_uses_requested_bounded_ttl() {
+        let policy = policy();
+        let material = DevelopmentSelfSignedMaterial::generate(&policy).expect("certificate");
+        let descriptor = material
+            .key_descriptor(&policy, "codex-key", 2_000)
+            .expect("descriptor");
+
+        assert_eq!(
+            descriptor.expires_at_unix_seconds,
+            2_000 + policy.token_ttl_seconds
+        );
+        assert!(
+            descriptor.expires_at_unix_seconds < 2_000 + DEVELOPMENT_SELF_SIGNING_MAX_TTL_SECONDS
         );
     }
 
