@@ -142,8 +142,9 @@ pub use profile_inspection::{
     PROFILE_INSPECTION_SCHEMA_VERSION,
 };
 pub use profile_s3::{
-    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3ObjectView, PROFILE_S3_MAX_KEYS,
-    PROFILE_S3_SCHEMA_VERSION,
+    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartCompletionRequest,
+    ProfileS3MultipartCompletionResponse, ProfileS3MultipartPartRequest, ProfileS3ObjectView,
+    PROFILE_S3_MAX_KEYS, PROFILE_S3_MAX_MULTIPART_PARTS, PROFILE_S3_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,

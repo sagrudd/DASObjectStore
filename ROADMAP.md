@@ -1200,6 +1200,9 @@ worker as well; multipart paths still need explicit provider injection.
 The profile S3 seam now publishes bounded multipart completion metadata
 (ordered parts, per-part SHA-256 checksums, total-size and reservation
 validation); stream assembly, provider injection, and HTTP dispatch remain.
+The transport boundary now also publishes versioned, path-free multipart
+completion request and acknowledgement DTOs with the same bounded validation;
+authenticated HTTP routing and runtime store dispatch remain separate.
 Capacity-enabled local ingest also rejects a client copy-count override before
 any source read when it differs from the daemon ObjectStore policy; legacy
 standalone executor paths retain their explicit override behavior.

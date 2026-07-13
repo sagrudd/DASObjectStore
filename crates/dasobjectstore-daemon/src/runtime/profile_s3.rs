@@ -15,7 +15,7 @@ use dasobjectstore_core::ids::StoreId;
 use std::io::Read;
 
 pub const PROFILE_S3_MAX_KEYS: usize = 1_000;
-pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = 10_000;
+pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = crate::api::PROFILE_S3_MAX_MULTIPART_PARTS;
 
 pub trait ProfileS3ReadBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
 
