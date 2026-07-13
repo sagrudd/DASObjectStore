@@ -112,7 +112,8 @@ pub use profile_registry::{
     PROFILE_BINDING_REGISTRY_SCHEMA,
 };
 pub use profile_s3::{
-    get_profile_object, head_profile_object, list_profile_objects, ProfileS3Object,
+    get_profile_object, head_profile_object, list_profile_objects, put_profile_object,
+    ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,

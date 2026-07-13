@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.76.20 - 2026-07-13
+
+- Add a provider-neutral profile S3 PUT adapter with known-length quota
+  reservations, in-flight checksums, durable finalization, and catalogue
+  commit semantics.
+
 ## 0.76.19 - 2026-07-13
 
 - Add a provider-neutral profile S3 read adapter deriving list, HEAD, and GET

@@ -443,6 +443,19 @@ impl FolderBackend {
             .map(|_| ())
             .map_err(|error| BackendError::InvalidRequest(format!("capacity release: {error:?}")))
     }
+
+    pub(crate) fn abort_staged_profile_object(
+        &mut self,
+        reservation_id: &str,
+        staged: Option<&BackendObjectRecord>,
+    ) -> Result<(), BackendError> {
+        if let Some(staged) = staged {
+            self.discard_staged(staged, reservation_id);
+            Ok(())
+        } else {
+            self.release_reservation(reservation_id)
+        }
+    }
 }
 
 impl ObjectStoreBackend for FolderBackend {

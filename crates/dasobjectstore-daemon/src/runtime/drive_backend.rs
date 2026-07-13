@@ -155,6 +155,16 @@ impl DriveBackend {
         self.folder.release_reservation(reservation_id)
     }
 
+    pub(crate) fn abort_staged_profile_object(
+        &mut self,
+        reservation_id: &str,
+        staged: Option<&BackendObjectRecord>,
+    ) -> Result<(), BackendError> {
+        self.guard()?;
+        self.folder
+            .abort_staged_profile_object(reservation_id, staged)
+    }
+
     fn guard(&self) -> Result<(), BackendError> {
         self.guard.validate().map_err(BackendError::InvalidRequest)
     }
