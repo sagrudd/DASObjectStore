@@ -151,8 +151,10 @@ resume is now available between source objects and through an authenticated Web
 admin action (the compact ``ingest control --tui`` acknowledgement is now
 available; interactive keyboard controls and live state refresh remain);
 control/Web capacity is not fully
-reserved under ingest; telemetry device mapping and appliance acceptance remain
-incomplete; and UI/design work remains. The module-size guard now passes with no
+reserved under ingest; telemetry missing markers now include actionable
+warm-up, counter-reset, permission, and device-mapping details, while stable
+device mapping and appliance acceptance remain incomplete; and UI/design work
+remains. The module-size guard now passes with no
 exceptions. Hardware-only acceptance is deferred while travelling without DAS
 access, but offline design, domain, metadata, API, test, and packaging work
 should continue.

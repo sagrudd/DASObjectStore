@@ -313,8 +313,41 @@ fn push_optional_missing_marker(
         missing_data.push(ApplianceTelemetryMissingDataMarker {
             path: path.to_string(),
             reason: *reason,
-            detail: None,
+            detail: Some(missing_reason_detail(*reason).to_string()),
         });
+    }
+}
+
+fn missing_reason_detail(reason: ApplianceTelemetryMissingReason) -> &'static str {
+    match reason {
+        ApplianceTelemetryMissingReason::FirstSampleWarmup => {
+            "a previous sample is required before a rate can be calculated"
+        }
+        ApplianceTelemetryMissingReason::CounterReset => {
+            "the device counter moved backwards; rates resume after a fresh baseline"
+        }
+        ApplianceTelemetryMissingReason::DeviceMissing => {
+            "the managed device could not be mapped to a live telemetry counter"
+        }
+        ApplianceTelemetryMissingReason::PermissionDenied => {
+            "the telemetry collector lacks permission to read the required source"
+        }
+        ApplianceTelemetryMissingReason::UnsupportedPlatform => {
+            "the host platform does not expose this telemetry source"
+        }
+        ApplianceTelemetryMissingReason::CollectorUnavailable => {
+            "the telemetry collector could not produce a sample"
+        }
+        ApplianceTelemetryMissingReason::DaemonStartup => {
+            "the daemon has not completed telemetry startup"
+        }
+        ApplianceTelemetryMissingReason::SampleTimeout => {
+            "the telemetry sample exceeded its collection deadline"
+        }
+        ApplianceTelemetryMissingReason::NotConfigured => "the telemetry source is not configured",
+        ApplianceTelemetryMissingReason::Unknown => {
+            "the telemetry source reported an unknown reason"
+        }
     }
 }
 
@@ -551,4 +584,26 @@ fn sync_parent_directory(path: &Path) -> Result<(), ApplianceTelemetryLoopError>
                 path.display()
             ))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::missing_reason_detail;
+    use crate::runtime::appliance_telemetry::model::ApplianceTelemetryMissingReason;
+
+    #[test]
+    fn missing_reason_details_explain_warmup_and_mapping_states() {
+        assert!(
+            missing_reason_detail(ApplianceTelemetryMissingReason::FirstSampleWarmup)
+                .contains("previous sample")
+        );
+        assert!(
+            missing_reason_detail(ApplianceTelemetryMissingReason::DeviceMissing)
+                .contains("mapped")
+        );
+        assert!(
+            missing_reason_detail(ApplianceTelemetryMissingReason::CounterReset)
+                .contains("baseline")
+        );
+    }
 }

@@ -253,8 +253,11 @@ completion.
     retain a backward-compatible safe default when the field is absent. The
     same gate is threaded through Garage reconciliation; explicit HTTP
     bridging and host-level control-plane telemetry remain open.
-- [ ] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
-  appliance acceptance gaps without fabricating continuity.
+- [~] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
+  appliance acceptance gaps without fabricating continuity. Collector missing
+  markers now carry actionable warm-up, counter-reset, permission, and mapping
+  details; stable device mapping, packaged-loop execution, and appliance
+  acceptance remain deployment-gated.
 - [x] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow. The
   exception file is empty and the module-size guard passes. The previously
