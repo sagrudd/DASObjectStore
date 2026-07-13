@@ -166,8 +166,10 @@ completion.
   - [x] Add a versioned `ObjectStoreManifest` with explicit folder root,
     drive filesystem/device identity, or appliance pool backend references;
     legacy metadata remains untouched and profile/backend mismatches are
-    rejected. Logical object versions, placement records, and protection fields
-    remain follow-up additions.
+    rejected. Add the separate strict ``portable_object_catalogue.v1``
+    companion contract for logical object versions, digests, provenance,
+    lifecycle/protection state, and profile-neutral placements; private
+    catalogue authority and daemon transaction wiring remain open.
 - [ ] Define protection policies independently from profiles: local-only,
   reproducible, externally replicated, appliance protected, and future
   multi-site protection.

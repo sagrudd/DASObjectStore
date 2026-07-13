@@ -914,6 +914,14 @@ Exit criteria: architecture and requirements are approved; existing appliance
 metadata remains readable; public and persistent compatibility boundaries have
 tests before profile-specific implementation begins.
 
+Current delivery note: the strict ObjectStore manifest v1 remains unchanged.
+The core now provides a separate ``portable_object_catalogue.v1`` companion
+contract for logical object versions, digests, provenance,
+lifecycle/protection state, and profile-neutral folder/drive/appliance/provider
+placements. Unknown/future schema, duplicate-record, and unsafe-path checks
+are covered locally; daemon catalogue authority and profile-adoption wiring
+remain open pending the shared metadata decision.
+
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 
 Goal: close current daemon ownership, upload completion, reconciliation,

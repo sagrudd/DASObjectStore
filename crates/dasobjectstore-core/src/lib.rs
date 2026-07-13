@@ -11,6 +11,7 @@ pub mod ingress;
 pub mod lifecycle;
 pub mod manifest;
 pub mod migration;
+pub mod object_catalogue;
 pub mod object_type;
 pub mod placement;
 pub mod policy_template;
@@ -34,6 +35,12 @@ pub use deployment::{DeploymentProfile, HostMode};
 pub use manifest::{
     BackendReference, DriveMediaKind, ObjectStoreManifest, ObjectStoreManifestDecodeError,
     OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+};
+pub use object_catalogue::{
+    ObjectDigest, PortableLifecycleState, PortableObjectCatalogue,
+    PortableObjectCatalogueDecodeError, PortableObjectCatalogueValidationError,
+    PortableObjectVersion, PortablePlacement, PortablePlacementLocation, PortableProtectionState,
+    PortableProvenance, PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION,
 };
 pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;

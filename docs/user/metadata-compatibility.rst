@@ -25,3 +25,19 @@ authority.
 The decode helper does not itself perform migration, adoption, or filesystem
 writes. Those operations remain gated by the profile adoption and catalogue
 contracts in the campaign roadmap.
+
+Portable object catalogue companion
+------------------------------------
+
+Object versions and placements use a separate ``portable_object_catalogue.v1``
+contract. It carries logical object/version identity, size and digest,
+opaque provenance, lifecycle/protection state, and profile-neutral placement
+locations for folder, drive, appliance, or provider backends. Folder and
+drive locations are safe relative paths; the contract does not imply an SSD,
+HDD, or replication layout.
+
+The companion catalogue has its own strict schema boundary: unknown fields,
+duplicate object versions or placements, unsafe paths, and future schema
+versions are rejected before interpretation. It does not change the strict v1
+ObjectStore manifest or make private folder/drive catalogue files authoritative;
+daemon transaction wiring and profile adoption remain separate decisions.
