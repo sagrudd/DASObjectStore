@@ -10,6 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_CONTEXT="${DASOBJECTSTORE_BUILD_CONTEXT:-$(cd "$REPO_DIR/.." && pwd)}"
 ROOT="${DASOBJECTSTORE_LOCAL_ROOT:-/Volumes/Seagate/DASObjectStore}"
+VALIDATION_ROOT="${HOME:-/Users/stephen}/.dasobjectstore-codex-validation"
 PROFILE="${DASOBJECTSTORE_LOCAL_PROFILE:-alleleanchor-mvp}"
 PROJECT="${DASOBJECTSTORE_LOCAL_PROJECT:-dasobjectstore-local}"
 API_PORT="${DASOBJECTSTORE_LOCAL_API_PORT:-3900}"
@@ -61,8 +62,25 @@ EOF
 require_volume_root() {
     case "$ROOT" in
         /Volumes/*) ;;
-        *) die "DASOBJECTSTORE_LOCAL_ROOT must be under /Volumes (got $ROOT)" ;;
+        "$VALIDATION_ROOT") ;;
+        *) die "DASOBJECTSTORE_LOCAL_ROOT must be under /Volumes or the dedicated validation root $VALIDATION_ROOT (got $ROOT)" ;;
     esac
+    if [ "$ROOT" = "$VALIDATION_ROOT" ]; then
+        mkdir -p "$ROOT"
+        local marker="$ROOT/.codex-validation-root"
+        if [ ! -e "$marker" ]; then
+            if find "$ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                die "validation root is not empty; use a dedicated generated-data directory: $ROOT"
+            fi
+            printf 'DASObjectStore Codex generated-data validation root\n' > "$marker"
+            chmod 600 "$marker"
+        fi
+        local used_kib
+        used_kib="$(du -sk "$ROOT" | awk '{print $1}')"
+        [ "${used_kib:-0}" -le 1073741824 ] || \
+            die "validation root exceeds the 1 TiB generated-data safety limit: $ROOT"
+        return
+    fi
     [ -d "/Volumes" ] || die "/Volumes is unavailable"
     [ -d "$ROOT" ] || mkdir -p "$ROOT"
     [ -w "$ROOT" ] || die "DAS root is not writable: $ROOT"
@@ -116,7 +134,7 @@ ensure_profile_dirs() {
     require_volume_root
     mkdir -p "$CONFIG_DIR" "$STATE_DIR" "$RUNTIME_DIR" "$LOG_DIR" \
         "$META_DIR" "$DATA_DIR" "$CREDENTIALS_DIR" "$GARAGE_PROJECT_DIR" \
-        "$(dirname "$REGISTRY_PATH")"
+        "$(dirname "$REGISTRY_PATH")" "$(dirname "$DEVICE_MARKER")"
     chmod 700 "$PROFILE_ROOT" "$CONFIG_DIR" "$STATE_DIR" "$RUNTIME_DIR" \
         "$LOG_DIR" "$META_DIR" "$DATA_DIR" "$CREDENTIALS_DIR"
 }

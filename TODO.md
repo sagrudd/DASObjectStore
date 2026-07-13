@@ -34,9 +34,10 @@ evidence and detailed source tasks.
 - Folder one-root adoption semantics and native-versus-provider-backed S3
   gateway choice remain product decisions listed above; implementation should
   not infer them from a path or profile name.
-- The local Playwright screenshot runner now reaches the fixture server but
-  timed out waiting for the authenticated ``.dos-topbar`` in this environment;
-  Rust/Yew, wasm, JavaScript syntax, and source-contract checks pass. Treat
+- The local Playwright screenshot runner reaches the fixture server and its
+  deterministic fixture/DOM checks pass, but full artifact execution remains
+  blocked because ``packaging/web/prepare-web-dist.sh`` exits without a
+  JavaScript bundle after the Trunk build on this macOS checkout. Treat
   desktop/mobile artifact execution as environment-gated until the local Web
   asset/bootstrap runtime is available; do not claim visual acceptance from
   this run.
@@ -59,22 +60,69 @@ completion.
   client to declare provider upload completion. A renewal token is currently
   available and daemon-side write-grant authorization is tested, but treating
   it as a bearer credential is a product/security decision.
-- [ ] Decide whether one ``folder`` root maps one-to-one to one logical
+- [x] Decide whether one ``folder`` root maps one-to-one to one logical
   ObjectStore and define whether direct user edits are forbidden, detected as
-  drift, or eligible only through explicit reconcile/adopt.
-- [ ] Decide native embedded versus provider-backed S3 gateway support for
+  drift, or eligible only through explicit reconcile/adopt. Approved:
+  one root maps to one logical store; unmanaged edits are reported as drift;
+  reconcile/adopt is an explicit, confirmed operation.
+- [x] Decide native embedded versus provider-backed S3 gateway support for
   folder and drive profiles; catalogue/daemon authority is mandatory either way.
-- [ ] Approve logical quota accounting at full object-version size independent
+  Approved: keep a provider-neutral S3 adapter boundary, with Garage as the
+  local compatibility provider and no provider-specific storage authority in
+  consumers.
+- [x] Approve logical quota accounting at full object-version size independent
   of physical deduplication, with physical amplification reported separately.
+  Approved: reservations and admission use logical bytes; physical replica and
+  metadata amplification is reported separately.
+
+### Approved architecture decisions (2026-07-13)
+
+- DASObjectStore is the storage authority. It owns disk paths, profile and
+  mount validation, service lifecycle, buckets, credentials, catalogue state,
+  placement, and health. Monas, AlleleAnchor, Synoptikon, and Mneion consume
+  versioned storage definitions, immutable object IDs, manifests, checksums,
+  and typed metadata; they never receive private host paths or take over
+  storage lifecycle decisions.
+- ``folder`` profiles are bounded one-root stores. Existing unmanaged files are
+  read-only inspectable; direct edits become explicit drift; adoption or
+  reconciliation requires an action-time confirmation and preserves manifest,
+  checksum, and quota safeguards.
+- ``drive`` profiles require one exclusively dedicated SSD with stable device
+  and filesystem identity. Mixed-use or HDD-backed drive profiles are not
+  accepted by the portable profile contract.
+- Quotas are universal per ObjectStore and account full logical object-version
+  bytes. Reservations are transactional, bounded, restart-safe, and released
+  on failure or cancellation; lowering a quota never deletes data.
+- Garage remains behind the object-service provider interface. The canonical
+  macOS Docker profile is single-node compatibility evidence only; it does not
+  imply appliance durability, multi-disk redundancy, SMART, repair, or
+  throughput acceptance.
+- Standalone administrator authority remains local OS/sudo-derived. Paired
+  remote clients use scoped credentials; public HTTPS completion and bearer or
+  renewal-token semantics remain disabled until the separate security contract
+  is approved.
+- Containerised macOS validation is an explicit development gate. The
+  ``deploy/local-docker`` profile may use
+  ``$HOME/.dasobjectstore-codex-validation`` as a generated-data-only root,
+  while AlleleAnchor's FileStore and Docker/Nextflow stages remain consumer-
+  side substitutes and must consume exported scoped configuration rather than
+  host paths. Keep all generated data below 1 TiB.
 
 ### Gate 0: Re-baseline and close release-critical appliance debt
 
 - [ ] Validate ``deploy/local-docker`` on macOS with Docker Desktop and an
-  attached volume: build the daemon image, start Garage through
-  ``dasobjectstored``, provision one scoped bucket/key, export a redacted
-  client config, and run a non-sensitive S3 adapter smoke. Keep the result
-  classified as local single-node compatibility evidence, not appliance soak
-  acceptance.
+  attached volume or the dedicated generated-data root
+  ``$HOME/.dasobjectstore-codex-validation``: build the daemon image, start
+  Garage through ``dasobjectstored``, provision one scoped bucket/key, export
+  a redacted client config, and run a non-sensitive S3 adapter smoke. Keep the
+  result classified as local single-node compatibility evidence, not appliance
+  soak acceptance. AlleleAnchor's local ``FileStore`` and container workflow
+  remain consumer-side substitutes and must consume exported scoped config,
+  not private DAS host paths.
+  - [x] Render the daemon/Garage profile against the dedicated validation root
+    and validate both generated Compose files with ``docker compose config``;
+    container start, Garage provisioning, and S3 smoke remain Docker-daemon
+    gated.
 
 - [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or

@@ -10,6 +10,12 @@ Persistent state is placed on an attached volume such as
 ``/Volumes/Seagate/DASObjectStore``. Docker Desktop must be granted file-sharing
 access to that volume before starting the profile.
 
+When an attached volume is unavailable, macOS contract tests may use only the
+dedicated generated-data root ``$HOME/.dasobjectstore-codex-validation``. The
+helper rejects arbitrary home folders, creates a marker in that root, and
+enforces a 1 TiB generated-data ceiling. This validation mode is a bounded
+folder substitute; it is not evidence that the host has a dedicated SSD.
+
 The profile is intentionally single-node and single-volume. It is suitable for
 S3-compatible adapter and contract validation, not for appliance throughput,
 SMART, repair, or redundancy claims.
@@ -66,4 +72,9 @@ The local profile can close a local S3-compatible adapter validation gate for
 AlleleAnchor and other clients. It does not replace Linux appliance soak,
 multi-disk redundancy, SMART, repair, or throughput acceptance. Treat USB
 disconnects, sleep, Docker Desktop restarts, and APFS/VM behavior as explicit
-development failure modes.
+development failure modes. The daemon container receives the Docker socket so
+it can own the nested Garage lifecycle; that authority is acceptable for this
+local development profile only. AlleleAnchor's local ``FileStore`` and
+containerised workflow stages remain consumer-side substitutes: they consume
+exported scoped S3 configuration and immutable object/manifests, never private
+DAS host paths or storage lifecycle state.

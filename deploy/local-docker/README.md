@@ -19,8 +19,10 @@ with one copy because the profile has one Garage node and one USB volume.
 
 1. Docker Desktop with the Compose plugin.
 2. `/Volumes/Seagate` added under Docker Desktop **Settings > Resources >
-   File Sharing**. The helper runs a bind-mount preflight and stops with this
-   exact instruction before starting the daemon when the path is not shared.
+   File Sharing** for the attached-drive profile. When the drive is unavailable,
+   use the dedicated generated-data validation root
+   `$HOME/.dasobjectstore-codex-validation`; the helper refuses arbitrary home
+   folders and enforces a 1 TiB safety ceiling.
 3. The DASObjectStore checkout and its sibling `prosopikon` checkout under one
    build context (the default is the parent of this repository).
 4. A built host CLI, or a `dasobjectstore` binary on `PATH`.
@@ -97,6 +99,9 @@ Set `DASOBJECTSTORE_LOCAL_API_PORT` if port 3900 is already occupied.
 
 Docker Desktop bind mounts cross a Linux VM. USB disconnects, sleep, Docker
 Desktop restarts, and APFS/bridge behavior are not equivalent to native Linux
-appliance semantics. Use this profile for deterministic local contract and
-adapter validation; keep throughput, SMART, repair, and multi-disk claims on a
-Linux DAS host.
+appliance semantics. The daemon container receives `/var/run/docker.sock` so
+that it can own the nested Garage lifecycle; this is a local-development
+authority boundary, not appliance hardening. Use this profile for deterministic
+local contract and adapter validation; keep throughput, SMART, repair, and
+multi-disk claims on a Linux DAS host. AlleleAnchor's local FileStore remains a
+consumer-side substitute and must not become a second storage authority.

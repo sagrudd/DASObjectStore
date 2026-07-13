@@ -19,5 +19,9 @@
 /playwright-report/
 /test-results/
 
+# Python helper caches
+__pycache__/
+*.pyc
+
 # Trunk/Yew generated web distribution artefacts
 /crates/dasobjectstore-gui-web/dist/

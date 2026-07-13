@@ -23,6 +23,39 @@ Storage profile and host authority are separate. A folder may be managed by a
 per-user daemon or system service; drive and appliance profiles normally use a
 system service. All profiles remain daemon-owned and capability-driven.
 
+### Approved architecture decisions (2026-07-13)
+
+The storage authority is DASObjectStore. It owns disk paths, mount/profile
+validation, service lifecycle, buckets, credentials, catalogue state, placement,
+quotas, and health. Monas, AlleleAnchor, Synoptikon, and Mneion consume
+versioned storage definitions, immutable object IDs, manifests, checksums, and
+typed metadata; they do not receive private host paths or manage storage
+lifecycle.
+
+The ``folder`` profile maps one bounded root to one logical ObjectStore. Direct
+unmanaged edits are reported as drift, and reconcile/adopt is explicit and
+confirmed. The ``drive`` profile requires one exclusively dedicated SSD with
+stable device/filesystem identity; mixed-use or HDD-backed drive profiles are
+outside the contract. Every ObjectStore has a logical quota measured in full
+object-version bytes, with transactional restart-safe reservations and
+separate physical-amplification reporting. Lowering a quota never deletes
+data.
+
+S3 exposure is provider-neutral. Garage remains the local compatibility
+provider behind the object-service interface, while no consumer becomes a
+storage authority. Standalone administrator authority is local OS/sudo-derived;
+paired clients use scoped credentials. Public HTTPS completion and bearer or
+renewal-token semantics remain disabled until the separate security contract is
+approved.
+
+The canonical macOS development path is ``deploy/local-docker``. It is a
+single-node compatibility profile with daemon-owned nested Garage lifecycle,
+and may use ``$HOME/.dasobjectstore-codex-validation`` as a generated-data-only
+root below 1 TiB. AlleleAnchor's local FileStore and Docker/Nextflow stages are
+consumer-side substitutes or environment gates; only an exported scoped S3
+configuration crosses the boundary. This profile makes no appliance durability,
+multi-disk, SMART, repair, or throughput claim.
+
 Market/integration readiness requires these campaign gates, in order:
 
 1. stabilize daemon ownership, ingress completion, metadata durability, and
@@ -64,6 +97,11 @@ incomplete; and UI/design work remains. The module-size guard now passes with no
 exceptions. Hardware-only acceptance is deferred while travelling without DAS
 access, but offline design, domain, metadata, API, test, and packaging work
 should continue.
+
+The canonical local Docker profile now renders successfully against the
+dedicated macOS validation root and both generated Compose documents pass
+configuration parsing. Starting the daemon, nested Garage, and the AlleleAnchor
+S3 smoke remains Docker-daemon/file-sharing gated.
 
 ## Historical Appliance MVP Definition
 
