@@ -70,10 +70,10 @@ adapter also has a daemon-capacity-provider wrapper: logical admission is
 reserved before backend staging and committed only after the catalogue, while
 pre-finalization failures release both ledgers. It exposes bounded range reads
 for consumers that need resumable object access. It is not an HTTP gateway and
-does not implement multipart completion. Profile DELETE first requires a
-catalogue-authoritative HEAD; folder deletion persists the catalogue debit
-before unlinking the payload, and drive deletion fails closed when its runtime
-identity guard is unavailable.
+does not implement multipart completion. Profile DELETE first checks the
+catalogue; missing keys are idempotent no-ops, while folder deletion persists
+the catalogue debit before unlinking the payload. Drive deletion fails closed
+when its runtime identity guard is unavailable.
 
 The private ``.dasobjectstore`` namespace and its object/staging descendants
 are tightened to owner-only ``0700`` permissions on Unix, and staged/finalized

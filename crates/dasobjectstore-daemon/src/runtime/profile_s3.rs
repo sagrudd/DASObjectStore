@@ -122,15 +122,23 @@ pub fn get_profile_object_range(
 }
 
 /// Delete one catalogue-authoritative profile object through the daemon-owned
-/// backend. A missing catalogue record is rejected before touching the
-/// backend, so provider listings or private paths cannot be used to mutate an
-/// object outside the logical ObjectStore view.
+/// backend. The boolean reports whether a catalogue record was removed; a
+/// missing key is an idempotent no-op as required by S3 DELETE semantics. A
+/// present record is authorized through the catalogue before backend removal,
+/// so provider listings or private paths cannot mutate an object outside the
+/// logical ObjectStore view.
 pub fn delete_profile_object(
     backend: &mut dyn ProfileS3WriteBackend,
     key: &BackendObjectKey,
-) -> Result<(), BackendError> {
-    head_profile_object(backend, key)?;
-    backend.remove(key)
+) -> Result<bool, BackendError> {
+    if backend
+        .records()?
+        .into_iter()
+        .all(|record| record.key != *key)
+    {
+        return Ok(false);
+    }
+    backend.remove(key).map(|()| true)
 }
 
 fn discard_prefix(reader: &mut dyn Read, mut remaining: u64) -> Result<(), BackendError> {
@@ -579,10 +587,10 @@ mod tests {
         )
         .expect("put");
         assert_eq!(backend.capacity().used_bytes, 6);
-        delete_profile_object(&mut backend, &key).expect("delete");
+        assert!(delete_profile_object(&mut backend, &key).expect("delete"));
         assert_eq!(backend.capacity().used_bytes, 0);
         assert!(head_profile_object(&backend, &key).is_err());
-        assert!(delete_profile_object(&mut backend, &key).is_err());
+        assert!(!delete_profile_object(&mut backend, &key).expect("idempotent delete"));
         std::fs::remove_dir_all(root).ok();
     }
 
