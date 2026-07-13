@@ -226,6 +226,10 @@ completion.
     authorized readers receive pressure and explicit block reasons without
     mutating reservations. The CLI exposes it as ``store capacity`` (including
     ``--json``); TUI/Web/adapters remain follow-up presentation work.
+  - [x] Render the daemon-owned capacity snapshot in the embedded TUI with
+    logical used/reserved/available bytes, backend and SSD availability, copy
+    amplification, thresholds, and admission-block reasons; the Web adapter
+    remains pending live daemon-provider wiring.
   - [x] Add transport-neutral daemon capacity admission request/decision DTOs
     with stable snake_case reasons, observed-capacity fields, and direct-ingress
     SSD fields optional; SSD-first/direct behavior is derived from the typed

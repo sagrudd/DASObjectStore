@@ -238,6 +238,12 @@ admission-block reason. It never accepts caller-supplied usage or free-space
 values; an unavailable provider is reported as an error rather than guessed
 capacity.
 
+The embedded ingest TUI consumes the same daemon snapshot when it is available.
+It renders logical used/reserved/available bytes separately from physical SSD
+and backend availability, includes copy amplification and warning/critical
+thresholds, and shows an admission-block reason. During daemon reconnects the
+snapshot is omitted rather than inferred from stale physical counters.
+
 Product-owned policy templates
 ------------------------------
 

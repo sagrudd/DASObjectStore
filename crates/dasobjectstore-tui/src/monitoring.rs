@@ -1,4 +1,5 @@
 use crate::planning::format_size_label;
+use dasobjectstore_daemon::api::CapacityStatusResponse;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveIngestTelemetry {
@@ -14,6 +15,12 @@ pub struct LiveIngestTelemetry {
     pub hdd_pressure: HddPressureTelemetry,
     pub verification: VerificationTelemetry,
     pub throughput: ThroughputTelemetry,
+    /// Latest daemon-owned logical-capacity snapshot for this target.
+    ///
+    /// The snapshot is optional because a TUI can remain useful while the
+    /// daemon control plane is reconnecting.  When present it is rendered
+    /// alongside the pipeline telemetry rather than inferred from SSD usage.
+    pub capacity: Option<CapacityStatusResponse>,
     pub action_support: DaemonActionSupport,
     pub attach_state: AttachState,
     pub errors: Vec<TuiErrorState>,
@@ -48,6 +55,7 @@ impl LiveIngestTelemetry {
             hdd_pressure_label: self.hdd_pressure.display_label(),
             verification_label: self.verification.display_label(),
             throughput_label: self.throughput.display_label(),
+            capacity_label: self.capacity.as_ref().map(capacity_display_label),
             actions: actions.actions,
             attach_label: self.attach_state.display_label(),
             error_labels: self
@@ -76,6 +84,7 @@ pub struct LiveMonitoringDisplay {
     pub hdd_pressure_label: String,
     pub verification_label: String,
     pub throughput_label: String,
+    pub capacity_label: Option<String>,
     pub actions: Vec<KeyboardActionDisplay>,
     pub attach_label: String,
     pub error_labels: Vec<String>,
@@ -95,6 +104,9 @@ impl LiveMonitoringDisplay {
         lines.push(self.hdd_pressure_label.clone());
         lines.push(self.verification_label.clone());
         lines.push(self.throughput_label.clone());
+        if let Some(capacity) = &self.capacity_label {
+            lines.push(capacity.clone());
+        }
         lines.push(self.attach_label.clone());
 
         if !self.actions.is_empty() {
@@ -120,6 +132,43 @@ impl LiveMonitoringDisplay {
 
         lines.join("\n")
     }
+}
+
+fn capacity_display_label(response: &CapacityStatusResponse) -> String {
+    let logical_limit = response
+        .logical_limit_bytes
+        .map(format_size_label)
+        .unwrap_or_else(|| "unbounded".to_string());
+    let logical_available = response
+        .logical_available_bytes
+        .map(format_size_label)
+        .unwrap_or_else(|| "unbounded".to_string());
+    let ssd_available = response
+        .ssd_available_bytes
+        .map(format_size_label)
+        .unwrap_or_else(|| "not required".to_string());
+    let block = response
+        .admission_block_reason
+        .map(|reason| format!(", blocked {reason:?}"))
+        .unwrap_or_default();
+    let amplification = format!("{:.2}x", f64::from(response.copy_count));
+
+    format!(
+        "Capacity {}: pressure {:?}, used {}, reserved {}, logical available {} / limit {}, backend free {} (available {}), SSD available {}, amplification {}, thresholds warning {}bp/critical {}bp{}",
+        response.store_id,
+        response.pressure,
+        format_size_label(response.used_bytes),
+        format_size_label(response.reserved_bytes),
+        logical_available,
+        logical_limit,
+        format_size_label(response.backend_free_bytes),
+        format_size_label(response.backend_available_bytes),
+        ssd_available,
+        amplification,
+        response.warning_threshold_basis_points,
+        response.critical_threshold_basis_points,
+        block,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -836,6 +885,31 @@ mod tests {
         assert!(snapshot.contains("Error: verification failure: 2 files failed"));
     }
 
+    #[test]
+    fn renders_daemon_capacity_snapshot_without_inferring_logical_usage() {
+        let mut telemetry = sample_telemetry();
+        telemetry.capacity = Some(dasobjectstore_daemon::api::CapacityStatusResponse {
+            store_id: dasobjectstore_core::ids::StoreId::new("research").expect("safe store id"),
+            pressure: dasobjectstore_core::store::CapacityPressureState::Warning,
+            logical_limit_bytes: Some(1_000_000),
+            used_bytes: 400_000,
+            reserved_bytes: 100_000,
+            logical_available_bytes: Some(500_000),
+            backend_free_bytes: 2_000_000,
+            backend_available_bytes: 1_900_000,
+            ssd_available_bytes: Some(700_000),
+            copy_count: 2,
+            requires_ssd_staging: true,
+            warning_threshold_basis_points: 7_500,
+            critical_threshold_basis_points: 9_000,
+            admission_block_reason: None,
+        });
+
+        assert!(telemetry.snapshot_text().contains(
+            "Capacity research: pressure Warning, used 0.4 MiB, reserved 0.1 MiB, logical available 0.5 MiB / limit 1.0 MiB, backend free 1.9 MiB (available 1.8 MiB), SSD available 0.7 MiB, amplification 2.00x, thresholds warning 7500bp/critical 9000bp"
+        ));
+    }
+
     fn sample_telemetry() -> LiveIngestTelemetry {
         let total_bytes = 64 * 1024 * 1024 * 1024;
         let staged_bytes = 32 * 1024 * 1024 * 1024;
@@ -903,6 +977,7 @@ mod tests {
                 recent_low_bytes_per_second: 140 * 1024 * 1024,
                 trend: ThroughputTrend::Up,
             },
+            capacity: None,
             action_support: DaemonActionSupport {
                 pause: true,
                 resume: true,

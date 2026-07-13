@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.65 - 2026-07-13
+
+- Render daemon-owned ObjectStore capacity snapshots in the TUI, including
+  logical reservations, backend/SSD availability, amplification, thresholds,
+  and admission blocking reasons.
+
 ## 0.72.64 - 2026-07-13
 
 - Update screenshot fixtures and workflow assertions for users-first Local
