@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.72.109 - 2026-07-13
+
+- Strengthen migration reopen coverage to assert authoritative logical usage is
+  restored alongside destination catalogue records.
+
 ## 0.72.108 - 2026-07-13
 
 - Move enclosure wizard selectors into feature-owned CSS with base-leakage and

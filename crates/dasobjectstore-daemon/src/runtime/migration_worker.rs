@@ -317,6 +317,7 @@ mod tests {
         )
         .expect("destination reopens from authoritative catalogue");
         assert_eq!(reopened.catalogue_records().len(), 1);
+        assert_eq!(reopened.capacity().used_bytes, 11);
         let _ = fs::remove_dir_all(source_root);
         let _ = fs::remove_dir_all(destination_root);
     }
