@@ -120,6 +120,9 @@ audit events remain part of the authority boundary. Its completion helper
 verifies provider state before consuming, releases on catalogue failure, and
 returns an idempotent replay result; public endpoint and live catalogue wiring
 remain.
+The daemon API now publishes a confirmation-bound, path-free revocation
+request/response contract for identities and individual public keys; dispatch,
+proof verification, and redacted audit persistence remain separate follow-ups.
 
 ### Current delivered baseline
 

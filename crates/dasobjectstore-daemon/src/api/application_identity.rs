@@ -7,6 +7,8 @@ use std::fmt::{self, Display};
 
 pub const APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION: &str =
     "confirm application identity registration";
+pub const APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION: &str =
+    "confirm application credential revocation";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ApplicationIdentityRegistrationRequest {
@@ -164,6 +166,117 @@ impl ApplicationKeyRegistrationResponse {
     }
 }
 
+/// Public, path-free revocation request.  `key_id` is omitted to revoke the
+/// service principal and supplied to revoke one registered public key.  The
+/// daemon performs the state mutation and records audit metadata; callers do
+/// not submit private keys, tokens, or filesystem locations.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ApplicationCredentialRevocationRequest {
+    pub application_id: String,
+    #[serde(default)]
+    pub key_id: Option<String>,
+    pub reason: String,
+    pub dry_run: bool,
+    pub client_request_id: Option<String>,
+    #[serde(default)]
+    pub administrator_actor: Option<String>,
+    pub confirmation_marker: String,
+}
+
+impl ApplicationCredentialRevocationRequest {
+    pub fn validate(&self) -> Result<(), ApplicationCredentialRevocationValidationError> {
+        if self.application_id.trim().is_empty() {
+            return Err(ApplicationCredentialRevocationValidationError::BlankApplicationId);
+        }
+        if self
+            .key_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ApplicationCredentialRevocationValidationError::BlankKeyId);
+        }
+        if self.reason.trim().is_empty() {
+            return Err(ApplicationCredentialRevocationValidationError::BlankReason);
+        }
+        if self
+            .client_request_id
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ApplicationCredentialRevocationValidationError::BlankClientRequestId);
+        }
+        if self
+            .administrator_actor
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err(ApplicationCredentialRevocationValidationError::BlankAdministratorActor);
+        }
+        if self.confirmation_marker.trim() != APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION {
+            return Err(ApplicationCredentialRevocationValidationError::ConfirmationMismatch);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ApplicationCredentialRevocationValidationError {
+    BlankApplicationId,
+    BlankKeyId,
+    BlankReason,
+    BlankClientRequestId,
+    BlankAdministratorActor,
+    ConfirmationMismatch,
+}
+
+impl Display for ApplicationCredentialRevocationValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BlankApplicationId => formatter.write_str("application_id must not be blank"),
+            Self::BlankKeyId => formatter.write_str("key_id must not be blank when supplied"),
+            Self::BlankReason => formatter.write_str("reason must not be blank"),
+            Self::BlankClientRequestId => formatter.write_str("client_request_id must not be blank"),
+            Self::BlankAdministratorActor => {
+                formatter.write_str("administrator_actor must not be blank")
+            }
+            Self::ConfirmationMismatch => write!(
+                formatter,
+                "confirmation_marker must exactly match \"{APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION}\""
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ApplicationCredentialRevocationValidationError {}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ApplicationCredentialRevocationResponse {
+    pub accepted: DaemonJobAcceptedResponse,
+    pub application_id: String,
+    pub key_id: Option<String>,
+    pub administrator_actor: Option<String>,
+}
+
+impl ApplicationCredentialRevocationResponse {
+    pub fn accepted(
+        job_id: DaemonJobId,
+        accepted_at_utc: impl Into<String>,
+        request: ApplicationCredentialRevocationRequest,
+    ) -> Self {
+        Self {
+            accepted: DaemonJobAcceptedResponse {
+                job_id,
+                kind: DaemonJobKind::SystemAdministration,
+                accepted_at_utc: accepted_at_utc.into(),
+                dry_run: request.dry_run,
+            },
+            application_id: request.application_id,
+            key_id: request.key_id,
+            administrator_actor: request.administrator_actor,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ApplicationKeyRegistrationValidationError {
     InvalidKey(ApplicationAuthValidationError),
@@ -193,8 +306,10 @@ impl std::error::Error for ApplicationKeyRegistrationValidationError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplicationIdentityRegistrationRequest, ApplicationIdentityRegistrationResponse,
-        ApplicationKeyRegistrationRequest, APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
+        ApplicationCredentialRevocationRequest, ApplicationIdentityRegistrationRequest,
+        ApplicationIdentityRegistrationResponse, ApplicationKeyRegistrationRequest,
+        APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
+        APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
     };
     use crate::api::{DaemonJobId, DaemonJobKind};
     use dasobjectstore_core::application_auth::{
@@ -279,5 +394,45 @@ mod tests {
         request.validate().expect("key request");
         let encoded = serde_json::to_string(&request).expect("encode");
         assert!(!encoded.contains("private_key"));
+    }
+
+    #[test]
+    fn validates_scoped_revocation_without_secret_or_path_fields() {
+        let request = ApplicationCredentialRevocationRequest {
+            application_id: "synoptikon-ingest".to_string(),
+            key_id: Some("key-1".to_string()),
+            reason: "scheduled key rotation".to_string(),
+            dry_run: true,
+            client_request_id: Some("revoke-1".to_string()),
+            administrator_actor: Some("root".to_string()),
+            confirmation_marker: APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION.to_string(),
+        };
+        request.validate().expect("revocation request");
+        let encoded = serde_json::to_string(&request).expect("encode");
+        assert!(!encoded.contains("private_key"));
+        assert!(!encoded.contains("/srv"));
+    }
+
+    #[test]
+    fn revocation_requires_confirmation_and_nonblank_reason() {
+        let mut request = ApplicationCredentialRevocationRequest {
+            application_id: "synoptikon-ingest".to_string(),
+            key_id: None,
+            reason: " ".to_string(),
+            dry_run: false,
+            client_request_id: None,
+            administrator_actor: None,
+            confirmation_marker: APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION.to_string(),
+        };
+        assert!(matches!(
+            request.validate(),
+            Err(super::ApplicationCredentialRevocationValidationError::BlankReason)
+        ));
+        request.reason = "incident response".to_string();
+        request.confirmation_marker = "wrong".to_string();
+        assert!(matches!(
+            request.validate(),
+            Err(super::ApplicationCredentialRevocationValidationError::ConfirmationMismatch)
+        ));
     }
 }

@@ -839,7 +839,9 @@ completion.
     redacted audit events for every credential class. Upload-completion
     capability consumption now has a daemon-owned, state-scoped atomic replay
     registry with expiry pruning and single-use nonce/capability checks;
-    cryptographic proof verification, revocation API, and audit events remain.
+    a confirmation-bound, path-free revocation request/response contract is
+    now published; daemon dispatch, cryptographic proof verification, and
+    redacted audit events remain.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and

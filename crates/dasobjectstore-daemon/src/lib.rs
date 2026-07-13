@@ -102,6 +102,9 @@ pub use api::{
     STORE_DEDUPLICATE_CONFIRMATION, STORE_DELETE_CONFIRMATION, STORE_DRAIN_CONFIRMATION,
     STORE_REPAIR_CONFIRMATION,
 };
+pub use api::{
+    PROFILE_S3_MULTIPART_COMPLETE_ROUTE, PROFILE_S3_OBJECTS_ROUTE, PROFILE_S3_ROUTE_PREFIX,
+};
 pub use auth::{
     authorize_store_write, DaemonAuthorizationError, DaemonLocalActor, DaemonStoreAccessPolicy,
 };
