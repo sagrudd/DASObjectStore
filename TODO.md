@@ -777,7 +777,8 @@ completion.
     list/HEAD/GET semantics over folder and drive backends; it never consults
     provider listings or exposes private backend paths. Bounded streaming now
     hashes bytes in flight and rejects catalogue checksum drift before
-    reporting success.
+    reporting success. The general GET reader now performs the same declared
+    size/checksum verification as bytes are consumed.
   - [x] Add a provider-neutral profile PUT adapter requiring a known content
     length, transactional quota reservation, in-flight hashing, staged
     fsync/rename finalization, and catalogue commit; failed staging/finalization
@@ -2276,6 +2277,10 @@ list until every temporary size-budget exception has been removed.
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
   headers.
+  - [x] Make the provider-neutral GET reader verify declared size and SHA-256
+    while the caller consumes the stream, rejecting payload drift instead of
+    returning an unchecked provider reader; HTTP/provider-backed route wiring
+    remains separate.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

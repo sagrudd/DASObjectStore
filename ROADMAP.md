@@ -1271,7 +1271,9 @@ helpers;
 provider-neutral runtime list/page, PUT, HEAD, DELETE, and multipart entry
 points enforce the same key boundary before backend mutation;
 bounded profile streaming now hashes bytes in flight and rejects catalogue
-checksum drift before reporting success;
+checksum drift before reporting success; the general profile GET reader now
+performs the same declared-size and SHA-256 verification while bytes are
+consumed;
 the daemon socket now dispatches authenticated bounded profile-S3 list requests
 through the registered folder binding and daemon-owned capacity policy, while
 the standalone authenticated Web route delegates through the same bounded

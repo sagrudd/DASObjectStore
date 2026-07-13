@@ -479,8 +479,83 @@ pub fn get_profile_object(
     key: &BackendObjectKey,
 ) -> Result<Box<dyn Read + Send>, BackendError> {
     // HEAD first ensures GET only exposes catalogue-authoritative objects.
-    head_profile_object(backend, key)?;
-    backend.read(key)
+    let object = head_profile_object(backend, key)?;
+    let reader = backend.read(key)?;
+    Ok(Box::new(VerifiedProfileObjectReader {
+        reader,
+        key: object.key,
+        expected_size: object.size_bytes,
+        expected_checksum: object.checksum,
+        copied: 0,
+        hasher: Sha256::new(),
+        finished: false,
+    }))
+}
+
+struct VerifiedProfileObjectReader {
+    reader: Box<dyn Read + Send>,
+    key: BackendObjectKey,
+    expected_size: u64,
+    expected_checksum: String,
+    copied: u64,
+    hasher: Sha256,
+    finished: bool,
+}
+
+impl VerifiedProfileObjectReader {
+    fn finish(&mut self) -> std::io::Result<()> {
+        let mut extra = [0_u8; 1];
+        let extra_read = self.reader.read(&mut extra)?;
+        if extra_read != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "profile object {} exceeded its declared size",
+                    self.key.object_id
+                ),
+            ));
+        }
+        let checksum = checksum_string(&self.hasher.clone().finalize());
+        if checksum != self.expected_checksum {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "profile object {} failed streamed checksum verification",
+                    self.key.object_id
+                ),
+            ));
+        }
+        self.finished = true;
+        Ok(())
+    }
+}
+
+impl Read for VerifiedProfileObjectReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() || self.finished {
+            return Ok(0);
+        }
+        if self.copied == self.expected_size {
+            self.finish()?;
+            return Ok(0);
+        }
+        let remaining = self.expected_size - self.copied;
+        let requested = usize::try_from(remaining)
+            .map_or(buffer.len(), |remaining| buffer.len().min(remaining));
+        let read = self.reader.read(&mut buffer[..requested])?;
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!(
+                    "profile object {} ended at {} bytes, expected {}",
+                    self.key.object_id, self.copied, self.expected_size
+                ),
+            ));
+        }
+        self.copied += read as u64;
+        self.hasher.update(&buffer[..read]);
+        Ok(read)
+    }
 }
 
 /// Stream one catalogue-authoritative object into a caller-owned sink while
@@ -1117,6 +1192,11 @@ mod tests {
         .expect("put");
         std::fs::write(root.join(record.location), b"changed").expect("tamper");
         assert!(verify_profile_object(&backend, &key).is_err());
+        let mut downloaded = Vec::new();
+        assert!(get_profile_object(&backend, &key)
+            .expect("catalogue-authorized get")
+            .read_to_end(&mut downloaded)
+            .is_err());
         let mut streamed = Vec::new();
         assert!(stream_profile_object(&backend, &key, &mut streamed, 7).is_err());
         std::fs::remove_dir_all(root).ok();
