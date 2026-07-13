@@ -118,7 +118,10 @@ with an explicit environment override; strict
 missing-binding rejection is deferred until local-Docker bootstrap can persist
 container-visible roots rather than host-only paths. The provider now exposes an
 explicit fail-closed requirement mode for profile-aware callers while legacy
-appliance fallback remains compatible.
+appliance fallback remains compatible. Programmatic bounded-folder creation now
+bootstraps the daemon-private namespace and an empty durable catalogue
+idempotently without adopting unmanaged user files; explicit adopt/reconcile
+reporting and drive-guarded opening remain subsequent seams.
 
 The canonical local Docker profile now renders successfully against the
 dedicated macOS validation root and both generated Compose documents pass

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -62,11 +64,13 @@ impl FolderCatalogue {
             fs::create_dir_all(parent).map_err(io_error)?;
         }
         if !path.exists() {
-            return Ok(Self {
+            let catalogue = Self {
                 path,
                 store_id,
                 records: BTreeMap::new(),
-            });
+            };
+            catalogue.persist(&BTreeMap::new())?;
+            return Ok(catalogue);
         }
         let file = File::open(&path).map_err(io_error)?;
         let snapshot: FolderCatalogueSnapshot = serde_json::from_reader(file).map_err(|error| {
@@ -179,11 +183,11 @@ impl FolderCatalogue {
                 .map(|duration| duration.as_nanos())
                 .unwrap_or_default()
         ));
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(io_error)?;
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&temporary).map_err(io_error)?;
         file.write_all(&bytes)
             .and_then(|_| file.sync_all())
             .map_err(io_error)?;

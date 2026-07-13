@@ -96,6 +96,31 @@ pub(super) fn register_profile_binding(
     ))
 }
 
+/// Create the daemon-private folder namespace for a new bounded folder store.
+///
+/// Adoption deliberately remains binding-only here: it needs a caller-owned
+/// reconciliation checkpoint and action-time confirmation before any user
+/// files can be copied into the managed namespace.
+pub(super) fn ensure_profile_backend(
+    request: &ProfileBindingRequest,
+) -> Result<(), DaemonServiceRuntimeError> {
+    if request.operation != ProfileBindingOperation::Create
+        || request.manifest.deployment_profile != DeploymentProfile::Folder
+    {
+        return Ok(());
+    }
+    FolderBackend::open(
+        request.backend_root.clone(),
+        request.manifest.clone(),
+        request.capacity.clone(),
+        0,
+    )
+    .map(|_| ())
+    .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!("open profile backend: {error}"),
+    })
+}
+
 pub(super) fn resolve_authorization_store_id(
     endpoint: &StoreId,
     store_registry_path: &Path,

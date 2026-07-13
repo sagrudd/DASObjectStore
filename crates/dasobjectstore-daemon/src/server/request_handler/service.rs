@@ -76,6 +76,8 @@ where
                     },
                 )
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                ensure_profile_backend(&request)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 handler
                     .service_orchestrator
                     .initialize_profile_capacity(

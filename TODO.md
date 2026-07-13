@@ -497,6 +497,10 @@ completion.
     roots may not overlap across stores, folder identities may not be reused,
     and same-store replacement remains idempotent; package hooks and explicit
     adopt/reconcile semantics remain open.
+  - [x] Bootstrap programmatic bounded-folder creation through the daemon-owned
+    private namespace and durable empty catalogue, idempotently and without
+    adopting unmanaged user files; explicit adopt/reconcile reporting and
+    package hooks remain open.
 - [ ] Finalize ingress on the same filesystem using private temporary files,
   in-flight checksum, file ``fsync``, atomic rename, directory ``fsync``, then
   transactional manifest/catalogue commit.
