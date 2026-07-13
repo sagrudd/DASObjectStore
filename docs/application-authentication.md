@@ -40,7 +40,9 @@ provider state, size, checksum, reservation state, and catalogue conflicts
 before atomically committing completion. Replays are rejected or return the
 same idempotent terminal result. The daemon now has a durable,
 expiry-pruned replay registry for capability IDs and nonces; proof verification
-and catalogue completion wiring remain authority-side work. A failed
+and catalogue completion wiring remain authority-side work. Core token issuance
+requires an explicit proof-verifier implementation and rejects unverified
+proofs. A failed
 catalogue commit never reports success.
 
 Renewal tokens are not accepted as bearer credentials for this operation.

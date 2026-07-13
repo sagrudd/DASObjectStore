@@ -204,6 +204,18 @@ pub struct AccessTokenExchangeRequest {
     pub proof: String,
 }
 
+/// Daemon/provider implementations must perform cryptographic proof
+/// verification before an access token can be issued. The core crate exposes
+/// only this narrow authority boundary and never treats a proof as verified
+/// based on its shape.
+pub trait ApplicationExchangeProofVerifier {
+    fn verify(
+        &self,
+        request: &AccessTokenExchangeRequest,
+        key: &ApplicationKeyDescriptor,
+    ) -> Result<(), ApplicationAuthValidationError>;
+}
+
 impl AccessTokenExchangeRequest {
     pub fn validate_against(
         &self,
@@ -258,6 +270,29 @@ impl AccessTokenExchangeRequest {
             return Err(ApplicationAuthValidationError::ScopeNotContained);
         }
         Ok(())
+    }
+
+    pub fn issue_access_token(
+        &self,
+        identity: &ApplicationIdentity,
+        key: &ApplicationKeyDescriptor,
+        token_id: String,
+        verifier: &impl ApplicationExchangeProofVerifier,
+    ) -> Result<AccessTokenClaims, ApplicationAuthValidationError> {
+        self.validate_against(identity, key)?;
+        verifier.verify(self, key)?;
+        validate_slug("token_id", &token_id)?;
+        let claims = AccessTokenClaims {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            token_id,
+            application_id: self.application_id.clone(),
+            audience: self.audience.clone(),
+            issued_at_unix_seconds: self.requested_issued_at_unix_seconds,
+            expires_at_unix_seconds: self.requested_expires_at_unix_seconds,
+            scope: self.scope.clone(),
+        };
+        claims.validate_against(identity)?;
+        Ok(claims)
     }
 }
 
@@ -391,6 +426,7 @@ pub enum ApplicationAuthValidationError {
     InactiveIdentity,
     InactiveKey,
     KeyMismatch,
+    ProofRejected,
     IdentityMismatch,
     ScopeNotContained,
     Invalid(String),
@@ -414,6 +450,7 @@ impl Display for ApplicationAuthValidationError {
             Self::InactiveIdentity => formatter.write_str("application identity is inactive"),
             Self::InactiveKey => formatter.write_str("application key is inactive"),
             Self::KeyMismatch => formatter.write_str("application token key mismatch"),
+            Self::ProofRejected => formatter.write_str("application exchange proof rejected"),
             Self::IdentityMismatch => formatter.write_str("token application identity mismatch"),
             Self::ScopeNotContained => {
                 formatter.write_str("token scope exceeds its application identity")
@@ -674,6 +711,65 @@ mod tests {
             Err(ApplicationAuthValidationError::Invalid(message))
                 if message.contains("exchange proof")
         ));
+    }
+
+    #[test]
+    fn access_token_issuance_requires_explicit_proof_verifier() {
+        struct Verifier {
+            accepted: bool,
+        }
+
+        impl ApplicationExchangeProofVerifier for Verifier {
+            fn verify(
+                &self,
+                _request: &AccessTokenExchangeRequest,
+                _key: &ApplicationKeyDescriptor,
+            ) -> Result<(), ApplicationAuthValidationError> {
+                self.accepted
+                    .then_some(())
+                    .ok_or(ApplicationAuthValidationError::ProofRejected)
+            }
+        }
+
+        let identity = identity();
+        let key = ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: "key-1".to_string(),
+            algorithm: ApplicationKeyAlgorithm::EcdsaP256Sha256,
+            public_key_fingerprint: format!("sha256:{}", "b".repeat(64)),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        };
+        let request = AccessTokenExchangeRequest {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: key.key_id.clone(),
+            audience: "dasobjectstore".to_string(),
+            requested_issued_at_unix_seconds: 2_000,
+            requested_expires_at_unix_seconds: 2_600,
+            scope: identity.scope.clone(),
+            proof: "detached-signature".to_string(),
+        };
+        assert_eq!(
+            request.issue_access_token(
+                &identity,
+                &key,
+                "access-1".to_string(),
+                &Verifier { accepted: false }
+            ),
+            Err(ApplicationAuthValidationError::ProofRejected)
+        );
+        let claims = request
+            .issue_access_token(
+                &identity,
+                &key,
+                "access-1".to_string(),
+                &Verifier { accepted: true },
+            )
+            .expect("verified token");
+        assert_eq!(claims.token_id, "access-1");
     }
 
     #[test]

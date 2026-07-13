@@ -811,8 +811,9 @@ completion.
     registry with authenticated administrator registration, active/revoked
     state, and fingerprints. The core exchange-request contract now validates
     active identity/key membership, bounded proof shape, lifetime, and scope;
-    private key custody, cryptographic proof verification, and exchange
-    issuance remain. Do not issue long-lived broadly scoped bearer access
+    issuance now requires an explicit verifier boundary and rejects unverified
+    proofs; private key custody and the daemon's concrete cryptographic
+    verifier remain. Do not issue long-lived broadly scoped bearer access
     tokens.
   - [ ] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
