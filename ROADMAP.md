@@ -157,6 +157,11 @@ The same authenticated route family now exposes provider-neutral bounded-profile
 health state and message fields; physical SMART/NVMe and appliance topology
 remain deployment-gated.
 
+Folder and dedicated-drive backends now reject a manifest whose store identity
+does not match the opened backend before any reservation, read, or catalogue
+operation can proceed. Appliance placement still remains behind the same
+capability contract and awaits deployment validation.
+
 ### Open technical debt
 
 The active baseline still has release-relevant gaps: provider upload completion

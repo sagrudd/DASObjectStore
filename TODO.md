@@ -309,9 +309,11 @@ completion.
   delivered; full backend orchestration remains for live drive/appliance
   identity probing and shared catalogue wiring. Legacy appliance creation does
   not infer profile authority from a path or profile name.
-- [ ] Define a capability-based backend contract for validation, reservation,
+- [~] Define a capability-based backend contract for validation, reservation,
   staging, durable finalization, reads, enumeration, verification, health,
-  reconciliation, and removal.
+  reconciliation, and removal. Folder and dedicated-drive implementations now
+  enforce manifest identity at the backend boundary; appliance placement and
+  unchanged ingress/repair/export evidence remain open.
   - [x] Add the shared `ObjectStoreBackend` trait, typed object/health/error
     records, and explicit capability flags for every operation; concrete folder,
     drive, and appliance implementations remain subsequent gates.

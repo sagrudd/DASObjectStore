@@ -464,7 +464,15 @@ impl ObjectStoreBackend for FolderBackend {
     }
 
     fn validate_manifest(&self, manifest: &ObjectStoreManifest) -> Result<(), BackendError> {
-        manifest.validate().map_err(BackendError::Manifest)
+        manifest.validate().map_err(BackendError::Manifest)?;
+        if manifest != &self.manifest
+            || !matches!(manifest.backend, BackendReference::Folder { .. })
+        {
+            return Err(BackendError::InvalidRequest(
+                "folder manifest identity does not match this backend".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     fn reserve(&mut self, reservation_id: &str, bytes: u64) -> Result<(), BackendError> {
@@ -1024,6 +1032,27 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn folder_backend_rejects_manifest_for_another_store() {
+        let root = unique_root();
+        let backend = FolderBackend::open(&root, manifest(), CapacityPolicy::bounded(1024, 1), 0)
+            .expect("folder backend opens");
+        let mut mismatched = manifest();
+        mismatched.store_id = StoreId::new("other-folder").expect("store id");
+
+        let error = backend
+            .validate_manifest(&mismatched)
+            .expect_err("foreign manifest must fail closed");
+        assert_eq!(
+            error,
+            BackendError::InvalidRequest(
+                "folder manifest identity does not match this backend".to_string()
+            )
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn folder_backend_hashes_stages_fsyncs_renames_and_reads() {
