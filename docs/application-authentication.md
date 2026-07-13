@@ -25,6 +25,11 @@ records the owner, purpose, allowed ObjectStores, allowed prefixes or object
 types, operations, ingress origin, optional byte limits, expiry, and audit
 metadata. Application credentials never convey private host paths.
 
+Rotatable key descriptors may carry base64-encoded public-key material alongside
+its SHA-256 fingerprint. The daemon's ring-backed verifier supports Ed25519 and
+P-256 detached signatures over the canonical proof-free exchange payload; an
+mTLS certificate descriptor must be verified by the transport layer.
+
 ## Token scope and completion
 
 Access tokens are audience-bound and include an application identity, token

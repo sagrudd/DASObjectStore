@@ -1,6 +1,7 @@
 //! Managed daemon boundary for DASObjectStore.
 
 pub mod api;
+pub mod application_token_verifier;
 pub mod auth;
 pub mod client;
 #[cfg(feature = "development-self-signing")]

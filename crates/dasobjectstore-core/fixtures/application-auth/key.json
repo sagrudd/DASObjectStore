@@ -4,6 +4,7 @@
   "key_id": "key-1",
   "algorithm": "ecdsa_p256_sha256",
   "public_key_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "public_key_material": "AQ==",
   "issued_at_unix_seconds": 1000,
   "expires_at_unix_seconds": 100000,
   "active": true

@@ -812,9 +812,10 @@ completion.
     state, and fingerprints. The core exchange-request contract now validates
     active identity/key membership, bounded proof shape, lifetime, and scope;
     issuance now requires an explicit verifier boundary and rejects unverified
-    proofs; private key custody and the daemon's concrete cryptographic
-    verifier remain. Do not issue long-lived broadly scoped bearer access
-    tokens.
+    proofs. The daemon now provides a ring-backed Ed25519/P-256 verifier bound
+    to registered public-key material and fingerprints; private key custody,
+    mTLS transport verification, and public exchange endpoint wiring remain.
+    Do not issue long-lived broadly scoped bearer access tokens.
   - [ ] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
     audience, expiry, and nonce; verify provider state before atomic catalogue

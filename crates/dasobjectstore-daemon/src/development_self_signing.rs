@@ -5,6 +5,8 @@
 //! set, so this code and its private-key material cannot be enabled by a
 //! packaged configuration file.
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use dasobjectstore_core::application_auth::{
     ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
     ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
@@ -106,6 +108,7 @@ pub struct DevelopmentSelfSignedMaterial {
     pub certificate_pem: String,
     pub private_key_pem: String,
     pub public_key_fingerprint: String,
+    pub public_key_material: String,
 }
 
 impl DevelopmentSelfSignedMaterial {
@@ -115,11 +118,12 @@ impl DevelopmentSelfSignedMaterial {
         policy.validate()?;
         let certified_key = generate_simple_self_signed(vec!["localhost".to_string()])
             .map_err(|error| DevelopmentSelfSigningError::Certificate(error.to_string()))?;
-        let fingerprint = Sha256::digest(certified_key.cert.der().as_ref());
+        let fingerprint = Sha256::digest(certified_key.signing_key.public_key_raw());
         Ok(Self {
             certificate_pem: certified_key.cert.pem(),
             private_key_pem: certified_key.signing_key.serialize_pem(),
             public_key_fingerprint: format!("sha256:{fingerprint:x}"),
+            public_key_material: BASE64.encode(certified_key.signing_key.public_key_raw()),
         })
     }
 
@@ -136,6 +140,7 @@ impl DevelopmentSelfSignedMaterial {
             key_id: key_id.into(),
             algorithm: ApplicationKeyAlgorithm::EcdsaP256Sha256,
             public_key_fingerprint: self.public_key_fingerprint.clone(),
+            public_key_material: Some(self.public_key_material.clone()),
             issued_at_unix_seconds,
             expires_at_unix_seconds: issued_at_unix_seconds
                 .saturating_add(DEVELOPMENT_SELF_SIGNING_MAX_TTL_SECONDS),

@@ -717,11 +717,13 @@ dependencies = [
 name = "dasobjectstore-daemon"
 version = "0.76.27"
 dependencies = [
+ "base64",
  "dasobjectstore-core",
  "dasobjectstore-metadata",
  "dasobjectstore-object-service",
  "libc",
  "rcgen",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

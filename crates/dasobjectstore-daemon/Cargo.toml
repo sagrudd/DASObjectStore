@@ -17,6 +17,7 @@ name = "dasobjectstored"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true
@@ -24,6 +25,7 @@ libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
+ring.workspace = true
 sha2.workspace = true
 rcgen = { workspace = true, optional = true }
 

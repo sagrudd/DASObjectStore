@@ -46,6 +46,10 @@ pub struct ApplicationKeyDescriptor {
     pub key_id: String,
     pub algorithm: ApplicationKeyAlgorithm,
     pub public_key_fingerprint: String,
+    /// Optional base64-encoded public key bytes. Rotation metadata may omit
+    /// this material, but a concrete daemon verifier must require it.
+    #[serde(default)]
+    pub public_key_material: Option<String>,
     pub issued_at_unix_seconds: u64,
     pub expires_at_unix_seconds: u64,
     pub active: bool,
@@ -217,6 +221,14 @@ pub trait ApplicationExchangeProofVerifier {
 }
 
 impl AccessTokenExchangeRequest {
+    /// Return the deterministic, proof-free bytes that a key implementation
+    /// must sign. The struct field order is part of the versioned contract.
+    pub fn signing_payload(&self) -> Vec<u8> {
+        let mut unsigned = self.clone();
+        unsigned.proof.clear();
+        serde_json::to_vec(&unsigned).expect("application auth request is serializable")
+    }
+
     pub fn validate_against(
         &self,
         identity: &ApplicationIdentity,
@@ -683,6 +695,7 @@ mod tests {
             key_id: "key-1".to_string(),
             algorithm: ApplicationKeyAlgorithm::EcdsaP256Sha256,
             public_key_fingerprint: format!("sha256:{}", "b".repeat(64)),
+            public_key_material: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,
@@ -738,6 +751,7 @@ mod tests {
             key_id: "key-1".to_string(),
             algorithm: ApplicationKeyAlgorithm::EcdsaP256Sha256,
             public_key_fingerprint: format!("sha256:{}", "b".repeat(64)),
+            public_key_material: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,
@@ -908,6 +922,7 @@ mod tests {
             key_id: "key-2026-07".to_string(),
             algorithm: ApplicationKeyAlgorithm::Ed25519,
             public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            public_key_material: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,

@@ -221,6 +221,7 @@ mod tests {
             key_id: key_id.to_string(),
             algorithm: ApplicationKeyAlgorithm::Ed25519,
             public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            public_key_material: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,
