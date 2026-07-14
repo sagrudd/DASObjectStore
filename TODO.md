@@ -325,9 +325,12 @@ completion.
     also publishes a stable operation vocabulary with `supports` and
     missing-operation projections so adapters can explain capability gaps
     without duplicating field mappings.
-- [ ] Version portable manifest and placement contracts so logical identity,
+- [~] Version portable manifest and placement contracts so logical identity,
   hierarchy, versions, hashes, provenance, protection, and backend locations do
-  not encode mandatory appliance SSD/HDD assumptions.
+  not encode mandatory appliance SSD/HDD assumptions. Versioned manifest and
+  profile-neutral catalogue contracts are implemented and validated locally;
+  appliance placement integration and the daemon-owned shared-catalogue
+  transaction handoff remain open.
   - [x] Add a versioned `ObjectStoreManifest` with explicit folder root,
     drive filesystem/device identity, or appliance pool backend references;
     legacy metadata remains untouched and profile/backend mismatches are
