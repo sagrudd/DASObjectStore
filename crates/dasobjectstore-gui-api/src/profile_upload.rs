@@ -210,7 +210,9 @@ async fn upload_to_daemon(
         .await
 }
 
-fn required_content_length(headers: &HeaderMap) -> Result<u64, (StatusCode, Json<AuthRouteError>)> {
+pub(super) fn required_content_length(
+    headers: &HeaderMap,
+) -> Result<u64, (StatusCode, Json<AuthRouteError>)> {
     let value = headers.get(header::CONTENT_LENGTH).ok_or_else(|| {
         route_error(
             StatusCode::LENGTH_REQUIRED,
@@ -234,7 +236,7 @@ fn required_content_length(headers: &HeaderMap) -> Result<u64, (StatusCode, Json
     })
 }
 
-fn required_header(
+pub(super) fn required_header(
     headers: &HeaderMap,
     name: &'static str,
 ) -> Result<String, (StatusCode, Json<AuthRouteError>)> {

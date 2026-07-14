@@ -5,6 +5,7 @@ use crate::api::{
     ProviderStreamVerifier,
 };
 use crate::runtime::DEFAULT_DAEMON_GROUP;
+use serde::Serialize;
 use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::io::{Error as IoError, ErrorKind};
 use std::os::unix::net::UnixStream;
@@ -135,6 +136,50 @@ impl UnixSocketDaemonTransport {
         request
             .validate()
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        self.upload_provider_frames(
+            &request,
+            &request.request_id,
+            request.expected_size_bytes,
+            &request.expected_sha256,
+            &mut next_frame,
+        )
+    }
+
+    /// Send one reservation-bound multipart part through the same bounded
+    /// binary framing and verifier as a complete-object upload. The JSON
+    /// envelope differs so retries are addressed by reservation and part
+    /// number rather than an upload capability.
+    pub fn upload_multipart_part(
+        &self,
+        request: crate::api::ProviderStreamMultipartPartUploadOpenRequest,
+        mut next_frame: impl FnMut() -> Result<
+            Option<(ProviderStreamChunkHeader, Vec<u8>)>,
+            DaemonClientError,
+        >,
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
+        request
+            .validate()
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        self.upload_provider_frames(
+            &request,
+            &request.request_id,
+            request.expected_size_bytes,
+            &request.expected_sha256,
+            &mut next_frame,
+        )
+    }
+
+    fn upload_provider_frames(
+        &self,
+        request: &impl Serialize,
+        request_id: &str,
+        expected_size_bytes: u64,
+        expected_sha256: &str,
+        next_frame: &mut dyn FnMut() -> Result<
+            Option<(ProviderStreamChunkHeader, Vec<u8>)>,
+            DaemonClientError,
+        >,
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
         let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
             DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
         })?;
@@ -152,7 +197,7 @@ impl UnixSocketDaemonTransport {
             .flush()
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
 
-        let mut verifier = ProviderStreamVerifier::new(request.request_id.clone())
+        let mut verifier = ProviderStreamVerifier::new(request_id.to_string())
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
         loop {
             let Some((header, payload)) = next_frame()? else {
@@ -169,8 +214,8 @@ impl UnixSocketDaemonTransport {
                         "provider stream upload final frame omitted its checksum".to_string(),
                     )
                 })?;
-                if total_size != request.expected_size_bytes
-                    || !checksum.eq_ignore_ascii_case(&request.expected_sha256)
+                if total_size != expected_size_bytes
+                    || !checksum.eq_ignore_ascii_case(expected_sha256)
                 {
                     return Err(DaemonClientError::Transport(
                         "provider stream upload differs from its declared size or checksum"

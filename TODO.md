@@ -44,7 +44,7 @@ evidence and detailed source tasks.
   require hardware.
 - `[~]` Gate 5 — provider-neutral S3 read/write/delete/verify/health contracts,
   capacity reconciliation, list transport DTOs, and authenticated daemon/HTTP
-  dispatch are delivered; binary multipart part ingress and appliance
+  dispatch are delivered; provider-native capability verification and appliance
   migration adapters remain.
 - `[ ]` Gate 6 — integration and market-readiness acceptance awaits the
   blocked deployment, security, stress, and product-workflow matrices.
@@ -717,15 +717,15 @@ transaction wiring; those boundaries stay explicit in the child items below.
 - [~] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations. Browse, verify, capacity, and
   health contracts are delivered for bounded folder profiles; provider-backed
-  streaming download, repair/lifecycle orchestration, and full S3 write/multipart
-  HTTP routing remain open. A provider-neutral bounded writer-stream helper now
+  streaming download, repair/lifecycle orchestration, and shared catalogue
+  integration remain open. A provider-neutral bounded writer-stream helper now
   verifies catalogue authority and exact declared size before reporting a
   successful copy; the provider-neutral GET reader likewise verifies declared
   size and checksum as it is consumed, and the bounded stream helper is
   exported for adapter consumers. The daemon Unix-socket upload envelope now
   drives that writer through authorization, reservation, staged fsync/rename,
-  and catalogue commit; HTTP listener framing and provider-backed transport
-  remain separate.
+    and catalogue commit; HTTP request bodies now use bounded multipart and
+    single-object adapters over the same daemon transport.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots
     from `FolderBackend`; folder-profile catalogue records now reload from the
     private snapshot, while repair/lifecycle/S3 and shared catalogue
@@ -890,8 +890,8 @@ hardware acceptance.
     catalogue-authoritative object through the daemon-owned folder binding and
     returns only logical key, version, size, and checksum metadata; backend
     paths and provider listings remain private; the authenticated Web HEAD
-    route delegates through this transport. Full binary multipart part ingress
-    remains on the daemon provider-stream boundary.
+    route delegates through this transport. Authenticated multipart part POST
+    now streams bounded binary frames through that same daemon boundary.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
@@ -899,15 +899,15 @@ hardware acceptance.
     bounded daemon payload transport gate recorded above; standalone
     authenticated PUT and GET/range routes now stream through the daemon
     provider envelope with bounded backpressure, and completion submits only a
-    path-free manifest. Binary multipart part ingress still keeps catalogue
-    authority and provider credentials inside the daemon and fails closed
-    rather than introducing a path-bearing or unbounded JSON shortcut.
+    path-free manifest. Multipart part POST also keeps catalogue authority and
+    provider credentials inside the daemon and fails closed rather than
+    introducing a path-bearing or unbounded JSON shortcut.
     - [x] Add the authenticated standalone HTTP GET/range adapter. It parses a
       single bounded byte range and SHA-256 conditional headers, waits for the
       daemon to open the verified stream before returning a response, and then
       relays frames through a bounded channel with 206 and conditional error
-      mapping; multipart completion now has a matching authenticated POST
-      adapter while binary part ingress remains daemon-owned.
+      mapping; multipart part and completion now have matching authenticated
+      POST adapters while binary frames remain daemon-owned.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
     daemon bridge; the authenticated Web health route delegates through the
@@ -966,8 +966,8 @@ hardware acceptance.
     daemon path. Writer-group authorization, logical/physical reservation,
     frame-by-frame size/checksum verification, staged fsync/rename, and the
     path-free commit acknowledgement now complete before the socket response;
-    native HTTP listener dispatch and provider-native capability verification
-    remain separately gated.
+    the authenticated HTTP part POST now feeds the same bounded frames, while
+    provider-native capability verification remains separately gated.
   - [x] Add the authenticated standalone HTTP profile PUT adapter. It requires
     explicit Content-Length, request/upload identity, and SHA-256 headers,
     streams bounded frames through a backpressured daemon bridge, closes the

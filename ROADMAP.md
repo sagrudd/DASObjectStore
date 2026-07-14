@@ -1429,9 +1429,9 @@ HTTPS exchange route for clients and adapters, and the standalone Web API
 dispatches it through the daemon; listener authentication and mTLS verification
 remain deployment-layer work.
 Stable profile-S3 route constants now identify bounded object listing and
-reservation-bound multipart completion without introducing an HTTP listener;
-daemon request routing and runtime store dispatch now consume the journal-backed
-completion command, while listener authentication remains separate.
+reservation-bound multipart part/completion routes; daemon request routing and
+runtime store dispatch consume the journal-backed commands, while listener
+authentication remains separate.
 Capacity-enabled local ingest also rejects a client copy-count override before
 any source read when it differs from the daemon ObjectStore policy; legacy
 standalone executor paths retain their explicit override behavior.
@@ -1453,17 +1453,17 @@ profile-neutral read-only browser projection now queries those authoritative
 records without inventing appliance placement/lifecycle fields. Daemon-backed
 profile HEAD, verification, capacity, health, readiness, and authenticated Web
 capability/readiness routes are also available without exposing private paths;
-shared SQLite catalogue authority, provider-backed streaming download,
-repair/lifecycle orchestration, and full S3 HTTP integration remain open. The
+shared SQLite catalogue authority, provider-backed streaming download, and
+repair/lifecycle orchestration remain open. The
 provider-neutral runtime now also offers a bounded writer-stream helper, the
 daemon Unix provider-stream dispatch drives it through authorization,
 reservation, exact byte/checksum verification, staged fsync/rename, and
 catalogue commit before acknowledging success, and the authenticated standalone
 HTTP PUT adapter feeds that stream with bounded channel backpressure. The
 authenticated HTTP GET/range adapter relays daemon-verified frames through a
-bounded channel after an explicit stream-open handshake. Multipart completion
-now uses the same authenticated bridge for its path-free manifest; listener
-framing for binary part ingress remains a daemon transport concern.
+bounded channel after an explicit stream-open handshake. Multipart part and
+completion routes now use the same authenticated bridge; binary framing and
+staging remain daemon transport concerns.
 
 Shared SQLite catalogue integration is currently blocked by a schema/authority
 boundary: profile-private records carry versioned logical keys and local

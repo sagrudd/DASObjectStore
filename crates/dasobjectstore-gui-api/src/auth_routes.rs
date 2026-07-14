@@ -108,7 +108,9 @@ use dasobjectstore_daemon::{
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use profile_download::standalone_profile_s3_get;
-use profile_multipart::standalone_profile_s3_multipart_complete;
+use profile_multipart::{
+    standalone_profile_s3_multipart_complete, standalone_profile_s3_multipart_part,
+};
 use profile_upload::standalone_profile_s3_put;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -1856,6 +1858,38 @@ mod tests {
                     .body(Body::from(
                         r#"{"key":{"object_id":"reads/sample.fastq","version":1},"expected_size_bytes":1,"parts":[{"part_number":1,"size_bytes":1,"checksum":"0000000000000000000000000000000000000000000000000000000000000000"}]}"#,
                     ))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_multipart_part_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-multipart-part-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(
+                        "/api/v1/profile-s3/stores/generated-data/multipart/reservation-1/parts/1?key=reads%2Fsample.fastq",
+                    )
+                    .header("content-type", "application/octet-stream")
+                    .header("content-length", "1")
+                    .header("x-das-request-id", "request-1")
+                    .header("x-das-sha256", format!("sha256:{}", "a".repeat(64)))
+                    .header("x-das-reservation-size", "1")
+                    .body(Body::from("x"))
                     .expect("request builds"),
             )
             .await
