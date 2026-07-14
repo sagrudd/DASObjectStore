@@ -105,6 +105,11 @@ The daemon, not the self-signing key, remains the authority. A self-signed token
 is accepted only when the daemon's development policy maps its issuer and
 claims to the constrained development service principal.
 
+All daemon/Web exchange and administrator identity/key/revocation wrappers use
+strict JSON decoding: unknown fields are rejected before validation, registry
+lookup, or claim consumption. This prevents clients from smuggling unreviewed
+security decisions through an otherwise valid versioned payload.
+
 ## Lifecycle and safeguards
 
 The implementation backlog covers service-principal registration, key/cert
