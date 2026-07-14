@@ -1,7 +1,10 @@
-use super::{DaemonClientError, DaemonClientTransport};
-use crate::api::{DaemonApiRequest, DaemonApiResponse, DaemonIngestProgressEvent};
+use super::{unexpected, DaemonClientError, DaemonClientTransport};
+use crate::api::{
+    read_provider_stream_frame, DaemonApiRequest, DaemonApiResponse, DaemonIngestProgressEvent,
+    ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamVerifier,
+};
 use crate::runtime::DEFAULT_DAEMON_GROUP;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::io::{Error as IoError, ErrorKind};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -11,6 +14,12 @@ use std::time::{Duration, Instant};
 pub struct UnixSocketDaemonTransport {
     socket_path: PathBuf,
     idle_timeout: Option<Duration>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderStreamReceipt {
+    pub total_size: u64,
+    pub sha256: String,
 }
 
 impl UnixSocketDaemonTransport {
@@ -35,6 +44,102 @@ impl UnixSocketDaemonTransport {
 
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
+    }
+
+    /// Consume a path-free provider stream from the daemon. The first server
+    /// response is either a newline-delimited JSON error or the fixed binary
+    /// frame magic; payload bytes are never buffered beyond one bounded frame
+    /// and are delivered only after cumulative offset/request/checksum checks.
+    pub fn stream_provider(
+        &self,
+        request: ProviderStreamOpenRequest,
+        mut emit_frame: impl FnMut(&ProviderStreamChunkHeader, &[u8]) -> Result<(), DaemonClientError>,
+    ) -> Result<ProviderStreamReceipt, DaemonClientError> {
+        request
+            .validate()
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
+            DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
+        })?;
+        if let Some(timeout) = self.idle_timeout {
+            stream
+                .set_read_timeout(Some(timeout))
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        }
+        serde_json::to_writer(&mut stream, &request)
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        stream
+            .write_all(b"\n")
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        stream
+            .flush()
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+
+        let mut reader = BufReader::new(stream);
+        let mut prefix = [0_u8; 4];
+        reader
+            .read_exact(&mut prefix)
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        if &prefix != b"DPS1" {
+            let mut line = String::from_utf8_lossy(&prefix).into_owned();
+            reader
+                .read_line(&mut line)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            let response: DaemonApiResponse = serde_json::from_str(&line)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            return match response {
+                DaemonApiResponse::Error(error) => Err(DaemonClientError::Api(error)),
+                response => Err(unexpected("provider_stream", response)),
+            };
+        }
+
+        let mut framed_reader = PrefixReader::new(prefix, reader);
+        let mut verifier = ProviderStreamVerifier::new(request.request_id)
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        loop {
+            let (header, payload) = read_provider_stream_frame(&mut framed_reader)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            if header.final_chunk {
+                let total_size = verifier
+                    .finish(&header, &payload)
+                    .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+                let sha256 = header.sha256.clone().ok_or_else(|| {
+                    DaemonClientError::Transport(
+                        "provider stream final frame omitted its checksum".to_string(),
+                    )
+                })?;
+                emit_frame(&header, &payload)?;
+                return Ok(ProviderStreamReceipt { total_size, sha256 });
+            }
+            verifier
+                .push(&header, &payload)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            emit_frame(&header, &payload)?;
+        }
+    }
+}
+
+struct PrefixReader<R> {
+    prefix: Cursor<[u8; 4]>,
+    reader: R,
+}
+
+impl<R> PrefixReader<R> {
+    fn new(prefix: [u8; 4], reader: R) -> Self {
+        Self {
+            prefix: Cursor::new(prefix),
+            reader,
+        }
+    }
+}
+
+impl<R: Read> Read for PrefixReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.prefix.read(buffer)?;
+        if read != 0 {
+            return Ok(read);
+        }
+        self.reader.read(buffer)
     }
 }
 
@@ -140,13 +245,16 @@ fn connect_error_message(socket_path: &Path, error: &IoError) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{connect_error_message, UnixSocketDaemonTransport};
+    use super::{connect_error_message, ProviderStreamReceipt, UnixSocketDaemonTransport};
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse,
+        DaemonServiceStatusResponse, ProviderStreamChunkHeader, ProviderStreamOpenRequest,
+        PROVIDER_STREAM_SCHEMA_VERSION,
     };
     use crate::client::{DaemonClient, DaemonClientError};
-    use crate::server::UnixSocketDaemonServer;
+    use crate::server::{DaemonApiHandler, UnixSocketDaemonServer, UnixSocketDaemonServerError};
+    use dasobjectstore_core::backend::BackendObjectKey;
+    use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::fs;
     use std::io::{Error as IoError, ErrorKind};
@@ -200,6 +308,47 @@ mod tests {
     }
 
     #[test]
+    fn unix_socket_transport_consumes_verified_provider_frames() {
+        let socket_path = unique_socket_path();
+        let listener = UnixListener::bind(&socket_path).expect("listener binds");
+        let server = UnixSocketDaemonServer::new(&socket_path, ProviderStreamHandler);
+        let join = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("client connects");
+            server
+                .handle_stream(stream)
+                .expect("provider stream handled");
+        });
+        let request = ProviderStreamOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "client-stream-1".to_string(),
+            store_id: StoreId::new("stream-store").expect("store id"),
+            object: BackendObjectKey {
+                object_id: "objects/hello.txt".to_string(),
+                version: 1,
+            },
+            range: None,
+            condition: Default::default(),
+            chunk_size_bytes: 1024,
+        };
+        let client = UnixSocketDaemonTransport::new(&socket_path);
+        let mut bytes = Vec::new();
+        let receipt: ProviderStreamReceipt = client
+            .stream_provider(request, |_, payload| {
+                bytes.extend_from_slice(payload);
+                Ok(())
+            })
+            .expect("provider stream receipt");
+        assert_eq!(bytes, b"hello");
+        assert_eq!(receipt.total_size, 5);
+        assert_eq!(
+            receipt.sha256,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        join.join().expect("server thread joins");
+        let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
     fn unix_socket_transport_explains_permission_denied() {
         let message = connect_error_message(
             PathBuf::from("/run/dasobjectstore/dasobjectstored.sock").as_path(),
@@ -243,5 +392,59 @@ mod tests {
             .expect("system clock")
             .as_nanos();
         std::env::temp_dir().join(format!("dasobjectstore-{}-{now}.sock", std::process::id()))
+    }
+
+    struct ProviderStreamHandler;
+
+    impl DaemonApiHandler for ProviderStreamHandler {
+        fn handle_api_request(
+            &self,
+            _request: DaemonApiRequest,
+        ) -> Result<DaemonApiResponse, UnixSocketDaemonServerError> {
+            Ok(DaemonApiResponse::Error(
+                crate::api::DaemonApiErrorResponse::new(
+                    "not_implemented",
+                    "provider stream test handler only",
+                ),
+            ))
+        }
+
+        fn handle_provider_stream_open_for_actor(
+            &self,
+            request: ProviderStreamOpenRequest,
+            _actor: Option<&crate::auth::DaemonLocalActor>,
+            _emit_response: &mut dyn FnMut(
+                DaemonApiResponse,
+            ) -> Result<(), UnixSocketDaemonServerError>,
+            emit_frame: &mut dyn FnMut(
+                &ProviderStreamChunkHeader,
+                &[u8],
+            ) -> Result<(), UnixSocketDaemonServerError>,
+        ) -> Result<(), UnixSocketDaemonServerError> {
+            let payload = b"hello";
+            let header = ProviderStreamChunkHeader {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: request.request_id.clone(),
+                offset: 0,
+                payload_len: payload.len() as u32,
+                final_chunk: false,
+                total_size: None,
+                sha256: None,
+            };
+            emit_frame(&header, payload)?;
+            let final_header = ProviderStreamChunkHeader {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: request.request_id,
+                offset: payload.len() as u64,
+                payload_len: 0,
+                final_chunk: true,
+                total_size: Some(payload.len() as u64),
+                sha256: Some(
+                    "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                        .to_string(),
+                ),
+            };
+            emit_frame(&final_header, &[])
+        }
     }
 }

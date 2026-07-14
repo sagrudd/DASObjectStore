@@ -6,7 +6,7 @@ mod unix_socket;
 
 pub use error::DaemonClientError;
 pub use in_process::InProcessDaemonTransport;
-pub use unix_socket::UnixSocketDaemonTransport;
+pub use unix_socket::{ProviderStreamReceipt, UnixSocketDaemonTransport};
 
 use crate::api::{
     ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplicationAccessTokenExchangeRequest,

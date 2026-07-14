@@ -2397,11 +2397,14 @@ list until every temporary size-budget exception has been removed.
     backends now expose the provider-neutral bounded range-read seam with a
     safe full-reader fallback for future providers; the Unix socket now
     recognizes and validates the standalone path-free open envelope and
-    dispatches bounded frames through an explicit handler callback. The daemon
-    now wires catalogue-authoritative bounded folder-profile reads, including
-    range and checksum conditions; appliance/provider-native readers and the
-    HTTP route remain separate. The verifier exposes a cooperative cancellation
-    token that aborts before the next frame.
+    dispatches bounded frames through an explicit handler callback. The Unix
+    socket client now consumes the binary stream, bounds allocation to one
+    frame, and verifies request identity, contiguous offsets, final size, and
+    SHA-256 before delivering payloads to callers. The daemon now wires
+    catalogue-authoritative bounded folder-profile reads, including range and
+    checksum conditions; appliance/provider-native readers and the HTTP route
+    remain separate. The verifier exposes a cooperative cancellation token
+    that aborts before the next frame.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

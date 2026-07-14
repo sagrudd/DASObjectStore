@@ -185,9 +185,11 @@ magic/length-prefixed framing, a cumulative contiguous-offset/size/checksum
 verifier, and a cooperative cancellation token. The Unix socket now recognizes
 and validates the standalone path-free open envelope, dispatches bounded frames
 through an explicit handler callback, and wires catalogue-authoritative bounded
-folder-profile reads, including range and checksum conditions. Appliance or
-provider-native readers and the HTTP route remain separate; provider-native
-execution is still intentionally unclaimed. The profile backend contract now exposes a bounded provider-neutral `read_range`
+folder-profile reads, including range and checksum conditions. The Unix-socket
+client now consumes and verifies those frames before delivering payloads to a
+caller-owned sink. Appliance or provider-native readers and the HTTP route
+remain separate; provider-native execution is still intentionally unclaimed.
+The profile backend contract now exposes a bounded provider-neutral `read_range`
 operation: folder and guarded-drive backends use native seek-bounded reads,
 while future providers retain a safe full-reader fallback until they add
 provider-native range support.

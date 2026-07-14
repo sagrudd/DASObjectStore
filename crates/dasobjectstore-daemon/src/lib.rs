@@ -121,7 +121,7 @@ pub use auth::{
 };
 pub use client::{
     DaemonClient, DaemonClientError, DaemonClientTransport, InProcessDaemonTransport,
-    UnixSocketDaemonTransport,
+    ProviderStreamReceipt, UnixSocketDaemonTransport,
 };
 pub use runtime::{
     admin_job_registry_path, appliance_sample_set, appliance_telemetry_state_path,
