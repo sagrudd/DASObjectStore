@@ -2879,7 +2879,9 @@ non-destructive close, and restores focus to its trigger when closed.
   a presentation/context refactor, not permission or transfer-policy
   relaxation. EasyConnect pairing persistence now uses fsync'd temporary-file
   replacement and directory fsync, with a regression proving no temporary
-  artifact remains after a successful write.
+  artifact remains after a successful write. Paired-session renewal and
+  revocation state now uses the same atomic persistence boundary with a
+  regression covering its final-file publication.
 
 ### 24.5 Verification and documentation
 

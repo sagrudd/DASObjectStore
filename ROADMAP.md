@@ -169,6 +169,8 @@ HEAD transport now exposes bounded logical key/version/size/checksum metadata
 through the same daemon bridge without revealing backend paths.
 EasyConnect pairing state uses fsync'd temporary-file replacement and directory
 fsync before publication, preserving pairing durability across crashes.
+Paired-session renewal and revocation state uses the same atomic publication
+boundary so credential updates cannot leave a truncated session registry.
 The same authenticated route family now exposes provider-neutral bounded-profile
 health state and message fields; physical SMART/NVMe and appliance topology
 remain deployment-gated.

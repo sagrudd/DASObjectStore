@@ -4,9 +4,10 @@ use crate::api::{
 };
 use crate::auth::DaemonLocalActor;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const REMOTE_EASYCONNECT_SESSION_DIR_NAME: &str = "remote-easyconnect";
 pub const REMOTE_EASYCONNECT_SESSION_FILE_NAME: &str = "sessions.json";
@@ -519,24 +520,59 @@ fn write_store(
     path: &Path,
     store: &RemoteEasyconnectPairedSessionStoreFile,
 ) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            RemoteEasyconnectPairedSessionStoreError::Io {
-                path: parent.to_path_buf(),
-                message: error.to_string(),
-            }
+    let parent = path
+        .parent()
+        .ok_or_else(|| RemoteEasyconnectPairedSessionStoreError::Io {
+            path: path.to_path_buf(),
+            message: "paired session store has no parent".to_string(),
         })?;
-    }
+    fs::create_dir_all(parent).map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
+        path: parent.to_path_buf(),
+        message: error.to_string(),
+    })?;
     let encoded = serde_json::to_vec_pretty(store).map_err(|error| {
         RemoteEasyconnectPairedSessionStoreError::Json {
             path: path.to_path_buf(),
             message: error.to_string(),
         }
     })?;
-    fs::write(path, encoded).map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("sessions"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
+            path: temporary.clone(),
+            message: error.to_string(),
+        })?;
+    use std::io::Write;
+    file.write_all(&encoded)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
+            path: temporary.clone(),
+            message: error.to_string(),
+        })?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
         path: path.to_path_buf(),
         message: error.to_string(),
-    })
+    })?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
+            path: parent.to_path_buf(),
+            message: error.to_string(),
+        })
 }
 
 fn ensure_session_usable(
@@ -609,6 +645,23 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&path).expect("store read"))
                 .expect("store decodes");
         assert_eq!(encoded["schema_version"], REMOTE_EASYCONNECT_SESSION_SCHEMA);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn session_persistence_leaves_only_final_file_after_atomic_write() {
+        let root = temp_root("atomic-persist");
+        let path = remote_easyconnect_session_store_path(&root);
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+
+        store.upsert(session("session-1")).expect("session stored");
+        let entries = std::fs::read_dir(path.parent().expect("parent"))
+            .expect("read parent")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_name(), "sessions.json");
 
         cleanup(&root);
     }
