@@ -905,6 +905,8 @@ completion.
     custody remains. Registry read-modify-write operations are serialized in
     the daemon and covered by a concurrent-upsert regression so authenticated
     administrator requests cannot lose identities.
+    Restored identity/key registries also normalize deterministic ordering
+    before reads, with malformed-order fixture regressions.
   - [~] Implement rotatable asymmetric-key or certificate identities and a
     short-lived access-token exchange (normally 5–15 minutes). Public key and
     certificate descriptors now have a versioned, daemon-owned rotation

@@ -166,6 +166,10 @@ fn read_registry(
             )));
         }
     }
+    let mut registry = registry;
+    registry
+        .identities
+        .sort_by(|left, right| left.application_id.cmp(&right.application_id));
     Ok(registry)
 }
 
@@ -322,6 +326,22 @@ mod tests {
             .expect("read")
             .expect("alpha");
         assert!(!alpha.active);
+    }
+
+    #[test]
+    fn reads_normalize_restored_identity_order() {
+        let path = root("restore-order").join("identities.json");
+        let payload = serde_json::json!({
+            "schema_version": APPLICATION_IDENTITY_REGISTRY_SCHEMA,
+            "identities": [identity("zeta"), identity("alpha")]
+        });
+        fs::write(&path, serde_json::to_vec(&payload).expect("encode")).expect("write");
+        let ids = list_application_identities(&path)
+            .expect("list identities")
+            .into_iter()
+            .map(|identity| identity.application_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["alpha", "zeta"]);
     }
 
     #[test]

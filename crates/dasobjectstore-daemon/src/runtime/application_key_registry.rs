@@ -151,6 +151,12 @@ fn read_registry(path: &Path) -> Result<ApplicationKeyRegistryFile, DaemonServic
             )));
         }
     }
+    let mut registry = registry;
+    registry.keys.sort_by(|left, right| {
+        left.application_id
+            .cmp(&right.application_id)
+            .then_with(|| left.key_id.cmp(&right.key_id))
+    });
     Ok(registry)
 }
 
@@ -283,6 +289,22 @@ mod tests {
                 .expect("key")
                 .active
         );
+    }
+
+    #[test]
+    fn reads_normalize_restored_key_order() {
+        let path = root("restore-order").join("keys.json");
+        let payload = serde_json::json!({
+            "schema_version": APPLICATION_KEY_REGISTRY_SCHEMA,
+            "keys": [key("synoptikon", "zeta"), key("synoptikon", "alpha")]
+        });
+        fs::write(&path, serde_json::to_vec(&payload).expect("encode")).expect("write");
+        let ids = list_application_keys(&path)
+            .expect("list keys")
+            .into_iter()
+            .map(|key| key.key_id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["alpha", "zeta"]);
     }
 
     #[test]

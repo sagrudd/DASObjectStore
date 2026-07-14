@@ -147,6 +147,8 @@ request/response contract for identities and individual public keys, and
 authenticated administrator dispatch applies atomic identity/key deactivation.
 Key-registry read-modify-write operations are serialized in the daemon so
 concurrent rotation or revocation requests cannot lose sibling descriptors.
+Restored identity and key registries normalize deterministic ordering before
+reads, preserving stable administrator and audit projections.
 Credential registration and revocation now append atomically persisted,
 reason-digest audit events without secrets or paths; mTLS transport verification
 remains listener work.
