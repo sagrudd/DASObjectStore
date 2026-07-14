@@ -1944,7 +1944,7 @@ list until every temporary size-budget exception has been removed.
   typed Web client contract; the compact ``ingest control --tui`` snapshot is
   covered by parser and renderer tests, while interactive keyboard controls
   and live daemon state refresh remain open.
-- [ ] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded.
+- [~] Add deterministic regressions with a deliberately blocked ingest handler and a saturated I/O fixture: HTTPS liveness/static assets and login remain responsive, daemon-backed pages fail fast with typed degraded responses, cancellation remains accepted, and no HTTP accept queue grows unbounded. Local bridge, liveness, static-asset, login, and degraded-response fixtures are covered; saturated-I/O and accept-queue measurements remain deployment-gated.
   - [x] Add a deterministic local bridge-saturation regression proving the
     daemon-independent health and liveness routes remain HTTP 200 while a
     bounded daemon bridge worker is blocked; bridge capacity is retained until
