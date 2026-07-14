@@ -2336,7 +2336,7 @@ list until every temporary size-budget exception has been removed.
 - [x] Make an omitted browser prefix a tested root-tree request: after selecting
   an ObjectStore, render all immediate folders and files without requiring a
   name, path, or search value.
-- [ ] Make daemon-owned upload completion atomically register each object path,
+- [~] Make daemon-owned upload completion atomically register each object path,
   size, checksum, lifecycle state, and readable managed/provider location in
   the ObjectBrowser catalogue before reporting the upload as complete. The
   approved contract uses a short-lived, single-use upload capability rather
@@ -2372,7 +2372,7 @@ list until every temporary size-budget exception has been removed.
   checkpoints. Remaining work is cancellation during a blocked provider copy,
   non-Garage provider range support, and appliance acceptance rather than a
   new transfer after daemon restart.
-- [ ] Extend daemon-authorized Web download to stream a verified
+- [~] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
   headers.
@@ -2394,9 +2394,12 @@ list until every temporary size-budget exception has been removed.
   ``profile_diagnostics`` projection and authenticated standalone Web route
   compare the authoritative catalogue with bounded backend enumeration without
   exposing private paths or mutating either side.
-- [ ] Add end-to-end appliance acceptance coverage for upload, root-tree
+- [~] Add end-to-end appliance acceptance coverage for upload, root-tree
   refresh, folder navigation, individual download, and content/checksum
-  verification; cover both managed-HDD and provider-backed uploads.
+  verification; cover both managed-HDD and provider-backed uploads. **Blocker
+  (appliance acceptance):** this requires the unavailable DASServer/Garage
+  deployment and quiescent managed-HDD/provider fixtures; local profile
+  contracts and diagnostics remain covered without claiming appliance parity.
 - [x] Document the operator recovery workflow for backend objects absent from
   the browser catalogue and the acceptance path proving an uploaded file can
   be browsed and downloaded; appliance execution remains deployment-gated.
