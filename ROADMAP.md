@@ -233,7 +233,11 @@ reporting and checkpointed source-preserving adoption are delivered, while live
 drive opening still requires platform identity probing.
 Profile create/adopt responses now carry redacted unmanaged/unsafe drift counts
 so callers can require explicit reconciliation without receiving private host
-paths; a separately authenticated inspection transport remains open.
+paths; a separately authenticated inspection transport remains open. DEB/RPM
+provisioning hooks now create the canonical ``/srv/dasobjectstore/ssd`` and
+``hdd`` roots idempotently, reject file collisions, and repair existing member
+trees only when the daemon-owned ``.dasobjectstore`` marker is present; unmarked
+files remain untouched until explicit adoption/reconciliation.
 
 The canonical local Docker profile now renders successfully against the
 dedicated macOS validation root and both generated Compose documents pass

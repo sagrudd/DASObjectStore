@@ -195,6 +195,49 @@ if [ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]; then
   chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
 fi
 
+repair_managed_tree() {
+  root="\$1"
+  [ -d "\$root" ] || return 0
+  chown "\$service_user:\$service_group" "\$root"
+  chmod 0750 "\$root"
+  find "\$root" -path "\$root/lost+found" -prune -o -mindepth 1 -exec chown "\$service_user:\$service_group" {} +
+  find "\$root" -path "\$root/lost+found" -prune -o -type d -exec chmod 0750 {} +
+  find "\$root" -path "\$root/lost+found" -prune -o -type f -exec chmod 0640 {} +
+}
+
+repair_marked_managed_tree() {
+  root="\$1"
+  [ -d "\$root" ] || return 0
+  if [ ! -d "\$root/.dasobjectstore" ]; then
+    cat >&2 <<WARNING
+DASObjectStore left existing files below \$root untouched because the profile
+namespace marker is missing. Explicit profile adoption/reconciliation is
+required before package configuration can manage that tree.
+WARNING
+    return 0
+  fi
+  repair_managed_tree "\$root"
+}
+
+ensure_profile_layout() {
+  root="\$1"
+  install -d -o "\$service_user" -g "\$service_group" -m 0750 "\$root"
+  if [ -e "\$root/ssd" ] && [ ! -d "\$root/ssd" ]; then
+    echo "DASObjectStore profile path \$root/ssd is not a directory." >&2
+    exit 1
+  fi
+  if [ -e "\$root/hdd" ] && [ ! -d "\$root/hdd" ]; then
+    echo "DASObjectStore profile path \$root/hdd is not a directory." >&2
+    exit 1
+  fi
+  if [ ! -e "\$root/ssd" ]; then
+    install -d -o "\$service_user" -g "\$service_group" -m 0750 "\$root/ssd"
+  fi
+  if [ ! -e "\$root/hdd" ]; then
+    install -d -o root -g root -m 0755 "\$root/hdd"
+  fi
+}
+
 if [ -e "\$managed_root" ]; then
   owner="\$(stat -c '%U' "\$managed_root")"
   group="\$(stat -c '%G' "\$managed_root")"
@@ -210,14 +253,10 @@ ERROR
   fi
 fi
 
-install -d -o "\$service_user" -g "\$service_group" -m 0750 "\$managed_root"
-for root in "\$managed_root/ssd" "\$managed_root"/hdd/*; do
-  [ -d "\$root" ] || continue
-  chown "\$service_user:\$service_group" "\$root"
-  chmod 0750 "\$root"
-  find "\$root" -path "\$root/lost+found" -prune -o -mindepth 1 -exec chown "\$service_user:\$service_group" {} +
-  find "\$root" -path "\$root/lost+found" -prune -o -type d -exec chmod 0750 {} +
-  find "\$root" -path "\$root/lost+found" -prune -o -type f -exec chmod 0640 {} +
+ensure_profile_layout "\$managed_root"
+repair_marked_managed_tree "\$managed_root/ssd"
+for root in "\$managed_root"/hdd/*; do
+  repair_marked_managed_tree "\$root"
 done
 
 if [ -x /usr/libexec/dasobjectstore/configure-external-mount-policy ]; then

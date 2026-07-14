@@ -16,7 +16,7 @@ or deployment credentials.
      - ``integrated``
    * - ``folder``
      - Preview: bounded macOS backend, XDG path contract, validated launchd plan, local tests
-     - Preview: bounded backend and packaged path contract; service/package hooks pending
+     - Preview: bounded backend and idempotent package root provisioning; explicit adoption/reconciliation remains pending
      - Preview: backend contract exists; Mnemosyne/Synoptikon provisioning adapter pending
    * - ``drive``
      - Preview: injected SSD identity validator and guarded backend

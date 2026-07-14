@@ -427,6 +427,13 @@ fn deb_postinst_rejects_user_owned_managed_root() {
 #[test]
 fn deb_postinst_repairs_existing_managed_member_roots() {
     assert_contains(POSTINST, "repair_managed_tree()");
+    assert_contains(POSTINST, "repair_marked_managed_tree()");
+    assert_contains(POSTINST, "profile");
+    assert_contains(POSTINST, "namespace marker is missing");
+    assert_contains(POSTINST, "ensure_profile_layout()");
+    assert_contains(POSTINST, "if [[ ! -e \"$root/ssd\" ]]; then");
+    assert_contains(POSTINST, "ensure_owned_dir \"$root/ssd\" 0750");
+    assert_contains(POSTINST, "install -d -o root -g root -m 0755 \"$root/hdd\"");
     assert_contains(POSTINST, "chown \"$service_user:$service_group\" \"$root\"");
     assert_contains(POSTINST, "chmod 0750 \"$root\"");
     assert_contains(POSTINST, "-path \"$root/lost+found\" -prune");
@@ -436,9 +443,9 @@ fn deb_postinst_repairs_existing_managed_member_roots() {
     );
     assert_contains(POSTINST, "-type d -exec chmod 0750 {} +");
     assert_contains(POSTINST, "-type f -exec chmod 0640 {} +");
-    assert_contains(POSTINST, "repair_managed_tree \"$managed_root/ssd\"");
+    assert_contains(POSTINST, "repair_marked_managed_tree \"$managed_root/ssd\"");
     assert_contains(POSTINST, "for root in \"$managed_root\"/hdd/*; do");
-    assert_contains(POSTINST, "repair_managed_tree \"$root\"");
+    assert_contains(POSTINST, "repair_marked_managed_tree \"$root\"");
     assert_contains(
         POSTINST,
         "systemctl enable --now dasobjectstored.service dasobjectstore-server.service",
@@ -446,6 +453,19 @@ fn deb_postinst_repairs_existing_managed_member_roots() {
     assert_contains(
         POSTINST,
         "systemctl restart dasobjectstored.service dasobjectstore-server.service",
+    );
+}
+
+#[test]
+fn rpm_post_requires_profile_marker_before_repairing_existing_trees() {
+    assert_contains(BUILD_RPM, "repair_marked_managed_tree()");
+    assert_contains(BUILD_RPM, "profile");
+    assert_contains(BUILD_RPM, "namespace marker is missing");
+    assert_contains(BUILD_RPM, "ensure_profile_layout()");
+    assert_contains(BUILD_RPM, "if [ ! -e \"\\$root/ssd\" ]; then");
+    assert_contains(
+        BUILD_RPM,
+        "repair_marked_managed_tree \"\\$managed_root/ssd\"",
     );
 }
 

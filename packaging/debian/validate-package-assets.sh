@@ -124,8 +124,15 @@ require_text "$postinst" "-exec chmod 0640 {} +"
 require_text "$postinst" "chown root:\"\$service_group\" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 require_text "$postinst" "chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
-require_text "$postinst" 'repair_managed_tree "$managed_root/ssd"'
-require_text "$postinst" 'repair_managed_tree "$root"'
+require_text "$postinst" 'repair_marked_managed_tree()'
+require_text "$postinst" 'profile'
+require_text "$postinst" 'namespace marker is missing'
+require_text "$postinst" 'ensure_profile_layout()'
+require_text "$postinst" 'if [[ ! -e "$root/ssd" ]]; then'
+require_text "$postinst" 'ensure_owned_dir "$root/ssd" 0750'
+require_text "$postinst" 'install -d -o root -g root -m 0755 "$root/hdd"'
+require_text "$postinst" 'repair_marked_managed_tree "$managed_root/ssd"'
+require_text "$postinst" 'repair_marked_managed_tree "$root"'
 require_text "$postinst" "systemctl enable --now dasobjectstored.service dasobjectstore-server.service"
 require_text "$postinst" "systemctl restart dasobjectstored.service dasobjectstore-server.service"
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
@@ -188,6 +195,12 @@ require_text "$build_rpm" '/usr/libexec/dasobjectstore/dasobjectstore-local-auth
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_rpm" 'prewarm-report-provider'
 require_text "$build_rpm" 'grammateus_report_provider install --image grammateus/report:0.8.1'
+require_text "$build_rpm" 'repair_marked_managed_tree()'
+require_text "$build_rpm" 'profile'
+require_text "$build_rpm" 'namespace marker is missing'
+require_text "$build_rpm" 'ensure_profile_layout()'
+require_text "$build_rpm" 'if [ ! -e "\$root/ssd" ]; then'
+require_text "$build_rpm" 'repair_marked_managed_tree "\$managed_root/ssd"'
 require_text "$build_rpm" 'BuildRequires:  clang'
 require_text "$build_rpm" 'BuildRequires:  libclang-devel'
 require_text "$build_rpm" 'BuildRequires:  pam-devel'

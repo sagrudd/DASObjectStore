@@ -729,6 +729,11 @@ completion.
     reload/recovery, quota rejection, and symlink drift under the dedicated
     generated-data root; package-created/container-mounted acceptance remains
     deployment-gated.
+  - [x] Make DEB/RPM provisioning hooks idempotently create the canonical
+    bounded profile roots and reject non-directory collisions. Existing member
+    trees are repaired only when their daemon-owned ``.dasobjectstore`` marker
+    is present; unmarked files remain untouched until explicit adoption or
+    reconciliation, preserving package safety without appliance acceptance.
 
 ### Gate 4: Dedicated SSD drive profile
 

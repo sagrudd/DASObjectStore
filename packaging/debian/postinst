@@ -88,6 +88,41 @@ repair_managed_tree() {
     -o -type f -exec chmod 0640 {} +
 }
 
+repair_marked_managed_tree() {
+  local root="$1"
+  if [[ ! -d "$root" ]]; then
+    return 0
+  fi
+  if [[ ! -d "$root/.dasobjectstore" ]]; then
+    cat >&2 <<WARNING
+DASObjectStore left existing files below $root untouched because the profile
+namespace marker is missing. Explicit profile adoption/reconciliation is
+required before package configuration can manage that tree.
+WARNING
+    return 0
+  fi
+  repair_managed_tree "$root"
+}
+
+ensure_profile_layout() {
+  local root="$1"
+  ensure_owned_dir "$root" 0750
+  if [[ -e "$root/ssd" && ! -d "$root/ssd" ]]; then
+    printf 'DASObjectStore profile path %s/ssd is not a directory.\n' "$root" >&2
+    exit 1
+  fi
+  if [[ -e "$root/hdd" && ! -d "$root/hdd" ]]; then
+    printf 'DASObjectStore profile path %s/hdd is not a directory.\n' "$root" >&2
+    exit 1
+  fi
+  if [[ ! -e "$root/ssd" ]]; then
+    ensure_owned_dir "$root/ssd" 0750
+  fi
+  if [[ ! -e "$root/hdd" ]]; then
+    install -d -o root -g root -m 0755 "$root/hdd"
+  fi
+}
+
 reject_user_owned_managed_root() {
   local path="$1"
   if [[ ! -e "$path" ]]; then
@@ -136,13 +171,13 @@ if [[ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]]; then
 fi
 
 reject_user_owned_managed_root "$managed_root"
-ensure_owned_dir "$managed_root" 0750
-repair_managed_tree "$managed_root/ssd"
+ensure_profile_layout "$managed_root"
+repair_marked_managed_tree "$managed_root/ssd"
 if [[ -d "$managed_root/hdd" ]]; then
   chown root:root "$managed_root/hdd"
   chmod 0755 "$managed_root/hdd"
   for root in "$managed_root"/hdd/*; do
-    repair_managed_tree "$root"
+    repair_marked_managed_tree "$root"
   done
 fi
 
