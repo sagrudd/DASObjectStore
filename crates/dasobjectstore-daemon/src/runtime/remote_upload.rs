@@ -905,7 +905,7 @@ mod tests {
             Some(&metadata)
         );
 
-        let mut invalid = metadata;
+        let mut invalid = metadata.clone();
         invalid.expected_size_bytes = 41;
         let failed = worker
             .run_with_completion_metadata(
@@ -915,6 +915,31 @@ mod tests {
                 |_| Ok::<(), &'static str>(()),
             )
             .expect("invalid completion metadata is recorded as failed");
+        assert!(matches!(failed.final_event, DaemonJobEvent::Failed(_)));
+        assert_eq!(completion.records.borrow().len(), 1);
+
+        let mut invalid_key = metadata.clone();
+        invalid_key.object_key = "../escape".to_string();
+        let failed = worker
+            .run_with_completion_metadata(
+                worker_request("remote-upload-job-completion-metadata-key"),
+                &completion,
+                invalid_key,
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("unsafe completion key is recorded as failed");
+        assert!(matches!(failed.final_event, DaemonJobEvent::Failed(_)));
+
+        let mut invalid_checksum = metadata;
+        invalid_checksum.expected_checksum = "sha256:not-a-digest".to_string();
+        let failed = worker
+            .run_with_completion_metadata(
+                worker_request("remote-upload-job-completion-metadata-checksum"),
+                &completion,
+                invalid_checksum,
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("invalid completion checksum is recorded as failed");
         assert!(matches!(failed.final_event, DaemonJobEvent::Failed(_)));
         assert_eq!(completion.records.borrow().len(), 1);
 
