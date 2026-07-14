@@ -12,6 +12,7 @@ pub const APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE: &str = "/api/v1/application-a
 /// exchange. Identity and key registries remain daemon-owned; callers submit
 /// only the signed, path-free request.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationAccessTokenExchangeRequest {
     pub exchange: AccessTokenExchangeRequest,
 }
@@ -27,6 +28,7 @@ impl ApplicationAccessTokenExchangeRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationAccessTokenExchangeResponse {
     pub claims: AccessTokenClaims,
 }
@@ -39,7 +41,10 @@ impl ApplicationAccessTokenExchangeResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationAccessTokenExchangeRequest, APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE};
+    use super::{
+        ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
+        APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
+    };
     use dasobjectstore_core::application_auth::{
         AccessTokenExchangeRequest, APPLICATION_AUTH_SCHEMA_VERSION,
     };
@@ -75,6 +80,30 @@ mod tests {
         claims.audience.clear();
         let response = super::ApplicationAccessTokenExchangeResponse { claims };
         assert!(response.validate().is_err());
+    }
+
+    #[test]
+    fn exchange_wrappers_reject_unknown_fields() {
+        let request = serde_json::json!({
+            "exchange": {
+                "schema_version": APPLICATION_AUTH_SCHEMA_VERSION,
+                "application_id": "synoptikon",
+                "key_id": "key-1",
+                "audience": "dasobjectstore",
+                "requested_issued_at_unix_seconds": 10,
+                "requested_expires_at_unix_seconds": 20,
+                "scope": sample_scope(),
+                "proof": "proof",
+                "unexpected": true
+            }
+        });
+        assert!(serde_json::from_value::<ApplicationAccessTokenExchangeRequest>(request).is_err());
+
+        let response = serde_json::json!({
+            "claims": sample_claims(),
+            "unexpected": true
+        });
+        assert!(serde_json::from_value::<ApplicationAccessTokenExchangeResponse>(response).is_err());
     }
 
     fn sample_claims() -> dasobjectstore_core::application_auth::AccessTokenClaims {

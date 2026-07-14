@@ -1030,6 +1030,10 @@ hardware acceptance.
     exchange. The CLI never accepts private keys or mints credentials; daemon
     peer authorization, confirmation markers, proof verification, and token
     issuance remain authoritative.
+  - [x] Make the daemon/Web access-token exchange request and response wrappers
+    reject unknown JSON fields before validation or claim consumption, with a
+    regression covering both directions; the inner versioned contracts remain
+    the authoritative scope/lifetime boundary.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit
