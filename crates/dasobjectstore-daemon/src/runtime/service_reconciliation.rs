@@ -165,6 +165,10 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     manifest
         .save_atomic(&manifest_path)
         .map_err(reconciliation_manifest_error)?;
+    let download_adapter = GarageReconciliationDownloadAdapter {
+        runner,
+        environment: &environment,
+    };
     let total = plan.actions.len();
     for (index, action) in plan.actions.iter().enumerate() {
         if is_cancelled() {
@@ -272,13 +276,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                     resume_offset,
                     temporary_range_path.as_deref(),
                 );
-                if let Err(error) = runner.run_with_display_args_and_env_cancellable(
-                    "aws",
-                    &args,
-                    &args,
-                    &environment,
-                    is_cancelled,
-                ) {
+                if let Err(error) = download_adapter.download(&args, is_cancelled) {
                     if let Some(path) = &temporary_range_path {
                         let _ = fs::remove_file(path);
                     }
@@ -381,6 +379,42 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         ingest_job_id: Some(ingest.job_id.to_string()),
         dry_run: false,
     })
+}
+
+/// Provider-neutral transfer seam used by reconciliation. Garage currently
+/// supplies the AWS CLI implementation; other providers can implement the
+/// same range/resume contract without changing manifest or checkpoint logic.
+trait ReconciliationDownloadAdapter {
+    fn download(
+        &self,
+        args: &[String],
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DaemonServiceRuntimeError>;
+}
+
+struct GarageReconciliationDownloadAdapter<'a, R> {
+    runner: &'a R,
+    environment: &'a [(String, String)],
+}
+
+impl<R: ServiceCommandRunner> ReconciliationDownloadAdapter
+    for GarageReconciliationDownloadAdapter<'_, R>
+{
+    fn download(
+        &self,
+        args: &[String],
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.runner
+            .run_with_display_args_and_env_cancellable(
+                "aws",
+                &args,
+                args,
+                self.environment,
+                is_cancelled,
+            )
+            .map(|_| ())
+    }
 }
 
 fn reconciliation_download_args(
@@ -639,9 +673,30 @@ fn emit_reconciliation_key_progress(
 
 #[cfg(test)]
 mod tests {
-    use super::{append_range_download, reconciliation_download_args};
+    use super::{
+        append_range_download, reconciliation_download_args, GarageReconciliationDownloadAdapter,
+        ReconciliationDownloadAdapter,
+    };
+    use crate::runtime::service::{ServiceCommandOutput, ServiceCommandRunner};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    struct RecordingRunner(Mutex<Vec<Vec<String>>>);
+
+    impl ServiceCommandRunner for RecordingRunner {
+        fn run(
+            &self,
+            _program: &str,
+            args: &[String],
+        ) -> Result<ServiceCommandOutput, crate::runtime::service::DaemonServiceRuntimeError>
+        {
+            self.0.lock().expect("runner lock").push(args.to_vec());
+            Ok(ServiceCommandOutput {
+                stdout: String::new(),
+            })
+        }
+    }
 
     fn validation_root(label: &str) -> PathBuf {
         let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
@@ -705,5 +760,25 @@ mod tests {
         assert!(append_range_download(&destination, &range, 3, 6).is_err());
         assert_eq!(fs::read(&destination).expect("destination"), b"ab");
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn provider_download_adapter_preserves_command_boundary_and_cancellation() {
+        let runner = RecordingRunner(Mutex::new(Vec::new()));
+        let environment = vec![("AWS_ACCESS_KEY_ID".to_string(), "redacted".to_string())];
+        let adapter = GarageReconciliationDownloadAdapter {
+            runner: &runner,
+            environment: &environment,
+        };
+        let args = vec!["s3api".to_string(), "get-object".to_string()];
+        adapter
+            .download(&args, &|| false)
+            .expect("provider command");
+        assert_eq!(
+            runner.0.lock().expect("runner lock").as_slice(),
+            &[args.clone()]
+        );
+        assert!(adapter.download(&args, &|| true).is_err());
+        assert_eq!(runner.0.lock().expect("runner lock").len(), 1);
     }
 }

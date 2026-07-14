@@ -57,6 +57,9 @@ keeps an atomic private handoff journal with prepared, profile-committed, and
 fully-committed states so interrupted imports can be reconciled after restart.
 The daemon replay operation re-verifies prepared or profile-committed entries;
 already committed entries are safe no-ops.
+Reconciliation transfer execution is isolated behind a provider-neutral
+range/resume/cancellation adapter; Garage is the current compatibility
+implementation and other providers still require their own runtime adapters.
 The shared-SQLite metadata seam is schema-versioned (v0.4) and records profile
 namespace, transaction id, source retention, and object versions atomically
 with idempotent retries and conflict rejection. It remains isolated from
