@@ -1424,6 +1424,13 @@ the bounded daemon bridge and preserving explicit not-ready reasons.
 Static profile-capability discovery is also available through authenticated
 Web at ``/api/v1/profile-capabilities``; the response remains a versioned
 catalogue and never implies provisioning or live hardware health.
+The daemon profile-binding contract now also exposes an explicit
+``provision`` operation over the authenticated Unix boundary. It initializes
+an explicit bounded backend and capacity ledger, reuses an identical persisted
+binding on retry, and rejects same-store manifest/root/staging conflicts
+without replacement. The typed response and admin-job projection report the
+reuse decision; product adapters still supply policy and appliance deployment
+remains unavailable in this macOS slice.
 The application access-token contract now publishes one canonical versioned
 HTTPS exchange route for clients and adapters, and the standalone Web API
 dispatches it through the daemon; listener authentication and mTLS verification

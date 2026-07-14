@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::ProfileBindingOperation;
 
 /// Handles daemon service, provisioning, local administration, and job requests.
 pub(super) fn request<S, C>(
@@ -401,6 +402,7 @@ where
             }
             let now = handler.clock.now_utc();
             let store_definition = request.store_definition.clone();
+            let mut reused = false;
             let inspection = if !request.dry_run {
                 request.validate().map_err(|error| {
                     DaemonRequestHandlerError::ServiceRuntime(
@@ -418,6 +420,17 @@ where
                     },
                 )
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                if request.operation == ProfileBindingOperation::Provision {
+                    reused = validate_profile_provision_claim(
+                        &handler.profile_binding_registry_path,
+                        BackendProfileBinding {
+                            manifest: request.manifest.clone(),
+                            backend_root: request.backend_root.clone(),
+                            ssd_staging_root: request.ssd_staging_root.clone(),
+                        },
+                    )
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                }
                 let inspection =
                     ensure_profile_backend(&request, &handler.profile_binding_registry_path)
                         .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
@@ -441,6 +454,7 @@ where
                 response.adopted_object_count = inspection.adopted_object_count;
                 response.adopted_bytes = inspection.adopted_bytes;
             }
+            response.reused = reused;
             if let Some(definition) = store_definition {
                 if !response.accepted.dry_run {
                     upsert_store_definition(&handler.store_registry_path, definition).map_err(

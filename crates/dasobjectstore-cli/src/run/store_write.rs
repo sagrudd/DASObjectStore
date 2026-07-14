@@ -12,6 +12,7 @@ pub(super) fn run_store_profile_binding(
         .map_err(|error| CliError::CommandFailed(error.to_string()))?;
     let operation = match args.operation() {
         StoreProfileBindingOperation::Create => ProfileBindingOperation::Create,
+        StoreProfileBindingOperation::Provision => ProfileBindingOperation::Provision,
         StoreProfileBindingOperation::Adopt => ProfileBindingOperation::Adopt,
     };
     let config = DaemonRuntimeConfig::default_packaged();
@@ -51,6 +52,17 @@ pub(super) fn run_store_profile_binding(
         writeln!(writer, "Backend root: daemon-managed")?;
         writeln!(writer, "Adopted objects: {}", response.adopted_object_count)?;
         writeln!(writer, "Adopted bytes: {}", response.adopted_bytes)?;
+        if response.operation == ProfileBindingOperation::Provision {
+            writeln!(
+                writer,
+                "Provisioning: {}",
+                if response.reused {
+                    "reused existing binding"
+                } else {
+                    "created binding"
+                }
+            )?;
+        }
         writeln!(writer, "Job: {}", response.accepted.job_id)?;
     }
     Ok(())

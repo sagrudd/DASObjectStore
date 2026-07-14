@@ -12,6 +12,9 @@ pub const PROFILE_BINDING_CONFIRMATION: &str = "confirm profile binding";
 #[serde(rename_all = "snake_case")]
 pub enum ProfileBindingOperation {
     Create,
+    /// Ensure a matching daemon-owned binding exists without adopting user
+    /// files. Repeating the same request is a safe no-op.
+    Provision,
     Adopt,
 }
 
@@ -99,6 +102,9 @@ pub struct ProfileBindingResponse {
     #[serde(default)]
     pub adopted_bytes: u64,
     pub administrator_actor: Option<String>,
+    /// True when `Provision` found an identical existing binding and reused it.
+    #[serde(default)]
+    pub reused: bool,
 }
 
 impl ProfileBindingResponse {
@@ -124,6 +130,7 @@ impl ProfileBindingResponse {
             adopted_object_count: 0,
             adopted_bytes: 0,
             administrator_actor: request.administrator_actor,
+            reused: false,
         }
     }
 }

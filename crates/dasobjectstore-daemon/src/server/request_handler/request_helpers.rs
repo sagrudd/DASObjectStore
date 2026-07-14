@@ -97,6 +97,32 @@ pub(super) fn register_profile_binding(
     ))
 }
 
+/// Validate an idempotent provisioning request against the persisted binding.
+///
+/// Provisioning may only reuse an identical binding. It must never silently
+/// replace a manifest, backend root, or staging root under the same store id;
+/// callers that need that transition must use an explicit create/adopt flow.
+pub(super) fn validate_profile_provision_claim(
+    registry_path: impl AsRef<Path>,
+    binding: BackendProfileBinding,
+) -> Result<bool, DaemonServiceRuntimeError> {
+    let desired = binding.validate_and_canonicalize()?;
+    let existing = read_profile_binding_record(registry_path, desired.manifest.store_id.as_str())?;
+    let Some(existing) = existing else {
+        return Ok(false);
+    };
+    let existing = existing.validate_and_canonicalize()?;
+    if existing != desired {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "profile provisioning conflicts with existing binding for ObjectStore {}",
+                desired.manifest.store_id
+            ),
+        });
+    }
+    Ok(true)
+}
+
 /// Create the daemon-private folder namespace for a new bounded folder store.
 ///
 /// Create the private namespace and, for explicit adoption, execute the

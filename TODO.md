@@ -980,8 +980,9 @@ hardware acceptance.
 - [~] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic. Static capability discovery and daemon-backed readiness are
-  delivered through CLI, client, and authenticated Web contracts; idempotent
-  provisioning/runtime orchestration remains open.
+  delivered through CLI, client, and authenticated Web contracts; daemon-owned
+  idempotent profile provisioning is now available over the authenticated Unix
+  contract, while product adapters and appliance orchestration remain open.
   - [x] Add a versioned static profile-capability catalogue DTO with separate
     backend-operation, service, host-mode, protection, and requirement fields;
     runtime store readiness and provisioning routes remain separate. The
@@ -1004,6 +1005,13 @@ hardware acceptance.
     authenticated Web route ``/api/v1/profile-capabilities``; it remains
     versioned discovery only and does not imply runtime readiness or
     provisioning.
+  - [x] Add the daemon-owned ``profile_binding`` ``provision`` operation. It
+    validates and initializes an explicit bounded backend, reuses an identical
+    persisted binding without replacement, and fails closed on a same-store
+    root/manifest conflict. The typed response and admin job projection report
+    whether the binding was reused; CLI callers use
+    ``store profile-binding --operation provision``. No provider credentials,
+    appliance paths, or product defaults cross this Unix boundary.
 - [~] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.

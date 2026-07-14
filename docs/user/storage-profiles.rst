@@ -332,6 +332,21 @@ The CLI exposes the same contract through ``dasobjectstore store capabilities``
 (``--json`` is available for automation); it does not bypass daemon authority
 or claim that an appliance is reachable.
 
+Daemon-owned profile provisioning
+----------------------------------
+
+An administrator can ask the daemon to establish a bounded local binding with
+``dasobjectstore store profile-binding --operation provision``. The request
+still supplies the explicit manifest, capacity, and daemon-visible backend
+root; the daemon owns validation, namespace initialization, capacity-ledger
+setup, and registry publication. Repeating an identical request is a safe
+no-op and the typed response reports ``reused: true``. A request that reuses a
+store id with a different manifest, backend root, or staging root fails closed;
+use the explicit create/adopt lifecycle when a migration is intended. This
+contract is local and path-bearing only on the authenticated daemon boundary:
+provider credentials, appliance paths, and product-specific defaults are not
+accepted from consumers.
+
 Profile catalogue browsing
 --------------------------
 

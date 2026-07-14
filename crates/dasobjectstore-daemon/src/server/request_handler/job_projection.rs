@@ -146,6 +146,13 @@ pub(super) fn daemon_job_summary_from_profile_binding(
             "profile binding {} {} for ObjectStore {}",
             match response.operation {
                 ProfileBindingOperation::Create => "created",
+                ProfileBindingOperation::Provision => {
+                    if response.reused {
+                        "reused"
+                    } else {
+                        "provisioned"
+                    }
+                }
                 ProfileBindingOperation::Adopt => "adopted",
             },
             response.deployment_profile.name(),

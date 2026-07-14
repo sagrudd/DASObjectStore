@@ -78,6 +78,7 @@ pub(crate) enum StoreCommand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum StoreProfileBindingOperation {
     Create,
+    Provision,
     Adopt,
 }
 
@@ -980,6 +981,29 @@ mod tests {
         assert_eq!(binding.operation(), StoreProfileBindingOperation::Adopt);
         assert!(binding.dry_run());
         assert!(binding.json());
+    }
+
+    #[test]
+    fn parses_profile_binding_provision_operation() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-binding",
+            "--manifest",
+            "/tmp/manifest.json",
+            "--backend-root",
+            "/tmp/store",
+            "--operation",
+            "provision",
+        ])
+        .expect("profile binding provisioning parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileBinding(binding)) = args.command() else {
+            panic!("expected profile binding command")
+        };
+        assert_eq!(binding.operation(), StoreProfileBindingOperation::Provision);
     }
 
     #[test]

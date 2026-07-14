@@ -111,6 +111,7 @@ pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
     create_object_store_with_capacity, ensure_profile_backend, register_profile_binding,
     resolve_authorization_store_id, rotated_easyconnect_renewal_token, stable_easyconnect_id,
+    validate_profile_provision_claim,
 };
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
@@ -1481,9 +1482,25 @@ mod tests {
         assert!(!backend_root
             .join(".dasobjectstore/objects/incoming/user.txt")
             .exists());
+
+        let mut provision_request = request.clone();
+        provision_request.operation = ProfileBindingOperation::Provision;
+        let provision_response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(provision_request),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("idempotent profile provisioning");
+        let DaemonApiResponse::RegisterProfileBinding(provision_response) = provision_response
+        else {
+            panic!("expected profile binding response");
+        };
+        assert!(provision_response.reused);
+
         let second_response = handler
             .handle_with_progress_for_actor(
-                DaemonApiRequest::RegisterProfileBinding(request),
+                DaemonApiRequest::RegisterProfileBinding(request.clone()),
                 Some(&actor),
                 |_| Ok(()),
             )
@@ -1504,6 +1521,22 @@ mod tests {
         assert!(read_profile_binding(&profile_registry, "folder-create")
             .expect("binding read")
             .is_some());
+
+        let conflicting_root = root.join("conflicting-root");
+        fs::create_dir_all(&conflicting_root).expect("conflicting root");
+        let mut conflict_request = request;
+        conflict_request.operation = ProfileBindingOperation::Provision;
+        conflict_request.backend_root = conflicting_root;
+        let error = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(conflict_request),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect_err("conflicting provisioning must fail closed");
+        assert!(error
+            .to_string()
+            .contains("profile provisioning conflicts with existing binding"));
         let _ = fs::remove_dir_all(root);
     }
 
