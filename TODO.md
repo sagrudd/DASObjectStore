@@ -2178,7 +2178,8 @@ list until every temporary size-budget exception has been removed.
   endpoint inventory contract without browser-side storage mutation.
 - [x] Add a persistent endpoint inventory/validation registry so Activity and
   Endpoints workspaces consume registry-backed endpoint-validation events rather
-  than an empty inventory source.
+  than an empty inventory source. Updates are serialized and atomically fsync'd
+  before publication, with concurrent-upsert and final-file regressions.
 - [x] Add administrator Web and daemon workflows to create/update endpoint
   inventory records from validated NAS/NFS, S3-compatible, and Mnemosyne
   endpoint definitions.

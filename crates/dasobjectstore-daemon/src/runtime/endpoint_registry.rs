@@ -1,12 +1,17 @@
 use crate::api::UpsertEndpointInventoryRequest;
 use crate::runtime::DaemonServiceRuntimeError;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_ENDPOINT_REGISTRY_PATH: &str = "/opt/dasobjectstore/endpoints.json";
 pub const ENDPOINT_REGISTRY_ENV: &str = "DASOBJECTSTORE_ENDPOINTS_PATH";
 pub const ENDPOINT_REGISTRY_SCHEMA: &str = "dasobjectstore.endpoint_inventory_registry.v1";
+
+static ENDPOINT_REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EndpointRegistryUpsertSummary {
@@ -25,6 +30,10 @@ pub fn upsert_endpoint_inventory_record(
     path: impl AsRef<Path>,
     request: &UpsertEndpointInventoryRequest,
 ) -> Result<EndpointRegistryUpsertSummary, DaemonServiceRuntimeError> {
+    let _guard = ENDPOINT_REGISTRY_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("endpoint registry lock poisoned");
     let path = path.as_ref();
     let mut registry = read_endpoint_registry(path)?;
     registry.upsert(EndpointRegistryEntry::from_request(request));
@@ -119,24 +128,60 @@ fn write_endpoint_registry(
     path: &Path,
     registry: &EndpointRegistryFile,
 ) -> Result<(), DaemonServiceRuntimeError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            DaemonServiceRuntimeError::EndpointRegistryIo {
-                path: parent.to_path_buf(),
-                message: error.to_string(),
-            }
+    let parent = path
+        .parent()
+        .ok_or_else(|| DaemonServiceRuntimeError::EndpointRegistryIo {
+            path: path.to_path_buf(),
+            message: "endpoint registry has no parent".to_string(),
         })?;
-    }
+    fs::create_dir_all(parent).map_err(|error| DaemonServiceRuntimeError::EndpointRegistryIo {
+        path: parent.to_path_buf(),
+        message: error.to_string(),
+    })?;
     let data = serde_json::to_vec_pretty(registry).map_err(|error| {
         DaemonServiceRuntimeError::InvalidEndpointRegistryJson {
             path: path.to_path_buf(),
             message: error.to_string(),
         }
     })?;
-    fs::write(path, data).map_err(|error| DaemonServiceRuntimeError::EndpointRegistryIo {
-        path: path.to_path_buf(),
-        message: error.to_string(),
-    })
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("endpoints"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| DaemonServiceRuntimeError::EndpointRegistryIo {
+            path: temporary.clone(),
+            message: error.to_string(),
+        })?;
+    file.write_all(&data)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| DaemonServiceRuntimeError::EndpointRegistryIo {
+            path: temporary.clone(),
+            message: error.to_string(),
+        })?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|error| {
+        DaemonServiceRuntimeError::EndpointRegistryIo {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
+    })?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| DaemonServiceRuntimeError::EndpointRegistryIo {
+            path: parent.to_path_buf(),
+            message: error.to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -169,6 +214,35 @@ mod tests {
         assert!(data.contains("Endpoint B2"));
         assert!(!data.contains("Endpoint B\""));
 
+        let entries = fs::read_dir(path.parent().expect("parent"))
+            .expect("read parent")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("entries");
+        assert_eq!(entries.len(), 1);
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn concurrent_endpoint_upserts_preserve_both_records() {
+        let root = temp_root("endpoint-registry-concurrent");
+        let path = root.join("endpoints.json");
+        let left_path = path.clone();
+        let left = std::thread::spawn(move || {
+            upsert_endpoint_inventory_record(&left_path, &request("endpoint-a", "A", false))
+                .expect("left endpoint")
+        });
+        let right_path = path.clone();
+        let right = std::thread::spawn(move || {
+            upsert_endpoint_inventory_record(&right_path, &request("endpoint-b", "B", false))
+                .expect("right endpoint")
+        });
+        left.join().expect("left joins");
+        right.join().expect("right joins");
+
+        let data = fs::read_to_string(&path).expect("registry reads");
+        assert!(data.contains("endpoint-a"));
+        assert!(data.contains("endpoint-b"));
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 

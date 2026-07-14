@@ -276,6 +276,8 @@ take precedence over historical milestone numbering when selecting new work.
 Daemon administrator job state is persisted through fsync'd temporary-file
 replacement and directory fsync before publication, preserving queryable job
 state across process crashes.
+Endpoint inventory updates use the same atomic persistence boundary and a
+process-local lock so concurrent endpoint validation cannot lose records.
 
 The Web interface has a coherent Yew shell and API contracts, but several
 current surfaces are holder implementations rather than completed operator
