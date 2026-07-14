@@ -272,8 +272,9 @@ completion.
 - [~] Close telemetry device mapping, warm-up/missing-reason, package-loop, and
   appliance acceptance gaps without fabricating continuity. Collector missing
   markers now carry actionable warm-up, counter-reset, permission, and mapping
-  details; stable device mapping, packaged-loop execution, and appliance
-  acceptance remain deployment-gated.
+  details; bounded sysfs/device-mapper resolution and the packaged daemon
+  collection loop are implemented and regression-tested. Physical device
+  mapping and appliance acceptance remain deployment-gated.
 - [x] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow. The
   folder backend's `ObjectStoreBackend` implementation and the storage request
