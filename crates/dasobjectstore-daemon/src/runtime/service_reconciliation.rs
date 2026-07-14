@@ -264,15 +264,13 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                         reconciliation_temp_suffix()
                     ))
                 });
-                let args = reconciliation_download_args(
-                    &config.endpoint,
-                    &bucket_name,
+                if let Err(error) = provider.download(
                     key,
                     &destination,
                     resume_offset,
                     temporary_range_path.as_deref(),
-                );
-                if let Err(error) = provider.download(&args, is_cancelled) {
+                    is_cancelled,
+                ) {
                     if let Some(path) = &temporary_range_path {
                         let _ = fs::remove_file(path);
                     }
@@ -389,7 +387,10 @@ trait ReconciliationProvider {
 
     fn download(
         &self,
-        args: &[String],
+        key: &str,
+        destination: &Path,
+        resume_offset: Option<u64>,
+        range_destination: Option<&Path>,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DaemonServiceRuntimeError>;
 }
@@ -417,14 +418,25 @@ impl<R: ServiceCommandRunner> ReconciliationProvider for GarageReconciliationPro
 
     fn download(
         &self,
-        args: &[String],
+        key: &str,
+        destination: &Path,
+        resume_offset: Option<u64>,
+        range_destination: Option<&Path>,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<(), DaemonServiceRuntimeError> {
+        let args = reconciliation_download_args(
+            self.endpoint,
+            self.bucket_name,
+            key,
+            destination,
+            resume_offset,
+            range_destination,
+        );
         self.runner
             .run_with_display_args_and_env_cancellable(
                 "aws",
                 &args,
-                args,
+                &args,
                 self.environment,
                 is_cancelled,
             )
@@ -787,15 +799,28 @@ mod tests {
             bucket_name: "bucket-1",
             environment: &environment,
         };
-        let args = vec!["s3api".to_string(), "get-object".to_string()];
         adapter
-            .download(&args, &|| false)
+            .download(
+                "reads/sample.fastq",
+                PathBuf::from("/tmp/object").as_path(),
+                Some(12),
+                Some(PathBuf::from("/tmp/object.resume").as_path()),
+                &|| false,
+            )
             .expect("provider command");
-        assert_eq!(
-            runner.0.lock().expect("runner lock").as_slice(),
-            &[args.clone()]
-        );
-        assert!(adapter.download(&args, &|| true).is_err());
+        let args = runner.0.lock().expect("runner lock")[0].clone();
+        assert_eq!(args[2], "s3api");
+        assert_eq!(args[8], "--range");
+        assert_eq!(args[9], "bytes=12-");
+        assert!(adapter
+            .download(
+                "reads/sample.fastq",
+                PathBuf::from("/tmp/object").as_path(),
+                None,
+                None,
+                &|| true,
+            )
+            .is_err());
         assert_eq!(runner.0.lock().expect("runner lock").len(), 1);
     }
 }
