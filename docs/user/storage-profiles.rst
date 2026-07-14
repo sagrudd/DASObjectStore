@@ -11,8 +11,10 @@ profile describes the backend boundary of one ObjectStore:
 Host mode is a separate axis. ``per_user`` is intended for a user-owned local
 service, ``system`` for a package-managed service, and ``integrated`` for a
 host product such as Mnemosyne or Synoptikon. Existing store metadata is not
-silently rewritten when these contracts evolve; profile creation, adoption,
-capacity limits, and migration rules remain gated campaign work.
+silently rewritten when these contracts evolve. Daemon-owned bounded-folder
+creation, explicit source-preserving adoption, and capacity validation are
+available locally; system-service installation, live drive/appliance probing,
+and migration acceptance remain deployment-gated.
 
 All profiles retain daemon-owned catalogue and ingress authority. A folder or
 drive is not a license for direct writes that bypass manifests, checksums,

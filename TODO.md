@@ -577,19 +577,20 @@ completion.
 
 ### Gate 3: Bounded folder profile
 
-- [ ] Implement system-service and programmatic create/adopt for one explicitly
-  bounded directory, including idempotent DEB/RPM provisioning hooks.
+- [~] Implement system-service and programmatic create/adopt for one explicitly
+  bounded directory, including idempotent DEB/RPM provisioning hooks. Daemon-
+  owned programmatic create/adopt, redacted inspection, source-preserving
+  reconciliation, and package hooks are delivered; system-service installation
+  and live drive/appliance identity probing remain deployment-gated.
   - [x] Enforce a finite logical capacity limit when opening a folder backend;
-    idempotent directory/namespace creation is covered locally, while package
-    hooks and explicit adopt/reconcile semantics remain open.
+    idempotent directory/namespace creation is covered locally.
   - [x] Make daemon profile binding claims one-to-one: backend and SSD staging
     roots may not overlap across stores, folder identities may not be reused,
-    and same-store replacement remains idempotent; package hooks and explicit
-    adopt/reconcile semantics remain open.
+    and same-store replacement remains idempotent.
   - [x] Bootstrap programmatic bounded-folder creation through the daemon-owned
     private namespace and durable empty catalogue, idempotently and without
-    adopting unmanaged user files; explicit adopt/reconcile reporting and
-    package hooks remain open.
+    adopting unmanaged user files; explicit adopt/reconcile reporting is
+    handled by the daemon binding workflow.
   - [x] Include daemon-derived unmanaged/unsafe drift counts in profile
     create/adopt responses without exposing host paths; a separately
     authenticated redacted inspection transport remains open.
