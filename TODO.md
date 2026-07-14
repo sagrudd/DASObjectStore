@@ -155,7 +155,7 @@ completion.
 
 ### Gate 0: Re-baseline and close release-critical appliance debt
 
-- [ ] Validate ``deploy/local-docker`` on macOS with Docker Desktop and an
+- [~] Validate ``deploy/local-docker`` on macOS with Docker Desktop and an
   attached volume or the dedicated generated-data root
   ``$HOME/.dasobjectstore-codex-validation``: build the daemon image, start
   Garage through ``dasobjectstored``, provision one scoped bucket/key, export
@@ -164,6 +164,9 @@ completion.
   soak acceptance. AlleleAnchor's local ``FileStore`` and container workflow
   remain consumer-side substitutes and must consume exported scoped config,
   not private DAS host paths.
+  Docker Desktop/container startup, Garage provisioning, and S3 smoke are
+  currently blocked in this run because the Docker daemon is unavailable;
+  renderer/configuration and secret-boundary checks remain complete locally.
   - [x] Render the daemon/Garage profile against the dedicated validation root
     and validate both generated Compose files with ``docker compose config``;
     container start, Garage provisioning, and S3 smoke remain Docker-daemon
