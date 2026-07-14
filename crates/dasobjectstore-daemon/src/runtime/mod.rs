@@ -24,6 +24,7 @@ mod object_download;
 mod performance_policy;
 mod profile_registry;
 mod profile_s3;
+mod profile_s3_multipart;
 mod reconciliation;
 mod remote_pairings;
 mod remote_sessions;
@@ -152,6 +153,9 @@ pub use profile_s3::{
     ProfileS3MultipartPart, ProfileS3MultipartPartSource, ProfileS3MultipartReader,
     ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend, PROFILE_S3_MAX_KEYS,
     PROFILE_S3_MAX_MULTIPART_PARTS,
+};
+pub use profile_s3_multipart::{
+    MultipartPartJournal, MultipartPartJournalError, MultipartPartRecord,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,

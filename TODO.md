@@ -939,6 +939,12 @@ hardware acceptance.
     same bounded binary frames, and defines a path-free typed acknowledgement;
     runtime staging, reservation settlement/abort cleanup, and authenticated
     HTTP routing remain the next implementation slice.
+  - [x] Add daemon-owned multipart part staging persistence: reservation-bound
+    journals live below the private profile namespace, publish part files only
+    after frame-level size/SHA-256 verification, atomically persist metadata,
+    and reopen across request boundaries with idempotent reservation/part
+    retries. Capacity admission settlement and completion consumption remain
+    separate runtime steps.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.

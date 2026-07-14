@@ -1222,6 +1222,7 @@ mod tests {
                 schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
                 request_id: "multipart-frame-1".to_string(),
                 reservation_id: "reservation-1".to_string(),
+                reservation_size_bytes: 5,
                 part_number: 2,
                 store_id: StoreId::new("stream-store").expect("store id"),
                 object: BackendObjectKey {

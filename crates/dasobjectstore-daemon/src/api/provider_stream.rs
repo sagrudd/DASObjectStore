@@ -66,6 +66,7 @@ pub struct ProviderStreamMultipartPartUploadOpenRequest {
     pub schema_version: String,
     pub request_id: String,
     pub reservation_id: String,
+    pub reservation_size_bytes: u64,
     pub part_number: u32,
     pub store_id: StoreId,
     pub object: BackendObjectKey,
@@ -103,7 +104,7 @@ impl ProviderStreamMultipartPartUploadOpenRequest {
             return Err(ProviderStreamValidationError::InvalidMultipartPartNumber);
         }
         validate_object_key(&self.object)?;
-        if self.expected_size_bytes == 0 {
+        if self.expected_size_bytes == 0 || self.reservation_size_bytes < self.expected_size_bytes {
             return Err(ProviderStreamValidationError::InvalidMultipartPartSize);
         }
         validate_sha256(&self.expected_sha256, "expected_sha256")?;
@@ -781,6 +782,7 @@ mod tests {
             schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
             request_id: "multipart-frame-1".to_string(),
             reservation_id: "reservation-1".to_string(),
+            reservation_size_bytes: 10,
             part_number: 2,
             store_id: StoreId::new("store-1").expect("store"),
             object: BackendObjectKey {

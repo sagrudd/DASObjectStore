@@ -1371,6 +1371,9 @@ completion request and acknowledgement DTOs with the same bounded validation;
 the Unix socket now dispatches a distinct reservation-bound multipart-part
 stream envelope keyed by reservation and part number, consuming the existing
 bounded binary frames and returning a typed acknowledgement contract;
+daemon-owned multipart journals now persist verified part bytes and metadata
+under the private profile namespace, reopen across request boundaries, and
+accept retries idempotently by reservation/part identity;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
 list prefixes apply the same relative-namespace boundary while allowing a
