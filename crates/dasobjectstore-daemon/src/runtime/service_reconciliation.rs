@@ -144,13 +144,13 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
             ),
         });
     }
-    let objects = list_garage_objects(
+    let provider = GarageReconciliationProvider {
         runner,
-        &config.endpoint,
-        &bucket_name,
-        prefix.as_deref(),
-        &environment,
-    )?;
+        endpoint: &config.endpoint,
+        bucket_name: &bucket_name,
+        environment: &environment,
+    };
+    let objects = provider.list_objects(prefix.as_deref())?;
     let plan = plan_reconciliation(&mut manifest, &objects);
     if let Some(action) = plan.actions.iter().find(|action| {
         matches!(
@@ -165,10 +165,6 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     manifest
         .save_atomic(&manifest_path)
         .map_err(reconciliation_manifest_error)?;
-    let download_adapter = GarageReconciliationDownloadAdapter {
-        runner,
-        environment: &environment,
-    };
     let total = plan.actions.len();
     for (index, action) in plan.actions.iter().enumerate() {
         if is_cancelled() {
@@ -276,7 +272,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                     resume_offset,
                     temporary_range_path.as_deref(),
                 );
-                if let Err(error) = download_adapter.download(&args, is_cancelled) {
+                if let Err(error) = provider.download(&args, is_cancelled) {
                     if let Some(path) = &temporary_range_path {
                         let _ = fs::remove_file(path);
                     }
@@ -381,10 +377,16 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     })
 }
 
-/// Provider-neutral transfer seam used by reconciliation. Garage currently
-/// supplies the AWS CLI implementation; other providers can implement the
-/// same range/resume contract without changing manifest or checkpoint logic.
-trait ReconciliationDownloadAdapter {
+/// Provider-neutral listing and transfer seam used by reconciliation. Garage
+/// currently supplies the AWS CLI implementation; other providers can
+/// implement the same listing, range/resume, and cancellation contract without
+/// changing manifest or checkpoint logic.
+trait ReconciliationProvider {
+    fn list_objects(
+        &self,
+        prefix: Option<&str>,
+    ) -> Result<Vec<ReconciliationObject>, DaemonServiceRuntimeError>;
+
     fn download(
         &self,
         args: &[String],
@@ -392,14 +394,27 @@ trait ReconciliationDownloadAdapter {
     ) -> Result<(), DaemonServiceRuntimeError>;
 }
 
-struct GarageReconciliationDownloadAdapter<'a, R> {
+struct GarageReconciliationProvider<'a, R> {
     runner: &'a R,
+    endpoint: &'a str,
+    bucket_name: &'a str,
     environment: &'a [(String, String)],
 }
 
-impl<R: ServiceCommandRunner> ReconciliationDownloadAdapter
-    for GarageReconciliationDownloadAdapter<'_, R>
-{
+impl<R: ServiceCommandRunner> ReconciliationProvider for GarageReconciliationProvider<'_, R> {
+    fn list_objects(
+        &self,
+        prefix: Option<&str>,
+    ) -> Result<Vec<ReconciliationObject>, DaemonServiceRuntimeError> {
+        list_garage_objects(
+            self.runner,
+            self.endpoint,
+            self.bucket_name,
+            prefix,
+            self.environment,
+        )
+    }
+
     fn download(
         &self,
         args: &[String],
@@ -674,8 +689,8 @@ fn emit_reconciliation_key_progress(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_range_download, reconciliation_download_args, GarageReconciliationDownloadAdapter,
-        ReconciliationDownloadAdapter,
+        append_range_download, reconciliation_download_args, GarageReconciliationProvider,
+        ReconciliationProvider,
     };
     use crate::runtime::service::{ServiceCommandOutput, ServiceCommandRunner};
     use std::fs;
@@ -766,8 +781,10 @@ mod tests {
     fn provider_download_adapter_preserves_command_boundary_and_cancellation() {
         let runner = RecordingRunner(Mutex::new(Vec::new()));
         let environment = vec![("AWS_ACCESS_KEY_ID".to_string(), "redacted".to_string())];
-        let adapter = GarageReconciliationDownloadAdapter {
+        let adapter = GarageReconciliationProvider {
             runner: &runner,
+            endpoint: "http://127.0.0.1:3900",
+            bucket_name: "bucket-1",
             environment: &environment,
         };
         let args = vec!["s3api".to_string(), "get-object".to_string()];

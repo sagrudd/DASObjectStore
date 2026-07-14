@@ -2504,11 +2504,11 @@ list until every temporary size-budget exception has been removed.
   - [~] **Remaining provider execution:** non-Garage range support, concrete
     provider-native cancellation semantics, and appliance acceptance remain
     deployment/provider gated.
-  - [x] Extract reconciliation download execution behind a provider-neutral
-    range/resume/cancellation adapter. Garage remains the current AWS CLI
-    implementation; manifest planning, checkpointing, and partial-range
-    validation no longer depend on that command shape, so a non-Garage adapter
-    can be added without changing recovery semantics.
+  - [x] Extract reconciliation listing and download execution behind a
+    provider-neutral range/resume/cancellation adapter. Garage remains the
+    current AWS CLI implementation; manifest planning, checkpointing, and
+    partial-range validation no longer depend on that command shape, so a
+    non-Garage adapter can be added without changing recovery semantics.
 - [~] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
