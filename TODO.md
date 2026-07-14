@@ -342,6 +342,16 @@ completion.
   - [x] Define the minimal profile-neutral `ObjectCatalogueAuthority` batch
     contract and adapt the durable folder catalogue to it; shared SQLite,
     appliance, and daemon transaction wiring remain open.
+    **Blocker (catalogue authority boundary):** the profile-private catalogue
+    records currently carry versioned logical keys plus profile-local locations,
+    while the existing ``live.sqlite`` objects/placements schema has no
+    compatible version field and derives locations through disk rows. Before
+    wiring shared SQLite, the daemon must choose a versioned adapter/schema and
+    transaction owner that can atomically reconcile both representations
+    without leaking paths or silently changing authoritative records.
+    Recommendation: add a daemon-owned, schema-versioned catalogue adapter with
+    explicit profile namespace and transaction IDs; keep backend paths private
+    and migrate only through an atomic, conflict-checked handoff.
   - [x] Prove authority batches are all-or-none across conflicts and restart;
     a conflicting existing version cannot partially add a new record.
     Catalogue mutations now serialize daemon-local read/modify/write

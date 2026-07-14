@@ -144,6 +144,11 @@ catalogue is updated before payload unlinking; catalogue failures leave the
 payload and accounting untouched, while unlink failures restore the catalogue
 record so retries remain authoritative. Shared SQLite/object-service catalogue
 integration remains a separate gate.
+The profile catalogue and the appliance ``live.sqlite`` schema are not silently
+merged: profile records carry versioned logical keys while the appliance schema
+derives placement through disk rows. A future daemon-owned, versioned adapter
+must perform an atomic, conflict-checked handoff before shared authority is
+enabled; callers should continue using the typed daemon profile routes.
 Folder staging also requires the copied byte count to equal its reservation,
 so logical usage cannot drift from the payload size.
 The core ledger also exposes a schema-versioned snapshot/restore boundary for

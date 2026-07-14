@@ -1381,6 +1381,14 @@ provider-neutral runtime now also offers a bounded writer-stream helper that
 checks catalogue authority and exact byte length before success; HTTP framing
 and provider-backed transport remain separate.
 
+Shared SQLite catalogue integration is currently blocked by a schema/authority
+boundary: profile-private records carry versioned logical keys and local
+locations, while the live SQLite objects/placements tables have no compatible
+version field and derive locations through disk rows. The recommended next
+step is a daemon-owned, schema-versioned adapter with an explicit profile
+namespace and transaction IDs, keeping paths private and requiring an atomic,
+conflict-checked handoff before either representation is treated as complete.
+
 Exit criteria: system and per-user deployments can create/adopt, ingest, verify,
 reconcile, browse, expose through S3, restart, and recover a folder store without
 following symlinks or accepting unmanaged changes silently.
