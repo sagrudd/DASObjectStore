@@ -1890,7 +1890,7 @@ list until every temporary size-budget exception has been removed.
 - [x] Bound performance-report PDF rebuilds to a separate two-worker
   `spawn_blocking` semaphore held until rendering completes; saturated requests
   return a typed `429` without running the renderer.
-- [ ] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable.
+- [~] Keep HTTPS liveness, static Web assets, login/session renewal, and a minimal cached appliance-status page independent of daemon round trips. Expose daemon-dependent pages as `degraded` with the last successful snapshot and retry guidance rather than making the whole WebUI uncontactable. Local liveness, static-asset, cached-status, and degraded-route contracts are implemented; appliance freshness/soak remains deployment-gated.
   - [x] Add the public `/api/v1/liveness` contract as a daemon-independent
     readiness probe with stable service/version/instance metadata; the
     authenticated cached-status route is covered below, while daemon-owned
@@ -1912,7 +1912,7 @@ list until every temporary size-budget exception has been removed.
     cold-start behavior; appliance-backed soak and telemetry freshness remain.
   - [x] Add the typed Web client response contract, WASM getter, and path helper
     for cached dashboard status; existing Home-page loading remains unchanged.
-- [ ] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected.
+- [~] Add daemon-owned ingest admission and dynamic backpressure that reserves CPU, memory, socket workers, and I/O capacity for the Web/control plane. In sustained disk-pressure conditions, throttle or pause low-priority source reads and HDD settlement before control-plane latency is affected. Core resource gates and local ingest wiring are implemented; host telemetry and appliance soak remain deployment-gated.
   - [x] Add a typed daemon admission decision that combines source-read error/
     pressure backpressure with adaptive worker scheduling and reports run,
     throttle, or block plus the limiting reason and schedule snapshot. Runtime
