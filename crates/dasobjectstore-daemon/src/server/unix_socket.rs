@@ -668,12 +668,29 @@ fn handle_pending_stream(
                 crate::api::read_provider_stream_frame(&mut pending.stream)
                     .map_err(UnixSocketDaemonServerError::ProviderStreamFrame)
             };
-            handler.handle_provider_stream_upload_for_actor(
+            match handler.handle_provider_stream_upload_for_actor(
                 request,
                 pending.actor.as_ref(),
                 &mut read_frame,
                 &mut emit_response,
-            )?;
+            ) {
+                Err(UnixSocketDaemonServerError::ProviderStreamFrame(error))
+                    if !matches!(
+                        &error,
+                        ProviderStreamFrameError::Io(io)
+                            if client_disconnect_kind(io.kind())
+                    ) =>
+                {
+                    write_response_frame(
+                        &mut response_stream,
+                        &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "bad_request",
+                            format!("invalid provider stream frame: {error}"),
+                        )),
+                    )?;
+                }
+                result => result?,
+            }
         }
     }
     Ok(())
@@ -1014,6 +1031,78 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error) if error.code == "upload_test"
+        ));
+    }
+
+    #[test]
+    fn translates_invalid_provider_upload_frame_to_typed_bad_request() {
+        struct InvalidFrameHandler;
+
+        impl DaemonApiHandler for InvalidFrameHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                panic!("invalid provider frame test should use the upload handler")
+            }
+
+            fn handle_provider_stream_upload_for_actor(
+                &self,
+                _request: ProviderStreamUploadOpenRequest,
+                _actor: Option<&crate::auth::DaemonLocalActor>,
+                read_frame: &mut dyn FnMut() -> Result<
+                    (ProviderStreamChunkHeader, Vec<u8>),
+                    super::UnixSocketDaemonServerError,
+                >,
+                _emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                let _ = read_frame()?;
+                Ok(())
+            }
+        }
+
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new(
+            "/tmp/dasobjectstored-invalid-provider-upload-test.sock",
+            InvalidFrameHandler,
+        );
+        serde_json::to_writer(
+            &mut client,
+            &ProviderStreamUploadOpenRequest {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "invalid-upload-stream".to_string(),
+                upload_id: "capability-invalid".to_string(),
+                store_id: StoreId::new("stream-store").expect("store id"),
+                object: BackendObjectKey {
+                    object_id: "objects/invalid.txt".to_string(),
+                    version: 1,
+                },
+                expected_size_bytes: 0,
+                expected_sha256:
+                    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        .to_string(),
+                chunk_size_bytes: 1024,
+            },
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+        client
+            .write_all(&[0, 0, 0, 0])
+            .expect("invalid frame written");
+
+        server.handle_stream(server_stream).expect("stream handled");
+
+        let mut line = String::new();
+        BufReader::new(client)
+            .read_line(&mut line)
+            .expect("response line");
+        let response: DaemonApiResponse = serde_json::from_str(&line).expect("response decoded");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "bad_request"
         ));
     }
 

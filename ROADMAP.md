@@ -195,7 +195,9 @@ are carried in a path-free envelope; the listener reads the request line
 without buffering ahead into binary frames and dispatches one validated frame
 at a time to an explicit upload handler. Oversized request envelopes are
 rejected with a typed `bad_request` response before handler dispatch. The default
-daemon implementation is
+malformed upload frames are likewise translated into a terminal typed
+`bad_request` response while disconnect errors remain transport failures. The
+default daemon implementation is
 still fail-closed until staging, cancellation/backpressure, reservation
 commit/release, provider verification, and catalogue publication are wired.
 The profile backend contract now exposes a bounded provider-neutral `read_range`

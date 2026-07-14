@@ -831,12 +831,12 @@ hardware acceptance.
 - [~] Route S3 PUT and multipart completion through quota reservation, daemon
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
   catalogue state rather than provider listings.
-  **Blocker (transport boundary):** the current Unix provider-stream protocol is
-  daemon-to-client and read-only. Safe HTTP PUT/multipart routing needs a
-  bounded client-to-daemon body stream, daemon-owned staging identity, and
-  cancellation/backpressure semantics before any catalogue mutation. Do not
-  implement this by writing request bodies directly from the Web process into a
-  managed profile root.
+  **Blocker (execution boundary):** the Unix provider-stream protocol now has
+  bounded client-to-daemon upload envelopes and binary-frame dispatch, but safe
+  HTTP PUT/multipart routing still needs a daemon-owned staging identity,
+  cancellation/backpressure semantics, and transactional catalogue mutation.
+  Do not implement this by writing request bodies directly from the Web process
+  into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative
     list/HEAD/GET semantics over folder and drive backends; it never consults
     provider listings or exposes private backend paths. Bounded streaming now
@@ -2434,6 +2434,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Return a typed ``bad_request`` response when a Unix request envelope
     exceeds the byte bound, keeping oversized control-plane input from reaching
     request handlers or being mistaken for a provider-stream frame.
+  - [x] Translate malformed provider upload frames into a terminal typed
+    ``bad_request`` response while preserving client-disconnect errors; handlers
+    never need to turn framing failures into ad hoc protocol responses.
   - [~] **Remaining upload execution boundary:** a concrete daemon-owned
     staging writer must consume the upload callback, honor cancellation and
     backpressure, release or commit the quota reservation transactionally, and
