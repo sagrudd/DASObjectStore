@@ -75,8 +75,13 @@ files directly onto member disks:
      --mount-root /srv/dasobjectstore \
      --service-user dasobjectstore \
      --service-group dasobjectstore \
-     --create-service-user \
-     --confirm "confirm lockdown das"
+   --create-service-user \
+   --confirm "confirm lockdown das"
+
+The CLI sends this request over the daemon Unix socket. The daemon performs
+protected-root discovery, account setup planning, authorization, confirmation,
+and command execution; the CLI only renders the returned plan or completion
+report. A dry run may omit the confirmation marker and never executes commands.
 
 Direct writes to individual disks bypass object metadata and can corrupt the
 store contract. Users should interact through DASObjectStore commands and, later,

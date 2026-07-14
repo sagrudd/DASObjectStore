@@ -1,8 +1,8 @@
 use super::connection_status::HostConnectionStatus;
-use super::disk_lockdown::LockdownDasReport;
 use super::health::{DiskHealthSummary, HealthReport};
 use super::{CliError, StoreDeleteCommandReport};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
+use dasobjectstore_daemon::DiskLockdownResponse;
 use dasobjectstore_daemon::PrepareEnclosureResponse;
 use dasobjectstore_metadata::{
     DestagePriorityPolicy, DiskDrainAction, DiskDrainObjectSummary, DiskDrainPlanSummary,
@@ -411,10 +411,10 @@ pub(super) fn write_prepare_das_report(
 }
 
 pub(super) fn write_lockdown_das_report(
-    report: &LockdownDasReport,
+    report: &DiskLockdownResponse,
     writer: &mut impl Write,
 ) -> Result<(), io::Error> {
-    if report.dry_run {
+    if report.accepted.dry_run {
         writeln!(writer, "DAS lockdown dry run")?;
     } else {
         writeln!(writer, "DAS lockdown complete")?;
@@ -430,8 +430,8 @@ pub(super) fn write_lockdown_das_report(
     for root in &report.protected_roots {
         writeln!(writer, "- {}", root.to_string_lossy())?;
     }
-    if report.dry_run {
-        for command in &report.commands {
+    if report.accepted.dry_run {
+        for command in &report.planned_commands {
             writeln!(writer, "$ {command}")?;
         }
     }

@@ -82,14 +82,17 @@ pub(super) fn run_disk_lockdown_das(
             "action confirmation mismatch; pass `{LOCKDOWN_CONFIRMATION}`"
         )));
     }
-    let report = lockdown_das(&LockdownDasRequest {
-        mount_root: args.mount_root().to_path_buf(),
-        service_user: args.service_user().to_string(),
-        service_group: args.service_group().to_string(),
-        create_service_user: args.create_service_user(),
-        dry_run: args.dry_run(),
-    })?;
-    write_lockdown_das_report(&report, writer)?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .disk_lockdown(DaemonDiskLockdownRequest {
+            mount_root: args.mount_root().to_path_buf(),
+            service_user: args.service_user().to_string(),
+            service_group: args.service_group().to_string(),
+            create_service_user: args.create_service_user(),
+            dry_run: args.dry_run(),
+            confirmation_marker: args.confirm().to_string(),
+        })?;
+    write_lockdown_das_report(&response, writer)?;
     Ok(())
 }
 

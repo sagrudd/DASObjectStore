@@ -107,6 +107,16 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn disk_lockdown(
+        &self,
+        _request: crate::api::DiskLockdownRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<crate::api::DiskLockdownResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "disk_lockdown requires a service orchestrator".to_string(),
+        })
+    }
+
     fn create_object_store(
         &self,
         _request: CreateObjectStoreRequest,

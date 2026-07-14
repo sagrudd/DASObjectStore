@@ -4,6 +4,7 @@ mod appliance_telemetry;
 mod application_identity;
 mod application_token;
 mod capacity;
+mod disk_lockdown;
 mod disk_mutation;
 mod enclosure;
 mod endpoint;
@@ -59,6 +60,10 @@ pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
     CapacityAdmissionReservationError, CapacityAdmissionResponse, CapacityAdmissionValidationError,
     CapacityStatusRequest, CapacityStatusResponse,
+};
+pub use disk_lockdown::{
+    DiskLockdownRequest, DiskLockdownResponse, DiskLockdownValidationError,
+    DISK_LOCKDOWN_CONFIRMATION,
 };
 pub use disk_mutation::{
     DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse, DiskRetireValidationError,
@@ -236,6 +241,7 @@ pub enum DaemonApiRequest {
     HealthSummary(DaemonHealthSummaryRequest),
     DiskRetire(DiskRetireRequest),
     DiskForceRetire(DiskForceRetireRequest),
+    DiskLockdown(DiskLockdownRequest),
     StoreInventory(StoreInventoryRequest),
     StoreDrain(StoreDrainRequest),
     StoreDelete(StoreDeleteRequest),
@@ -296,6 +302,7 @@ impl DaemonApiRequest {
             Self::HealthSummary(_) => "health_summary",
             Self::DiskRetire(_) => "disk_retire",
             Self::DiskForceRetire(_) => "disk_force_retire",
+            Self::DiskLockdown(_) => "disk_lockdown",
             Self::StoreInventory(_) => "store_inventory",
             Self::StoreDrain(_) => "store_drain",
             Self::StoreDelete(_) => "store_delete",
@@ -358,6 +365,9 @@ impl DaemonApiRequest {
             Self::DiskRetire(request) => request.validate().map_err(disk_retire_validation_error),
             Self::DiskForceRetire(request) => {
                 request.validate().map_err(disk_retire_validation_error)
+            }
+            Self::DiskLockdown(request) => {
+                request.validate().map_err(disk_lockdown_validation_error)
             }
             Self::SubmitIngestFiles(request) => request.validate(),
             Self::IngestControl(request) => {
@@ -479,6 +489,7 @@ pub enum DaemonApiResponse {
     HealthSummary(DaemonHealthSummaryResponse),
     DiskRetire(DiskRetireResponse),
     DiskForceRetire(DiskRetireResponse),
+    DiskLockdown(DiskLockdownResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     StoreDelete(StoreDeleteResponse),
@@ -806,6 +817,30 @@ fn prepare_enclosure_validation_error(
     }
 }
 
+fn disk_lockdown_validation_error(
+    error: DiskLockdownValidationError,
+) -> DaemonRequestValidationError {
+    match error {
+        DiskLockdownValidationError::RelativePath { path } => {
+            DaemonRequestValidationError::RelativePath {
+                field: "mount_root",
+                path,
+            }
+        }
+        DiskLockdownValidationError::UnsafeName { field } => {
+            DaemonRequestValidationError::UnsafeLocalName {
+                field,
+                value: "<redacted>".to_string(),
+            }
+        }
+        DiskLockdownValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: DISK_LOCKDOWN_CONFIRMATION,
+            }
+        }
+    }
+}
+
 fn local_admin_validation_error(
     err: DaemonLocalAdminValidationError,
 ) -> DaemonRequestValidationError {
@@ -958,6 +993,7 @@ mod tests {
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
+    use crate::api::DiskLockdownRequest;
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::remote_upload::RemoteUploadBackpressurePolicy;
     use dasobjectstore_object_service::ObjectServiceProviderId;
@@ -969,6 +1005,23 @@ mod tests {
         let encoded = serde_json::to_value(request).expect("request serializes");
 
         assert_eq!(encoded["command"], "store_inventory");
+    }
+
+    #[test]
+    fn disk_lockdown_command_uses_stable_shape() {
+        let request = DaemonApiRequest::DiskLockdown(DiskLockdownRequest {
+            mount_root: "/srv/das".into(),
+            service_user: "dasobjectstore".to_string(),
+            service_group: "dasobjectstore".to_string(),
+            create_service_user: true,
+            dry_run: true,
+            confirmation_marker: String::new(),
+        });
+
+        request.validate().expect("dry-run request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["command"], "disk_lockdown");
+        assert_eq!(encoded["payload"]["mount_root"], "/srv/das");
     }
 
     #[test]

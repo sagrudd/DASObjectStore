@@ -227,6 +227,15 @@ where
         super::enclosure_prepare::prepare_enclosure(&self.runner, request, accepted_at_utc.as_ref())
     }
 
+    pub fn disk_lockdown(
+        &self,
+        request: crate::api::DiskLockdownRequest,
+        accepted_at_utc: impl AsRef<str>,
+    ) -> Result<crate::api::DiskLockdownResponse, DaemonServiceRuntimeError> {
+        self.config.validate()?;
+        super::disk_lockdown::lockdown_das(&self.runner, request, accepted_at_utc.as_ref())
+    }
+
     pub fn provision_buckets(
         &self,
         credentials: &[StoreServiceCredential],

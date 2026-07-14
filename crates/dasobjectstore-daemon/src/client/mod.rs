@@ -23,13 +23,14 @@ use crate::api::{
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
-    DiskRetireRequest, DiskRetireResponse, IngestControlRequest, IngestControlResponse,
-    IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
-    IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest,
-    ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    ObjectPutRequest, ObjectPutResponse, ObjectStoreCapabilityDiscoveryRequest,
-    ObjectStoreCapabilityDiscoveryResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
+    DiskLockdownRequest, DiskLockdownResponse, DiskRetireRequest, DiskRetireResponse,
+    IngestControlRequest, IngestControlResponse, IngestJobStatusRequest, IngestJobStatusResponse,
+    IngestQueueDrainRequest, IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse,
+    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
+    ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
+    ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
+    PrepareEnclosureRequest, PrepareEnclosureResponse, ProfileBindingRequest,
+    ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
     ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileInspectionRequest,
     ProfileInspectionResponse, ProfileReadinessRequest, ProfileReadinessResponse,
     ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
@@ -470,6 +471,16 @@ where
         }
     }
 
+    pub fn disk_lockdown(
+        &self,
+        request: DiskLockdownRequest,
+    ) -> Result<DiskLockdownResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::DiskLockdown(request))? {
+            DaemonApiResponse::DiskLockdown(response) => Ok(response),
+            response => Err(unexpected("disk_lockdown", response)),
+        }
+    }
+
     pub fn create_object_store(
         &self,
         request: CreateObjectStoreRequest,
@@ -712,6 +723,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::HealthSummary(_) => "health_summary",
         DaemonApiResponse::DiskRetire(_) => "disk_retire",
         DaemonApiResponse::DiskForceRetire(_) => "disk_force_retire",
+        DaemonApiResponse::DiskLockdown(_) => "disk_lockdown",
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::StoreDelete(_) => "store_delete",
@@ -794,19 +806,19 @@ mod tests {
         DaemonJobSummary, DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse,
         DaemonServiceOperation, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
         DaemonServiceStatusRequest, DaemonServiceStatusResponse, DaemonSsdPressure,
-        ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
-        ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
-        ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileBrowserRequest, ProfileBrowserResponse, ProfileInspectionRequest,
-        ProfileInspectionResponse, ProfileInspectionRootState, ProfileS3VerifyRequest,
-        ProfileS3VerifyResponse, RemoteEasyconnectCreatePairingRequest,
+        DiskLockdownRequest, DiskLockdownResponse, ObjectBrowserPageRequest, ObjectBrowserRequest,
+        ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
+        ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        PrepareEnclosureResponse, ProfileBrowserRequest, ProfileBrowserResponse,
+        ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
+        ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        DISK_LOCKDOWN_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use dasobjectstore_core::ids::StoreId;
@@ -1349,6 +1361,47 @@ mod tests {
             seen.borrow().as_slice(),
             [DaemonApiRequest::PrepareEnclosure(_)]
         ));
+    }
+
+    #[test]
+    fn disk_lockdown_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            let request = match seen.borrow().last().expect("request") {
+                DaemonApiRequest::DiskLockdown(request) => request.clone(),
+                other => panic!("unexpected request: {other:?}"),
+            };
+            Ok(DaemonApiResponse::DiskLockdown(
+                DiskLockdownResponse::accepted(
+                    DaemonJobId::new("disk-lockdown-1").expect("job id"),
+                    "2026-07-08T19:40:00Z",
+                    &request,
+                    vec!["/srv/das/ssd".into()],
+                    vec!["chown root:root /srv/das".to_string()],
+                ),
+            ))
+        });
+        let client = DaemonClient::new(transport);
+
+        let response = client
+            .disk_lockdown(DiskLockdownRequest {
+                mount_root: "/srv/das".into(),
+                service_user: "dasobjectstore".to_string(),
+                service_group: "dasobjectstore".to_string(),
+                create_service_user: false,
+                dry_run: true,
+                confirmation_marker: String::new(),
+            })
+            .expect("disk lockdown response");
+
+        assert!(response.accepted.dry_run);
+        assert_eq!(response.protected_roots.len(), 1);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::DiskLockdown(_)]
+        ));
+        assert_eq!(DISK_LOCKDOWN_CONFIRMATION, "confirm lockdown das");
     }
 
     #[test]

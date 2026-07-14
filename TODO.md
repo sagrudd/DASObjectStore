@@ -1305,10 +1305,11 @@ list until every temporary size-budget exception has been removed.
     `run/store_write.rs`, leaving the root runner focused on dispatch.
 - [~] Complete the daemon ownership boundary: add daemon request contracts and
   runtime operations for store drain/delete, ingest queue drain, object put,
-  disk retirement, and other managed mutations still performed by the CLI.
-  The listed store, ingest, disk-retirement, deletion, object-put, and normal
-  writer-group creation paths now execute and report through typed daemon
-  operations; remaining CLI migration fallbacks and any unlisted managed
+  disk retirement, `disk lockdown-das`, and other managed mutations still
+  performed by the CLI. The listed store, ingest, disk-retirement, deletion,
+  object-put, normal writer-group creation, and `disk lockdown-das` paths now
+  execute and report through typed daemon operations; remaining CLI migration
+  fallbacks and any unlisted managed
   mutation must not be treated as daemon-owned until their runtime operation is
   implemented. Do not redirect a CLI command to an acceptance-only daemon
   request unless the daemon actually performs and reports the requested
@@ -1339,6 +1340,10 @@ list until every temporary size-budget exception has been removed.
     available; keep explicit registry-path, no-writer-group, portable mirror,
     and `store adopt` behavior as separate migration/test fallbacks until an
     unassigned-writer policy is approved.
+  - [x] Route `disk lockdown-das` through a typed daemon request; daemon-owned
+    root discovery, account setup planning, command execution, confirmation,
+    administrator authorization, and dry-run reporting now stay behind the
+    Unix-socket boundary while the CLI retains argument parsing and output.
 - [x] Split remote-upload runtime into admission, transfer/progress, and
   cancellation-cleanup modules; keep shared concurrency/backpressure policy
   single-sourced with normal ingest.

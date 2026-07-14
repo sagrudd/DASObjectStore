@@ -9,6 +9,7 @@ mod application_key_registry;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
+pub(crate) mod disk_lockdown;
 mod drive_backend;
 mod enclosure_prepare;
 mod endpoint_registry;

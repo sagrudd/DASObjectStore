@@ -148,6 +148,12 @@ records its current timestamp, and returns the state-transition report.
 The force-retirement variant applies its policy allowance and exact confirmation
 inside the daemon before the risk-gated state transition.
 
+``dasobjectstore disk lockdown-das`` follows the same boundary. The daemon
+discovers the managed SSD/HDD roots, plans optional service-account creation,
+checks administrator authorization and the exact confirmation marker, executes
+the ownership and mode changes, and records the completed job. The CLI remains
+responsible only for argument parsing and report rendering.
+
 The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
 user or group, package configuration stops and asks the operator to repair the

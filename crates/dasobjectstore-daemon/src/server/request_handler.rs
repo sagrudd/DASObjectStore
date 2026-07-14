@@ -677,6 +677,14 @@ where
         GarageServiceController::prepare_enclosure(self, request, accepted_at_utc)
     }
 
+    fn disk_lockdown(
+        &self,
+        request: crate::api::DiskLockdownRequest,
+        accepted_at_utc: &str,
+    ) -> Result<crate::api::DiskLockdownResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::disk_lockdown(self, request, accepted_at_utc)
+    }
+
     fn provision(
         &self,
         request: DaemonServiceProvisionRequest,

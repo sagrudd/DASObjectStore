@@ -1301,8 +1301,11 @@ retained only for explicit registry/test and no-writer-group migration paths;
 portable SSD mirroring remains a separate compatibility concern.
 
 The daemon-ownership backlog is now tracked as partial rather than open: store
-drain/delete, ingest queue drain, object put, disk retirement, and normal
-writer-group creation have typed runtime operations and regression coverage.
+drain/delete, ingest queue drain, object put, disk retirement, normal
+writer-group creation, and `disk lockdown-das` have typed runtime operations
+and regression coverage. The lockdown path keeps protected-root discovery,
+account setup planning, confirmation, administrator authorization, and command
+execution behind the Unix-socket boundary while the CLI remains a client.
 Post-acceptance local writer-group registry updates are serialized and
 fsync-published, preserving sibling groups when concurrent Web responses
 reconcile the same registry.

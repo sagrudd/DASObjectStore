@@ -20,7 +20,6 @@ use crate::cli::{
 mod application_auth;
 mod command_handlers;
 mod connection_status;
-mod disk_lockdown;
 mod health;
 mod ingest_client;
 mod ingest_local_direct;
@@ -101,9 +100,6 @@ use self::command_handlers::{
 #[cfg(feature = "debug-commands")]
 use self::command_handlers::{run_pool_mark_clean, run_pool_mark_dirty};
 
-use self::disk_lockdown::{
-    lockdown_das, LockdownDasError, LockdownDasRequest, LOCKDOWN_CONFIRMATION,
-};
 use self::health::run_health;
 #[cfg(test)]
 use self::health::{DiskHealthSummary, HealthReport};
@@ -177,7 +173,7 @@ use dasobjectstore_daemon::{
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
     DaemonIngestControlAction, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
     DaemonRuntimeConfig, DiskForceRetireRequest as DaemonDiskForceRetireRequest,
-    DiskRetireRequest as DaemonDiskRetireRequest,
+    DiskLockdownRequest as DaemonDiskLockdownRequest, DiskRetireRequest as DaemonDiskRetireRequest,
     IngestControlRequest as DaemonIngestControlRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     ObjectPutRequest as DaemonObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
@@ -191,7 +187,8 @@ use dasobjectstore_daemon::{
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
     StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
-    DEFAULT_DAEMON_STATE_DIR, OBJECT_STORE_CREATE_CONFIRMATION,
+    DEFAULT_DAEMON_STATE_DIR, DISK_LOCKDOWN_CONFIRMATION as LOCKDOWN_CONFIRMATION,
+    OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
@@ -646,7 +643,6 @@ pub(crate) enum CliError {
     PoolImport(ReadOnlyAttachError),
     DiskDrain(DiskDrainError),
     StoreCleanup(StoreCleanupError),
-    DiskLockdown(LockdownDasError),
     DaemonClient(DaemonClientError),
     DiskRetirement(DiskRetirementError),
     ObjectExport(ObjectExportError),
@@ -694,7 +690,6 @@ impl Display for CliError {
             Self::PoolImport(err) => write!(formatter, "{err}"),
             Self::DiskDrain(err) => write!(formatter, "{err}"),
             Self::StoreCleanup(err) => write!(formatter, "{err}"),
-            Self::DiskLockdown(err) => write!(formatter, "{err}"),
             Self::DaemonClient(err) => write!(formatter, "{err}"),
             Self::DiskRetirement(err) => write!(formatter, "{err}"),
             Self::ObjectExport(err) => write!(formatter, "{err}"),
@@ -800,12 +795,6 @@ impl From<DaemonClientError> for CliError {
 impl From<DiskRetirementError> for CliError {
     fn from(err: DiskRetirementError) -> Self {
         Self::DiskRetirement(err)
-    }
-}
-
-impl From<LockdownDasError> for CliError {
-    fn from(err: LockdownDasError) -> Self {
-        Self::DiskLockdown(err)
     }
 }
 

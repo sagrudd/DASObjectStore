@@ -335,6 +335,39 @@ where
             handler.record_admin_job(daemon_job_summary_from_prepare_enclosure(&response))?;
             Ok(DaemonApiResponse::PrepareEnclosure(response))
         }
+        DaemonApiRequest::DiskLockdown(mut request) => {
+            request.confirmation_marker = request.confirmation_marker.trim().to_string();
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "disk lockdown requires an authenticated local administrator",
+                    )));
+                };
+                if !actor.is_administrator() {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authorization_required",
+                        "disk lockdown requires root, sudo, or dasobjectstore-admin membership",
+                    )));
+                }
+            }
+            let now = handler.clock.now_utc();
+            let response = handler
+                .service_orchestrator
+                .disk_lockdown(request, &now)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            handler.record_admin_job(DaemonJobSummary {
+                job_id: response.accepted.job_id.clone(),
+                kind: response.accepted.kind.clone(),
+                state: DaemonJobState::Complete,
+                progress: DaemonJobProgress::default(),
+                submitted_at_utc: response.accepted.accepted_at_utc.clone(),
+                updated_at_utc: response.accepted.accepted_at_utc.clone(),
+                actor: actor.map(DaemonLocalActor::display_name),
+                failure_message: None,
+            })?;
+            Ok(DaemonApiResponse::DiskLockdown(response))
+        }
         DaemonApiRequest::CreateObjectStore(request) => {
             let now = handler.clock.now_utc();
             let response = handler
