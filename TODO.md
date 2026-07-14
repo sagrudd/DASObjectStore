@@ -427,31 +427,36 @@ completion.
 
 ### Gate 2: Universal capacity and transactional admission
 
-- [ ] Extend every ObjectStore policy with logical capacity limit, mandatory
+The core quota, reservation, admission, SubObject, and read-only reporting
+contracts are implemented and regression-tested. The remaining work is
+profile-specific registry/probe integration plus live S3 and multipart
+transaction wiring; those boundaries stay explicit in the child items below.
+
+- [~] Extend every ObjectStore policy with logical capacity limit, mandatory
   backend reserve, warning threshold, and critical threshold; require a finite
   limit for ``folder``.
   - [x] Add serde-compatible `CapacityPolicy` fields and strict validation to
     the shared `StorePolicy` model while retaining unbounded legacy defaults
     until profile creation supplies a finite limit.
-- [ ] Add a transactional quota ledger and capacity reservations so concurrent,
+- [~] Add a transactional quota ledger and capacity reservations so concurrent,
   streaming, versioned, and multipart uploads cannot overbook the same bytes.
   - [x] Add a core transactional `CapacityReservationLedger` with reserve,
     commit, release, overflow, duplicate-ID, and backend-reserve enforcement
     tests; daemon/S3/multipart admission wiring remains open.
-- [ ] Admit against the strictest of logical quota, outstanding reservations,
+- [~] Admit against the strictest of logical quota, outstanding reservations,
   backend usable space after reserve, SSD staging, and copy amplification.
   - [x] Add a pure core admission evaluator that reports logical/backend/SSD
     availability and rejects the strictest failed constraint with copy
     amplification; SSD staging is now an explicit daemon-derived input so
     policy-permitted direct ingress bypasses only SSD free-space checks.
     Daemon/S3 call-site integration remains open.
-- [ ] Charge each logical object version at full logical size even when physical
+- [~] Charge each logical object version at full logical size even when physical
   content is deduplicated; report physical staging/replication separately.
   - [x] Add a typed core logical-object-version charge and ledger reservation
     entry point that always accounts the full version size independently of
     content dedupe, copy count, or staging; daemon/catalogue call-site wiring
     and physical telemetry remain open.
-- [ ] Define over-quota behavior: preserve reads, verified deletion, repair, and
+- [~] Define over-quota behavior: preserve reads, verified deletion, repair, and
   cleanup; reject new ingress; never delete data when a quota is lowered.
   - [x] Add derived pressure states and atomic quota-policy updates to the core
     ledger. Lowering a limit preserves usage and existing reservations, marks
@@ -462,7 +467,7 @@ completion.
     transaction wiring remain separate.
   - [x] Require folder staging bytes to match the reservation exactly before
     commit, preventing logical-used/accounted-size drift during adoption.
-- [ ] Add optional SubObject budgets whose reservations atomically update both
+- [~] Add optional SubObject budgets whose reservations atomically update both
   child and parent allocations.
   - [x] Add a core hierarchical SubObject capacity ledger with atomic
     parent/child reservation, commit, and release behavior; a strict,
@@ -470,7 +475,7 @@ completion.
     links across restart and rejects inconsistent links. The daemon now has an
     atomic state-file save/load adapter with corruption and link-integrity
     regressions; registry integration and transport wiring remain open.
-- [ ] Expose used, reserved, available, backend free, amplification, thresholds,
+- [~] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
   - [x] Add a read-only daemon ``capacity_status`` transport response backed by
     the registry policy, persisted ledger, and daemon-owned statvfs probes;
