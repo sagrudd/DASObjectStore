@@ -454,8 +454,9 @@ completion.
   - [x] Add a core hierarchical SubObject capacity ledger with atomic
     parent/child reservation, commit, and release behavior; a strict,
     schema-versioned parent/child snapshot contract now preserves reservation
-    links across restart and rejects inconsistent links. Daemon registry
-    persistence and transport wiring remain open.
+    links across restart and rejects inconsistent links. The daemon now has an
+    atomic state-file save/load adapter with corruption and link-integrity
+    regressions; registry integration and transport wiring remain open.
 - [ ] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
   - [x] Add a read-only daemon ``capacity_status`` transport response backed by

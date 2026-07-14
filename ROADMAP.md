@@ -1301,7 +1301,9 @@ Garage S3 reconciliation now passes its controller-owned provider into that
 worker as well; multipart paths still need explicit provider injection.
 The core SubObject capacity ledger now has a strict, schema-versioned snapshot
 contract that preserves parent/child reservation links and rejects inconsistent
-restart state; daemon registry persistence and transport wiring remain open.
+restart state. The daemon now persists that snapshot through an atomic,
+restart-safe state-file adapter with corruption and link-integrity regressions;
+registry integration and transport wiring remain open.
 The profile S3 seam now publishes bounded multipart completion metadata
 (ordered parts, per-part SHA-256 checksums, total-size and reservation
 validation) and a streaming assembler that verifies each declared part;

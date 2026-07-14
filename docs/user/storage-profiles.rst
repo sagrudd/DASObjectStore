@@ -146,8 +146,9 @@ Folder staging also requires the copied byte count to equal its reservation,
 so logical usage cannot drift from the payload size.
 The core ledger also exposes a schema-versioned snapshot/restore boundary for
 restart-safe persistence. Unknown schemas and snapshots that would overbook a
-policy are rejected; the daemon still needs to supply durable file persistence
-and stale-reservation expiry.
+policy are rejected. Optional SubObject parent/child snapshots are now also
+persisted through an atomic daemon state-file adapter; registry integration and
+stale-reservation expiry remain separate capacity-gate work.
 The daemon persistence wrapper writes this snapshot through a private temporary
 file, file ``fsync``, atomic rename, and directory ``fsync``; corrupt or
 future-schema state is rejected without silently resetting reservations.

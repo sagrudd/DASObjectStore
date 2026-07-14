@@ -29,6 +29,7 @@ mod remote_sessions;
 mod remote_upload;
 mod service;
 mod service_reconciliation;
+mod subobject_capacity_persistence;
 
 pub use admin_jobs::{
     admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,
@@ -196,4 +197,8 @@ pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,
     GarageServiceController, GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary,
     ServiceCommandOutput, ServiceCommandRunner, SystemServiceCommandRunner,
+};
+pub use subobject_capacity_persistence::{
+    load_subobject_capacity_ledger, save_subobject_capacity_ledger,
+    SubObjectCapacityLedgerPersistenceError,
 };
