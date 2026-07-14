@@ -1053,16 +1053,21 @@ transaction wiring; those boundaries stay explicit in the child items below.
 
 ### Gate 6: Integration and market-readiness acceptance
 
+The profile-neutral contracts, local generated-data fixtures, and operator
+surfaces are delivered. The remaining matrix runs are intentionally
+deployment-gated and must cover packaged folder/drive installs plus the
+appliance and representative product workflows before release readiness.
+
 - [x] Publish a profile-by-host-mode support matrix and upgrade/migration policy.
   - [x] Publish the current profile/host-mode matrix and fail-closed upgrade
     policy in `docs/user/storage-profile-matrix.rst`, distinguishing local
     preview contracts from DASServer/Garage-blocked acceptance.
-- [ ] Run package install/upgrade/uninstall, authentication, quota, S3,
+- [~] Run package install/upgrade/uninstall, authentication, quota, S3,
   migration, recovery, security, observability, and performance matrices for
   folder, drive, and appliance.
-- [ ] Validate generated-data stress tests plus representative Mnemosyne product
+- [~] Validate generated-data stress tests plus representative Mnemosyne product
   workflows; never use customer/project data in automated acceptance.
-- [ ] Require real-world validation readiness, operator runbooks, release notes,
+- [~] Require real-world validation readiness, operator runbooks, release notes,
   and no unexplained critical TODO blockers before declaring a profile ready.
 
 ## Architecture Remediation Backlog
