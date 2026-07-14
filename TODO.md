@@ -2120,7 +2120,9 @@ list until every temporary size-budget exception has been removed.
       cancellation without browser-side storage mutation.
     - [x] Add a daemon-owned persistent administrator job registry so accepted
       admin jobs can be queried after submission and cancellation requests have
-      stable terminal-state semantics.
+      stable terminal-state semantics. Registry updates now use fsync'd
+      temporary-file replacement and directory fsync, with regression coverage
+      for final-file publication.
     - [x] Render live daemon job progress, cancellation, retry, and completed
       result state in the Enclosures wizard using the persistent administrator
       job status route.

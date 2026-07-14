@@ -5,9 +5,11 @@ use crate::api::{
 };
 use crate::runtime::DaemonServiceRuntimeError;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const ADMIN_JOB_REGISTRY_DIR_NAME: &str = "admin-jobs";
 pub const ADMIN_JOB_REGISTRY_FILE_NAME: &str = "jobs.json";
@@ -217,22 +219,58 @@ fn write_registry(
     path: &Path,
     registry: &AdminJobRegistryFile,
 ) -> Result<(), DaemonServiceRuntimeError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
-            path: parent.to_path_buf(),
-            message: error.to_string(),
+    let parent = path
+        .parent()
+        .ok_or_else(|| DaemonServiceRuntimeError::JobRegistryIo {
+            path: path.to_path_buf(),
+            message: "admin job registry has no parent".to_string(),
         })?;
-    }
+    fs::create_dir_all(parent).map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
+        path: parent.to_path_buf(),
+        message: error.to_string(),
+    })?;
     let encoded = serde_json::to_vec_pretty(registry).map_err(|error| {
         DaemonServiceRuntimeError::InvalidJobRegistryJson {
             path: path.to_path_buf(),
             message: error.to_string(),
         }
     })?;
-    fs::write(path, encoded).map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("jobs"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
+            path: temporary.clone(),
+            message: error.to_string(),
+        })?;
+    file.write_all(&encoded)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
+            path: temporary.clone(),
+            message: error.to_string(),
+        })?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
         path: path.to_path_buf(),
         message: error.to_string(),
-    })
+    })?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| DaemonServiceRuntimeError::JobRegistryIo {
+            path: parent.to_path_buf(),
+            message: error.to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -272,6 +310,24 @@ mod tests {
         assert_eq!(response.job.state, DaemonJobState::Running);
         assert!(path.exists());
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn job_registry_persistence_leaves_only_final_file_after_atomic_write() {
+        let root = temp_root("atomic-persist");
+        let path = admin_job_registry_path(&root);
+        let registry = FileBackedAdminJobRegistry::new(&path);
+
+        registry
+            .record(job("job-1", DaemonJobState::Queued))
+            .expect("recorded");
+        let entries = fs::read_dir(path.parent().expect("parent"))
+            .expect("read parent")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("entries");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file_name(), "jobs.json");
         cleanup(&root);
     }
 

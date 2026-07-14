@@ -273,6 +273,9 @@ appliance:
 Milestones 1-18 delivered a substantial appliance foundation, but their
 acceptance and later integration debts remain open. The active campaign gates
 take precedence over historical milestone numbering when selecting new work.
+Daemon administrator job state is persisted through fsync'd temporary-file
+replacement and directory fsync before publication, preserving queryable job
+state across process crashes.
 
 The Web interface has a coherent Yew shell and API contracts, but several
 current surfaces are holder implementations rather than completed operator
