@@ -2348,8 +2348,10 @@ list until every temporary size-budget exception has been removed.
   - [x] Publish an optional, bounded completion-metadata handoff carrying the
     upload ID, logical object key, admitted byte count, and SHA-256 checksum.
     The daemon validates the metadata after provider transfer and before the
-    completion authority is called; legacy multi-object jobs remain metadata
-    agnostic. Provider verification and live catalogue/provider wiring remain.
+    completion authority is called; malformed keys, upload IDs, and checksums
+    now fail-closed with regression coverage; legacy multi-object jobs remain
+    metadata agnostic. Provider verification and live catalogue/provider wiring
+    remain.
   - [~] Add a guarded, resumable reconciliation operation for already-uploaded
     S3/object-service keys missing from the ObjectBrowser catalogue; report
     collisions, malformed keys, and inaccessible objects without silently
