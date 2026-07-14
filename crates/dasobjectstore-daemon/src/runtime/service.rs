@@ -141,6 +141,10 @@ where
             .admit(request)
     }
 
+    pub fn capacity_provider(&self) -> Option<Arc<dyn CapacityAdmissionProvider>> {
+        self.capacity_admission_provider.clone()
+    }
+
     pub fn capacity_status(
         &self,
         request: crate::api::CapacityStatusRequest,

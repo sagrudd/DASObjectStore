@@ -663,6 +663,10 @@ where
         GarageServiceController::capacity_admission(self, request)
     }
 
+    fn capacity_provider(&self) -> Option<Arc<dyn crate::runtime::CapacityAdmissionProvider>> {
+        GarageServiceController::capacity_provider(self)
+    }
+
     fn capacity_status(
         &self,
         request: crate::api::CapacityStatusRequest,
@@ -1000,15 +1004,15 @@ mod tests {
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
         ProfileInspectionRequest, ProfileInspectionRootState, ProfileReadinessRequest,
-        ProviderStreamOpenRequest, RemoteEasyconnectApprovePairingRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -1211,6 +1215,142 @@ mod tests {
             .read_to_end(&mut ranged_bytes)
             .expect("read ranged provider source");
         assert_eq!(ranged_bytes, b"ell");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn provider_stream_upload_commits_folder_profile_before_acknowledgement() {
+        let root = temp_root("provider-stream-upload");
+        cleanup(&root);
+        let backend_root = root.join("backend");
+        fs::create_dir_all(&backend_root).expect("backend root");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "upload-store",
+            None,
+            Some("mnemosyne"),
+            true,
+        );
+        let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
+        store_definitions[0].policy.capacity =
+            dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        fs::write(
+            &store_registry,
+            serde_json::to_string_pretty(&store_definitions).expect("bounded registry JSON"),
+        )
+        .expect("bounded store registry written");
+        let profile_registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-14T09:00:00Z"),
+        )
+        .with_registry_paths(&store_registry, &subobject_registry)
+        .with_profile_binding_registry_path(&profile_registry);
+        let actor = DaemonLocalActor::new(0)
+            .with_username("root")
+            .with_groups(["mnemosyne"]);
+        let binding_request =
+            profile_binding_request_for_auth_test("upload-store", backend_root.clone());
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile binding");
+
+        let checksum = "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        let request = ProviderStreamUploadOpenRequest {
+            schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "upload-request".to_string(),
+            upload_id: "upload-1".to_string(),
+            store_id: StoreId::new("upload-store").expect("store id"),
+            object: BackendObjectKey {
+                object_id: "objects/hello.txt".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            expected_sha256: checksum.to_string(),
+            chunk_size_bytes: 1024,
+        };
+        let frames = std::cell::RefCell::new(vec![
+            (
+                ProviderStreamChunkHeader {
+                    schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                    request_id: "upload-request".to_string(),
+                    offset: 0,
+                    payload_len: 5,
+                    final_chunk: false,
+                    total_size: None,
+                    sha256: None,
+                },
+                b"hello".to_vec(),
+            ),
+            (
+                ProviderStreamChunkHeader {
+                    schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                    request_id: "upload-request".to_string(),
+                    offset: 5,
+                    payload_len: 0,
+                    final_chunk: true,
+                    total_size: Some(5),
+                    sha256: Some(checksum.to_string()),
+                },
+                Vec::new(),
+            ),
+        ]);
+        let mut read_frame = || {
+            frames.borrow_mut().drain(..1).next().ok_or_else(|| {
+                crate::server::unix_socket::UnixSocketDaemonServerError::Io(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "test frame missing",
+                ))
+            })
+        };
+        let responses = std::cell::RefCell::new(Vec::new());
+        let mut emit_response = |response| {
+            responses.borrow_mut().push(response);
+            Ok(())
+        };
+        handler
+            .handle_provider_stream_upload_for_actor(
+                request,
+                Some(&actor),
+                &mut read_frame,
+                &mut emit_response,
+            )
+            .expect("provider stream upload");
+        let response = responses
+            .into_inner()
+            .pop()
+            .expect("upload acknowledgement");
+        let DaemonApiResponse::ProviderStreamUpload(response) = response else {
+            panic!("expected provider stream upload acknowledgement: {response:?}");
+        };
+        assert_eq!(response.size_bytes, 5);
+        assert_eq!(response.sha256, checksum);
+
+        let backend = FolderBackend::open(
+            backend_root,
+            binding_request.manifest,
+            binding_request.capacity,
+            0,
+        )
+        .expect("folder backend");
+        let record = backend
+            .records()
+            .expect("catalogue records")
+            .into_iter()
+            .next()
+            .expect("committed record");
+        assert_eq!(record.key, response.object);
+        let mut payload = Vec::new();
+        backend
+            .read(&record.key)
+            .expect("committed payload reader")
+            .read_to_end(&mut payload)
+            .expect("read committed payload");
+        assert_eq!(payload, b"hello");
         cleanup(&root);
     }
 

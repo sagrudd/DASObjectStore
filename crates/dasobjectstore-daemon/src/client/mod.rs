@@ -724,6 +724,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::DiskRetire(_) => "disk_retire",
         DaemonApiResponse::DiskForceRetire(_) => "disk_force_retire",
         DaemonApiResponse::DiskLockdown(_) => "disk_lockdown",
+        DaemonApiResponse::ProviderStreamUpload(_) => "provider_stream_upload",
         DaemonApiResponse::StoreInventory(_) => "store_inventory",
         DaemonApiResponse::StoreDrain(_) => "store_drain",
         DaemonApiResponse::StoreDelete(_) => "store_delete",

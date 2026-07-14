@@ -54,6 +54,36 @@ pub struct ProviderStreamUploadOpenRequest {
     pub chunk_size_bytes: u32,
 }
 
+/// Path-free acknowledgement emitted only after the daemon has staged,
+/// verified, finalized, and catalogue-committed one streamed object.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamUploadResponse {
+    pub schema_version: String,
+    pub upload_id: String,
+    pub store_id: StoreId,
+    pub object: BackendObjectKey,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+impl ProviderStreamUploadResponse {
+    pub fn from_record(
+        upload_id: impl Into<String>,
+        store_id: StoreId,
+        record: &dasobjectstore_core::backend::BackendObjectRecord,
+    ) -> Self {
+        Self {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            upload_id: upload_id.into(),
+            store_id,
+            object: record.key.clone(),
+            size_bytes: record.size_bytes,
+            sha256: record.checksum.clone(),
+        }
+    }
+}
+
 impl ProviderStreamUploadOpenRequest {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
         if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {

@@ -1361,7 +1361,10 @@ The profile S3 seam now publishes bounded multipart completion metadata
 (ordered parts, per-part SHA-256 checksums, total-size and reservation
 validation) and a streaming assembler that verifies each declared part;
 the assembler now feeds the same transactional PUT lifecycle, with and without
-the daemon logical-capacity provider. HTTP dispatch remains.
+the daemon logical-capacity provider. Unix provider-stream upload dispatch now
+also drives the folder-profile writer through authorization, reservation, frame
+verification, staged fsync/rename, and path-free commit acknowledgement; HTTP
+listener dispatch remains.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
@@ -1423,9 +1426,11 @@ profile HEAD, verification, capacity, health, readiness, and authenticated Web
 capability/readiness routes are also available without exposing private paths;
 shared SQLite catalogue authority, provider-backed streaming download,
 repair/lifecycle orchestration, and full S3 HTTP integration remain open. The
-provider-neutral runtime now also offers a bounded writer-stream helper that
-checks catalogue authority and exact byte length before success; HTTP framing
-and provider-backed transport remain separate.
+provider-neutral runtime now also offers a bounded writer-stream helper and the
+daemon Unix provider-stream dispatch drives it through authorization,
+reservation, exact byte/checksum verification, staged fsync/rename, and
+catalogue commit before acknowledging success; HTTP listener framing and
+provider-backed transport remain separate.
 
 Shared SQLite catalogue integration is currently blocked by a schema/authority
 boundary: profile-private records carry versioned logical keys and local

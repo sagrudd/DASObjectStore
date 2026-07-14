@@ -722,7 +722,9 @@ transaction wiring; those boundaries stay explicit in the child items below.
   verifies catalogue authority and exact declared size before reporting a
   successful copy; the provider-neutral GET reader likewise verifies declared
   size and checksum as it is consumed, and the bounded stream helper is
-  exported for adapter consumers. HTTP framing and provider-backed transport
+  exported for adapter consumers. The daemon Unix-socket upload envelope now
+  drives that writer through authorization, reservation, staged fsync/rename,
+  and catalogue commit; HTTP listener framing and provider-backed transport
   remain separate.
   - [x] Expose folder browse/read/verify, health, and typed capacity snapshots
     from `FolderBackend`; folder-profile catalogue records now reload from the
@@ -832,11 +834,15 @@ hardware acceptance.
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
   catalogue state rather than provider listings.
   **Blocker (execution boundary):** the Unix provider-stream protocol now has
-  bounded client-to-daemon upload envelopes and binary-frame dispatch, but safe
-  HTTP PUT/multipart routing still needs a daemon-owned staging identity,
+  bounded client-to-daemon upload envelopes, binary-frame dispatch, and a
+  folder-profile writer that performs authorization, reservation, verification,
+  staged fsync/rename, and catalogue commit. Safe HTTP PUT/multipart routing
+  still needs an HTTP listener adapter with the same staging identity,
   cancellation/backpressure semantics, and transactional catalogue mutation.
   Do not implement this by writing request bodies directly from the Web process
-  into a managed profile root.
+  into a managed profile root. **Next acceptance condition:** an authenticated
+  HTTP request must delegate its body to this daemon stream and return the
+  typed commit acknowledgement only after catalogue persistence succeeds.
   - [x] Add a provider-neutral profile read adapter for authoritative
     list/HEAD/GET semantics over folder and drive backends; it never consults
     provider listings or exposes private backend paths. Bounded streaming now
@@ -925,6 +931,12 @@ hardware acceptance.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.
+  - [x] Wire the bounded Unix provider-stream upload into the folder-profile
+    daemon path. Writer-group authorization, logical/physical reservation,
+    frame-by-frame size/checksum verification, staged fsync/rename, and the
+    path-free commit acknowledgement now complete before the socket response;
+    native HTTP listener dispatch and provider-native capability verification
+    remain separately gated.
 - [~] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic. Static capability discovery and daemon-backed readiness are

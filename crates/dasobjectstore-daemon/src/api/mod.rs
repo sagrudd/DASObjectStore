@@ -176,8 +176,8 @@ pub use provider_stream::{
     read_provider_stream_frame, write_provider_stream_frame, ProviderStreamCancellation,
     ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamFrameError,
     ProviderStreamOpenRequest, ProviderStreamRange, ProviderStreamUploadOpenRequest,
-    ProviderStreamValidationError, ProviderStreamVerificationError, ProviderStreamVerifier,
-    PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
+    ProviderStreamUploadResponse, ProviderStreamValidationError, ProviderStreamVerificationError,
+    ProviderStreamVerifier, PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
     PROVIDER_STREAM_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
@@ -490,6 +490,7 @@ pub enum DaemonApiResponse {
     DiskRetire(DiskRetireResponse),
     DiskForceRetire(DiskRetireResponse),
     DiskLockdown(DiskLockdownResponse),
+    ProviderStreamUpload(ProviderStreamUploadResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     StoreDelete(StoreDeleteResponse),

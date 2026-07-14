@@ -5,6 +5,12 @@ use crate::api::{
 };
 
 pub trait DaemonServiceOrchestrator {
+    fn capacity_provider(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::runtime::CapacityAdmissionProvider>> {
+        None
+    }
+
     fn initialize_profile_capacity(
         &self,
         _store_id: &StoreId,

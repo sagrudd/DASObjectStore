@@ -181,14 +181,15 @@ pub trait DaemonApiHandler {
     /// verification complete.
     fn handle_provider_stream_upload_for_actor(
         &self,
-        _request: ProviderStreamUploadOpenRequest,
-        _actor: Option<&DaemonLocalActor>,
-        _read_frame: &mut dyn FnMut() -> Result<
+        request: ProviderStreamUploadOpenRequest,
+        actor: Option<&DaemonLocalActor>,
+        read_frame: &mut dyn FnMut() -> Result<
             (ProviderStreamChunkHeader, Vec<u8>),
             UnixSocketDaemonServerError,
         >,
         emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
     ) -> Result<(), UnixSocketDaemonServerError> {
+        let _ = (request, actor, read_frame);
         emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
             "not_implemented",
             "provider stream upload writer is not wired into dasobjectstored yet",
@@ -372,6 +373,25 @@ where
                 ))
             })?;
         }
+    }
+
+    fn handle_provider_stream_upload_for_actor(
+        &self,
+        request: ProviderStreamUploadOpenRequest,
+        actor: Option<&DaemonLocalActor>,
+        read_frame: &mut dyn FnMut() -> Result<
+            (ProviderStreamChunkHeader, Vec<u8>),
+            UnixSocketDaemonServerError,
+        >,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        DaemonRequestHandler::<S, C>::handle_provider_stream_upload_for_actor(
+            self,
+            request,
+            actor,
+            read_frame,
+            emit_response,
+        )
     }
 }
 
