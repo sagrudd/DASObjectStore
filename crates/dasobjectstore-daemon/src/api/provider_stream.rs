@@ -54,6 +54,89 @@ pub struct ProviderStreamUploadOpenRequest {
     pub chunk_size_bytes: u32,
 }
 
+/// Path-free open envelope for one reservation-bound multipart part.
+///
+/// A part is addressed by the daemon-owned reservation and its one-based
+/// number. This is separate from the ordinary single-object upload envelope
+/// so retries can be matched to the same reservation/part identity without
+/// exposing a staging path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamMultipartPartUploadOpenRequest {
+    pub schema_version: String,
+    pub request_id: String,
+    pub reservation_id: String,
+    pub part_number: u32,
+    pub store_id: StoreId,
+    pub object: BackendObjectKey,
+    pub expected_size_bytes: u64,
+    pub expected_sha256: String,
+    pub chunk_size_bytes: u32,
+}
+
+/// Acknowledgement emitted only after the daemon has durably staged and
+/// verified one multipart part. Completion consumes these daemon-owned bytes
+/// by reservation/part identity; callers never receive a path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamMultipartPartUploadResponse {
+    pub schema_version: String,
+    pub request_id: String,
+    pub reservation_id: String,
+    pub part_number: u32,
+    pub store_id: StoreId,
+    pub object: BackendObjectKey,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+impl ProviderStreamMultipartPartUploadOpenRequest {
+    pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+            return Err(ProviderStreamValidationError::UnsupportedSchema {
+                schema_version: self.schema_version.clone(),
+            });
+        }
+        validate_non_blank(&self.request_id, "request_id")?;
+        validate_non_blank(&self.reservation_id, "reservation_id")?;
+        if self.part_number == 0 {
+            return Err(ProviderStreamValidationError::InvalidMultipartPartNumber);
+        }
+        validate_object_key(&self.object)?;
+        if self.expected_size_bytes == 0 {
+            return Err(ProviderStreamValidationError::InvalidMultipartPartSize);
+        }
+        validate_sha256(&self.expected_sha256, "expected_sha256")?;
+        if self.chunk_size_bytes == 0 || self.chunk_size_bytes > PROVIDER_STREAM_MAX_CHUNK_BYTES {
+            return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
+                chunk_size_bytes: self.chunk_size_bytes,
+            });
+        }
+        Ok(())
+    }
+}
+
+impl ProviderStreamMultipartPartUploadResponse {
+    pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+            return Err(ProviderStreamValidationError::UnsupportedSchema {
+                schema_version: self.schema_version.clone(),
+            });
+        }
+        validate_non_blank(&self.request_id, "request_id")?;
+        validate_non_blank(&self.reservation_id, "reservation_id")?;
+        if self.part_number == 0 {
+            return Err(ProviderStreamValidationError::InvalidMultipartPartNumber);
+        }
+        validate_object_key(&self.object)?;
+        if self.size_bytes == 0 {
+            return Err(ProviderStreamValidationError::InvalidMultipartPartSize);
+        }
+        validate_sha256(&self.sha256, "sha256")?;
+        Ok(())
+    }
+}
+
 /// Path-free acknowledgement emitted only after the daemon has staged,
 /// verified, finalized, and catalogue-committed one streamed object.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -526,6 +609,8 @@ pub enum ProviderStreamValidationError {
         field: &'static str,
     },
     InvalidObjectKey,
+    InvalidMultipartPartNumber,
+    InvalidMultipartPartSize,
     InvalidRange {
         start: u64,
         end_exclusive: Option<u64>,
@@ -553,6 +638,12 @@ impl Display for ProviderStreamValidationError {
             }
             Self::InvalidField { field } => write!(formatter, "{field} must not be blank"),
             Self::InvalidObjectKey => formatter.write_str("provider stream object key is invalid"),
+            Self::InvalidMultipartPartNumber => {
+                formatter.write_str("multipart part number must be greater than zero")
+            }
+            Self::InvalidMultipartPartSize => {
+                formatter.write_str("multipart part size must be greater than zero")
+            }
             Self::InvalidRange {
                 start,
                 end_exclusive,
@@ -681,6 +772,39 @@ mod tests {
         assert!(matches!(
             invalid.validate(),
             Err(ProviderStreamValidationError::InvalidField { field: "upload_id" })
+        ));
+    }
+
+    #[test]
+    fn multipart_part_open_request_is_path_free_and_retry_addressable() {
+        let request = ProviderStreamMultipartPartUploadOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "multipart-frame-1".to_string(),
+            reservation_id: "reservation-1".to_string(),
+            part_number: 2,
+            store_id: StoreId::new("store-1").expect("store"),
+            object: BackendObjectKey {
+                object_id: "folder/object.bin".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            expected_sha256:
+                "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            chunk_size_bytes: 1024,
+        };
+        request.validate().expect("valid multipart part request");
+        let encoded = serde_json::to_string(&request).expect("encode");
+        assert!(!encoded.contains("/") || encoded.contains("folder/object.bin"));
+        let decoded: ProviderStreamMultipartPartUploadOpenRequest =
+            serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, request);
+
+        let mut invalid = request;
+        invalid.part_number = 0;
+        assert!(matches!(
+            invalid.validate(),
+            Err(ProviderStreamValidationError::InvalidMultipartPartNumber)
         ));
     }
 

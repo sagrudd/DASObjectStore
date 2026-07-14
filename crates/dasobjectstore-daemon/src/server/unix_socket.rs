@@ -1,6 +1,7 @@
 use crate::api::{
     write_provider_stream_frame, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    ProviderStreamChunkHeader, ProviderStreamFrameError, ProviderStreamOpenRequest,
+    ProviderStreamChunkHeader, ProviderStreamFrameError,
+    ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamOpenRequest,
     ProviderStreamUploadOpenRequest, ProviderStreamVerifier,
 };
 use crate::auth::DaemonLocalActor;
@@ -193,6 +194,25 @@ pub trait DaemonApiHandler {
         emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
             "not_implemented",
             "provider stream upload writer is not wired into dasobjectstored yet",
+        )))
+    }
+
+    /// Handle one reservation-bound multipart part. The default remains
+    /// fail-closed until the runtime stages bytes under daemon ownership.
+    fn handle_provider_stream_multipart_part_upload_for_actor(
+        &self,
+        request: ProviderStreamMultipartPartUploadOpenRequest,
+        actor: Option<&DaemonLocalActor>,
+        read_frame: &mut dyn FnMut() -> Result<
+            (ProviderStreamChunkHeader, Vec<u8>),
+            UnixSocketDaemonServerError,
+        >,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        let _ = (request, actor, read_frame);
+        emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "not_implemented",
+            "multipart part staging is not wired into dasobjectstored yet",
         )))
     }
 }
@@ -541,6 +561,7 @@ enum PendingRequest {
     Api(DaemonApiRequest),
     ProviderStream(ProviderStreamOpenRequest),
     ProviderStreamUpload(ProviderStreamUploadOpenRequest),
+    ProviderStreamMultipartPartUpload(ProviderStreamMultipartPartUploadOpenRequest),
 }
 
 fn receive_stream(
@@ -613,6 +634,24 @@ fn receive_stream(
         return Ok(Some(PendingStream {
             stream,
             request: PendingRequest::ProviderStreamUpload(request),
+            actor,
+        }));
+    }
+    if let Ok(request) = serde_json::from_str::<ProviderStreamMultipartPartUploadOpenRequest>(&line)
+    {
+        if let Err(error) = request.validate() {
+            write_response_frame(
+                &mut stream,
+                &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "bad_request",
+                    format!("invalid multipart part upload request: {error}"),
+                )),
+            )?;
+            return Ok(None);
+        }
+        return Ok(Some(PendingStream {
+            stream,
+            request: PendingRequest::ProviderStreamMultipartPartUpload(request),
             actor,
         }));
     }
@@ -725,6 +764,41 @@ fn handle_pending_stream(
                 result => result?,
             }
         }
+        PendingRequest::ProviderStreamMultipartPartUpload(request) => {
+            let mut response_stream = pending
+                .stream
+                .try_clone()
+                .map_err(UnixSocketDaemonServerError::Io)?;
+            let mut emit_response =
+                |response| write_response_frame(&mut response_stream, &response);
+            let mut read_frame = || {
+                crate::api::read_provider_stream_frame(&mut pending.stream)
+                    .map_err(UnixSocketDaemonServerError::ProviderStreamFrame)
+            };
+            match handler.handle_provider_stream_multipart_part_upload_for_actor(
+                request,
+                pending.actor.as_ref(),
+                &mut read_frame,
+                &mut emit_response,
+            ) {
+                Err(UnixSocketDaemonServerError::ProviderStreamFrame(error))
+                    if !matches!(
+                        &error,
+                        ProviderStreamFrameError::Io(io)
+                            if client_disconnect_kind(io.kind())
+                    ) =>
+                {
+                    write_response_frame(
+                        &mut response_stream,
+                        &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "bad_request",
+                            format!("invalid multipart part frame: {error}"),
+                        )),
+                    )?;
+                }
+                result => result?,
+            }
+        }
     }
     Ok(())
 }
@@ -753,6 +827,7 @@ impl PendingRequest {
             Self::Api(request) => request.is_ingest_submission(),
             Self::ProviderStream(_) => false,
             Self::ProviderStreamUpload(_) => true,
+            Self::ProviderStreamMultipartPartUpload(_) => true,
         }
     }
 
@@ -761,6 +836,7 @@ impl PendingRequest {
             Self::Api(request) => request.is_priority_control_request(),
             Self::ProviderStream(_) => false,
             Self::ProviderStreamUpload(_) => false,
+            Self::ProviderStreamMultipartPartUpload(_) => false,
         }
     }
 }
@@ -1087,6 +1163,105 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error) if error.code == "upload_test"
+        ));
+    }
+
+    #[test]
+    fn dispatches_reservation_bound_multipart_part_to_frame_handler() {
+        struct MultipartPartHandler;
+
+        impl DaemonApiHandler for MultipartPartHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                panic!("multipart part test should use the stream handler")
+            }
+
+            fn handle_provider_stream_multipart_part_upload_for_actor(
+                &self,
+                request: crate::api::ProviderStreamMultipartPartUploadOpenRequest,
+                _actor: Option<&crate::auth::DaemonLocalActor>,
+                read_frame: &mut dyn FnMut() -> Result<
+                    (ProviderStreamChunkHeader, Vec<u8>),
+                    super::UnixSocketDaemonServerError,
+                >,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                assert_eq!(request.reservation_id, "reservation-1");
+                assert_eq!(request.part_number, 2);
+                let (header, payload) = read_frame()?;
+                assert!(header.final_chunk);
+                assert_eq!(payload, b"hello");
+                emit_response(DaemonApiResponse::ProviderStreamMultipartPartUpload(
+                    crate::api::ProviderStreamMultipartPartUploadResponse {
+                        schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                        request_id: request.request_id,
+                        reservation_id: request.reservation_id,
+                        part_number: request.part_number,
+                        store_id: request.store_id,
+                        object: request.object,
+                        size_bytes: 5,
+                        sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+                    },
+                ))
+            }
+        }
+
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new(
+            "/tmp/dasobjectstored-provider-multipart-part-test.sock",
+            MultipartPartHandler,
+        );
+        serde_json::to_writer(
+            &mut client,
+            &crate::api::ProviderStreamMultipartPartUploadOpenRequest {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "multipart-frame-1".to_string(),
+                reservation_id: "reservation-1".to_string(),
+                part_number: 2,
+                store_id: StoreId::new("stream-store").expect("store id"),
+                object: BackendObjectKey {
+                    object_id: "objects/hello.txt".to_string(),
+                    version: 1,
+                },
+                expected_size_bytes: 5,
+                expected_sha256:
+                    "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                        .to_string(),
+                chunk_size_bytes: 1024,
+            },
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+        let final_header = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "multipart-frame-1".to_string(),
+            offset: 0,
+            payload_len: 5,
+            final_chunk: true,
+            total_size: Some(5),
+            sha256: Some(
+                "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            ),
+        };
+        crate::api::write_provider_stream_frame(&mut client, &final_header, b"hello")
+            .expect("part frame");
+
+        server.handle_stream(server_stream).expect("stream handled");
+        let mut line = String::new();
+        BufReader::new(client)
+            .read_line(&mut line)
+            .expect("response line");
+        let response: DaemonApiResponse = serde_json::from_str(&line).expect("response decoded");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::ProviderStreamMultipartPartUpload(response)
+                if response.reservation_id == "reservation-1" && response.part_number == 2
         ));
     }
 

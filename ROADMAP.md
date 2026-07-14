@@ -1368,6 +1368,9 @@ authenticated standalone HTTP PUT now delegates bounded request bodies through
 that stream, while HTTP GET/range and multipart listener dispatch remain.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
+the Unix socket now dispatches a distinct reservation-bound multipart-part
+stream envelope keyed by reservation and part number, consuming the existing
+bounded binary frames and returning a typed acknowledgement contract;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
 list prefixes apply the same relative-namespace boundary while allowing a

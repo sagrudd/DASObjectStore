@@ -933,6 +933,12 @@ hardware acceptance.
     provider-neutral assembler and transactional PUT path. List, HEAD,
     verify, and completion responses also reject unsafe logical keys, zero
     versions, and malformed SHA-256 checksums before transport dispatch.
+    The daemon Unix contract now also accepts a distinct reservation-bound
+    multipart-part stream envelope keyed by ``reservation_id`` and
+    ``part_number``. It validates expected part size/checksum, consumes the
+    same bounded binary frames, and defines a path-free typed acknowledgement;
+    runtime staging, reservation settlement/abort cleanup, and authenticated
+    HTTP routing remain the next implementation slice.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; listener authentication,
     request routing, and runtime store dispatch remain open.

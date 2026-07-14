@@ -175,6 +175,7 @@ pub use profile_s3::{
 pub use provider_stream::{
     read_provider_stream_frame, write_provider_stream_frame, ProviderStreamCancellation,
     ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamFrameError,
+    ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
     ProviderStreamOpenRequest, ProviderStreamRange, ProviderStreamUploadOpenRequest,
     ProviderStreamUploadResponse, ProviderStreamValidationError, ProviderStreamVerificationError,
     ProviderStreamVerifier, PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
@@ -491,6 +492,7 @@ pub enum DaemonApiResponse {
     DiskForceRetire(DiskRetireResponse),
     DiskLockdown(DiskLockdownResponse),
     ProviderStreamUpload(ProviderStreamUploadResponse),
+    ProviderStreamMultipartPartUpload(ProviderStreamMultipartPartUploadResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),
     StoreDelete(StoreDeleteResponse),
