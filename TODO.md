@@ -217,6 +217,11 @@ completion.
   capabilities. Internal admission, transfer, cancellation, and progress
   modules are delivered; service-principal/token-exchange implementation,
   catalogue completion wiring, and endpoint exposure remain open.
+  **Blocker (provider runtime):** a concrete completion adapter must verify the
+  remote provider object and commit the daemon-owned catalogue record, but the
+  provider service and scoped credentials are unavailable in this macOS-only
+  run. The transport worker therefore remains contract-tested and fail-closed;
+  do not report provider completion as catalogue-complete without that adapter.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable
