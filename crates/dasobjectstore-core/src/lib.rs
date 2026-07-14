@@ -5,6 +5,7 @@ pub mod backend;
 pub mod capacity;
 pub mod config;
 pub mod deployment;
+pub mod enclosure_registry;
 pub mod file_export;
 pub mod health;
 pub mod ids;
@@ -42,6 +43,10 @@ pub use config::{
     DEFAULT_STANDALONE_HTTPS_PORT,
 };
 pub use deployment::{DeploymentProfile, HostMode};
+pub use enclosure_registry::{
+    PhysicalBay, PhysicalEnclosure, PhysicalEnclosureRegistry,
+    PhysicalEnclosureRegistryValidationError, PHYSICAL_ENCLOSURE_REGISTRY_SCHEMA_VERSION,
+};
 pub use manifest::{
     BackendReference, DriveMediaKind, ObjectStoreManifest, ObjectStoreManifestDecodeError,
     OBJECT_STORE_MANIFEST_SCHEMA_VERSION,

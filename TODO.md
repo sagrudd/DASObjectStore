@@ -2634,10 +2634,11 @@ list until every temporary size-budget exception has been removed.
   - [x] Preserve marker-provided bay labels in capacity telemetry and daemon
     API summaries so current operators can correlate known bays while the
     authoritative physical enclosure/bay registry is still pending.
-  - [ ] Tie capacity samples to the future physical enclosure/bay registry so
-    every disk physically associated with a known DAS enclosure carries the
-    authoritative enclosure association in each sample.
-    Blocked until the physical enclosure/bay registry is implemented.
+  - [~] Tie capacity samples to the physical enclosure/bay registry so every
+    disk physically associated with a known DAS enclosure carries the
+    authoritative enclosure association in each sample. A versioned,
+    path-free registry contract now validates enclosure, bay, and disk
+    uniqueness; daemon telemetry wiring and live topology acceptance remain.
 - [~] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
   read operations/s, write operations/s, queue or await signals where available,
   and explicit missing-counter reasons when the host cannot provide a metric:
@@ -2647,9 +2648,10 @@ list until every temporary size-budget exception has been removed.
     retained previous samples and cadence-aware rate calculation.
   - [x] Preserve marker-provided bay labels in disk IO telemetry, current IO
     summaries, and per-disk IO series for stable current grouping.
-  - [ ] Tie disk IO samples to the future physical enclosure/bay registry so
-    per-enclosure IO grouping uses authoritative hardware association.
-    Blocked until the physical enclosure/bay registry is implemented.
+  - [~] Tie disk IO samples to the physical enclosure/bay registry so
+    per-enclosure IO grouping uses authoritative hardware association. The
+    versioned registry contract is implemented; daemon telemetry wiring and
+    live topology acceptance remain.
 
 ### Live Disk IO and throughput-card production follow-up
 
