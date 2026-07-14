@@ -2431,6 +2431,9 @@ list until every temporary size-budget exception has been removed.
     request-line reader is byte-bounded and never buffers ahead into upload
     frames. The default daemon handler remains fail-closed until staging,
     reservation, provider verification, and catalogue commit are wired.
+  - [x] Return a typed ``bad_request`` response when a Unix request envelope
+    exceeds the byte bound, keeping oversized control-plane input from reaching
+    request handlers or being mistaken for a provider-stream frame.
   - [~] **Remaining upload execution boundary:** a concrete daemon-owned
     staging writer must consume the upload callback, honor cancellation and
     backpressure, release or commit the quota reservation transactionally, and

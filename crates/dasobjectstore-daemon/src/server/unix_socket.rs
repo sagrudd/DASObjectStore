@@ -526,7 +526,20 @@ fn receive_stream(
     // Do not use a buffered clone here. Upload requests are followed by
     // binary frames on the same socket; read-ahead would consume those bytes
     // into a dropped BufReader before the upload handler can dispatch them.
-    let line = read_request_line(&mut stream)?;
+    let line = match read_request_line(&mut stream) {
+        Ok(line) => line,
+        Err(UnixSocketDaemonServerError::RequestLineTooLarge { max_bytes }) => {
+            write_response_frame(
+                &mut stream,
+                &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "bad_request",
+                    format!("daemon request envelope exceeds the {max_bytes}-byte limit"),
+                )),
+            )?;
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
 
     if let Ok(request) = serde_json::from_str::<DaemonApiRequest>(&line) {
         return Ok(Some(PendingStream {
@@ -800,6 +813,33 @@ mod tests {
                 state: ServiceState::Running,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn rejects_oversized_request_envelope_with_typed_bad_request() {
+        let (client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new("/tmp/dasobjectstored-test.sock", |_request| {
+            panic!("oversized request must not reach the handler")
+        });
+        let mut writer = client.try_clone().expect("client clone");
+        let write_join = thread::spawn(move || {
+            writer
+                .write_all(&vec![b'x'; super::MAX_REQUEST_LINE_BYTES + 1])
+                .expect("oversized request written");
+        });
+
+        server.handle_stream(server_stream).expect("stream handled");
+        write_join.join().expect("writer thread joins");
+
+        let mut line = String::new();
+        BufReader::new(client)
+            .read_line(&mut line)
+            .expect("response line");
+        let response: DaemonApiResponse = serde_json::from_str(&line).expect("response decoded");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "bad_request"
         ));
     }
 
