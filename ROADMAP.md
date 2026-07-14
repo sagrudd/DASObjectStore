@@ -185,7 +185,11 @@ authority and data-plane boundaries. The versioned provider-stream contract
 now defines path-free open requests, bounded metadata-only chunk headers, and
 range/conditional checks, plus bounded magic/length-prefixed framing, a
 cumulative contiguous-offset/size/checksum verifier, and a cooperative
-cancellation token, without claiming socket request dispatch is complete.
+cancellation token, without claiming socket request dispatch is complete. The
+profile backend contract now exposes a bounded provider-neutral `read_range`
+operation: folder and guarded-drive backends use native seek-bounded reads,
+while future providers retain a safe full-reader fallback until they add
+provider-native range support.
 Folder catalogue mutations now reload the latest durable snapshot under a
 daemon-local serialization boundary before atomic publication, preserving
 sibling records when concurrent request handles commit independently.
