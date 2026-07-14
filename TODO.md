@@ -757,6 +757,13 @@ transaction wiring; those boundaries stay explicit in the child items below.
 
 ### Gate 4: Dedicated SSD drive profile
 
+**Blocker (hardware/deployment):** the remaining live mount/device probing,
+SMART/NVMe health, replacement/remount, and package acceptance require a
+dedicated non-rotational device and the DASServer deployment environment. The
+profile manifest, guarded backend, fail-closed identity checks, and generated
+data fixtures are validated locally; do not substitute a developer disk for
+hardware acceptance.
+
 - [ ] Create/adopt only an explicit mount backed by a validated non-rotational
   device; identify it by stable filesystem/device identity rather than name.
   - [x] Require an explicit `DriveMediaKind::Ssd` plus stable filesystem/device
