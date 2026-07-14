@@ -2,12 +2,16 @@ use crate::dashboard::{DashboardWarning, StorageGroupView};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
-use std::fs;
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const DEFAULT_GROUPS_REGISTRY_PATH: &str = "/opt/dasobjectstore/groups.json";
 pub(crate) const GROUPS_REGISTRY_ENV: &str = "DASOBJECTSTORE_GROUPS_PATH";
+
+static GROUPS_REGISTRY_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct StorageGroupsSnapshot {
@@ -81,6 +85,10 @@ pub(crate) fn upsert_storage_group(
         return Err(StorageGroupRegistryWriteError::BlankGroupName);
     }
 
+    let _guard = GROUPS_REGISTRY_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("groups registry write lock poisoned");
     let mut entries = match read_storage_group_entries(path) {
         Ok(entries) => entries,
         Err(StorageGroupRegistryError::Missing) => Vec::new(),
@@ -237,9 +245,36 @@ fn write_storage_group_entries(
     let registry = StorageGroupRegistryFile::Object { groups: entries };
     let data =
         serde_json::to_string_pretty(&registry).map_err(StorageGroupRegistryWriteError::Encode)?;
-    let temp_path = path.with_extension("json.tmp");
-    fs::write(&temp_path, format!("{data}\n")).map_err(StorageGroupRegistryWriteError::Write)?;
-    fs::rename(temp_path, path).map_err(StorageGroupRegistryWriteError::Rename)
+    let temp_path = path.with_file_name(format!(
+        ".{}.tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("groups.json"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temp_path)
+        .map_err(StorageGroupRegistryWriteError::Write)?;
+    file.write_all(format!("{data}\n").as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(StorageGroupRegistryWriteError::Write)?;
+    drop(file);
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(StorageGroupRegistryWriteError::Rename(error));
+    }
+    if let Some(parent) = path.parent() {
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(StorageGroupRegistryWriteError::Write)?;
+    }
+    Ok(())
 }
 
 fn titleize_group_name(group_name: &str) -> String {
@@ -343,12 +378,45 @@ mod tests {
         assert_eq!(snapshot.groups[0].display_name, "Mnemosyne");
     }
 
+    #[test]
+    fn concurrent_group_upserts_preserve_each_group() {
+        let root = temp_root("groups-concurrent");
+        let path = root.join("groups.json");
+        let first_path = path.clone();
+        let first = std::thread::spawn(move || {
+            upsert_storage_group(&first_path, "first_group").expect("first group upsert");
+        });
+        let second_path = path.clone();
+        let second = std::thread::spawn(move || {
+            upsert_storage_group(&second_path, "second_group").expect("second group upsert");
+        });
+
+        first.join().expect("first thread");
+        second.join().expect("second thread");
+
+        let snapshot = read_storage_groups_for_user(&path, &[]);
+        let groups: Vec<_> = snapshot
+            .groups
+            .into_iter()
+            .map(|group| group.group_name)
+            .collect();
+        assert_eq!(groups, vec!["first_group", "second_group"]);
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time")
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("dos-gui-{label}-{unique}"));
+        let parent = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|home| home.join(".dasobjectstore-codex-validation"))
+            })
+            .unwrap_or_else(std::env::temp_dir);
+        let root = parent.join(format!("dos-gui-{label}-{unique}"));
         fs::create_dir_all(&root).expect("temp root");
         root
     }

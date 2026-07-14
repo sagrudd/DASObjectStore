@@ -1234,6 +1234,9 @@ portable SSD mirroring remains a separate compatibility concern.
 The daemon-ownership backlog is now tracked as partial rather than open: store
 drain/delete, ingest queue drain, object put, disk retirement, and normal
 writer-group creation have typed runtime operations and regression coverage.
+Post-acceptance local writer-group registry updates are serialized and
+fsync-published, preserving sibling groups when concurrent Web responses
+reconcile the same registry.
 CLI migration fallbacks and any remaining managed mutation require their own
 daemon runtime operation before they can be marked complete.
 

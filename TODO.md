@@ -1819,7 +1819,10 @@ list until every temporary size-budget exception has been removed.
   acknowledgement gates.
 - [x] Route Web local-group creation and membership assignment through the
   bounded bridge, keeping the daemon as mutation authority and updating the
-  local group registry only after accepted non-dry-run responses.
+  local group registry only after accepted non-dry-run responses. Registry
+  read/modify/write updates are serialized and fsync-published, with
+  concurrent-upsert coverage preventing accepted sibling groups from being
+  lost.
 - [x] Keep Web administrator cancellation on a dedicated bounded priority
   bridge/circuit so routine query or mutation degradation cannot suppress the
   emergency cancellation path.
