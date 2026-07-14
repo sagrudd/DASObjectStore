@@ -12,6 +12,8 @@ pub const PROFILE_S3_OBJECT_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/
 pub const PROFILE_S3_HEALTH_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/health";
 pub const PROFILE_S3_MULTIPART_COMPLETE_ROUTE: &str =
     "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete";
+pub const PROFILE_S3_MULTIPART_PART_ROUTE: &str =
+    "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/parts/{part_number}";
 
 /// Bounded catalogue query for the future profile-S3/Web transport. The
 /// request contains logical identity only; backend roots and provider
@@ -532,6 +534,9 @@ mod tests {
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{store_id}"));
         assert!(PROFILE_S3_MULTIPART_COMPLETE_ROUTE.contains("{reservation_id}"));
+        assert!(PROFILE_S3_MULTIPART_PART_ROUTE.starts_with(PROFILE_S3_ROUTE_PREFIX));
+        assert!(PROFILE_S3_MULTIPART_PART_ROUTE.contains("{reservation_id}"));
+        assert!(PROFILE_S3_MULTIPART_PART_ROUTE.contains("{part_number}"));
     }
 
     #[test]

@@ -6,7 +6,9 @@ use axum::{
     routing::{get, post},
     Extension, Router,
 };
-use dasobjectstore_daemon::api::APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE;
+use dasobjectstore_daemon::api::{
+    APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE, PROFILE_S3_MULTIPART_PART_ROUTE,
+};
 
 pub fn standalone_gui_api_router(auth_store: LocalAuthStore) -> Router {
     gui_api_router_for_host_mode(GuiApiHostMode::Standalone, auth_store)
@@ -99,7 +101,7 @@ pub(crate) fn standalone_dashboard_router_with_state(
             post(standalone_profile_s3_multipart_complete),
         )
         .route(
-            "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/parts/{part_number}",
+            PROFILE_S3_MULTIPART_PART_ROUTE,
             post(standalone_profile_s3_multipart_part),
         )
         .route(
