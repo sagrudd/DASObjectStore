@@ -11,11 +11,17 @@ use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PROFILE_BINDING_REGISTRY_SCHEMA: &str = "dasobjectstore.profile_binding_registry.v1";
 pub const PROFILE_BINDING_REGISTRY_FILE_NAME: &str = "profile-bindings.json";
 pub const PROFILE_BINDING_REGISTRY_ENV: &str = "DASOBJECTSTORE_PROFILE_BINDINGS_PATH";
+
+// Registration is a read/modify/write transaction over one daemon-owned
+// registry file. Keep concurrent authenticated requests from replacing each
+// other's newly-added bindings before the atomic publication boundary.
+static PROFILE_BINDING_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 pub fn default_profile_binding_registry_path(state_dir: impl AsRef<Path>) -> PathBuf {
     state_dir.as_ref().join(PROFILE_BINDING_REGISTRY_FILE_NAME)
@@ -120,6 +126,12 @@ pub fn upsert_profile_binding(
     path: impl AsRef<Path>,
     binding: BackendProfileBinding,
 ) -> Result<(), DaemonServiceRuntimeError> {
+    let _guard = PROFILE_BINDING_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "profile binding registry write lock poisoned".to_string(),
+        })?;
     let path = path.as_ref();
     let registry = prepare_registry_with_binding(path, binding)?;
     write_registry(path, &registry)
@@ -659,6 +671,39 @@ mod tests {
                 .backend_root,
             fs::canonicalize(second).expect("canonical")
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_binding_upserts_preserve_each_store() {
+        let root = root("concurrent-upserts");
+        let path = root.join("bindings.json");
+        let first_root = root.join("first");
+        let second_root = root.join("second");
+        fs::create_dir_all(&first_root).expect("first root");
+        fs::create_dir_all(&second_root).expect("second root");
+
+        let first_path = path.clone();
+        let first = std::thread::spawn(move || {
+            upsert_profile_binding(&first_path, folder_binding("first", &first_root))
+                .expect("first upsert")
+        });
+        let second_path = path.clone();
+        let second = std::thread::spawn(move || {
+            upsert_profile_binding(&second_path, folder_binding("second", &second_root))
+                .expect("second upsert")
+        });
+
+        first.join().expect("first thread");
+        second.join().expect("second thread");
+
+        let registry = read_registry(&path).expect("registry reads");
+        let stores: Vec<_> = registry
+            .bindings
+            .iter()
+            .map(|binding| binding.manifest.store_id.as_str())
+            .collect();
+        assert_eq!(stores, vec!["first", "second"]);
         let _ = fs::remove_dir_all(root);
     }
 

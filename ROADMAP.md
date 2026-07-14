@@ -278,6 +278,9 @@ replacement and directory fsync before publication, preserving queryable job
 state across process crashes.
 Endpoint inventory updates use the same atomic persistence boundary and a
 process-local lock so concurrent endpoint validation cannot lose records.
+Profile-binding registry updates use the same daemon-local serialization
+boundary, preserving sibling bindings when concurrent authenticated
+registration requests race.
 
 The Web interface has a coherent Yew shell and API contracts, but several
 current surfaces are holder implementations rather than completed operator

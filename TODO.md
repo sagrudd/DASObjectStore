@@ -360,6 +360,9 @@ completion.
     registry path is now daemon-state scoped with an explicit environment
     override; local-Docker bootstrap must still register container-visible roots
     before strict missing-binding enforcement can replace legacy fallback.
+    Registry read-modify-write updates are serialized in the daemon and covered
+    by a concurrent-upsert regression, so sibling bindings cannot be lost at
+    the atomic publication boundary.
   - [x] Add the daemon-local ``register_profile_binding`` contract for explicit
     create/adopt binding registration. It validates the portable manifest and
     daemon-only absolute roots, writes the binding atomically, and exposes a
