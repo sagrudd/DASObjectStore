@@ -640,14 +640,35 @@ fn resolve_diskstats_device_name(
             let Ok(target) = fs::canonicalize(&alias) else {
                 continue;
             };
-            let Some(name) = target.file_name() else {
-                continue;
-            };
-            let name = name.to_string_lossy().to_string();
-            if current_diskstats.contains_key(&name) {
+            if let Some(name) = resolve_diskstats_name_from_sysfs_target(
+                &target,
+                current_diskstats,
+            ) {
                 return Some(name);
             }
         }
+    }
+    None
+}
+
+/// Resolve a canonical sysfs block target to the most specific diskstats name
+/// available. Walking ancestors handles partition mounts (for example
+/// `nvme0n1p1` when only `nvme0n1` is reported), device-mapper layers, and MD
+/// RAID aliases without trusting a marker-provided path.
+fn resolve_diskstats_name_from_sysfs_target(
+    target: &Path,
+    current_diskstats: &BTreeMap<String, LinuxDiskIoCounters>,
+) -> Option<String> {
+    let mut path = Some(target);
+    for _ in 0..16 {
+        let Some(candidate) = path.and_then(Path::file_name) else {
+            break;
+        };
+        let candidate = candidate.to_string_lossy();
+        if current_diskstats.contains_key(candidate.as_ref()) {
+            return Some(candidate.into_owned());
+        }
+        path = path.and_then(Path::parent);
     }
     None
 }
@@ -817,6 +838,56 @@ fn diskstats_counter_reset(current: &LinuxDiskIoCounters, previous: &LinuxDiskIo
         || current.read_time_millis < previous.read_time_millis
         || current.write_time_millis < previous.write_time_millis
         || current.io_time_millis < previous.io_time_millis
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_diskstats_name_from_sysfs_target, LinuxDiskIoCounters};
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    fn counters(name: &str) -> LinuxDiskIoCounters {
+        LinuxDiskIoCounters {
+            device_name: name.to_string(),
+            read_operations: 0,
+            write_operations: 0,
+            sectors_read: 0,
+            sectors_written: 0,
+            read_time_millis: 0,
+            write_time_millis: 0,
+            io_time_millis: 0,
+            weighted_io_time_millis: 0,
+        }
+    }
+
+    #[test]
+    fn sysfs_partition_target_falls_back_to_parent_diskstats_name() {
+        let mut current = BTreeMap::new();
+        current.insert("nvme0n1".to_string(), counters("nvme0n1"));
+
+        assert_eq!(
+            resolve_diskstats_name_from_sysfs_target(
+                Path::new("/sys/devices/pci0000:00/nvme/nvme0/nvme0n1/nvme0n1p1"),
+                &current,
+            ),
+            Some("nvme0n1".to_string())
+        );
+    }
+
+    #[test]
+    fn sysfs_target_prefers_partition_when_both_counters_exist() {
+        let mut current = BTreeMap::new();
+        current.insert("sda".to_string(), counters("sda"));
+        current.insert("sda1".to_string(), counters("sda1"));
+
+        assert_eq!(
+            resolve_diskstats_name_from_sysfs_target(
+                Path::new("/sys/devices/virtual/block/sda/sda1"),
+                &current,
+            ),
+            Some("sda1".to_string())
+        );
+    }
 }
 
 fn rate(delta: u64, elapsed_seconds: f64) -> f64 {
