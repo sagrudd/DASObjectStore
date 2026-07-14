@@ -167,6 +167,9 @@ versioned path-free list transport projection; authenticated HTTP gateway and
 multipart dispatch remain deliberately separate. An authenticated profile-S3
 HEAD transport now exposes bounded logical key/version/size/checksum metadata
 through the same daemon bridge without revealing backend paths.
+Folder catalogue mutations now reload the latest durable snapshot under a
+daemon-local serialization boundary before atomic publication, preserving
+sibling records when concurrent request handles commit independently.
 EasyConnect pairing state uses fsync'd temporary-file replacement and directory
 fsync before publication, preserving pairing durability across crashes.
 Paired-session renewal and revocation state uses the same atomic publication

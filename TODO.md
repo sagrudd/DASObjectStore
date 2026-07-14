@@ -344,6 +344,9 @@ completion.
     appliance, and daemon transaction wiring remain open.
   - [x] Prove authority batches are all-or-none across conflicts and restart;
     a conflicting existing version cannot partially add a new record.
+    Catalogue mutations now serialize daemon-local read/modify/write
+    transactions and reload the latest durable snapshot, with concurrent
+    commit coverage proving sibling records cannot be lost across handles.
   - [x] Adapt the SSD-backed drive profile to the same authority contract and
     fail closed on drive-guard loss for catalogue reads and mutations.
   - [x] Centralize checked logical used-byte accounting through the authority

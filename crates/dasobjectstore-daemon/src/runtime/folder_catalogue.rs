@@ -10,11 +10,17 @@ use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const FOLDER_CATALOGUE_SCHEMA_VERSION: u32 = 1;
 
 const MAX_BROWSER_PAGE_SIZE: usize = 1_000;
+
+// A catalogue mutation is a read/modify/write transaction. Serialize those
+// transactions in the daemon and reload the durable snapshot while holding
+// the lock so separate request handles cannot lose sibling records.
+static FOLDER_CATALOGUE_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// Read-only query for the profile-neutral folder catalogue view.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -87,21 +93,7 @@ impl FolderCatalogue {
             catalogue.persist(&BTreeMap::new())?;
             return Ok(catalogue);
         }
-        let file = File::open(&path).map_err(io_error)?;
-        let snapshot: FolderCatalogueSnapshot = serde_json::from_reader(file).map_err(|error| {
-            BackendError::InvalidRequest(format!("folder catalogue JSON is invalid: {error}"))
-        })?;
-        if snapshot.schema_version != FOLDER_CATALOGUE_SCHEMA_VERSION {
-            return Err(BackendError::InvalidRequest(format!(
-                "unsupported folder catalogue schema {}",
-                snapshot.schema_version
-            )));
-        }
-        if snapshot.store_id != store_id {
-            return Err(BackendError::InvalidRequest(
-                "folder catalogue belongs to a different ObjectStore".to_string(),
-            ));
-        }
+        let snapshot = Self::read_snapshot(&path, &store_id)?;
         Ok(Self {
             path,
             store_id,
@@ -161,7 +153,11 @@ impl FolderCatalogue {
         &mut self,
         records: impl IntoIterator<Item = BackendObjectRecord>,
     ) -> Result<(), BackendError> {
-        let mut next = self.records.clone();
+        let _guard = FOLDER_CATALOGUE_WRITE_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .map_err(|_| BackendError::Io("folder catalogue write lock poisoned".to_string()))?;
+        let mut next = self.durable_records()?;
         for record in records {
             let key = catalogue_key(&record.key);
             if let Some(existing) = next.get(&key) {
@@ -180,11 +176,45 @@ impl FolderCatalogue {
     }
 
     pub fn remove(&mut self, key: &BackendObjectKey) -> Result<(), BackendError> {
-        let mut next = self.records.clone();
+        let _guard = FOLDER_CATALOGUE_WRITE_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .map_err(|_| BackendError::Io("folder catalogue write lock poisoned".to_string()))?;
+        let mut next = self.durable_records()?;
         next.remove(&catalogue_key(key));
         self.persist(&next)?;
         self.records = next;
         Ok(())
+    }
+
+    fn durable_records(&self) -> Result<BTreeMap<String, BackendObjectRecord>, BackendError> {
+        if self.path.is_file() {
+            Ok(Self::read_snapshot(&self.path, &self.store_id)?.records)
+        } else {
+            Ok(self.records.clone())
+        }
+    }
+
+    fn read_snapshot(
+        path: &std::path::Path,
+        store_id: &str,
+    ) -> Result<FolderCatalogueSnapshot, BackendError> {
+        let file = File::open(path).map_err(io_error)?;
+        let snapshot: FolderCatalogueSnapshot = serde_json::from_reader(file).map_err(|error| {
+            BackendError::InvalidRequest(format!("folder catalogue JSON is invalid: {error}"))
+        })?;
+        if snapshot.schema_version != FOLDER_CATALOGUE_SCHEMA_VERSION {
+            return Err(BackendError::InvalidRequest(format!(
+                "unsupported folder catalogue schema {}",
+                snapshot.schema_version
+            )));
+        }
+        if snapshot.store_id != store_id {
+            return Err(BackendError::InvalidRequest(
+                "folder catalogue belongs to a different ObjectStore".to_string(),
+            ));
+        }
+        Ok(snapshot)
     }
 
     fn persist(&self, records: &BTreeMap<String, BackendObjectRecord>) -> Result<(), BackendError> {
@@ -274,6 +304,7 @@ mod tests {
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Barrier};
 
     fn root() -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -323,6 +354,48 @@ mod tests {
 
         let restarted = FolderCatalogue::open(&path, "codex").expect("catalogue reloads");
         assert_eq!(restarted.records(), vec![record()]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_catalogue_commits_preserve_each_record() {
+        let root = root();
+        let path = root.join("catalogue.json");
+        let mut first_record = record();
+        first_record.key.object_id = "incoming/first.dat".to_string();
+        let mut second_record = record();
+        second_record.key.object_id = "incoming/second.dat".to_string();
+        let first = FolderCatalogue::open(&path, "codex").expect("first catalogue");
+        let second = FolderCatalogue::open(&path, "codex").expect("second catalogue");
+        let barrier = Arc::new(Barrier::new(2));
+
+        let first_barrier = Arc::clone(&barrier);
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            let mut catalogue = first;
+            catalogue
+                .commit_records([first_record])
+                .expect("first commit");
+        });
+        let second_barrier = Arc::clone(&barrier);
+        let second = std::thread::spawn(move || {
+            second_barrier.wait();
+            let mut catalogue = second;
+            catalogue
+                .commit_records([second_record])
+                .expect("second commit");
+        });
+
+        first.join().expect("first thread");
+        second.join().expect("second thread");
+
+        let catalogue = FolderCatalogue::open(&path, "codex").expect("catalogue reloads");
+        let keys: Vec<_> = catalogue
+            .records()
+            .into_iter()
+            .map(|record| record.key.object_id)
+            .collect();
+        assert_eq!(keys, vec!["incoming/first.dat", "incoming/second.dat"]);
         let _ = std::fs::remove_dir_all(root);
     }
 
