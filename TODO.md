@@ -808,7 +808,7 @@ transaction wiring; those boundaries stay explicit in the child items below.
 
 - [x] Decide native embedded gateway versus provider-backed S3 per profile while
   preserving one public S3 contract.
-- [ ] Route S3 PUT and multipart completion through quota reservation, daemon
+- [~] Route S3 PUT and multipart completion through quota reservation, daemon
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
   catalogue state rather than provider listings.
   - [x] Add a provider-neutral profile read adapter for authoritative
@@ -926,7 +926,7 @@ transaction wiring; those boundaries stay explicit in the child items below.
     authenticated Web route ``/api/v1/profile-capabilities``; it remains
     versioned discovery only and does not imply runtime readiness or
     provisioning.
-- [ ] Add daemon-owned application identity and authoritative token support for
+- [~] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.
   - [x] Add the versioned, path-free core identity, scoped access-token,
@@ -1027,7 +1027,7 @@ transaction wiring; those boundaries stay explicit in the child items below.
     template identity and emits a strict versioned shape without product
     defaults, paths, credentials, or provisioning behavior; concrete product
     defaults and provisioning adapters remain open.
-- [ ] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
+- [~] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
   import jobs preserving IDs, versions, hashes, provenance, and protection.
   - [x] Add a core resumable promotion state machine that retains source
     placement through destination verification and explicit retirement; actual
