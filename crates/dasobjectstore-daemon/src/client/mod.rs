@@ -34,7 +34,8 @@ use crate::api::{
     ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileInspectionRequest,
     ProfileInspectionResponse, ProfileReadinessRequest, ProfileReadinessResponse,
     ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
-    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
+    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartCompletionRequest,
+    ProfileS3MultipartCompletionResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
     RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
@@ -250,6 +251,16 @@ where
         match self.send(DaemonApiRequest::ProfileS3Health(request))? {
             DaemonApiResponse::ProfileS3Health(response) => Ok(response),
             response => Err(unexpected("profile_s3_health", response)),
+        }
+    }
+
+    pub fn profile_s3_multipart_complete(
+        &self,
+        request: ProfileS3MultipartCompletionRequest,
+    ) -> Result<ProfileS3MultipartCompletionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3MultipartComplete(request))? {
+            DaemonApiResponse::ProfileS3MultipartComplete(response) => Ok(response),
+            response => Err(unexpected("profile_s3_multipart_complete", response)),
         }
     }
 
@@ -817,12 +828,13 @@ mod tests {
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         PrepareEnclosureResponse, ProfileBrowserRequest, ProfileBrowserResponse,
         ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
-        ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
+        ProfileS3MultipartPartRequest, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+        RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, StoreInventoryResponse,
+        SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         DISK_LOCKDOWN_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -958,6 +970,48 @@ mod tests {
         assert!(matches!(
             seen.borrow().as_slice(),
             [DaemonApiRequest::ProfileS3Verify(_)]
+        ));
+    }
+
+    #[test]
+    fn profile_multipart_complete_uses_typed_request_and_response() {
+        let seen = RefCell::new(Vec::new());
+        let transport = InProcessDaemonTransport::new(|request| {
+            seen.borrow_mut().push(request);
+            Ok(DaemonApiResponse::ProfileS3MultipartComplete(
+                ProfileS3MultipartCompletionResponse {
+                    schema_version: crate::api::PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id: StoreId::new("codex").expect("store id"),
+                    reservation_id: "reservation-1".to_string(),
+                    key: dasobjectstore_core::backend::BackendObjectKey {
+                        object_id: "reads/sample.fastq".to_string(),
+                        version: 1,
+                    },
+                    committed: true,
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+        let response = client
+            .profile_s3_multipart_complete(ProfileS3MultipartCompletionRequest {
+                store_id: StoreId::new("codex").expect("store id"),
+                reservation_id: "reservation-1".to_string(),
+                key: dasobjectstore_core::backend::BackendObjectKey {
+                    object_id: "reads/sample.fastq".to_string(),
+                    version: 1,
+                },
+                expected_size_bytes: 4,
+                parts: vec![ProfileS3MultipartPartRequest {
+                    part_number: 1,
+                    size_bytes: 4,
+                    checksum: format!("sha256:{}", "a".repeat(64)),
+                }],
+            })
+            .expect("multipart completion response");
+        assert!(response.committed);
+        assert!(matches!(
+            seen.borrow().as_slice(),
+            [DaemonApiRequest::ProfileS3MultipartComplete(_)]
         ));
     }
 

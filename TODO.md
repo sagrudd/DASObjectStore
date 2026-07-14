@@ -43,9 +43,9 @@ evidence and detailed source tasks.
   delivered; live mount identity, SMART/NVMe health, and replacement tests
   require hardware.
 - `[~]` Gate 5 — provider-neutral S3 read/write/delete/verify/health contracts,
-  capacity reconciliation, list transport DTOs, and authenticated daemon list
-  dispatch are delivered; authenticated HTTP gateway, multipart routing, and
-  appliance migration adapters remain.
+  capacity reconciliation, list transport DTOs, and authenticated daemon/HTTP
+  dispatch are delivered; binary multipart part ingress and appliance
+  migration adapters remain.
 - `[ ]` Gate 6 — integration and market-readiness acceptance awaits the
   blocked deployment, security, stress, and product-workflow matrices.
 
@@ -853,13 +853,16 @@ hardware acceptance.
     fsync/rename finalization, and catalogue commit; failed staging/finalization
     releases reservations without exposing private paths. Runtime PUT, HEAD,
     DELETE, and multipart entry points now fail closed on the same unsafe-key
-    and zero-version rules; HTTP gateway and multipart routing remain separate.
+    and zero-version rules; the authenticated HTTP completion route delegates
+    through the same typed daemon bridge while binary part ingress remains
+    daemon-owned.
   - [x] Wire profile PUT through the daemon-owned logical capacity admission
     provider before backend staging; logical and backend reservations commit in
     order, and failures before durable finalization release both ledgers.
     Multipart completion now assembles verified ordered parts directly through
     this same transactional PUT lifecycle, including logical-capacity provider
-    admission; HTTP gateway wiring remains separate.
+    admission; the authenticated HTTP completion POST submits only the
+    reservation-bound manifest.
   - [x] Add a bounded provider-neutral profile range-read helper for consumers
     such as AlleleAnchor's `get/range/list` contract; it authorizes through the
     catalogue first, rejects out-of-bounds starts, and preserves the private
@@ -887,22 +890,24 @@ hardware acceptance.
     catalogue-authoritative object through the daemon-owned folder binding and
     returns only logical key, version, size, and checksum metadata; backend
     paths and provider listings remain private; the authenticated Web HEAD
-    route delegates through this transport. Full HTTP PUT/GET/multipart gateway
-    wiring remains separate.
+    route delegates through this transport. Full binary multipart part ingress
+    remains on the daemon provider-stream boundary.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
-  - [~] Authenticated HTTP GET/range and multipart routing follow the bounded
-    daemon payload transport gate recorded above; standalone authenticated PUT
-    and GET/range routes now stream through the daemon provider envelope with
-    bounded backpressure, while multipart still keeps catalogue authority and
-    provider credentials inside the daemon and fails closed rather than
-    introducing a path-bearing or unbounded JSON shortcut.
+  - [~] Authenticated HTTP GET/range and multipart completion follow the
+    bounded daemon payload transport gate recorded above; standalone
+    authenticated PUT and GET/range routes now stream through the daemon
+    provider envelope with bounded backpressure, and completion submits only a
+    path-free manifest. Binary multipart part ingress still keeps catalogue
+    authority and provider credentials inside the daemon and fails closed
+    rather than introducing a path-bearing or unbounded JSON shortcut.
     - [x] Add the authenticated standalone HTTP GET/range adapter. It parses a
       single bounded byte range and SHA-256 conditional headers, waits for the
       daemon to open the verified stream before returning a response, and then
       relays frames through a bounded channel with 206 and conditional error
-      mapping; multipart routing remains separate.
+      mapping; multipart completion now has a matching authenticated POST
+      adapter while binary part ingress remains daemon-owned.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
     daemon bridge; the authenticated Web health route delegates through the
@@ -939,8 +944,9 @@ hardware acceptance.
     same bounded binary frames, and defines a path-free typed acknowledgement;
     daemon request handling now authorizes the folder profile, admits the full
     reservation once, stages verified frames through the durable journal, and
-    releases the admission when first-part staging fails; completion settlement
-    and authenticated HTTP routing remain the next implementation slice.
+    releases the admission when first-part staging fails; the authenticated
+    HTTP completion route now submits the same path-free manifest through the
+    daemon bridge.
   - [x] Add daemon-owned multipart part staging persistence: reservation-bound
     journals live below the private profile namespace, publish part files only
     after frame-level size/SHA-256 verification, atomically persist metadata,
@@ -954,7 +960,8 @@ hardware acceptance.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; daemon request routing and
     runtime store dispatch now complete through the journal-backed completion
-    command, while authenticated HTTP listener wiring remains open.
+    command, and the authenticated standalone HTTP completion route delegates
+    through the same typed daemon client without exposing backend paths.
   - [x] Wire the bounded Unix provider-stream upload into the folder-profile
     daemon path. Writer-group authorization, logical/physical reservation,
     frame-by-frame size/checksum verification, staged fsync/rename, and the
@@ -965,8 +972,9 @@ hardware acceptance.
     explicit Content-Length, request/upload identity, and SHA-256 headers,
     streams bounded frames through a backpressured daemon bridge, closes the
     stream on body cancellation, and returns the typed commit acknowledgement
-    only after daemon catalogue persistence; multipart routing remains
-    separate.
+    only after daemon catalogue persistence; multipart completion now has a
+    matching authenticated POST adapter that submits the daemon-owned journal
+    manifest and returns the typed commit acknowledgement.
 - [~] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic. Static capability discovery and daemon-backed readiness are

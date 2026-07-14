@@ -172,8 +172,9 @@ sessions, telemetry foundations, and Mnemosyne adapter/design work. Completed
 historical checklists remain below and in TODO as evidence. The bounded folder
 and guarded-drive profile seams now also provide catalogue-authoritative S3
 read/write/delete/verify/health operations, capacity reconciliation, and a
-versioned path-free list transport projection; authenticated HTTP gateway and
-multipart dispatch remain deliberately separate. An authenticated profile-S3
+versioned path-free list transport projection; authenticated HTTP adapters now
+delegate list, HEAD, health, GET/range, PUT, and multipart completion through
+the daemon. An authenticated profile-S3
 HEAD transport now exposes bounded logical key/version/size/checksum metadata
 through the same daemon bridge without revealing backend paths.
 Provider-backed Web GET/HTTP gateway payload routing remains separate from the
@@ -1365,7 +1366,10 @@ the daemon logical-capacity provider. Unix provider-stream upload dispatch now
 also drives the folder-profile writer through authorization, reservation, frame
 verification, staged fsync/rename, and path-free commit acknowledgement;
 authenticated standalone HTTP PUT now delegates bounded request bodies through
-that stream, while HTTP GET/range and multipart listener dispatch remain.
+that stream, while HTTP GET/range uses the same verified frames. The
+authenticated multipart completion POST submits a path-free logical manifest
+through the typed daemon client; staged part bytes remain daemon-owned and are
+reopened only from the private journal.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 the Unix socket now dispatches a distinct reservation-bound multipart-part
@@ -1400,8 +1404,9 @@ same bounded daemon bridge. Authenticated standalone HTTP PUT now streams
 Content-Length-bounded frames through a backpressured daemon bridge and returns
 the path-free commit acknowledgement only after catalogue persistence.
 Authenticated standalone HTTP GET/range now waits for daemon stream-open
-acceptance and relays verified frames through bounded backpressure, while
-multipart listener dispatch remains.
+acceptance and relays verified frames through bounded backpressure. Multipart
+completion submits a path-free logical manifest through the typed daemon
+client; binary part streaming remains on the daemon Unix-socket boundary.
 Authenticated Web list, HEAD, and health routes now share typed daemon
 projections and never expose backend paths; a path-free profile
 diagnostics projection and authenticated Web route distinguish empty,
@@ -1411,7 +1416,8 @@ reconciliation timestamps. Authenticated Web verification and the read-only
 before reporting success and return no backend location. The authenticated
 profile GET/range route now uses the same path-free Unix provider stream and
 maps daemon conditional and range failures to HTTP status without opening a
-managed path in the Web process; multipart routing remains separate.
+managed path in the Web process; multipart part bytes remain daemon-owned and
+are never opened by the Web process.
 The same path-free profile-readiness projection is now available through the
 authenticated Web route ``/api/v1/profile-readiness/stores/{store_id}``, using
 the bounded daemon bridge and preserving explicit not-ready reasons.
@@ -1455,8 +1461,9 @@ reservation, exact byte/checksum verification, staged fsync/rename, and
 catalogue commit before acknowledging success, and the authenticated standalone
 HTTP PUT adapter feeds that stream with bounded channel backpressure. The
 authenticated HTTP GET/range adapter relays daemon-verified frames through a
-bounded channel after an explicit stream-open handshake; multipart listener
-framing remains separate.
+bounded channel after an explicit stream-open handshake. Multipart completion
+now uses the same authenticated bridge for its path-free manifest; listener
+framing for binary part ingress remains a daemon transport concern.
 
 Shared SQLite catalogue integration is currently blocked by a schema/authority
 boundary: profile-private records carry versioned logical keys and local

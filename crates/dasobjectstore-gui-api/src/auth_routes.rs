@@ -26,6 +26,8 @@ mod auth_validation;
 mod contracts;
 #[path = "profile_download.rs"]
 mod profile_download;
+#[path = "profile_multipart.rs"]
+mod profile_multipart;
 #[path = "profile_upload.rs"]
 mod profile_upload;
 use auth_admin_clients::*;
@@ -106,6 +108,7 @@ use dasobjectstore_daemon::{
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use profile_download::standalone_profile_s3_get;
+use profile_multipart::standalone_profile_s3_multipart_complete;
 use profile_upload::standalone_profile_s3_put;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -1823,6 +1826,36 @@ mod tests {
                 Request::builder()
                     .uri("/api/v1/profile-s3/stores/generated-data/health")
                     .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_multipart_completion_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-multipart-complete-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(
+                        "/api/v1/profile-s3/stores/generated-data/multipart/reservation-1/complete",
+                    )
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"key":{"object_id":"reads/sample.fastq","version":1},"expected_size_bytes":1,"parts":[{"part_number":1,"size_bytes":1,"checksum":"0000000000000000000000000000000000000000000000000000000000000000"}]}"#,
+                    ))
                     .expect("request builds"),
             )
             .await

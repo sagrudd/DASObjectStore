@@ -78,9 +78,11 @@ content length, request/upload identity, and SHA-256 header, and uses bounded
 channel backpressure so cancellation closes the daemon stream. Web GET/range
 now uses the same path-free daemon stream, supports one bounded byte range and
 SHA-256 conditional headers, and waits for daemon stream-open acceptance before
-returning the response. Multipart gateway streaming remains gated on an
-equivalent adapter; backend paths and unbounded base64 JSON responses are not
-acceptable substitutes.
+returning the response. Multipart part streaming remains daemon-owned and
+bounded. The authenticated completion POST submits only the reservation-bound
+logical manifest; the daemon reopens its private journal, verifies staged
+parts, and returns the typed commit acknowledgement. Backend paths and
+unbounded base64 JSON responses are not acceptable substitutes.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
 checked against the in-flight SHA-256 stage. The backend then performs its
