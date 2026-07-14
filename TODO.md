@@ -772,7 +772,7 @@ profile manifest, guarded backend, fail-closed identity checks, and generated
 data fixtures are validated locally; do not substitute a developer disk for
 hardware acceptance.
 
-- [ ] Create/adopt only an explicit mount backed by a validated non-rotational
+- [~] Create/adopt only an explicit mount backed by a validated non-rotational
   device; identify it by stable filesystem/device identity rather than name.
   - [x] Require an explicit `DriveMediaKind::Ssd` plus stable filesystem/device
     identity in portable drive manifests; runtime mount/device probing and
@@ -780,7 +780,7 @@ hardware acceptance.
   - [x] Add injected platform validation for positively observed SSD media,
     matching filesystem/device identities, safe mounted paths, root-status,
     and writable mode; real diskutil/lsblk observation remains external.
-- [ ] Reject the system root and already-claimed devices by default; support a
+- [~] Reject the system root and already-claimed devices by default; support a
   documented administrator override for virtual or unusual SSD topology.
   - [x] Reject missing drive device identity and `/` system-root mount hints in
     the portable manifest validator; live mount/claim probing and override
@@ -789,9 +789,9 @@ hardware acceptance.
     roots in the daemon profile registry without disclosing host paths in drive
     identity errors; live mount probing and an explicit administrator override
     remain open.
-- [ ] Implement reserve, pressure, capacity, SMART/NVMe health, endurance,
+- [~] Implement reserve, pressure, capacity, SMART/NVMe health, endurance,
   mount-loss, replacement, import/export, and read-only degraded behavior.
-- [ ] Reuse folder hierarchy/manifest/S3 semantics while making the single-
+- [~] Reuse folder hierarchy/manifest/S3 semantics while making the single-
   device failure domain explicit in policy, CLI, TUI, and Web.
   - [x] Add a drive backend wrapper that retains the drive manifest while
     delegating hardened folder hierarchy, checksum, durable-finalization, and
@@ -816,7 +816,7 @@ hardware acceptance.
     preserves source files and delegates durable checkpointing and catalogue
     records to the shared folder engine; live mount/device probing remains
     hardware-dependent.
-- [ ] Add Linux package, reboot/remount, device replacement, full-disk,
+- [~] Add Linux package, reboot/remount, device replacement, full-disk,
   corruption, and performance acceptance coverage.
 
 ### Gate 5: Unified S3, product APIs, and migrations
