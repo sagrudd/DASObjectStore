@@ -1080,8 +1080,11 @@ Exit criteria:
 
 Current delivery note: the offline collector matrix now covers direct SATA,
 partition, stable USB alias, device-mapper alias, and missing-device fixtures,
-including warm-up and non-zero rate transitions. Authoritative enclosure
-topology and packaged-loop verification remain appliance-dependent.
+including warm-up and non-zero rate transitions. A versioned, path-free
+physical enclosure/bay registry now validates uniqueness and is consumed by
+the Linux collector to override known capacity/IO samples with authoritative
+enclosure and bay labels. Authoritative live topology and packaged-loop
+verification remain appliance-dependent.
 The operator recovery runbook is now published in the user guide; it keeps
 Home/API as the normal inspection surface, documents read-only state and
 marker evidence, and separates idle, warm-up, missing-device, and stale-state
