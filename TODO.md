@@ -592,8 +592,8 @@ completion.
     adopting unmanaged user files; explicit adopt/reconcile reporting is
     handled by the daemon binding workflow.
   - [x] Include daemon-derived unmanaged/unsafe drift counts in profile
-    create/adopt responses without exposing host paths; a separately
-    authenticated redacted inspection transport remains open.
+    create/adopt responses without exposing host paths; the separately
+    authenticated redacted inspection transport is delivered below.
   - [x] Preserve a non-canonical persisted binding read for missing/unmounted
     roots so diagnostics can report drift; capacity probes and backend opens
     continue to fail closed on unavailable roots.
