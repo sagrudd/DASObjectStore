@@ -2388,14 +2388,14 @@ list until every temporary size-budget exception has been removed.
     while the caller consumes the stream, rejecting payload drift instead of
     returning an unchecked provider reader; HTTP/provider-backed route wiring
     remains separate.
-  - [ ] **Blocker (transport contract):** the daemon Unix-socket protocol
+  - [~] **Blocker (transport contract):** the daemon Unix-socket protocol
     currently returns one JSON response and has no bounded binary-chunk or
     file-descriptor handoff for provider bytes. Do not return backend paths or
-    base64 an unbounded object in JSON. Recommended next contract is a bounded
-    daemon-owned chunk stream (or equivalent descriptor-passing transport) with
-    an opaque request identity, per-chunk byte limits, final size/checksum
-    verification, cancellation, and explicit range/conditional-request
-    semantics before adding the HTTP route.
+    base64 an unbounded object in JSON. A versioned, path-free open request,
+    range/conditional contract, and metadata-only bounded chunk header now
+    define the recommended binary framing; socket frame dispatch,
+    cancellation, and final verification wiring remain before adding the HTTP
+    route.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

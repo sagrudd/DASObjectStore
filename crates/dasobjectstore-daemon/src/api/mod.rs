@@ -24,6 +24,7 @@ mod profile_diagnostics;
 mod profile_inspection;
 mod profile_readiness;
 mod profile_s3;
+mod provider_stream;
 mod remote_easyconnect;
 mod service;
 mod storage_mutation;
@@ -165,6 +166,11 @@ pub use profile_s3::{
     ProfileS3VerifyRequest, ProfileS3VerifyResponse, PROFILE_S3_HEALTH_ROUTE, PROFILE_S3_MAX_KEYS,
     PROFILE_S3_MAX_MULTIPART_PARTS, PROFILE_S3_MULTIPART_COMPLETE_ROUTE, PROFILE_S3_OBJECTS_ROUTE,
     PROFILE_S3_OBJECT_ROUTE, PROFILE_S3_ROUTE_PREFIX, PROFILE_S3_SCHEMA_VERSION,
+};
+pub use provider_stream::{
+    ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamOpenRequest,
+    ProviderStreamRange, ProviderStreamValidationError, PROVIDER_STREAM_MAX_CHUNK_BYTES,
+    PROVIDER_STREAM_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,

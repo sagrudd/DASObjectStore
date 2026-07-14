@@ -1,0 +1,317 @@
+//! Bounded metadata for daemon-owned provider byte streams.
+//!
+//! The Unix-socket transport currently returns JSON responses only. These
+//! contracts describe the safe framing boundary for a future binary stream:
+//! JSON carries request and chunk metadata, while payload bytes travel in
+//! bounded binary frames and never as base64 or backend paths.
+
+use dasobjectstore_core::backend::BackendObjectKey;
+use dasobjectstore_core::ids::StoreId;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
+
+pub const PROVIDER_STREAM_SCHEMA_VERSION: &str = "dasobjectstore.provider_stream.v1";
+pub const PROVIDER_STREAM_MAX_CHUNK_BYTES: u32 = 1024 * 1024;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamOpenRequest {
+    pub schema_version: String,
+    pub request_id: String,
+    pub store_id: StoreId,
+    pub object: BackendObjectKey,
+    #[serde(default)]
+    pub range: Option<ProviderStreamRange>,
+    #[serde(default)]
+    pub condition: ProviderStreamCondition,
+    pub chunk_size_bytes: u32,
+}
+
+impl ProviderStreamOpenRequest {
+    pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+            return Err(ProviderStreamValidationError::UnsupportedSchema {
+                schema_version: self.schema_version.clone(),
+            });
+        }
+        validate_non_blank(&self.request_id, "request_id")?;
+        validate_object_key(&self.object)?;
+        if self.chunk_size_bytes == 0 || self.chunk_size_bytes > PROVIDER_STREAM_MAX_CHUNK_BYTES {
+            return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
+                chunk_size_bytes: self.chunk_size_bytes,
+            });
+        }
+        if let Some(range) = self.range {
+            range.validate()?;
+        }
+        self.condition.validate()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamRange {
+    pub start: u64,
+    #[serde(default)]
+    pub end_exclusive: Option<u64>,
+}
+
+impl ProviderStreamRange {
+    pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if self.end_exclusive.is_some_and(|end| end <= self.start) {
+            return Err(ProviderStreamValidationError::InvalidRange {
+                start: self.start,
+                end_exclusive: self.end_exclusive,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamCondition {
+    #[serde(default)]
+    pub if_match_sha256: Option<String>,
+    #[serde(default)]
+    pub if_none_match_sha256: Option<String>,
+}
+
+impl ProviderStreamCondition {
+    fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if let Some(checksum) = self.if_match_sha256.as_deref() {
+            validate_sha256(checksum, "if_match_sha256")?;
+        }
+        if let Some(checksum) = self.if_none_match_sha256.as_deref() {
+            validate_sha256(checksum, "if_none_match_sha256")?;
+        }
+        Ok(())
+    }
+}
+
+/// Metadata for one binary frame. The frame payload is deliberately not a
+/// field here; callers must enforce `payload_len` before reading that many
+/// bytes from the daemon-owned stream.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamChunkHeader {
+    pub schema_version: String,
+    pub request_id: String,
+    pub offset: u64,
+    pub payload_len: u32,
+    pub final_chunk: bool,
+    #[serde(default)]
+    pub total_size: Option<u64>,
+    #[serde(default)]
+    pub sha256: Option<String>,
+}
+
+impl ProviderStreamChunkHeader {
+    pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+            return Err(ProviderStreamValidationError::UnsupportedSchema {
+                schema_version: self.schema_version.clone(),
+            });
+        }
+        validate_non_blank(&self.request_id, "request_id")?;
+        if self.payload_len > PROVIDER_STREAM_MAX_CHUNK_BYTES {
+            return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
+                chunk_size_bytes: self.payload_len,
+            });
+        }
+        let end = self
+            .offset
+            .checked_add(self.payload_len as u64)
+            .ok_or(ProviderStreamValidationError::OffsetOverflow)?;
+        if self.final_chunk {
+            let Some(total_size) = self.total_size else {
+                return Err(ProviderStreamValidationError::FinalMetadataMissing);
+            };
+            let Some(checksum) = self.sha256.as_deref() else {
+                return Err(ProviderStreamValidationError::FinalMetadataMissing);
+            };
+            if end != total_size {
+                return Err(ProviderStreamValidationError::FinalSizeMismatch { end, total_size });
+            }
+            validate_sha256(checksum, "sha256")?;
+        } else if self.total_size.is_some() || self.sha256.is_some() {
+            return Err(ProviderStreamValidationError::NonFinalMetadataPresent);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProviderStreamValidationError {
+    UnsupportedSchema {
+        schema_version: String,
+    },
+    InvalidField {
+        field: &'static str,
+    },
+    InvalidObjectKey,
+    InvalidRange {
+        start: u64,
+        end_exclusive: Option<u64>,
+    },
+    ChunkSizeOutOfBounds {
+        chunk_size_bytes: u32,
+    },
+    OffsetOverflow,
+    FinalMetadataMissing,
+    FinalSizeMismatch {
+        end: u64,
+        total_size: u64,
+    },
+    NonFinalMetadataPresent,
+}
+
+impl Display for ProviderStreamValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedSchema { schema_version } => {
+                write!(
+                    formatter,
+                    "unsupported provider stream schema {schema_version}"
+                )
+            }
+            Self::InvalidField { field } => write!(formatter, "{field} must not be blank"),
+            Self::InvalidObjectKey => formatter.write_str("provider stream object key is invalid"),
+            Self::InvalidRange {
+                start,
+                end_exclusive,
+            } => write!(formatter, "invalid byte range {start}..{end_exclusive:?}"),
+            Self::ChunkSizeOutOfBounds { chunk_size_bytes } => write!(
+                formatter,
+                "provider stream chunk size {chunk_size_bytes} exceeds the bounded limit"
+            ),
+            Self::OffsetOverflow => formatter.write_str("provider stream offset overflows"),
+            Self::FinalMetadataMissing => {
+                formatter.write_str("final provider stream chunk requires size and checksum")
+            }
+            Self::FinalSizeMismatch { end, total_size } => write!(
+                formatter,
+                "final provider stream chunk ends at {end}, expected {total_size}"
+            ),
+            Self::NonFinalMetadataPresent => formatter.write_str(
+                "non-final provider stream chunks must not carry terminal size or checksum",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProviderStreamValidationError {}
+
+fn validate_non_blank(
+    value: &str,
+    field: &'static str,
+) -> Result<(), ProviderStreamValidationError> {
+    if value.trim().is_empty() {
+        return Err(ProviderStreamValidationError::InvalidField { field });
+    }
+    Ok(())
+}
+
+fn validate_object_key(key: &BackendObjectKey) -> Result<(), ProviderStreamValidationError> {
+    if key.version == 0
+        || key.object_id.trim().is_empty()
+        || key.object_id.starts_with('/')
+        || key.object_id.ends_with('/')
+        || key.object_id.contains('\\')
+        || key.object_id.contains('\0')
+        || key
+            .object_id
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(ProviderStreamValidationError::InvalidObjectKey);
+    }
+    Ok(())
+}
+
+fn validate_sha256(value: &str, field: &'static str) -> Result<(), ProviderStreamValidationError> {
+    let Some(hex) = value.strip_prefix("sha256:") else {
+        return Err(ProviderStreamValidationError::InvalidField { field });
+    };
+    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(ProviderStreamValidationError::InvalidField { field });
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> ProviderStreamOpenRequest {
+        ProviderStreamOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "stream-1".to_string(),
+            store_id: StoreId::new("store-1").expect("store"),
+            object: BackendObjectKey {
+                object_id: "folder/file.bin".to_string(),
+                version: 1,
+            },
+            range: Some(ProviderStreamRange {
+                start: 0,
+                end_exclusive: Some(4096),
+            }),
+            condition: ProviderStreamCondition {
+                if_match_sha256: Some(format!("sha256:{}", "a".repeat(64))),
+                if_none_match_sha256: None,
+            },
+            chunk_size_bytes: 4096,
+        }
+    }
+
+    #[test]
+    fn open_request_round_trips_and_validates() {
+        let request = request();
+        request.validate().expect("valid stream request");
+        let encoded = serde_json::to_string(&request).expect("encode");
+        let decoded: ProviderStreamOpenRequest = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn chunk_header_requires_bounded_terminal_metadata() {
+        let header = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "stream-1".to_string(),
+            offset: 0,
+            payload_len: 4,
+            final_chunk: true,
+            total_size: Some(4),
+            sha256: Some(format!("sha256:{}", "b".repeat(64))),
+        };
+        header.validate().expect("valid final header");
+
+        let mut mismatch = header.clone();
+        mismatch.total_size = Some(5);
+        assert!(matches!(
+            mismatch.validate(),
+            Err(ProviderStreamValidationError::FinalSizeMismatch { .. })
+        ));
+
+        let mut non_final = header;
+        non_final.final_chunk = false;
+        assert!(matches!(
+            non_final.validate(),
+            Err(ProviderStreamValidationError::NonFinalMetadataPresent)
+        ));
+    }
+
+    #[test]
+    fn open_request_rejects_traversal_and_unknown_fields() {
+        let mut invalid = request();
+        invalid.object.object_id = "../escape".to_string();
+        assert!(matches!(
+            invalid.validate(),
+            Err(ProviderStreamValidationError::InvalidObjectKey)
+        ));
+
+        let mut value = serde_json::to_value(request()).expect("encode");
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<ProviderStreamOpenRequest>(value).is_err());
+    }
+}
