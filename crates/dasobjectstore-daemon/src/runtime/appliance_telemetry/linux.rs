@@ -635,6 +635,9 @@ fn resolve_diskstats_device_name(
             sys_root.join("class/block"),
             sys_root.join("dev/disk/by-id"),
             sys_root.join("dev/disk/by-path"),
+            sys_root.join("dev/disk/by-uuid"),
+            sys_root.join("dev/disk/by-partuuid"),
+            sys_root.join("dev/disk/by-label"),
         ] {
             let alias = alias_root.join(&candidate);
             let Ok(target) = fs::canonicalize(&alias) else {

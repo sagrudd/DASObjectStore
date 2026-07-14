@@ -2654,7 +2654,8 @@ list until every temporary size-budget exception has been removed.
   USB bridge names, and stable `/dev/disk/by-*` aliases; do not depend only on
   a marker's basename when it cannot match the kernel counter name.
   - [x] Resolve explicit `diskstats_device` markers and stable `/dev/disk/by-*`
-    or `/dev/disk/by-path` aliases through a fixtureable sysfs root before
+    or `/dev/disk/by-*` aliases (including UUID, PARTUUID, and label aliases)
+    through a fixtureable sysfs root before
     reporting `device_missing`; canonical sysfs ancestry now also falls back
     from partition targets to the nearest reported parent disk while preferring
     a reported partition counter when available. Device-mapper/MD/USB topology
