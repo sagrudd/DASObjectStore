@@ -377,8 +377,9 @@ mod tests {
     use super::{connect_error_message, ProviderStreamReceipt, UnixSocketDaemonTransport};
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, ProviderStreamChunkHeader, ProviderStreamOpenRequest,
-        ProviderStreamUploadOpenRequest, PROVIDER_STREAM_SCHEMA_VERSION,
+        DaemonServiceStatusResponse, ProviderStreamChunkHeader,
+        ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
+        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest, PROVIDER_STREAM_SCHEMA_VERSION,
     };
     use crate::client::{DaemonClient, DaemonClientError};
     use crate::server::{DaemonApiHandler, UnixSocketDaemonServer, UnixSocketDaemonServerError};
@@ -555,6 +556,104 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error) if error.code == "upload_test"
+        ));
+        join.join().expect("server thread joins");
+        let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn unix_socket_transport_uploads_multipart_part_with_reservation_identity() {
+        struct MultipartPartHandler;
+
+        impl DaemonApiHandler for MultipartPartHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, UnixSocketDaemonServerError> {
+                panic!("multipart part test should use the stream handler")
+            }
+
+            fn handle_provider_stream_multipart_part_upload_for_actor(
+                &self,
+                request: ProviderStreamMultipartPartUploadOpenRequest,
+                _actor: Option<&crate::auth::DaemonLocalActor>,
+                read_frame: &mut dyn FnMut() -> Result<
+                    (ProviderStreamChunkHeader, Vec<u8>),
+                    UnixSocketDaemonServerError,
+                >,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), UnixSocketDaemonServerError>,
+            ) -> Result<(), UnixSocketDaemonServerError> {
+                assert_eq!(request.reservation_id, "reservation-1");
+                assert_eq!(request.part_number, 1);
+                let (_, payload) = read_frame()?;
+                assert_eq!(payload, b"hello");
+                emit_response(DaemonApiResponse::ProviderStreamMultipartPartUpload(
+                    ProviderStreamMultipartPartUploadResponse {
+                        schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                        request_id: request.request_id,
+                        reservation_id: request.reservation_id,
+                        part_number: request.part_number,
+                        store_id: request.store_id,
+                        object: request.object,
+                        size_bytes: 5,
+                        sha256: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+                    },
+                ))
+            }
+        }
+
+        let socket_path = unique_socket_path();
+        let listener = UnixListener::bind(&socket_path).expect("listener binds");
+        let server = UnixSocketDaemonServer::new(&socket_path, MultipartPartHandler);
+        let join = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("client connects");
+            server
+                .handle_stream(stream)
+                .expect("multipart part handled");
+        });
+        let request = ProviderStreamMultipartPartUploadOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "multipart-client-1".to_string(),
+            reservation_id: "reservation-1".to_string(),
+            reservation_size_bytes: 5,
+            part_number: 1,
+            store_id: StoreId::new("stream-store").expect("store id"),
+            object: BackendObjectKey {
+                object_id: "objects/hello.txt".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            expected_sha256:
+                "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            chunk_size_bytes: 1024,
+        };
+        let client = UnixSocketDaemonTransport::new(&socket_path);
+        let mut next = Some((
+            ProviderStreamChunkHeader {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "multipart-client-1".to_string(),
+                offset: 0,
+                payload_len: 5,
+                final_chunk: true,
+                total_size: Some(5),
+                sha256: Some(
+                    "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                        .to_string(),
+                ),
+            },
+            b"hello".to_vec(),
+        ));
+        let response = client
+            .upload_multipart_part(request, || Ok(next.take()))
+            .expect("multipart part response");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::ProviderStreamMultipartPartUpload(response)
+                if response.reservation_id == "reservation-1" && response.part_number == 1
         ));
         join.join().expect("server thread joins");
         let _ = fs::remove_file(socket_path);

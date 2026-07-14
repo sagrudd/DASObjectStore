@@ -967,7 +967,9 @@ hardware acceptance.
     frame-by-frame size/checksum verification, staged fsync/rename, and the
     path-free commit acknowledgement now complete before the socket response;
     the authenticated HTTP part POST now feeds the same bounded frames, while
-    provider-native capability verification remains separately gated.
+    provider-native capability verification remains separately gated. A local
+    Unix-socket integration fixture now round-trips a reservation-bound part
+    with its terminal frame and typed acknowledgement.
   - [x] Add the authenticated standalone HTTP profile PUT adapter. It requires
     explicit Content-Length, request/upload identity, and SHA-256 headers,
     streams bounded frames through a backpressured daemon bridge, closes the

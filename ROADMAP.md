@@ -1463,7 +1463,9 @@ HTTP PUT adapter feeds that stream with bounded channel backpressure. The
 authenticated HTTP GET/range adapter relays daemon-verified frames through a
 bounded channel after an explicit stream-open handshake. Multipart part and
 completion routes now use the same authenticated bridge; binary framing and
-staging remain daemon transport concerns.
+staging remain daemon transport concerns. A local Unix-socket fixture also
+round-trips a reservation-bound part through terminal framing and its typed
+acknowledgement.
 
 Shared SQLite catalogue integration is currently blocked by a schema/authority
 boundary: profile-private records carry versioned logical keys and local
