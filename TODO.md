@@ -2396,9 +2396,12 @@ list until every temporary size-budget exception has been removed.
     bounded magic/length-prefixed frame codec and cumulative verifier now
     define the binary framing and final size/checksum gate; folder/drive
     backends now expose the provider-neutral bounded range-read seam with a
-    safe full-reader fallback for future providers; socket request dispatch
-    remains before adding the HTTP route, while the verifier exposes a
-    cooperative cancellation token that aborts before the next frame.
+    safe full-reader fallback for future providers; the Unix socket now
+    recognizes and validates the standalone path-free open envelope and
+    dispatches bounded frames through an explicit handler callback. The default
+    daemon handler remains fail-closed until a provider reader is wired, and
+    the HTTP route remains separate; the verifier exposes a cooperative
+    cancellation token that aborts before the next frame.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

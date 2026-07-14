@@ -185,8 +185,11 @@ authority and data-plane boundaries. The versioned provider-stream contract
 now defines path-free open requests, bounded metadata-only chunk headers, and
 range/conditional checks, plus bounded magic/length-prefixed framing, a
 cumulative contiguous-offset/size/checksum verifier, and a cooperative
-cancellation token, without claiming socket request dispatch is complete. The
-profile backend contract now exposes a bounded provider-neutral `read_range`
+cancellation token. The Unix socket now recognizes and validates the standalone
+path-free open envelope and dispatches bounded frames through an explicit
+handler callback; the default daemon handler remains fail-closed until a
+provider reader is wired, and the HTTP route remains separate. Provider-backed
+execution is still intentionally unclaimed. The profile backend contract now exposes a bounded provider-neutral `read_range`
 operation: folder and guarded-drive backends use native seek-bounded reads,
 while future providers retain a safe full-reader fallback until they add
 provider-native range support.

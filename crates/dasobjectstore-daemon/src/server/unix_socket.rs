@@ -1,4 +1,7 @@
-use crate::api::{DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse};
+use crate::api::{
+    write_provider_stream_frame, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
+    ProviderStreamChunkHeader, ProviderStreamFrameError, ProviderStreamOpenRequest,
+};
 use crate::auth::DaemonLocalActor;
 use crate::runtime::DaemonIngestFilesRuntimeError;
 use crate::server::{DaemonRequestHandler, DaemonRequestHandlerError, DaemonServiceOrchestrator};
@@ -148,6 +151,26 @@ pub trait DaemonApiHandler {
         let _ = actor;
         self.handle_api_request_streaming(request, emit_response)
     }
+
+    /// Handle the path-free provider-stream open envelope. Successful
+    /// implementations emit bounded binary frames through `emit_frame`; the
+    /// default keeps the transport fail-closed until a provider reader is
+    /// wired into the daemon.
+    fn handle_provider_stream_open_for_actor(
+        &self,
+        _request: ProviderStreamOpenRequest,
+        _actor: Option<&DaemonLocalActor>,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+        _emit_frame: &mut dyn FnMut(
+            &ProviderStreamChunkHeader,
+            &[u8],
+        ) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "not_implemented",
+            "provider stream reader is not wired into dasobjectstored yet",
+        )))
+    }
 }
 
 impl<S, C> DaemonApiHandler for DaemonRequestHandler<S, C>
@@ -206,6 +229,7 @@ pub enum UnixSocketDaemonServerError {
     Decode(serde_json::Error),
     Encode(serde_json::Error),
     Handler(DaemonRequestHandlerError),
+    ProviderStreamFrame(ProviderStreamFrameError),
     PeerCredentials(std::io::Error),
 }
 
@@ -238,6 +262,7 @@ impl Display for UnixSocketDaemonServerError {
             Self::Decode(error) => write!(formatter, "failed to decode daemon request: {error}"),
             Self::Encode(error) => write!(formatter, "failed to encode daemon response: {error}"),
             Self::Handler(error) => Display::fmt(error, formatter),
+            Self::ProviderStreamFrame(error) => Display::fmt(error, formatter),
             Self::PeerCredentials(error) => {
                 write!(
                     formatter,
@@ -258,6 +283,9 @@ impl UnixSocketDaemonServerError {
             Self::Handler(DaemonRequestHandlerError::IngestRuntime(
                 DaemonIngestFilesRuntimeError::ClientDisconnected(_),
             )) => true,
+            Self::ProviderStreamFrame(ProviderStreamFrameError::Io(error)) => {
+                client_disconnect_kind(error.kind())
+            }
             _ => false,
         }
     }
@@ -306,8 +334,13 @@ fn handle_stream(
 
 struct PendingStream {
     stream: UnixStream,
-    request: DaemonApiRequest,
+    request: PendingRequest,
     actor: Option<DaemonLocalActor>,
+}
+
+enum PendingRequest {
+    Api(DaemonApiRequest),
+    ProviderStream(ProviderStreamOpenRequest),
 }
 
 fn receive_stream(
@@ -323,22 +356,40 @@ fn receive_stream(
     .read_line(&mut line)
     .map_err(UnixSocketDaemonServerError::Io)?;
 
-    match serde_json::from_str::<DaemonApiRequest>(&line) {
-        Ok(request) => Ok(Some(PendingStream {
+    if let Ok(request) = serde_json::from_str::<DaemonApiRequest>(&line) {
+        return Ok(Some(PendingStream {
             stream,
-            request,
+            request: PendingRequest::Api(request),
             actor,
-        })),
-        Err(error) => {
+        }));
+    }
+    if let Ok(request) = serde_json::from_str::<ProviderStreamOpenRequest>(&line) {
+        if let Err(error) = request.validate() {
             write_response_frame(
                 &mut stream,
                 &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "bad_request",
-                    format!("failed to decode daemon request: {error}"),
+                    format!("invalid provider stream request: {error}"),
                 )),
             )?;
-            Ok(None)
+            return Ok(None);
         }
+        return Ok(Some(PendingStream {
+            stream,
+            request: PendingRequest::ProviderStream(request),
+            actor,
+        }));
+    }
+    {
+        let error = serde_json::from_str::<DaemonApiRequest>(&line).expect_err("request parse");
+        write_response_frame(
+            &mut stream,
+            &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "bad_request",
+                format!("failed to decode daemon request: {error}"),
+            )),
+        )?;
+        Ok(None)
     }
 }
 
@@ -346,12 +397,38 @@ fn handle_pending_stream(
     mut pending: PendingStream,
     handler: &impl DaemonApiHandler,
 ) -> Result<(), UnixSocketDaemonServerError> {
-    let mut emit_response = |response| write_response_frame(&mut pending.stream, &response);
-    handler.handle_api_request_streaming_for_actor(
-        pending.request,
-        pending.actor.as_ref(),
-        &mut emit_response,
-    )?;
+    match pending.request {
+        PendingRequest::Api(request) => {
+            let mut emit_response = |response| write_response_frame(&mut pending.stream, &response);
+            handler.handle_api_request_streaming_for_actor(
+                request,
+                pending.actor.as_ref(),
+                &mut emit_response,
+            )?;
+        }
+        PendingRequest::ProviderStream(request) => {
+            let mut response_stream = pending
+                .stream
+                .try_clone()
+                .map_err(UnixSocketDaemonServerError::Io)?;
+            let mut frame_stream = pending
+                .stream
+                .try_clone()
+                .map_err(UnixSocketDaemonServerError::Io)?;
+            let mut emit_response =
+                |response| write_response_frame(&mut response_stream, &response);
+            let mut emit_frame = |header: &ProviderStreamChunkHeader, payload: &[u8]| {
+                write_provider_stream_frame(&mut frame_stream, header, payload)
+                    .map_err(UnixSocketDaemonServerError::ProviderStreamFrame)
+            };
+            handler.handle_provider_stream_open_for_actor(
+                request,
+                pending.actor.as_ref(),
+                &mut emit_response,
+                &mut emit_frame,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -370,6 +447,22 @@ impl DaemonApiRequestClass for DaemonApiRequest {
 
     fn is_priority_control_request(&self) -> bool {
         matches!(self, Self::CancelJob(_))
+    }
+}
+
+impl PendingRequest {
+    fn is_ingest_submission(&self) -> bool {
+        match self {
+            Self::Api(request) => request.is_ingest_submission(),
+            Self::ProviderStream(_) => false,
+        }
+    }
+
+    fn is_priority_control_request(&self) -> bool {
+        match self {
+            Self::Api(request) => request.is_priority_control_request(),
+            Self::ProviderStream(_) => false,
+        }
     }
 }
 
@@ -402,12 +495,15 @@ fn write_response_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::{DaemonApiRequestClass, UnixSocketDaemonServer};
+    use super::{DaemonApiHandler, DaemonApiRequestClass, UnixSocketDaemonServer};
+    use crate::api::read_provider_stream_frame;
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
         DaemonIngestStage, DaemonJobCancelRequest, DaemonJobId, DaemonServiceStatusResponse,
-        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        ProviderStreamChunkHeader, ProviderStreamOpenRequest, StoreInventoryRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, PROVIDER_STREAM_SCHEMA_VERSION,
     };
+    use dasobjectstore_core::backend::BackendObjectKey;
     use dasobjectstore_core::ids::{IngestJobId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
@@ -468,6 +564,83 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn dispatches_standalone_provider_stream_open_to_bounded_frame_handler() {
+        struct ProviderStreamingHandler;
+
+        impl DaemonApiHandler for ProviderStreamingHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                panic!("provider stream test should use the stream handler")
+            }
+
+            fn handle_provider_stream_open_for_actor(
+                &self,
+                request: ProviderStreamOpenRequest,
+                _actor: Option<&crate::auth::DaemonLocalActor>,
+                _emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+                emit_frame: &mut dyn FnMut(
+                    &ProviderStreamChunkHeader,
+                    &[u8],
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                assert_eq!(request.request_id, "provider-stream-test");
+                let payload = b"hello";
+                emit_frame(
+                    &ProviderStreamChunkHeader {
+                        schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                        request_id: request.request_id,
+                        offset: 0,
+                        payload_len: payload.len() as u32,
+                        final_chunk: true,
+                        total_size: Some(payload.len() as u64),
+                        sha256: Some(
+                            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                                .to_string(),
+                        ),
+                    },
+                    payload,
+                )
+            }
+        }
+
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new(
+            "/tmp/dasobjectstored-provider-stream-test.sock",
+            ProviderStreamingHandler,
+        );
+        serde_json::to_writer(
+            &mut client,
+            &ProviderStreamOpenRequest {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "provider-stream-test".to_string(),
+                store_id: StoreId::new("stream-store").expect("store id"),
+                object: BackendObjectKey {
+                    object_id: "objects/hello.txt".to_string(),
+                    version: 1,
+                },
+                range: None,
+                condition: Default::default(),
+                chunk_size_bytes: 1024,
+            },
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+
+        server.handle_stream(server_stream).expect("stream handled");
+
+        let (header, payload) = read_provider_stream_frame(&mut client).expect("frame decoded");
+        assert!(header.final_chunk);
+        assert_eq!(header.request_id, "provider-stream-test");
+        assert_eq!(payload, b"hello");
     }
 
     #[test]
