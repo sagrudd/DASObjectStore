@@ -3,10 +3,11 @@ use crate::api::{
     RemoteEasyconnectSessionCredentials,
 };
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::io;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const REMOTE_EASYCONNECT_PAIRING_DIR_NAME: &str = "remote-easyconnect";
 pub const REMOTE_EASYCONNECT_PAIRING_FILE_NAME: &str = "pairings.json";
@@ -362,22 +363,58 @@ fn write_store(
     path: &Path,
     store: &RemoteEasyconnectPairingStoreFile,
 ) -> Result<(), RemoteEasyconnectPairingStoreError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|source| RemoteEasyconnectPairingStoreError::Io {
-            path: parent.to_path_buf(),
-            source,
+    let parent = path
+        .parent()
+        .ok_or_else(|| RemoteEasyconnectPairingStoreError::Io {
+            path: path.to_path_buf(),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "pairing store has no parent"),
         })?;
-    }
+    fs::create_dir_all(parent).map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+        path: parent.to_path_buf(),
+        source,
+    })?;
     let encoded = serde_json::to_vec_pretty(store).map_err(|error| {
         RemoteEasyconnectPairingStoreError::Json {
             path: path.to_path_buf(),
             message: error.to_string(),
         }
     })?;
-    fs::write(path, encoded).map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("pairings"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    ));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+            path: temporary.clone(),
+            source,
+        })?;
+    file.write_all(&encoded)
+        .and_then(|_| file.sync_all())
+        .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+            path: temporary.clone(),
+            source,
+        })?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|source| RemoteEasyconnectPairingStoreError::Io {
         path: path.to_path_buf(),
         source,
-    })
+    })?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })
 }
 
 fn ensure_pairing_usable(
@@ -428,5 +465,51 @@ pub fn session_credentials_from_store_credentials(
         access_key_id: credential.access_key_id,
         secret_access_key: credential.secret_access_key.expose_secret().to_string(),
         session_token: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        write_store, RemoteEasyconnectPairingStoreFile, REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn root() -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| PathBuf::from(home).join(".dasobjectstore-codex-validation"))
+            })
+            .unwrap_or_else(std::env::temp_dir)
+            .join(format!(
+                "remote-pairings-persistence-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            ));
+        fs::create_dir_all(&root).expect("fixture root");
+        root
+    }
+
+    #[test]
+    fn pairing_store_persistence_uses_atomic_final_path_without_temp_files() {
+        let root = root();
+        let path = root.join("nested/pairings.json");
+        let store = RemoteEasyconnectPairingStoreFile {
+            schema_version: REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+            pairings: Vec::new(),
+        };
+        write_store(&path, &store).expect("persist pairing store");
+        assert!(path.is_file());
+        let entries = fs::read_dir(path.parent().expect("parent"))
+            .expect("read parent")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("entries");
+        assert_eq!(entries.len(), 1);
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

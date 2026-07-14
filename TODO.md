@@ -2877,7 +2877,9 @@ non-destructive close, and restores focus to its trigger when closed.
 - [ ] Keep all existing remote-agent pairing, path privacy, S3 credential,
   SSD-first ingress, daemon job, cancellation, and renewal behaviour. This is
   a presentation/context refactor, not permission or transfer-policy
-  relaxation.
+  relaxation. EasyConnect pairing persistence now uses fsync'd temporary-file
+  replacement and directory fsync, with a regression proving no temporary
+  artifact remains after a successful write.
 
 ### 24.5 Verification and documentation
 
