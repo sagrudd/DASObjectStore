@@ -1886,6 +1886,11 @@ list until every temporary size-budget exception has been removed.
     source enumeration, preserving automatic release on dry-run, failure, and
     successful settlement; dynamic policy injection is complete for the
     packaged path.
+  - [x] Make the daemon resource gate reconfigurable for future live telemetry
+    policy updates without dropping active leases. Budget refresh and admission
+    decisions share one lock, lowered budgets fail closed for new work while
+    existing jobs drain, and atomic snapshot coverage protects diagnostics;
+    host telemetry collection and wiring remain deployment-gated.
 - [ ] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds.
 - [ ] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI.
   - [x] Surface the optional daemon ingest admission action, limiting reason,

@@ -1233,6 +1233,12 @@ budget is selected from the daemon-configured ingest policy rather than a
 hard-coded runtime default. Garage S3 reconciliation uses the same injected
 gate before handing staged provider data to local ingest.
 
+The shared resource gate now supports an atomic budget refresh for future live
+telemetry policy updates. Existing leases are never revoked; if a refreshed
+budget is below current usage, new admissions fail closed until work drains.
+The gate exposes a bounded budget/usage snapshot for diagnostics. Host
+telemetry collection and policy wiring remain deployment-gated.
+
 The TUI now renders an optional daemon admission action, limiting reason, and
 worker schedule alongside live ingest telemetry; Web bridging and host-level
 availability counters remain open.

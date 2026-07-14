@@ -114,10 +114,15 @@ impl DaemonIngestResourceBudget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DaemonIngestResourceUsage(DaemonIngestResourceReservation);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DaemonIngestResourceState {
+    budget: DaemonIngestResourceBudget,
+    usage: DaemonIngestResourceUsage,
+}
+
 #[derive(Clone, Debug)]
 pub struct DaemonIngestResourceGate {
-    budget: DaemonIngestResourceBudget,
-    usage: Arc<Mutex<DaemonIngestResourceUsage>>,
+    state: Arc<Mutex<DaemonIngestResourceState>>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -138,10 +143,10 @@ pub struct DaemonIngestResourceLease {
 impl DaemonIngestResourceGate {
     pub fn new(budget: DaemonIngestResourceBudget) -> Self {
         Self {
-            budget,
-            usage: Arc::new(Mutex::new(DaemonIngestResourceUsage(
-                DaemonIngestResourceReservation::default(),
-            ))),
+            state: Arc::new(Mutex::new(DaemonIngestResourceState {
+                budget,
+                usage: DaemonIngestResourceUsage(DaemonIngestResourceReservation::default()),
+            })),
         }
     }
 
@@ -152,46 +157,74 @@ impl DaemonIngestResourceGate {
         ))
     }
 
+    /// Replace the admission budget without dropping existing leases.
+    ///
+    /// A live policy update may temporarily set a budget below current usage;
+    /// existing work is allowed to drain, while new reservations fail closed
+    /// until sufficient capacity is available again. The update and each
+    /// reservation share one mutex so a policy refresh cannot race an
+    /// admission decision.
+    pub fn reconfigure(&self, budget: DaemonIngestResourceBudget) {
+        let mut state = self.state.lock().expect("ingest resource gate lock");
+        state.budget = budget;
+    }
+
+    /// Return the effective budget and usage atomically for diagnostics.
+    pub fn snapshot(&self) -> (DaemonIngestResourceBudget, DaemonIngestResourceReservation) {
+        let state = self.state.lock().expect("ingest resource gate lock");
+        (state.budget, state.usage.0)
+    }
+
     pub fn try_reserve(
         &self,
         reservation: DaemonIngestResourceReservation,
     ) -> Result<DaemonIngestResourceLease, DaemonIngestResourceReservationError> {
-        let mut usage = self.usage.lock().expect("ingest resource gate lock");
+        let mut state = self.state.lock().expect("ingest resource gate lock");
         check_resource(
             "cpu_cores",
-            u64::from(usage.0.cpu_cores),
+            u64::from(state.usage.0.cpu_cores),
             u64::from(reservation.cpu_cores),
-            u64::from(self.budget.cpu_cores),
+            u64::from(state.budget.cpu_cores),
         )?;
         check_resource(
             "memory_bytes",
-            usage.0.memory_bytes,
+            state.usage.0.memory_bytes,
             reservation.memory_bytes,
-            self.budget.memory_bytes,
+            state.budget.memory_bytes,
         )?;
         check_resource(
             "socket_workers",
-            u64::from(usage.0.socket_workers),
+            u64::from(state.usage.0.socket_workers),
             u64::from(reservation.socket_workers),
-            u64::from(self.budget.socket_workers),
+            u64::from(state.budget.socket_workers),
         )?;
         check_resource(
             "io_workers",
-            u64::from(usage.0.io_workers),
+            u64::from(state.usage.0.io_workers),
             u64::from(reservation.io_workers),
-            u64::from(self.budget.io_workers),
+            u64::from(state.budget.io_workers),
         )?;
-        usage.0.cpu_cores = usage.0.cpu_cores.saturating_add(reservation.cpu_cores);
-        usage.0.memory_bytes = usage
+        state.usage.0.cpu_cores = state
+            .usage
+            .0
+            .cpu_cores
+            .saturating_add(reservation.cpu_cores);
+        state.usage.0.memory_bytes = state
+            .usage
             .0
             .memory_bytes
             .saturating_add(reservation.memory_bytes);
-        usage.0.socket_workers = usage
+        state.usage.0.socket_workers = state
+            .usage
             .0
             .socket_workers
             .saturating_add(reservation.socket_workers);
-        usage.0.io_workers = usage.0.io_workers.saturating_add(reservation.io_workers);
-        drop(usage);
+        state.usage.0.io_workers = state
+            .usage
+            .0
+            .io_workers
+            .saturating_add(reservation.io_workers);
+        drop(state);
         Ok(DaemonIngestResourceLease {
             gate: self.clone(),
             reservation,
@@ -200,23 +233,30 @@ impl DaemonIngestResourceGate {
 
     #[cfg(test)]
     fn usage(&self) -> DaemonIngestResourceReservation {
-        self.usage.lock().expect("ingest resource gate lock").0
+        self.snapshot().1
     }
 }
 
 impl Drop for DaemonIngestResourceLease {
     fn drop(&mut self) {
-        let mut usage = self.gate.usage.lock().expect("ingest resource gate lock");
-        usage.0.cpu_cores = usage.0.cpu_cores.saturating_sub(self.reservation.cpu_cores);
-        usage.0.memory_bytes = usage
+        let mut state = self.gate.state.lock().expect("ingest resource gate lock");
+        state.usage.0.cpu_cores = state
+            .usage
+            .0
+            .cpu_cores
+            .saturating_sub(self.reservation.cpu_cores);
+        state.usage.0.memory_bytes = state
+            .usage
             .0
             .memory_bytes
             .saturating_sub(self.reservation.memory_bytes);
-        usage.0.socket_workers = usage
+        state.usage.0.socket_workers = state
+            .usage
             .0
             .socket_workers
             .saturating_sub(self.reservation.socket_workers);
-        usage.0.io_workers = usage
+        state.usage.0.io_workers = state
+            .usage
             .0
             .io_workers
             .saturating_sub(self.reservation.io_workers);
@@ -355,5 +395,62 @@ mod tests {
                 available: 0,
             }
         );
+    }
+
+    #[test]
+    fn reconfigure_is_atomic_and_allows_existing_work_to_drain() {
+        let gate = DaemonIngestResourceGate::new(DaemonIngestResourceBudget {
+            cpu_cores: 2,
+            memory_bytes: 200,
+            socket_workers: 2,
+            io_workers: 4,
+        });
+        let lease = gate
+            .try_reserve(reservation())
+            .expect("initial reservation");
+        gate.reconfigure(DaemonIngestResourceBudget {
+            cpu_cores: 1,
+            memory_bytes: 50,
+            socket_workers: 1,
+            io_workers: 2,
+        });
+
+        assert_eq!(
+            gate.snapshot(),
+            (
+                DaemonIngestResourceBudget {
+                    cpu_cores: 1,
+                    memory_bytes: 50,
+                    socket_workers: 1,
+                    io_workers: 2,
+                },
+                reservation(),
+            )
+        );
+        let error = gate
+            .try_reserve(DaemonIngestResourceReservation {
+                cpu_cores: 1,
+                memory_bytes: 1,
+                socket_workers: 1,
+                io_workers: 1,
+            })
+            .expect_err("new work must fail while the lowered budget is saturated");
+        assert_eq!(
+            error,
+            DaemonIngestResourceReservationError::BudgetExceeded {
+                resource: "cpu_cores",
+                requested: 1,
+                available: 0,
+            }
+        );
+        drop(lease);
+        assert!(gate
+            .try_reserve(DaemonIngestResourceReservation {
+                cpu_cores: 1,
+                memory_bytes: 50,
+                socket_workers: 1,
+                io_workers: 2,
+            })
+            .is_ok());
     }
 }
