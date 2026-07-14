@@ -2517,12 +2517,13 @@ list until every temporary size-budget exception has been removed.
   - [x] Translate malformed provider upload frames into a terminal typed
     ``bad_request`` response while preserving client-disconnect errors; handlers
     never need to turn framing failures into ad hoc protocol responses.
-  - [~] **Remaining upload execution boundary:** a concrete daemon-owned
-    staging writer must consume the upload callback, honor cancellation and
-    backpressure, release or commit the quota reservation transactionally, and
-    publish the verified catalogue record. Provider credentials, live HTTP
-    multipart routing, and appliance acceptance remain unavailable in this
-    macOS-only run; do not treat the transport contract as a completed upload.
+  - [x] Complete the daemon-owned upload execution boundary: the staging reader
+    consumes one bounded callback frame at a time, honors cancellation and
+    backpressure, commits the quota reservation only after durable finalization,
+    and publishes the verified catalogue record. Missing daemon capacity
+    admission now fails closed rather than falling back to direct profile PUT.
+    Provider credentials, live HTTP multipart routing, and appliance acceptance
+    remain unavailable in this macOS-only run.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

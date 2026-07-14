@@ -185,25 +185,22 @@ where
                     )))
                 }
             };
-        let mut source = ProviderUploadReader::new(&request, read_frame);
-        let record = match self.service_orchestrator.capacity_provider() {
-            Some(provider) => crate::runtime::put_profile_object_with_capacity_provider(
-                provider.as_ref(),
-                store_id.as_str(),
-                &mut backend,
-                &request.upload_id,
-                &request.object,
-                &mut source,
-                request.expected_size_bytes,
-            ),
-            None => crate::runtime::put_profile_object(
-                &mut backend,
-                &request.upload_id,
-                &request.object,
-                &mut source,
-                request.expected_size_bytes,
-            ),
+        let Some(provider) = self.service_orchestrator.capacity_provider() else {
+            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "provider_stream_upload_unavailable",
+                "provider stream upload requires daemon capacity admission",
+            )));
         };
+        let mut source = ProviderUploadReader::new(&request, read_frame);
+        let record = crate::runtime::put_profile_object_with_capacity_provider(
+            provider.as_ref(),
+            store_id.as_str(),
+            &mut backend,
+            &request.upload_id,
+            &request.object,
+            &mut source,
+            request.expected_size_bytes,
+        );
         let record = match record {
             Ok(record) => record,
             Err(error) => {

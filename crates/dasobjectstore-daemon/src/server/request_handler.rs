@@ -1241,12 +1241,26 @@ mod tests {
         )
         .expect("bounded store registry written");
         let profile_registry = root.join("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-14T09:00:00Z"),
+        let provider = crate::runtime::FileBackedCapacityAdmissionProvider::new(
+            &store_registry,
+            root.join("capacity-ledgers"),
+            &backend_root,
+            &backend_root,
+            crate::runtime::StatvfsCapacitySpaceProbe,
         )
-        .with_registry_paths(&store_registry, &subobject_registry)
         .with_profile_binding_registry_path(&profile_registry);
+        crate::runtime::CapacityAdmissionProvider::initialize_store(
+            &provider,
+            &StoreId::new("upload-store").expect("store id"),
+            store_definitions[0].policy.capacity.clone(),
+        )
+        .expect("capacity ledger");
+        let mut service = FakeService::default();
+        service.capacity_provider = Some(Arc::new(provider));
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-14T09:00:00Z"))
+                .with_registry_paths(&store_registry, &subobject_registry)
+                .with_profile_binding_registry_path(&profile_registry);
         let actor = DaemonLocalActor::new(0)
             .with_username("root")
             .with_groups(["mnemosyne"]);
@@ -4812,6 +4826,7 @@ mod tests {
         cancel_job_calls: RefCell<Vec<(String, String)>>,
         ingest_error: Option<String>,
         capacity_admission_response: Option<CapacityAdmissionResponse>,
+        capacity_provider: Option<Arc<dyn crate::runtime::CapacityAdmissionProvider>>,
     }
 
     impl DaemonServiceOrchestrator for FakeService {
@@ -4891,6 +4906,10 @@ mod tests {
                     operation: "capacity admission provider is not configured".to_string(),
                 },
             )
+        }
+
+        fn capacity_provider(&self) -> Option<Arc<dyn crate::runtime::CapacityAdmissionProvider>> {
+            self.capacity_provider.clone()
         }
 
         fn remote_easyconnect_aws_cli_upload_job(

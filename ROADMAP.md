@@ -1250,6 +1250,11 @@ identifiers before invoking an injected catalogue/manifest commit. Malformed
 handoff records therefore fail closed without publishing completion or creating
 an unreconcilable catalogue transaction; provider-backed catalogue wiring and
 public completion endpoints remain separately gated.
+The Unix-socket provider upload path now consumes bounded frames through a
+daemon-owned staging reader, requires daemon capacity admission, verifies size
+and SHA-256 before durable finalization, and commits the profile catalogue
+before returning its typed acknowledgement. Missing capacity admission fails
+closed; provider-native credentials and appliance acceptance remain gated.
 
 Current delivery note: daemon-independent health/liveness and degraded Activity
 responses are covered, including a local bridge-saturation regression for both
