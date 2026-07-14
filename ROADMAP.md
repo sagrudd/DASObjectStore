@@ -1386,14 +1386,19 @@ the standalone authenticated Web list/HEAD/health routes delegate through the
 same bounded daemon bridge. Authenticated standalone HTTP PUT now streams
 Content-Length-bounded frames through a backpressured daemon bridge and returns
 the path-free commit acknowledgement only after catalogue persistence.
+Authenticated standalone HTTP GET/range now waits for daemon stream-open
+acceptance and relays verified frames through bounded backpressure, while
+multipart listener dispatch remains.
 Authenticated Web list, HEAD, and health routes now share typed daemon
 projections and never expose backend paths; a path-free profile
 diagnostics projection and authenticated Web route distinguish empty,
 synchronized, uncatalogued, and catalogue-missing states with counts and
 reconciliation timestamps. Authenticated Web verification and the read-only
 ``store profile-verify`` CLI now require daemon-side size/checksum agreement
-before reporting success and return no backend location. HTTP GET/range and
-multipart routing remain separate.
+before reporting success and return no backend location. The authenticated
+profile GET/range route now uses the same path-free Unix provider stream and
+maps daemon conditional and range failures to HTTP status without opening a
+managed path in the Web process; multipart routing remains separate.
 The same path-free profile-readiness projection is now available through the
 authenticated Web route ``/api/v1/profile-readiness/stores/{store_id}``, using
 the bounded daemon bridge and preserving explicit not-ready reasons.
@@ -1434,8 +1439,10 @@ provider-neutral runtime now also offers a bounded writer-stream helper, the
 daemon Unix provider-stream dispatch drives it through authorization,
 reservation, exact byte/checksum verification, staged fsync/rename, and
 catalogue commit before acknowledging success, and the authenticated standalone
-HTTP PUT adapter feeds that stream with bounded channel backpressure; HTTP
-GET/range and multipart listener framing remain separate.
+HTTP PUT adapter feeds that stream with bounded channel backpressure. The
+authenticated HTTP GET/range adapter relays daemon-verified frames through a
+bounded channel after an explicit stream-open handshake; multipart listener
+framing remains separate.
 
 Shared SQLite catalogue integration is currently blocked by a schema/authority
 boundary: profile-private records carry versioned logical keys and local

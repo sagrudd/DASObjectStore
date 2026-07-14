@@ -76,9 +76,11 @@ The authenticated standalone Web PUT route now delegates bounded request-body
 frames through the daemon provider-stream transport. It requires an explicit
 content length, request/upload identity, and SHA-256 header, and uses bounded
 channel backpressure so cancellation closes the daemon stream. Web GET/range
-and multipart gateway streaming remain gated on equivalent daemon transport
-contracts; backend paths and unbounded base64 JSON responses are not acceptable
-substitutes.
+now uses the same path-free daemon stream, supports one bounded byte range and
+SHA-256 conditional headers, and waits for daemon stream-open acceptance before
+returning the response. Multipart gateway streaming remains gated on an
+equivalent adapter; backend paths and unbounded base64 JSON responses are not
+acceptable substitutes.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
 checked against the in-flight SHA-256 stage. The backend then performs its

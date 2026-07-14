@@ -836,9 +836,10 @@ hardware acceptance.
   Authenticated HTTP PUT now delegates its bounded body through the daemon
   provider stream with explicit Content-Length, upload/request identity,
   checksum headers, channel backpressure, disconnect cancellation, and a
-  typed acknowledgement only after catalogue persistence. **Remaining
-  execution gate:** HTTP GET/range and multipart routing still need adapters
-  with the same daemon-owned staging identity and transactional semantics.
+  typed acknowledgement only after catalogue persistence. Authenticated HTTP
+  GET/range now relays daemon-verified frames through the same bounded bridge;
+  **remaining execution gate:** multipart routing still needs an adapter with
+  the same daemon-owned staging identity and transactional semantics.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative
@@ -892,11 +893,16 @@ hardware acceptance.
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
   - [~] Authenticated HTTP GET/range and multipart routing follow the bounded
-    daemon payload transport gate recorded above; the standalone authenticated
-    PUT route now streams through the daemon provider envelope, while GET and
-    multipart still keep catalogue authority and provider credentials inside
-    the daemon and fail closed rather than introducing a path-bearing or
-    unbounded JSON shortcut.
+    daemon payload transport gate recorded above; standalone authenticated PUT
+    and GET/range routes now stream through the daemon provider envelope with
+    bounded backpressure, while multipart still keeps catalogue authority and
+    provider credentials inside the daemon and fails closed rather than
+    introducing a path-bearing or unbounded JSON shortcut.
+    - [x] Add the authenticated standalone HTTP GET/range adapter. It parses a
+      single bounded byte range and SHA-256 conditional headers, waits for the
+      daemon to open the verified stream before returning a response, and then
+      relays frames through a bounded channel with 206 and conditional error
+      mapping; multipart routing remains separate.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
     daemon bridge; the authenticated Web health route delegates through the
@@ -940,8 +946,8 @@ hardware acceptance.
     explicit Content-Length, request/upload identity, and SHA-256 headers,
     streams bounded frames through a backpressured daemon bridge, closes the
     stream on body cancellation, and returns the typed commit acknowledgement
-    only after daemon catalogue persistence; HTTP GET/range and multipart
-    routing remain separate.
+    only after daemon catalogue persistence; multipart routing remains
+    separate.
 - [~] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic. Static capability discovery and daemon-backed readiness are

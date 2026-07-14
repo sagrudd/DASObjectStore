@@ -24,6 +24,8 @@ mod auth_router;
 mod auth_validation;
 #[path = "auth_contracts.rs"]
 mod contracts;
+#[path = "profile_download.rs"]
+mod profile_download;
 #[path = "profile_upload.rs"]
 mod profile_upload;
 use auth_admin_clients::*;
@@ -103,6 +105,7 @@ use dasobjectstore_daemon::{
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
+use profile_download::standalone_profile_s3_get;
 use profile_upload::standalone_profile_s3_put;
 use serde::{Deserialize, Serialize};
 use std::fs;

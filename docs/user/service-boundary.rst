@@ -170,8 +170,10 @@ while streaming, then performs staged ``fsync``/rename and commits the
 catalogue before returning the path-free acknowledgement. Clients and Web
 workers must not write request bodies directly into managed profile roots. The
 authenticated standalone HTTP PUT route now feeds this stream through a
-bounded backpressure channel and closes it on body cancellation; HTTP
-GET/range and multipart listener adapters remain separate deployment seams and
+bounded backpressure channel and closes it on body cancellation. HTTP GET/range
+now uses the same path-free daemon stream, waits for stream-open acceptance
+before returning a response, and relays verified frames through a bounded
+channel. Multipart listener adapters remain a separate deployment seam and
 must preserve these daemon-owned staging, cancellation, backpressure, and
 catalogue rules.
 

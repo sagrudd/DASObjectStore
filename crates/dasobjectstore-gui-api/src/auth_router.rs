@@ -3,7 +3,7 @@
 use super::*;
 use axum::{
     extract::DefaultBodyLimit,
-    routing::{get, post, put},
+    routing::{get, post},
     Extension, Router,
 };
 use dasobjectstore_daemon::api::APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE;
@@ -92,7 +92,7 @@ pub(crate) fn standalone_dashboard_router_with_state(
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/objects/{*object_id}",
-            put(standalone_profile_s3_put),
+            get(standalone_profile_s3_get).put(standalone_profile_s3_put),
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/verify",
