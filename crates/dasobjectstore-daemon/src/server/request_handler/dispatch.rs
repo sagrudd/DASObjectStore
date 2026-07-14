@@ -58,6 +58,8 @@ where
         | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)
         | DaemonApiRequest::ObjectBrowser(_)
         | DaemonApiRequest::ProfileBrowser(_)
+        | DaemonApiRequest::ProfileCatalogueExport(_)
+        | DaemonApiRequest::ProfileCatalogueImport(_)
         | DaemonApiRequest::ProfileS3List(_)
         | DaemonApiRequest::ProfileS3MultipartComplete(_)
         | DaemonApiRequest::ProfileS3Head(_)

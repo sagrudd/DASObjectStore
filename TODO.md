@@ -1146,6 +1146,12 @@ hardware acceptance.
     logical usage (`used_bytes`) survive restart, while provider/appliance
     adapters remain. Guarded drive migration/reopen tests now prove the same
     authority handoff for the dedicated SSD profile.
+  - [x] Add daemon-owned Unix-socket portable catalogue export/import contracts
+    for bounded folder profiles. Export serializes validated IDs, versions,
+    hashes, provenance, protection, and logical placements without paths or
+    credentials; import verifies every destination payload before committing
+    catalogue rows and always reports source retention. Physical archive
+    packaging and folder/drive-to-appliance adapters remain deployment-gated.
 - [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
   - [x] The core migration state machine and atomic checkpoints retain source

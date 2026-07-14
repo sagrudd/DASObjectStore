@@ -448,6 +448,155 @@ where
                 store_id, page,
             )))
         }
+        DaemonApiRequest::ProfileCatalogueExport(request) => {
+            let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding))
+                    if binding.manifest.deployment_profile == DeploymentProfile::Folder =>
+                {
+                    binding
+                }
+                Ok(Some(_)) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_unavailable",
+                        "portable catalogue export is available for bounded folder profiles only",
+                    )));
+                }
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_unavailable",
+                        "portable catalogue export requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            let capacity = match read_store_registry(&handler.store_registry_path) {
+                Ok(definitions) => definitions
+                    .into_iter()
+                    .find(|definition| definition.store_id == store_id)
+                    .map(|definition| definition.policy.capacity),
+                Err(_) => None,
+            };
+            let Some(capacity) = capacity else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_catalogue_unavailable",
+                    "profile capacity policy is unavailable",
+                )));
+            };
+            let backend =
+                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_catalogue_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let catalogue = match crate::runtime::export_profile_catalogue(&store_id, &backend) {
+                Ok(catalogue) => catalogue,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_export_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileCatalogueExport(
+                crate::api::ProfileCatalogueExportResponse {
+                    schema_version: crate::api::PROFILE_CATALOGUE_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    catalogue,
+                },
+            ))
+        }
+        DaemonApiRequest::ProfileCatalogueImport(request) => {
+            let store_id = match handler.authorize_endpoint_write(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding))
+                    if binding.manifest.deployment_profile == DeploymentProfile::Folder =>
+                {
+                    binding
+                }
+                Ok(Some(_)) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_unavailable",
+                        "portable catalogue import is available for bounded folder profiles only",
+                    )));
+                }
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_unavailable",
+                        "portable catalogue import requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            let capacity = match read_store_registry(&handler.store_registry_path) {
+                Ok(definitions) => definitions
+                    .into_iter()
+                    .find(|definition| definition.store_id == store_id)
+                    .map(|definition| definition.policy.capacity),
+                Err(_) => None,
+            };
+            let Some(capacity) = capacity else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_catalogue_unavailable",
+                    "profile capacity policy is unavailable",
+                )));
+            };
+            let mut backend =
+                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_catalogue_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let imported_objects = match crate::runtime::import_profile_catalogue(
+                &store_id,
+                &request.catalogue,
+                &mut backend,
+            ) {
+                Ok(imported_objects) => imported_objects,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_import_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileCatalogueImport(
+                crate::api::ProfileCatalogueImportResponse {
+                    schema_version: crate::api::PROFILE_CATALOGUE_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    imported_objects,
+                    source_retained: true,
+                },
+            ))
+        }
         DaemonApiRequest::ProfileS3Delete(request) => {
             let store_id = match handler.authorize_endpoint_write(actor, &request.store_id) {
                 Ok(store_id) => store_id,

@@ -39,10 +39,15 @@ operator-authorized catalogue registration.
 Promotion uses the resumable migration checkpoint state machine. Source
 placements remain retained through destination verification and are retired only
 after explicit confirmation. A failed or interrupted checkpoint preserves source
-retention. Actual copy workers, portable export/import, package installation,
-HTTP gateway wiring and appliance acceptance remain open campaign gates; the
-provider-neutral S3 adapter boundary is approved, with Garage retained as the
-local compatibility provider behind the daemon authority.
+retention. Actual copy workers, archive packaging, package installation, and
+appliance acceptance remain open campaign gates. The daemon now owns a
+versioned Unix-socket portable catalogue export/import handoff for bounded
+folder profiles: export carries validated IDs, versions, hashes, provenance,
+protection, and logical placements without paths or credentials; import
+verifies every destination payload before committing catalogue rows and always
+reports source retention. The provider-neutral S3 adapter boundary is
+approved, with Garage retained as the local compatibility provider behind the
+daemon authority.
 
 The matrix must be revised when daemon-owned provisioning, product adapters, or
 real-world acceptance changes a row; it must not be used to infer hardware

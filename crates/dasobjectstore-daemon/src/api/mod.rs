@@ -21,6 +21,7 @@ mod object_store;
 mod profile_binding;
 mod profile_browser;
 mod profile_capabilities;
+mod profile_catalogue;
 mod profile_diagnostics;
 mod profile_inspection;
 mod profile_readiness;
@@ -152,6 +153,10 @@ pub use profile_capabilities::{
     discover_profile_capabilities, ObjectStoreCapabilityDiscoveryRequest,
     ObjectStoreCapabilityDiscoveryResponse, ObjectStoreCapabilityValidationError,
 };
+pub use profile_catalogue::{
+    ProfileCatalogueExportRequest, ProfileCatalogueExportResponse, ProfileCatalogueImportRequest,
+    ProfileCatalogueImportResponse, PROFILE_CATALOGUE_SCHEMA_VERSION,
+};
 pub use profile_diagnostics::{
     ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileDiagnosticsState,
     PROFILE_DIAGNOSTICS_SCHEMA_VERSION,
@@ -272,6 +277,8 @@ pub enum DaemonApiRequest {
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
     ProfileBrowser(ProfileBrowserRequest),
+    ProfileCatalogueExport(ProfileCatalogueExportRequest),
+    ProfileCatalogueImport(ProfileCatalogueImportRequest),
     ProfileS3List(ProfileS3ListRequest),
     ProfileS3Delete(ProfileS3DeleteRequest),
     ProfileS3MultipartComplete(ProfileS3MultipartCompletionRequest),
@@ -335,6 +342,8 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
             Self::ProfileBrowser(_) => "profile_browser",
+            Self::ProfileCatalogueExport(_) => "profile_catalogue_export",
+            Self::ProfileCatalogueImport(_) => "profile_catalogue_import",
             Self::ProfileS3List(_) => "profile_s3_list",
             Self::ProfileS3Delete(_) => "profile_s3_delete",
             Self::ProfileS3MultipartComplete(_) => "profile_s3_multipart_complete",
@@ -424,6 +433,8 @@ impl DaemonApiRequest {
                 request.validate().map_err(profile_binding_validation_error)
             }
             Self::ProfileBrowser(request) => request.validate(),
+            Self::ProfileCatalogueExport(request) => request.validate(),
+            Self::ProfileCatalogueImport(request) => request.validate(),
             Self::ProfileS3List(request) => request.validate(),
             Self::ProfileS3Delete(request) => request.validate(),
             Self::ProfileS3MultipartComplete(request) => request.validate(),
@@ -528,6 +539,8 @@ pub enum DaemonApiResponse {
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
     ProfileBrowser(ProfileBrowserResponse),
+    ProfileCatalogueExport(ProfileCatalogueExportResponse),
+    ProfileCatalogueImport(ProfileCatalogueImportResponse),
     ProfileS3List(ProfileS3ListResponse),
     ProfileS3Delete(ProfileS3DeleteResponse),
     ProfileS3MultipartComplete(ProfileS3MultipartCompletionResponse),

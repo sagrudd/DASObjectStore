@@ -1228,6 +1228,12 @@ integration remain open.
 Folder-to-folder and folder-to-drive migrations now commit the verified
 destination record through the shared authority before advancing migration
 state; destination reopen coverage proves catalogue-backed logical usage.
+The daemon now also exposes a versioned Unix-socket portable catalogue
+export/import handoff for bounded folder profiles. Export carries validated
+IDs, versions, hashes, provenance, protection, and logical placements without
+paths or credentials; import verifies every destination payload before
+committing catalogue rows and always reports source retention. Physical archive
+packaging and appliance adapters remain deployment-gated.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 

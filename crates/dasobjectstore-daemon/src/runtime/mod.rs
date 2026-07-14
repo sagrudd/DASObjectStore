@@ -22,6 +22,7 @@ mod migration_worker;
 mod object_browser;
 mod object_download;
 mod performance_policy;
+mod profile_catalogue;
 mod profile_registry;
 mod profile_s3;
 mod profile_s3_multipart;
@@ -136,6 +137,7 @@ pub use performance_policy::{
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
 };
+pub use profile_catalogue::{export_profile_catalogue, import_profile_catalogue};
 pub use profile_registry::{
     default_profile_binding_registry_path, profile_binding_registry_path, read_profile_binding,
     read_profile_binding_record, upsert_profile_binding, validate_profile_binding_claim,
