@@ -1246,6 +1246,9 @@ SQLite adapter. Cross-file rollback and physical appliance reconciliation
 remain deployment-gated. A private atomic handoff journal now records prepared,
 profile-committed, and fully-committed states and can be read by restart
 reconciliation without exposing paths through the socket or Web protocol.
+Restart reconciliation now replays prepared/profile-committed entries through
+the verified idempotent import path and treats fully committed entries as
+no-ops.
 The authenticated standalone Web surface now exposes matching GET export and
 POST import routes, preserving the daemon as the only catalogue/path authority.
 

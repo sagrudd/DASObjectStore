@@ -394,6 +394,10 @@ completion.
     journal entries are atomic, path-free on the transport, and readable for
     restart reconciliation. Automatic cross-file rollback is intentionally not
     claimed until both authorities can share a transaction owner.
+  - [x] Add restart reconciliation for prepared/profile-committed journal
+    entries. Replay re-verifies destination payloads and reuses the idempotent
+    profile plus SQLite commit; fully committed entries are no-op reads, while
+    missing or mismatched journals fail closed.
   - [x] Add the daemon-owned profile-binding registry: portable manifests are
     validated against canonical folder/drive roots, persisted atomically, and
     per-store capacity probes use the binding when present; profile-binding

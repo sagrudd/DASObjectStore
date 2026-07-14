@@ -68,6 +68,42 @@ pub fn read_profile_catalogue_handoff(
     }))
 }
 
+/// Replay an interrupted profile-catalogue handoff after daemon restart.
+/// Fully committed journals are safe no-ops; earlier states re-run payload
+/// verification and the idempotent profile/SQLite commit path.
+pub fn reconcile_profile_catalogue_handoff(
+    store_id: &StoreId,
+    transaction_id: &str,
+    backend: &mut dyn ProfileCatalogueBackend,
+    live_sqlite_path: impl AsRef<Path>,
+    handoff_root: impl AsRef<Path>,
+    committed_at_utc: &str,
+) -> Result<u64, BackendError> {
+    let Some(handoff) = read_profile_catalogue_handoff(&handoff_root, transaction_id)? else {
+        return Err(BackendError::NotFound(format!(
+            "profile catalogue handoff {transaction_id} is unavailable"
+        )));
+    };
+    if handoff.store_id != *store_id {
+        return Err(BackendError::InvalidRequest(
+            "profile catalogue handoff store identity mismatch".to_string(),
+        ));
+    }
+    if handoff.state == ProfileCatalogueHandoffState::Committed {
+        return Ok(0);
+    }
+    import_profile_catalogue_with_metadata(
+        store_id,
+        &handoff.catalogue,
+        backend,
+        live_sqlite_path,
+        handoff_root,
+        transaction_id,
+        &handoff.profile_namespace,
+        committed_at_utc,
+    )
+}
+
 /// Convert a daemon-authoritative backend catalogue into profile-neutral
 /// metadata. The payload itself is never copied by this function.
 pub fn export_profile_catalogue(
@@ -514,6 +550,74 @@ mod tests {
                 )
                 .expect("count"),
             1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reconciles_a_prepared_handoff_after_restart() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-catalogue-reconcile-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let db = root.join("live.sqlite");
+        let connection = Connection::open(&db).expect("db");
+        connection
+            .execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)
+            .expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('codex', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("store");
+        drop(connection);
+
+        let store_id = StoreId::new("codex").expect("store");
+        let record = BackendObjectRecord {
+            key: BackendObjectKey {
+                object_id: "reads/recover.txt".to_string(),
+                version: 1,
+            },
+            size_bytes: 4,
+            checksum: "sha256:abcd".to_string(),
+            location: ".dasobjectstore/objects/reads/recover.txt".to_string(),
+        };
+        let mut backend = FakeBackend { record };
+        let catalogue = export_profile_catalogue(&store_id, &backend).expect("export");
+        let handoff_root = root.join("handoffs");
+        HandoffJournal::prepare(
+            &handoff_root,
+            "tx-recover",
+            "folder:codex",
+            &store_id,
+            &catalogue,
+        )
+        .expect("prepare journal");
+        let imported = reconcile_profile_catalogue_handoff(
+            &store_id,
+            "tx-recover",
+            &mut backend,
+            &db,
+            &handoff_root,
+            "2026-07-14T00:00:00Z",
+        )
+        .expect("reconcile");
+        assert_eq!(imported, 1);
+        assert_eq!(
+            read_profile_catalogue_handoff(&handoff_root, "tx-recover")
+                .expect("read")
+                .expect("entry")
+                .state,
+            ProfileCatalogueHandoffState::Committed
         );
         let _ = std::fs::remove_dir_all(root);
     }

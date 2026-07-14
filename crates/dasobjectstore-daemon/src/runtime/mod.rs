@@ -139,7 +139,8 @@ pub use performance_policy::{
 };
 pub use profile_catalogue::{
     export_profile_catalogue, import_profile_catalogue, import_profile_catalogue_with_metadata,
-    read_profile_catalogue_handoff, ProfileCatalogueHandoffRecord, ProfileCatalogueHandoffState,
+    read_profile_catalogue_handoff, reconcile_profile_catalogue_handoff,
+    ProfileCatalogueHandoffRecord, ProfileCatalogueHandoffState,
 };
 pub use profile_registry::{
     default_profile_binding_registry_path, profile_binding_registry_path, read_profile_binding,
