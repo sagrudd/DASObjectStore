@@ -262,8 +262,8 @@ completion.
   during blocked or saturated ingest. Daemon lanes, bounded GUI bridges, strict
   cancellation, configured runtime resource-policy injection, and the daemon/
   CLI file-ingest emergency control, authenticated Web action bridging, and a
-  compact one-shot TUI action snapshot are delivered; async HTTP bridging and
-  appliance soak acceptance remain.
+  compact one-shot TUI action snapshot are delivered; appliance soak
+  acceptance remains.
   - [x] Load the versioned ingest resource policy from daemon configuration,
     inject its CPU/memory/socket/I/O budget into packaged local ingest, and
     retain a backward-compatible safe default when the field is absent. The
@@ -1849,14 +1849,14 @@ list until every temporary size-budget exception has been removed.
   lanes return the typed `server_busy` response. Async HTTP bridging,
   deadlines, circuit breaking, and appliance soak acceptance remain separate
   follow-up items.
-- [~] Replace synchronous daemon Unix-socket calls in Axum handlers with an
+- [x] Replace synchronous daemon Unix-socket calls in Axum handlers with an
   async bridge and bounded blocking pool. The identified browser, activity,
   remote-auth, administrator, and archive paths now have deadlines, bounded
   permits, typed overload/degraded responses, and a circuit breaker with a
   single half-open probe. GUI bridge transports now opt into bounded idle
   deadlines (reset by progress frames), so stalled socket workers return and
   release bridge capacity; default CLI/long-ingest transports remain
-  unbounded. Async HTTP bridging and appliance soak acceptance remain open.
+  unbounded. Appliance soak acceptance remains deployment-gated.
 - [x] Route ObjectStore file and folder download authorization/location lookups
   through the shared bounded daemon bridge; preserve typed `429`/`503`
   overload/deadline responses and release control capacity before payload

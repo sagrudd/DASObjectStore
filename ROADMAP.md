@@ -1243,7 +1243,8 @@ request now has a deterministic typed-429 saturation regression as well.
 The daemon API also exposes a typed ingest admission decision combining
 source-read pressure/error backpressure with adaptive worker scheduling. It
 reports run/throttle/block and the limiting schedule reason; live host resource
-telemetry and HTTP bridging remain open.
+telemetry remains open; the identified HTTP handlers now use bounded async
+bridges with deadline and circuit-breaker protection.
 
 A transactional resource gate now prevents concurrent daemon jobs from
 overbooking CPU, memory, socket-worker, or I/O-worker budgets and releases
