@@ -31,11 +31,58 @@ pub trait RemoteUploadCompletionCommit {
     ) -> Result<(), RemoteUploadCompletionCommitError>;
 }
 
+/// Optional object-level metadata for a completion handoff. Remote transfer
+/// jobs may represent a provider upload containing more than one object, so
+/// legacy completion callers can omit this metadata while profile-aware
+/// callers provide the exact logical key and checksum to register.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteUploadCompletionMetadata {
+    pub upload_id: String,
+    pub object_key: String,
+    pub expected_size_bytes: u64,
+    pub expected_checksum: String,
+}
+
+impl RemoteUploadCompletionMetadata {
+    fn validate(&self) -> Result<(), RemoteUploadCompletionCommitError> {
+        if self.upload_id.trim().is_empty() || self.upload_id.len() > 128 {
+            return Err(RemoteUploadCompletionCommitError::new(
+                "remote upload completion upload id must be bounded and non-blank",
+            ));
+        }
+        if self.object_key.is_empty()
+            || self.object_key.starts_with('/')
+            || self.object_key.contains('\\')
+            || self
+                .object_key
+                .split('/')
+                .any(|component| component.is_empty() || component == "." || component == "..")
+            || self.object_key.bytes().any(|byte| byte.is_ascii_control())
+        {
+            return Err(RemoteUploadCompletionCommitError::new(
+                "remote upload completion object key must be a relative logical path",
+            ));
+        }
+        if !self.expected_checksum.starts_with("sha256:")
+            || self.expected_checksum.len() != "sha256:".len() + 64
+            || !self.expected_checksum["sha256:".len()..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(RemoteUploadCompletionCommitError::new(
+                "remote upload completion checksum must be a sha256 digest",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteUploadCompletionRecord {
     pub job_id: String,
     pub object_store: String,
     pub source_bytes: u64,
+    pub metadata: Option<RemoteUploadCompletionMetadata>,
 }
 
 impl RemoteUploadCompletionRecord {
@@ -61,7 +108,23 @@ impl RemoteUploadCompletionRecord {
             job_id: job.job_id.clone(),
             object_store: job.object_store.clone(),
             source_bytes: job.source_bytes,
+            metadata: None,
         })
+    }
+
+    fn from_job_with_metadata(
+        job: &RemoteUploadS3TransferJob,
+        metadata: &RemoteUploadCompletionMetadata,
+    ) -> Result<Self, RemoteUploadCompletionCommitError> {
+        let mut record = Self::from_job(job)?;
+        metadata.validate()?;
+        if metadata.expected_size_bytes != job.source_bytes {
+            return Err(RemoteUploadCompletionCommitError::new(
+                "remote upload completion size does not match transfer admission",
+            ));
+        }
+        record.metadata = Some(metadata.clone());
+        Ok(record)
     }
 }
 
@@ -135,7 +198,23 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
     where
         E: fmt::Display,
     {
-        self.run_with_progress_inner(request, None, Some(completion), transfer)
+        self.run_with_progress_inner(request, None, Some((completion, None)), transfer)
+    }
+
+    /// Run a transfer with object-level completion metadata. The metadata is
+    /// validated and handed to the completion authority only after provider
+    /// transfer success; the existing reservation/replay ordering is retained.
+    pub fn run_with_completion_metadata<E>(
+        &self,
+        request: RemoteUploadS3TransferWorkerRequest,
+        completion: &dyn RemoteUploadCompletionCommit,
+        metadata: RemoteUploadCompletionMetadata,
+        transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
+    ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
+    where
+        E: fmt::Display,
+    {
+        self.run_with_progress_inner(request, None, Some((completion, Some(metadata))), transfer)
     }
 
     pub fn run_with_cleanup_on_failure<E>(
@@ -174,7 +253,10 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
             RemoteUploadCancellationCleanupPlan,
             &dyn RemoteUploadCancellationCleanupWorker,
         )>,
-        completion: Option<&dyn RemoteUploadCompletionCommit>,
+        completion: Option<(
+            &dyn RemoteUploadCompletionCommit,
+            Option<RemoteUploadCompletionMetadata>,
+        )>,
         transfer: impl FnOnce(&mut RemoteUploadS3TransferProgressReporter<'_>) -> Result<(), E>,
     ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError>
     where
@@ -315,8 +397,15 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
         let transfer_result = transfer(&mut progress_reporter).map_err(|error| error.to_string());
         let transfer_result = transfer_result.and_then(|()| {
             completion
-                .map(|completion| {
-                    let record = RemoteUploadCompletionRecord::from_job(&job)
+                .map(|(completion, metadata)| {
+                    let record = metadata
+                        .as_ref()
+                        .map_or_else(
+                            || RemoteUploadCompletionRecord::from_job(&job),
+                            |metadata| {
+                                RemoteUploadCompletionRecord::from_job_with_metadata(&job, metadata)
+                            },
+                        )
                         .map_err(|error| error.to_string())?;
                     completion
                         .commit(&record)

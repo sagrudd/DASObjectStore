@@ -269,9 +269,10 @@ mod tests {
         RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupRuntime,
         RemoteUploadCancellationCleanupRuntimeConfig, RemoteUploadCancellationCleanupScope,
         RemoteUploadCancellationCleanupWorker, RemoteUploadCompletionCommit,
-        RemoteUploadCompletionCommitError, RemoteUploadCompletionRecord,
-        RemoteUploadMultipartAbortConfig, RemoteUploadProgressTelemetry, RemoteUploadQueueDepths,
-        RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadCompletionCommitError, RemoteUploadCompletionMetadata,
+        RemoteUploadCompletionRecord, RemoteUploadMultipartAbortConfig,
+        RemoteUploadProgressTelemetry, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
+        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
         RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
         RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
         RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
@@ -871,6 +872,51 @@ mod tests {
             ]
         );
         assert_eq!(gate.snapshot().active_s3_transfers, 0);
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn completion_metadata_carries_bounded_object_identity_to_authority() {
+        let root = temp_root("remote-upload-completion-metadata");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry);
+        let completion = RecordingCompletionCommit::default();
+        let metadata = RemoteUploadCompletionMetadata {
+            upload_id: "upload-1".to_string(),
+            object_key: "reads/sample.fastq".to_string(),
+            expected_size_bytes: 42,
+            expected_checksum: format!("sha256:{}", "a".repeat(64)),
+        };
+
+        worker
+            .run_with_completion_metadata(
+                worker_request("remote-upload-job-completion-metadata"),
+                &completion,
+                metadata.clone(),
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("completion metadata handoff succeeds");
+
+        assert_eq!(completion.records.borrow().len(), 1);
+        assert_eq!(
+            completion.records.borrow()[0].metadata.as_ref(),
+            Some(&metadata)
+        );
+
+        let mut invalid = metadata;
+        invalid.expected_size_bytes = 41;
+        let failed = worker
+            .run_with_completion_metadata(
+                worker_request("remote-upload-job-completion-metadata-invalid"),
+                &completion,
+                invalid,
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("invalid completion metadata is recorded as failed");
+        assert!(matches!(failed.final_event, DaemonJobEvent::Failed(_)));
+        assert_eq!(completion.records.borrow().len(), 1);
 
         cleanup(&root);
     }

@@ -1139,6 +1139,13 @@ Remote-upload setup failures now release already-admitted capacity reservations
 before returning, with an invalid-job regression; public completion metadata and
 authentication remain contract-gated.
 
+The remote-upload worker now exposes an optional bounded completion-metadata
+handoff for profile-aware callers. It validates an upload ID, relative logical
+object key, exact admitted size, and SHA-256 checksum only after provider
+transfer success, then passes the metadata to the daemon completion authority;
+legacy multi-object jobs remain compatible. Provider verification and live
+catalogue wiring remain separate acceptance gates.
+
 Guarded direct-to-HDD imports now use the shared inline-hash copy primitive;
 optional source metadata is checked after the single read, preserving the
 direct-ingress policy without a strict pre-copy hash pass.

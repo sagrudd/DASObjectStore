@@ -62,6 +62,12 @@ a capability and releases it when catalogue commit fails, so retries remain safe
 A failed
 catalogue commit never reports success.
 
+Profile-aware remote-upload callers may additionally provide a bounded
+completion metadata record containing an upload ID, relative logical object
+key, exact admitted size, and SHA-256 checksum. The daemon validates that
+record after provider transfer and before invoking the completion authority;
+legacy multi-object jobs may omit object-level metadata.
+
 Renewal tokens are not accepted as bearer credentials for this operation.
 
 ## Development self-signing mode
