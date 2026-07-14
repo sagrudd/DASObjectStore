@@ -2388,20 +2388,20 @@ list until every temporary size-budget exception has been removed.
     while the caller consumes the stream, rejecting payload drift instead of
     returning an unchecked provider reader; HTTP/provider-backed route wiring
     remains separate.
-  - [~] **Blocker (transport contract):** the daemon Unix-socket protocol
-    currently returns one JSON response and has no bounded binary-chunk or
-    file-descriptor handoff for provider bytes. Do not return backend paths or
-    base64 an unbounded object in JSON. A versioned, path-free open request,
+  - [~] **Remaining provider/appliance execution:** the daemon Unix-socket
+    protocol now carries bounded provider bytes without returning backend paths
+    or base64-embedding an unbounded object in JSON. A versioned, path-free open request,
     range/conditional contract, metadata-only bounded chunk header, and
     bounded magic/length-prefixed frame codec and cumulative verifier now
     define the binary framing and final size/checksum gate; folder/drive
     backends now expose the provider-neutral bounded range-read seam with a
     safe full-reader fallback for future providers; the Unix socket now
     recognizes and validates the standalone path-free open envelope and
-    dispatches bounded frames through an explicit handler callback. The default
-    daemon handler remains fail-closed until a provider reader is wired, and
-    the HTTP route remains separate; the verifier exposes a cooperative
-    cancellation token that aborts before the next frame.
+    dispatches bounded frames through an explicit handler callback. The daemon
+    now wires catalogue-authoritative bounded folder-profile reads, including
+    range and checksum conditions; appliance/provider-native readers and the
+    HTTP route remain separate. The verifier exposes a cooperative cancellation
+    token that aborts before the next frame.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

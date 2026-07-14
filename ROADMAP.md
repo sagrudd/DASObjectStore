@@ -176,19 +176,17 @@ versioned path-free list transport projection; authenticated HTTP gateway and
 multipart dispatch remain deliberately separate. An authenticated profile-S3
 HEAD transport now exposes bounded logical key/version/size/checksum metadata
 through the same daemon bridge without revealing backend paths.
-Provider-backed Web GET/HTTP gateway payload routing is intentionally blocked
-until the daemon Unix-socket protocol gains a bounded binary-chunk (or
-descriptor-passing) handoff with opaque stream identity, cancellation,
-range/conditional semantics, and final size/checksum verification. Returning
-backend paths or embedding unbounded object bytes in JSON would violate the
-authority and data-plane boundaries. The versioned provider-stream contract
-now defines path-free open requests, bounded metadata-only chunk headers, and
-range/conditional checks, plus bounded magic/length-prefixed framing, a
-cumulative contiguous-offset/size/checksum verifier, and a cooperative
-cancellation token. The Unix socket now recognizes and validates the standalone
-path-free open envelope and dispatches bounded frames through an explicit
-handler callback; the default daemon handler remains fail-closed until a
-provider reader is wired, and the HTTP route remains separate. Provider-backed
+Provider-backed Web GET/HTTP gateway payload routing remains separate from the
+daemon Unix-socket data plane. Returning backend paths or embedding unbounded
+object bytes in JSON would violate the authority and data-plane boundaries. The
+versioned provider-stream contract now defines path-free open requests, bounded
+metadata-only chunk headers, and range/conditional checks, plus bounded
+magic/length-prefixed framing, a cumulative contiguous-offset/size/checksum
+verifier, and a cooperative cancellation token. The Unix socket now recognizes
+and validates the standalone path-free open envelope, dispatches bounded frames
+through an explicit handler callback, and wires catalogue-authoritative bounded
+folder-profile reads, including range and checksum conditions. Appliance or
+provider-native readers and the HTTP route remain separate; provider-native
 execution is still intentionally unclaimed. The profile backend contract now exposes a bounded provider-neutral `read_range`
 operation: folder and guarded-drive backends use native seek-bounded reads,
 while future providers retain a safe full-reader fallback until they add

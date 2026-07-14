@@ -1,14 +1,16 @@
 use crate::api::{
     write_provider_stream_frame, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
     ProviderStreamChunkHeader, ProviderStreamFrameError, ProviderStreamOpenRequest,
+    ProviderStreamVerifier,
 };
 use crate::auth::DaemonLocalActor;
 use crate::runtime::DaemonIngestFilesRuntimeError;
 use crate::server::{DaemonRequestHandler, DaemonRequestHandlerError, DaemonServiceOrchestrator};
 use crate::DaemonClock;
+use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::fs;
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -153,9 +155,8 @@ pub trait DaemonApiHandler {
     }
 
     /// Handle the path-free provider-stream open envelope. Successful
-    /// implementations emit bounded binary frames through `emit_frame`; the
-    /// default keeps the transport fail-closed until a provider reader is
-    /// wired into the daemon.
+    /// implementations emit bounded binary frames through `emit_frame`; a
+    /// handler without a provider reader remains fail-closed by default.
     fn handle_provider_stream_open_for_actor(
         &self,
         _request: ProviderStreamOpenRequest,
@@ -202,6 +203,153 @@ where
             })
             .map_err(UnixSocketDaemonServerError::Handler)?;
         emit_response(response)
+    }
+
+    fn handle_provider_stream_open_for_actor(
+        &self,
+        request: ProviderStreamOpenRequest,
+        actor: Option<&DaemonLocalActor>,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+        emit_frame: &mut dyn FnMut(
+            &ProviderStreamChunkHeader,
+            &[u8],
+        ) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        let source = match self.open_provider_stream(&request, actor) {
+            Ok(source) => source,
+            Err(response) => return emit_response(response),
+        };
+        let mut verifier =
+            ProviderStreamVerifier::new(request.request_id.clone()).map_err(|error| {
+                UnixSocketDaemonServerError::Handler(DaemonRequestHandlerError::ServiceRuntime(
+                    crate::runtime::DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: error.to_string(),
+                    },
+                ))
+            })?;
+        let cancellation = verifier.cancellation_token();
+        let mut reader = source.reader;
+        let mut hasher = Sha256::new();
+        let mut offset = 0_u64;
+        let mut buffer = vec![0_u8; request.chunk_size_bytes as usize];
+        let mut emitted_frame = false;
+        loop {
+            if cancellation.is_cancelled() {
+                return Ok(());
+            }
+            let read = match reader.read(&mut buffer) {
+                Ok(read) => read,
+                Err(error) => {
+                    if !emitted_frame {
+                        return emit_response(DaemonApiResponse::Error(
+                            DaemonApiErrorResponse::new(
+                                "provider_stream_read_failed",
+                                error.to_string(),
+                            ),
+                        ));
+                    }
+                    return Err(UnixSocketDaemonServerError::Io(error));
+                }
+            };
+            if read == 0 {
+                let checksum = format!("sha256:{:x}", hasher.clone().finalize());
+                let header = ProviderStreamChunkHeader {
+                    schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                    request_id: request.request_id.clone(),
+                    offset,
+                    payload_len: 0,
+                    final_chunk: true,
+                    total_size: Some(offset),
+                    sha256: Some(checksum.clone()),
+                };
+                if let Err(error) = verifier.finish(&header, &[]) {
+                    if !emitted_frame {
+                        return emit_response(DaemonApiResponse::Error(
+                            DaemonApiErrorResponse::new(
+                                "provider_stream_verification_failed",
+                                error.to_string(),
+                            ),
+                        ));
+                    }
+                    return Err(UnixSocketDaemonServerError::Handler(
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            crate::runtime::DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: error.to_string(),
+                            },
+                        ),
+                    ));
+                }
+                if offset != source.expected_size_bytes {
+                    return Err(UnixSocketDaemonServerError::Handler(
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            crate::runtime::DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: format!(
+                                    "provider stream size {} does not match expected {}",
+                                    offset, source.expected_size_bytes
+                                ),
+                            },
+                        ),
+                    ));
+                }
+                if source
+                    .expected_checksum
+                    .as_deref()
+                    .is_some_and(|expected| !expected.eq_ignore_ascii_case(&checksum))
+                {
+                    return Err(UnixSocketDaemonServerError::Handler(
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            crate::runtime::DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: "provider stream checksum differs from catalogue"
+                                    .to_string(),
+                            },
+                        ),
+                    ));
+                }
+                if let Err(error) = emit_frame(&header, &[]) {
+                    cancellation.cancel();
+                    return Err(error);
+                }
+                return Ok(());
+            }
+            let payload = &buffer[..read];
+            hasher.update(payload);
+            let header = ProviderStreamChunkHeader {
+                schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: request.request_id.clone(),
+                offset,
+                payload_len: read as u32,
+                final_chunk: false,
+                total_size: None,
+                sha256: None,
+            };
+            if let Err(error) = verifier.push(&header, payload) {
+                if !emitted_frame {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_verification_failed",
+                        error.to_string(),
+                    )));
+                }
+                return Err(UnixSocketDaemonServerError::Handler(
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        crate::runtime::DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: error.to_string(),
+                        },
+                    ),
+                ));
+            }
+            if let Err(error) = emit_frame(&header, payload) {
+                cancellation.cancel();
+                return Err(error);
+            }
+            emitted_frame = true;
+            offset = offset.checked_add(read as u64).ok_or_else(|| {
+                UnixSocketDaemonServerError::Handler(DaemonRequestHandlerError::ServiceRuntime(
+                    crate::runtime::DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: "provider stream offset overflow".to_string(),
+                    },
+                ))
+            })?;
+        }
     }
 }
 

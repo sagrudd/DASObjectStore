@@ -86,9 +86,11 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+mod configuration;
 mod dispatch;
 mod job_projection;
 mod orchestrator;
+mod provider_stream;
 mod request_helpers;
 mod storage_authorization;
 mod storage_helpers;
@@ -129,6 +131,7 @@ pub struct DaemonRequestHandler<S, C> {
     application_key_registry_path: PathBuf,
     application_audit_log_path: PathBuf,
 }
+
 impl<S, C> DaemonRequestHandler<S, C>
 where
     S: DaemonServiceOrchestrator,
@@ -211,66 +214,6 @@ where
         self.subobject_registry_path = subobject_registry_path.into();
         self
     }
-    pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
-        self.live_sqlite_path = live_sqlite_path.into();
-        self
-    }
-    pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
-        self.hdd_root_path = hdd_root_path.into();
-        self
-    }
-    pub fn with_profile_binding_registry_path(
-        mut self,
-        profile_binding_registry_path: impl Into<PathBuf>,
-    ) -> Self {
-        self.profile_binding_registry_path = profile_binding_registry_path.into();
-        self
-    }
-    pub fn with_application_identity_registry_path(
-        mut self,
-        application_identity_registry_path: impl Into<PathBuf>,
-    ) -> Self {
-        self.application_identity_registry_path = application_identity_registry_path.into();
-        self
-    }
-    pub fn with_application_key_registry_path(
-        mut self,
-        application_key_registry_path: impl Into<PathBuf>,
-    ) -> Self {
-        self.application_key_registry_path = application_key_registry_path.into();
-        self
-    }
-    pub fn with_application_audit_log_path(
-        mut self,
-        application_audit_log_path: impl Into<PathBuf>,
-    ) -> Self {
-        self.application_audit_log_path = application_audit_log_path.into();
-        self
-    }
-    pub fn with_appliance_telemetry_state_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.appliance_telemetry_state_path = path.into();
-        self
-    }
-    pub fn with_remote_easyconnect_session_store_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.remote_easyconnect_session_store_path = path.into();
-        self
-    }
-    pub fn with_remote_easyconnect_pairing_store_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.remote_easyconnect_pairing_store_path = path.into();
-        self
-    }
-    pub fn with_credential_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.credential_registry_path = path.into();
-        self
-    }
-    pub fn with_remote_upload_admission_gate(
-        mut self,
-        remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
-    ) -> Self {
-        self.remote_upload_admission_gate = remote_upload_admission_gate;
-        self
-    }
-
     pub fn handle(
         &self,
         request: DaemonApiRequest,
@@ -1049,14 +992,15 @@ mod tests {
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
         ProfileInspectionRequest, ProfileInspectionRootState, ProfileReadinessRequest,
-        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ProviderStreamOpenRequest, RemoteEasyconnectApprovePairingRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
+        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -1069,7 +1013,7 @@ mod tests {
         read_profile_binding, remote_easyconnect_pairing_store_path,
         remote_easyconnect_session_store_path, upsert_profile_binding, BackendProfileBinding,
         DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
-        FileBackedRemoteEasyconnectPairedSessionStore, LocalAdminRuntimeError,
+        FileBackedRemoteEasyconnectPairedSessionStore, FolderBackend, LocalAdminRuntimeError,
         LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
         RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
         RemoteUploadAdmissionGate,
@@ -1081,6 +1025,9 @@ mod tests {
         AccessTokenExchangeRequest, ApplicationCredentialKind, ApplicationEnvironment,
         ApplicationIdentity, ApplicationKeyAlgorithm, ApplicationKeyDescriptor,
         ApplicationOperation, ApplicationScope, APPLICATION_AUTH_SCHEMA_VERSION,
+    };
+    use dasobjectstore_core::backend::{
+        BackendObjectKey, ObjectCatalogueAuthority, ObjectStoreBackend,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
@@ -1104,6 +1051,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::cell::RefCell;
     use std::fs;
+    use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -1155,6 +1103,107 @@ mod tests {
         response.validate().expect("capability response validates");
         assert_eq!(response.profiles.len(), 3);
         assert_eq!(response.profiles[0].profile, DeploymentProfile::Folder);
+    }
+
+    #[test]
+    fn opens_catalogue_authoritative_provider_stream_for_folder_profile() {
+        let root = temp_root("provider-stream-open");
+        cleanup(&root);
+        let backend_root = root.join("backend");
+        fs::create_dir_all(&backend_root).expect("backend root");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry_with_read_policy(&root, "stream-store", None, None, true);
+        let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
+        store_definitions[0].policy.capacity =
+            dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        fs::write(
+            &store_registry,
+            serde_json::to_string_pretty(&store_definitions).expect("bounded registry JSON"),
+        )
+        .expect("bounded store registry written");
+        let profile_registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-14T09:00:00Z"),
+        )
+        .with_registry_paths(&store_registry, &subobject_registry)
+        .with_profile_binding_registry_path(&profile_registry);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let binding_request =
+            profile_binding_request_for_auth_test("stream-store", backend_root.clone());
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile binding");
+
+        let mut backend = FolderBackend::open(
+            backend_root,
+            binding_request.manifest,
+            binding_request.capacity,
+            0,
+        )
+        .expect("folder backend");
+        let key = BackendObjectKey {
+            object_id: "objects/hello.txt".to_string(),
+            version: 1,
+        };
+        backend.reserve("stream-upload", 5).expect("reserve");
+        let staged = backend
+            .stage("stream-upload", &key, &mut &b"hello"[..])
+            .expect("stage");
+        let finalized = backend.finalize(staged).expect("finalize");
+        backend
+            .commit_batch(std::slice::from_ref(&finalized))
+            .expect("catalogue commit");
+
+        let request = ProviderStreamOpenRequest {
+            schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "open-test".to_string(),
+            store_id: StoreId::new("stream-store").expect("store id"),
+            object: key,
+            range: None,
+            condition: Default::default(),
+            chunk_size_bytes: 1024,
+        };
+        let mut source = handler
+            .open_provider_stream(&request, Some(&actor))
+            .expect("provider stream source");
+        assert_eq!(source.expected_size_bytes, 5);
+        assert_eq!(
+            source.expected_checksum.as_deref(),
+            Some("sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+        );
+        let mut bytes = Vec::new();
+        source
+            .reader
+            .read_to_end(&mut bytes)
+            .expect("read provider source");
+        assert_eq!(bytes, b"hello");
+
+        let mut ranged_request = request.clone();
+        ranged_request.request_id = "range-test".to_string();
+        ranged_request.range = Some(crate::api::ProviderStreamRange {
+            start: 1,
+            end_exclusive: Some(4),
+        });
+        ranged_request.condition.if_match_sha256 = Some(
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
+        );
+        let mut ranged_source = handler
+            .open_provider_stream(&ranged_request, Some(&actor))
+            .expect("ranged provider stream source");
+        assert_eq!(ranged_source.expected_size_bytes, 3);
+        assert!(ranged_source.expected_checksum.is_none());
+        let mut ranged_bytes = Vec::new();
+        ranged_source
+            .reader
+            .read_to_end(&mut ranged_bytes)
+            .expect("read ranged provider source");
+        assert_eq!(ranged_bytes, b"ell");
+        cleanup(&root);
     }
 
     #[test]
