@@ -831,6 +831,12 @@ hardware acceptance.
 - [~] Route S3 PUT and multipart completion through quota reservation, daemon
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
   catalogue state rather than provider listings.
+  **Blocker (transport boundary):** the current Unix provider-stream protocol is
+  daemon-to-client and read-only. Safe HTTP PUT/multipart routing needs a
+  bounded client-to-daemon body stream, daemon-owned staging identity, and
+  cancellation/backpressure semantics before any catalogue mutation. Do not
+  implement this by writing request bodies directly from the Web process into a
+  managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative
     list/HEAD/GET semantics over folder and drive backends; it never consults
     provider listings or exposes private backend paths. Bounded streaming now
