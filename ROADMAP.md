@@ -227,9 +227,9 @@ control/Web capacity is not fully
 reserved under ingest; telemetry missing markers now include actionable
 warm-up, counter-reset, permission, and device-mapping details, while stable
 device mapping and appliance acceptance remain incomplete; and UI/design work
-remains. The folder backend has been split below the production size budget;
-one unexcepted `server/request_handler/storage.rs` violation remains before
-the module-size guard can pass with no exceptions. Hardware-only acceptance is
+remains. The folder backend and storage request handler have been split below
+the production size budget; the module-size guard now passes with no
+exceptions. Hardware-only acceptance is
 deferred while travelling without DAS access, but offline design, domain,
 metadata, API, test, and packaging work should continue.
 

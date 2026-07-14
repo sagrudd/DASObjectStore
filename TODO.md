@@ -269,13 +269,13 @@ completion.
   markers now carry actionable warm-up, counter-reset, permission, and mapping
   details; stable device mapping, packaged-loop execution, and appliance
   acceptance remain deployment-gated.
-- [~] Remove temporary production module-size exceptions through owned,
+- [x] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow. The
-  folder backend's `ObjectStoreBackend` implementation is now isolated in a
-  responsibility-specific child module, reducing the production façade below
-  the 1,000-line budget. The remaining unexcepted violation is
-  ``server/request_handler/storage.rs``; the exception file remains empty and
-  the guard must pass before this item can close.
+  folder backend's `ObjectStoreBackend` implementation and the storage request
+  handler's store/disk/repair/inventory operations are isolated in
+  responsibility-specific child modules. Both public façades remain below the
+  1,000-line budget, the exception file remains empty, and `make module-size`
+  passes.
   - [x] Keep package-asset regression tests aligned with the authoritative
     Debian dependency contract, including `udisks2` and `awscli`, so the local
     workspace test baseline does not mask packaging drift.
