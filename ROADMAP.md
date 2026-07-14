@@ -135,6 +135,9 @@ claim shape at Web and client response boundaries; mTLS transport verification
 remains a listener concern. This is intentionally blocked pending a security
 decision on the trust-store source, certificate-fingerprint-to-application
 mapping, rotation/revocation, and absent/unknown-client failure semantics.
+The exchange and administrator identity/key/revocation DTO wrappers also reject
+unknown JSON fields before registry lookup or claim consumption, preserving a
+strict versioned boundary for authoritative token decisions.
 The recommended boundary is an explicitly enabled mTLS listener with a
 configured CA reference and daemon-owned fingerprint mapping; required mTLS
 must never fall back silently to bearer-token authentication. Native DEB/RPM
