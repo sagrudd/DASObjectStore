@@ -21,6 +21,7 @@ pub mod markers;
 pub mod object;
 pub mod object_commit;
 pub mod placement_log;
+pub mod profile_catalogue_commit;
 pub mod queue;
 pub mod recovery;
 pub mod repair_activity;
@@ -106,6 +107,10 @@ pub use object::{
 };
 pub use object_commit::{commit_object_put, ObjectMetadataCommitError};
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
+pub use profile_catalogue_commit::{
+    commit_profile_catalogue, ProfileCatalogueCommitError, ProfileCatalogueCommitReport,
+    ProfileCatalogueCommitRequest, PROFILE_CATALOGUE_SCHEMA_VERSION,
+};
 pub use queue::{
     drain_ingest_queue, read_ingest_queue, read_ingest_queue_for_store, DestagePriorityPolicy,
     DestageUrgency, IngestAdmission, IngestBackpressurePolicy, IngestQueueDrainError,

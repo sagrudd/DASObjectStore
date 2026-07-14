@@ -1225,6 +1225,13 @@ open.
 Folder adoption now uses the same authority batch seam rather than a concrete
 catalogue call site; richer daemon transaction and SQLite/object-service
 integration remain open.
+The metadata crate now provides a live-SQLite v0.4 profile-catalogue adapter.
+It stores profile namespace, transaction id, source-retention state, and
+versioned object payloads in isolated tables, committing batches atomically and
+making exact retries idempotent while rejecting transaction/object conflicts.
+It intentionally leaves legacy appliance `objects`/`placements` untouched;
+daemon import/migration call-site wiring and physical placement reconciliation
+remain the next integration gate.
 Folder-to-folder and folder-to-drive migrations now commit the verified
 destination record through the shared authority before advancing migration
 state; destination reopen coverage proves catalogue-backed logical usage.

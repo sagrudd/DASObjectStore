@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 3);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 4);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -104,6 +104,34 @@ ON ingest_jobs (store_id, state, priority DESC, created_at_utc);
 
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_object
 ON ingest_jobs (object_id);
+
+-- Profile-neutral catalogue handoffs are deliberately isolated from the
+-- legacy objects/placements tables.  The latter derive appliance paths from
+-- disk rows; these rows retain the portable namespace, transaction, and
+-- version contract until a daemon-owned adapter performs a checked handoff.
+CREATE TABLE IF NOT EXISTS profile_catalogue_transactions (
+    transaction_id TEXT PRIMARY KEY NOT NULL,
+    profile_namespace TEXT NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    source_retained INTEGER NOT NULL CHECK (source_retained IN (0, 1)),
+    catalogue_json TEXT NOT NULL,
+    committed_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS profile_catalogue_objects (
+    profile_namespace TEXT NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_id TEXT NOT NULL,
+    object_version INTEGER NOT NULL CHECK (object_version > 0),
+    transaction_id TEXT NOT NULL REFERENCES profile_catalogue_transactions(transaction_id),
+    object_json TEXT NOT NULL,
+    committed_at_utc TEXT NOT NULL,
+    PRIMARY KEY (profile_namespace, store_id, object_id, object_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_catalogue_objects_transaction
+ON profile_catalogue_objects (transaction_id);
 "#;
 
 #[cfg(test)]
@@ -119,7 +147,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 3);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 4);
     }
 
     #[test]
@@ -142,6 +170,8 @@ mod tests {
                 "placements",
                 "pool_state_markers",
                 "pools",
+                "profile_catalogue_objects",
+                "profile_catalogue_transactions",
                 "stores",
             ]
         );

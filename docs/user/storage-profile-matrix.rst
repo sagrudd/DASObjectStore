@@ -48,6 +48,11 @@ verifies every destination payload before committing catalogue rows and always
 reports source retention. The provider-neutral S3 adapter boundary is
 approved, with Garage retained as the local compatibility provider behind the
 daemon authority.
+The shared-SQLite metadata seam is schema-versioned (v0.4) and records profile
+namespace, transaction id, source retention, and object versions atomically
+with idempotent retries and conflict rejection. It remains isolated from
+legacy appliance placement rows until a daemon-owned physical handoff is
+available.
 Authenticated standalone Web clients may use the matching GET export and POST
 import routes; these routes carry only the versioned catalogue document and
 never expose backend paths or credentials.

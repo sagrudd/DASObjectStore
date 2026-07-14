@@ -353,6 +353,12 @@ completion.
   - [x] Define the minimal profile-neutral `ObjectCatalogueAuthority` batch
     contract and adapt the durable folder catalogue to it; shared SQLite,
     appliance, and daemon transaction wiring remain open.
+  - [x] Add the daemon-owned shared-SQLite adapter seam with live schema v0.4:
+    profile namespace, transaction id, source-retention flag, and versioned
+    object rows commit atomically with exact-payload idempotency and conflict
+    rejection. The adapter deliberately leaves legacy appliance
+    `objects`/`placements` untouched; daemon call-site wiring and physical
+    appliance reconciliation remain the next integration gate.
     **Blocker (catalogue authority boundary):** the profile-private catalogue
     records currently carry versioned logical keys plus profile-local locations,
     while the existing ``live.sqlite`` objects/placements schema has no
@@ -360,9 +366,11 @@ completion.
     wiring shared SQLite, the daemon must choose a versioned adapter/schema and
     transaction owner that can atomically reconcile both representations
     without leaking paths or silently changing authoritative records.
-    Recommendation: add a daemon-owned, schema-versioned catalogue adapter with
+    The adapter now provides the recommended schema-versioned boundary with
     explicit profile namespace and transaction IDs; keep backend paths private
-    and migrate only through an atomic, conflict-checked handoff.
+    and migrate only through its atomic, conflict-checked handoff. Remaining
+    work is wiring this adapter into daemon import/migration call sites and
+    reconciling with appliance placement only when that host is available.
   - [x] Prove authority batches are all-or-none across conflicts and restart;
     a conflicting existing version cannot partially add a new record.
     Catalogue mutations now serialize daemon-local read/modify/write
