@@ -183,9 +183,9 @@ range/conditional semantics, and final size/checksum verification. Returning
 backend paths or embedding unbounded object bytes in JSON would violate the
 authority and data-plane boundaries. The versioned provider-stream contract
 now defines path-free open requests, bounded metadata-only chunk headers, and
-range/conditional checks, plus bounded magic/length-prefixed framing and a
-cumulative contiguous-offset/size/checksum verifier, without claiming socket
-request dispatch or cancellation is complete.
+range/conditional checks, plus bounded magic/length-prefixed framing, a
+cumulative contiguous-offset/size/checksum verifier, and a cooperative
+cancellation token, without claiming socket request dispatch is complete.
 Folder catalogue mutations now reload the latest durable snapshot under a
 daemon-local serialization boundary before atomic publication, preserving
 sibling records when concurrent request handles commit independently.

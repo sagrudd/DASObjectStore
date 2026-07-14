@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::io::{self, Read, Write};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 pub const PROVIDER_STREAM_SCHEMA_VERSION: &str = "dasobjectstore.provider_stream.v1";
 pub const PROVIDER_STREAM_MAX_CHUNK_BYTES: u32 = 1024 * 1024;
@@ -220,6 +224,7 @@ pub struct ProviderStreamVerifier {
     request_id: String,
     next_offset: u64,
     hasher: Sha256,
+    cancellation: ProviderStreamCancellation,
 }
 
 impl ProviderStreamVerifier {
@@ -232,7 +237,12 @@ impl ProviderStreamVerifier {
             request_id,
             next_offset: 0,
             hasher: Sha256::new(),
+            cancellation: ProviderStreamCancellation::default(),
         })
+    }
+
+    pub fn cancellation_token(&self) -> ProviderStreamCancellation {
+        self.cancellation.clone()
     }
 
     pub fn push(
@@ -240,6 +250,9 @@ impl ProviderStreamVerifier {
         header: &ProviderStreamChunkHeader,
         payload: &[u8],
     ) -> Result<(), ProviderStreamVerificationError> {
+        if self.cancellation.is_cancelled() {
+            return Err(ProviderStreamVerificationError::Cancelled);
+        }
         header.validate()?;
         if header.request_id != self.request_id {
             return Err(ProviderStreamVerificationError::RequestIdMismatch);
@@ -293,6 +306,19 @@ impl ProviderStreamVerifier {
             return Err(ProviderStreamVerificationError::ChecksumMismatch);
         }
         Ok(total_size)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProviderStreamCancellation(Arc<AtomicBool>);
+
+impl ProviderStreamCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -363,6 +389,7 @@ impl From<ProviderStreamValidationError> for ProviderStreamFrameError {
 #[derive(Debug)]
 pub enum ProviderStreamVerificationError {
     InvalidRequestId,
+    Cancelled,
     RequestIdMismatch,
     NonContiguous {
         expected_offset: u64,
@@ -386,6 +413,7 @@ impl Display for ProviderStreamVerificationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidRequestId => formatter.write_str("provider stream request id is blank"),
+            Self::Cancelled => formatter.write_str("provider stream was cancelled"),
             Self::RequestIdMismatch => formatter.write_str("provider stream request id changed"),
             Self::NonContiguous {
                 expected_offset,
@@ -659,6 +687,26 @@ mod tests {
             ..first
         };
         assert_eq!(verifier.finish(&final_header, b"def").expect("finish"), 6);
+    }
+
+    #[test]
+    fn verifier_honors_cooperative_cancellation_before_next_frame() {
+        let mut verifier = ProviderStreamVerifier::new("stream-1").expect("verifier");
+        let cancellation = verifier.cancellation_token();
+        cancellation.cancel();
+        let header = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "stream-1".to_string(),
+            offset: 0,
+            payload_len: 1,
+            final_chunk: false,
+            total_size: None,
+            sha256: None,
+        };
+        assert!(matches!(
+            verifier.push(&header, b"x"),
+            Err(ProviderStreamVerificationError::Cancelled)
+        ));
     }
 
     #[test]
