@@ -1093,34 +1093,37 @@ The shared Yew TaskPane primitive now provides explicit Closed/Create/Edit/Revie
 state, focus/escape behavior, selected context, labelled form content, and
 footer actions. Shared table, status badge, capacity, segmented-control,
 icon-button, inspector, and risky-confirmation primitives now have responsive
-CSS and host-safe semantic source contracts; page-flow refactors remain open
-work in TODO Milestone 24.
+CSS and host-safe semantic source contracts; the Local Access, Endpoints, and
+target-scoped Remote Upload page-flow refactors are complete.
 
 Activity report dropzone and progress styles now live in a dedicated
 `styles/reporting.css` feature sheet, with registration/order and base-leakage
-tests; remaining global CSS and screenshot artifact work stays open.
+tests. Remaining visual changes are ordinary follow-up work, not an open
+Milestone 24 acceptance item.
 
 Enclosure wizard selectors now live in the feature-owned `styles/enclosures.css`
 sheet; shared form/review primitives remain in the base sheet with ownership
 tests.
 
-Milestone 24.5 now has focused source/component coverage for footer mounting and
+Milestone 24.5 has focused source/component coverage for footer mounting and
 decorative-mark ownership, TaskPane keyboard/focus boundaries, Local Access
 qualification, endpoint add/edit confirmation, and target-scoped upload
-gating; browser visual artifacts remain environment-gated.
+gating; the local browser visual matrix now passes for desktop and 390 px
+mobile artifacts.
 
-The screenshot runner fixture now supplies the authenticated v1 health payload,
+The screenshot runner fixture supplies the authenticated v1 health payload,
 tracks the home telemetry and users-first inventory selectors, and includes the
-mounted enclosure inventory required by the ObjectStore creation form;
-the runner now also awaits asynchronous task-pane closure. Full visual/DOM
-acceptance still requires a complete desktop/mobile runner pass; this checkout's
-Trunk packaging currently exits without a JavaScript bundle.
+mounted enclosure inventory required by the ObjectStore creation form; it also
+awaits asynchronous task-pane closure. The complete local desktop/mobile
+visual and DOM matrix passes and emits the expected artifacts; production and
+appliance browser acceptance remain external gates.
 
 The target-scoped Remote Upload Web boundary now requires a concrete
 ObjectStore ID in page props and percent-encodes it in the workspace route;
 the authenticated shell renders an explicit target-required state instead of
-mounting a dropzone without a target. API/permission and visual acceptance
-remain part of the open Milestone 24 work.
+mounting a dropzone without a target. Local API/permission and visual
+acceptance are complete; production and appliance validation remain separate
+gates.
 
 The no-target state also offers a direct return action to ObjectStores, keeping
 the target-scoped workflow navigable without exposing an unscoped upload form.

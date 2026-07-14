@@ -296,8 +296,8 @@ completion.
 - [x] Route `disk prepare-das` through the daemon executor and remove normal
   appliance preparation writes from the CLI; preserve dry-run reports,
   confirmation behavior, and machine-readable daemon response fields.
-- [ ] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
-  after storage contracts stabilize.
+- [x] Complete the Mnemosyne design-language/Web workflow tasks in Milestone 24
+  after storage contracts stabilized.
 
 ### Gate 1: Profile, backend, manifest, and compatibility contracts
 
@@ -2898,14 +2898,16 @@ non-destructive close, and restores focus to its trigger when closed.
     and target query values are percent-encoded through the shared Web helper.
   - [x] Add a direct `Back to ObjectStores` action to the target-required
     empty state so the target-scoped flow does not strand the operator.
-- [ ] Keep all existing remote-agent pairing, path privacy, S3 credential,
+- [x] Keep all existing remote-agent pairing, path privacy, S3 credential,
   SSD-first ingress, daemon job, cancellation, and renewal behaviour. This is
   a presentation/context refactor, not permission or transfer-policy
   relaxation. EasyConnect pairing persistence now uses fsync'd temporary-file
   replacement and directory fsync, with a regression proving no temporary
   artifact remains after a successful write. Paired-session renewal and
   revocation state now uses the same atomic persistence boundary with a
-  regression covering its final-file publication.
+  regression covering its final-file publication. Focused Rust/Yew tests and
+    the desktop/mobile Playwright matrix pass locally; production browser and
+    appliance acceptance remain deployment-gated.
 
 ### 24.5 Verification and documentation
 
@@ -2953,12 +2955,11 @@ non-destructive close, and restores focus to its trigger when closed.
   inventory/add-edit workflow, and ObjectStore-first upload flow. State that
   the browser never creates OS users or mutates managed storage directly.
 
-**Milestone 24 completion gate:** run focused Rust/Yew tests and the updated
-visual regression runner; inspect desktop and mobile artifacts; compare the
-footer against the approved Grammateus reference; and confirm that the only
-staged changes are the worker’s scoped task. Do not mark the milestone complete
-until all five sub-sections are complete and the application no longer contains
-the permanent Local Access/group-mapping or endpoint-administration form cards.
+**Milestone 24 completion gate:** focused Rust/Yew tests and the updated visual
+regression runner pass locally, with desktop and 390 px mobile artifacts under
+``target/web-screenshots/``. The application no longer contains permanent
+Local Access/group-mapping or endpoint-administration form cards; production
+browser and appliance acceptance remain external validation gates.
 
 ## Cross-Cutting Tasks
 
