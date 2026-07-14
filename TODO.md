@@ -2388,9 +2388,17 @@ list until every temporary size-budget exception has been removed.
   terminal Repair jobs, and marks interrupted nonterminal jobs failed on daemon
   restart. Garage now also reports per-key progress and checks administrator
   cancellation between provider transfers while preserving in-progress
-  checkpoints. Remaining work is cancellation during a blocked provider copy,
-  non-Garage provider range support, and appliance acceptance rather than a
-  new transfer after daemon restart.
+  checkpoints. Remaining work is non-Garage provider range support, concrete
+  provider-native cancellation semantics, and appliance acceptance rather than
+  a new transfer after daemon restart.
+  - [x] Add a cancellable service-command boundary for provider copies. The
+    packaged command runner polls a child process, terminates it on
+    administrator cancellation, and preserves the durable in-progress
+    checkpoint path; adapters without process control fail closed before
+    launch. A regression covers the pre-launch cancellation guard.
+  - [~] **Remaining provider execution:** non-Garage range support, concrete
+    provider-native cancellation semantics, and appliance acceptance remain
+    deployment/provider gated.
 - [~] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition

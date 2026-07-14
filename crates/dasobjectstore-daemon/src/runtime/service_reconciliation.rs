@@ -272,9 +272,13 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                     resume_offset,
                     temporary_range_path.as_deref(),
                 );
-                if let Err(error) =
-                    runner.run_with_display_args_and_env("aws", &args, &args, &environment)
-                {
+                if let Err(error) = runner.run_with_display_args_and_env_cancellable(
+                    "aws",
+                    &args,
+                    &args,
+                    &environment,
+                    is_cancelled,
+                ) {
                     if let Some(path) = &temporary_range_path {
                         let _ = fs::remove_file(path);
                     }

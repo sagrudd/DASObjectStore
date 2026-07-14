@@ -29,6 +29,7 @@ use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GarageServiceRuntimeConfig {
@@ -366,6 +367,26 @@ pub trait ServiceCommandRunner {
     ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
         self.run_with_display_args(program, args, display_args)
     }
+
+    /// Run a provider command while allowing an administrator cancellation
+    /// request to stop it before launch. Implementations with process control
+    /// should override this to poll and terminate a running child; the default
+    /// keeps test doubles and non-process adapters fail-closed.
+    fn run_with_display_args_and_env_cancellable(
+        &self,
+        program: &str,
+        args: &[String],
+        display_args: &[String],
+        environment: &[(String, String)],
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        if is_cancelled() {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!("{program} command cancelled before launch"),
+            });
+        }
+        self.run_with_display_args_and_env(program, args, display_args, environment)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -440,6 +461,70 @@ impl ServiceCommandRunner for SystemServiceCommandRunner {
         Ok(ServiceCommandOutput {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         })
+    }
+
+    fn run_with_display_args_and_env_cancellable(
+        &self,
+        program: &str,
+        args: &[String],
+        display_args: &[String],
+        environment: &[(String, String)],
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+        if is_cancelled() {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!("{program} command cancelled before launch"),
+            });
+        }
+        let mut child = Command::new(program)
+            .args(args)
+            .envs(environment.iter().map(|(name, value)| (name, value)))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|error| DaemonServiceRuntimeError::CommandIo {
+                program: program.to_string(),
+                message: error.to_string(),
+            })?;
+        loop {
+            if is_cancelled() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!("{program} command cancelled while running"),
+                });
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let output = child.wait_with_output().map_err(|error| {
+                        DaemonServiceRuntimeError::CommandIo {
+                            program: program.to_string(),
+                            message: error.to_string(),
+                        }
+                    })?;
+                    if !status.success() {
+                        return Err(DaemonServiceRuntimeError::CommandFailed {
+                            program: program.to_string(),
+                            args: display_args.to_vec(),
+                            status: status.to_string(),
+                            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                        });
+                    }
+                    return Ok(ServiceCommandOutput {
+                        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                    });
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(DaemonServiceRuntimeError::CommandIo {
+                        program: program.to_string(),
+                        message: error.to_string(),
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -865,7 +950,10 @@ impl ServiceCommandRunner for FakeRunner {
 
 #[cfg(test)]
 mod tests {
-    use super::{GarageServiceController, GarageServiceRuntimeConfig};
+    use super::{
+        GarageServiceController, GarageServiceRuntimeConfig, ServiceCommandRunner,
+        SystemServiceCommandRunner,
+    };
     use crate::api::{
         DaemonServiceLifecycleRequest, DaemonServiceOperation, DaemonServiceStatusRequest,
     };
@@ -879,6 +967,27 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn cancellable_runner_rejects_cancelled_command_before_spawn() {
+        let runner = SystemServiceCommandRunner;
+        let args = vec!["must-not-run".to_string()];
+        let error = runner
+            .run_with_display_args_and_env_cancellable(
+                "command-that-must-not-run",
+                &args,
+                &args,
+                &[],
+                &|| true,
+            )
+            .expect_err("cancelled command must fail closed");
+
+        assert!(matches!(
+            error,
+            super::DaemonServiceRuntimeError::UnsupportedOperation { operation }
+                if operation.contains("cancelled before launch")
+        ));
+    }
 
     #[test]
     fn status_parses_running_compose_service() {

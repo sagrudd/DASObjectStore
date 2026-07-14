@@ -222,7 +222,9 @@ The active baseline still has release-relevant gaps: provider upload completion
 is not yet an atomic catalogue transaction; Garage reconciliation now uses
 durable provider-independent manifest/checkpoint planning plus a per-key Garage
 transfer worker with progress and administrator cancellation checks between
-provider transfers. Retry jobs now rediscover the newest incomplete manifest
+provider transfers; the packaged command runner now also polls and terminates a
+blocked provider child on cancellation while preserving the in-progress
+checkpoint. Retry jobs now rediscover the newest incomplete manifest
 for the same store/prefix scope without following symlinks, and resumed keys
 request and append only the missing byte suffix after validating the partial
 file. Non-Garage providers and appliance soak acceptance remain open;
