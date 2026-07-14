@@ -552,7 +552,8 @@ completion.
     remain loadable. Explicit stale-reservation expiry is now covered below;
     lease policy and scheduling remain open.
   - [x] Add daemon atomic JSON persistence around that snapshot contract with
-    file and directory ``fsync``/rename ordering plus corrupt-state rejection;
+    uniquely-scoped temporary files, file and directory ``fsync``/rename
+    ordering, cleanup on failed publication, and corrupt-state rejection;
     live-store registry wiring remains open. Durable reservation timestamps,
     deterministic expiry, legacy-snapshot retention, and provider persistence
     rollback tests are now in place; no background scheduler is enabled until

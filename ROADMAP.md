@@ -279,6 +279,8 @@ take precedence over historical milestone numbering when selecting new work.
 Daemon administrator job state is persisted through fsync'd temporary-file
 replacement and directory fsync before publication, preserving queryable job
 state across process crashes.
+Capacity-ledger checkpoints use uniquely-scoped fsync'd temporary files and
+remove failed publication artifacts before returning an error.
 Endpoint inventory updates use the same atomic persistence boundary and a
 process-local lock so concurrent endpoint validation cannot lose records.
 Profile-binding registry updates use the same daemon-local serialization

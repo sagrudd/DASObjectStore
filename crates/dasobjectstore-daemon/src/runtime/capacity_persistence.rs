@@ -8,6 +8,7 @@ use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub enum CapacityLedgerPersistenceError {
@@ -62,11 +63,15 @@ pub fn save_capacity_ledger(
         }
     })?;
     let temporary = parent.join(format!(
-        ".{}.tmp-{}",
+        ".{}.tmp-{}-{}",
         path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("ledger"),
-        std::process::id()
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
     ));
     let mut file = OpenOptions::new()
         .create_new(true)
@@ -77,7 +82,10 @@ pub fn save_capacity_ledger(
         .and_then(|_| file.sync_all())
         .map_err(|error| io_error(&temporary, error))?;
     drop(file);
-    fs::rename(&temporary, path).map_err(|error| io_error(path, error))?;
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(io_error(path, error));
+    }
     File::open(parent)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| io_error(parent, error))
@@ -169,6 +177,24 @@ mod tests {
         assert_eq!(restored.reserved_bytes(), 100);
         assert_eq!(restored.reservation_bytes("upload-1"), Some(100));
         assert!(!root.join("state/.ledger.json.tmp").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repeated_checkpoint_replacement_leaves_no_temporary_artifacts() {
+        let root = root("repeated");
+        let path = root.join("state/ledger.json");
+        let ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 10), 0)
+            .expect("policy valid");
+
+        save_capacity_ledger(&path, &ledger).expect("first save");
+        save_capacity_ledger(&path, &ledger).expect("second save");
+
+        let entries = fs::read_dir(path.parent().expect("ledger parent"))
+            .expect("state directory")
+            .map(|entry| entry.expect("directory entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries, vec![std::ffi::OsString::from("ledger.json")]);
         let _ = fs::remove_dir_all(root);
     }
 
