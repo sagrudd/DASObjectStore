@@ -957,7 +957,13 @@ completion.
     atomic identity/key deactivation; redacted, reason-digest audit events are
     now persisted atomically for registration, rotation, revocation, and
     access-token issuance, and completion paths, while mTLS listener binding
-    remains.
+    remains. **Blocker (security decision):** listener enforcement needs an
+    approved trust-store source, certificate-fingerprint-to-application
+    identity mapping, rotation/revocation behavior, and fail-closed behavior
+    when a client certificate is absent or unknown. Recommended policy is an
+    explicitly enabled mTLS listener with a configured CA reference and
+    daemon-owned fingerprint mapping; it must never silently fall back to a
+    bearer token when client authentication is required.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
