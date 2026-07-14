@@ -127,6 +127,14 @@ pub(crate) fn standalone_dashboard_router_with_state(
             get(standalone_profile_capabilities),
         )
         .route(
+            "/api/v1/profile-catalogue/stores/{store_id}",
+            get(standalone_profile_catalogue_export),
+        )
+        .route(
+            "/api/v1/profile-catalogue/stores/{store_id}/import",
+            post(standalone_profile_catalogue_import),
+        )
+        .route(
             "/api/v1/dashboard/enclosures",
             get(standalone_enclosures_dashboard),
         )

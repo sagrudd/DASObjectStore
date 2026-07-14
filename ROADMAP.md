@@ -1234,6 +1234,8 @@ IDs, versions, hashes, provenance, protection, and logical placements without
 paths or credentials; import verifies every destination payload before
 committing catalogue rows and always reports source retention. Physical archive
 packaging and appliance adapters remain deployment-gated.
+The authenticated standalone Web surface now exposes matching GET export and
+POST import routes, preserving the daemon as the only catalogue/path authority.
 
 ## Milestone 26: Appliance Debt and Control-Plane Readiness
 

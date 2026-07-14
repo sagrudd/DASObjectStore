@@ -24,6 +24,8 @@ mod auth_router;
 mod auth_validation;
 #[path = "auth_contracts.rs"]
 mod contracts;
+#[path = "profile_catalogue.rs"]
+mod profile_catalogue;
 #[path = "profile_delete.rs"]
 mod profile_delete;
 #[path = "profile_download.rs"]
@@ -109,6 +111,7 @@ use dasobjectstore_daemon::{
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
+use profile_catalogue::{standalone_profile_catalogue_export, standalone_profile_catalogue_import};
 use profile_delete::standalone_profile_s3_delete;
 use profile_download::standalone_profile_s3_get;
 use profile_multipart::{
@@ -1689,6 +1692,52 @@ mod tests {
             .await
             .expect("request completes");
 
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_catalogue_export_requires_a_local_session() {
+        let root = temp_root("standalone-profile-catalogue-export-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/profile-catalogue/stores/generated-data")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_catalogue_import_requires_a_local_session() {
+        let root = temp_root("standalone-profile-catalogue-import-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/profile-catalogue/stores/generated-data/import")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         cleanup(&root);
     }

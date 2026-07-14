@@ -48,6 +48,9 @@ verifies every destination payload before committing catalogue rows and always
 reports source retention. The provider-neutral S3 adapter boundary is
 approved, with Garage retained as the local compatibility provider behind the
 daemon authority.
+Authenticated standalone Web clients may use the matching GET export and POST
+import routes; these routes carry only the versioned catalogue document and
+never expose backend paths or credentials.
 
 The matrix must be revised when daemon-owned provisioning, product adapters, or
 real-world acceptance changes a row; it must not be used to infer hardware

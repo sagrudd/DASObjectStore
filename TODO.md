@@ -1019,6 +1019,10 @@ hardware acceptance.
     whether the binding was reused; CLI callers use
     ``store profile-binding --operation provision``. No provider credentials,
     appliance paths, or product defaults cross this Unix boundary.
+  - [x] Expose the portable profile-catalogue handoff through authenticated
+    Web routes. Export is read-only and path-free; import submits only the
+    versioned catalogue document to the daemon and returns its verified object
+    count plus mandatory source-retention marker.
 - [~] Add daemon-owned application identity and authoritative token support for
   unattended Synoptikon, Mneion, AlleleAnchor, Mnemosyne, and standalone
   integrations.
