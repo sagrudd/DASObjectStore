@@ -617,10 +617,8 @@ pub fn stream_profile_object(
 }
 
 /// Read a bounded byte range from a catalogue-authoritative profile object.
-/// The backend contract currently exposes a streaming full-object reader, so
-/// this compatibility seam discards the prefix while preserving the same
-/// private-path and authority boundaries. Provider-native range operations can
-/// be added below this seam without changing consumers.
+/// The backend owns the provider-specific range implementation; the profile
+/// layer retains catalogue authority and private-path boundaries.
 pub fn get_profile_object_range(
     backend: &dyn ProfileS3ReadBackend,
     key: &BackendObjectKey,
@@ -634,9 +632,7 @@ pub fn get_profile_object_range(
             object.size_bytes
         )));
     }
-    let mut reader = backend.read(key)?;
-    discard_prefix(&mut reader, offset)?;
-    Ok(Box::new(reader.take(length)))
+    backend.read_range(key, offset, length)
 }
 
 /// Delete one catalogue-authoritative profile object through the daemon-owned
@@ -686,23 +682,6 @@ pub fn delete_profile_object_with_capacity_provider(
             ))
         })?;
     Ok(true)
-}
-
-fn discard_prefix(reader: &mut dyn Read, mut remaining: u64) -> Result<(), BackendError> {
-    let mut buffer = [0_u8; 64 * 1024];
-    while remaining != 0 {
-        let requested = remaining.min(buffer.len() as u64) as usize;
-        let read = reader.read(&mut buffer[..requested]).map_err(|error| {
-            BackendError::Io(format!("profile object range prefix read failed: {error}"))
-        })?;
-        if read == 0 {
-            return Err(BackendError::InvalidRequest(
-                "profile object ended before requested range".to_string(),
-            ));
-        }
-        remaining -= read as u64;
-    }
-    Ok(())
 }
 
 /// Store one profile-backed S3 object through the daemon-owned transactional

@@ -206,6 +206,36 @@ pub trait ObjectStoreBackend {
 
     fn read(&self, key: &BackendObjectKey) -> Result<Box<dyn Read + Send>, BackendError>;
 
+    /// Read a bounded byte range without exposing a provider path.
+    ///
+    /// Providers with native range support should override this method. The
+    /// default implementation preserves compatibility for existing backends
+    /// by discarding the prefix from the ordinary reader and bounding the
+    /// returned stream to `length` bytes.
+    fn read_range(
+        &self,
+        key: &BackendObjectKey,
+        offset: u64,
+        length: u64,
+    ) -> Result<Box<dyn Read + Send>, BackendError> {
+        let mut reader = self.read(key)?;
+        let mut remaining = offset;
+        let mut buffer = [0_u8; 64 * 1024];
+        while remaining != 0 {
+            let requested = remaining.min(buffer.len() as u64) as usize;
+            let read = reader.read(&mut buffer[..requested]).map_err(|error| {
+                BackendError::Io(format!("backend range prefix read failed: {error}"))
+            })?;
+            if read == 0 {
+                return Err(BackendError::InvalidRequest(
+                    "backend object ended before requested range".to_string(),
+                ));
+            }
+            remaining -= read as u64;
+        }
+        Ok(Box::new(reader.take(length)))
+    }
+
     fn enumerate(&self, prefix: Option<&str>) -> Result<Vec<BackendObjectRecord>, BackendError>;
 
     fn verify(&self, key: &BackendObjectKey) -> Result<BackendObjectRecord, BackendError>;

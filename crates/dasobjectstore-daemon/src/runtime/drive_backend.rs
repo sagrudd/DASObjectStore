@@ -214,6 +214,16 @@ impl ObjectStoreBackend for DriveBackend {
         self.folder.read(key)
     }
 
+    fn read_range(
+        &self,
+        key: &BackendObjectKey,
+        offset: u64,
+        length: u64,
+    ) -> Result<Box<dyn Read + Send>, BackendError> {
+        self.guard()?;
+        self.folder.read_range(key, offset, length)
+    }
+
     fn enumerate(&self, prefix: Option<&str>) -> Result<Vec<BackendObjectRecord>, BackendError> {
         self.guard()?;
         self.folder.enumerate(prefix)

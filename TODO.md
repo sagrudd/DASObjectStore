@@ -2394,9 +2394,11 @@ list until every temporary size-budget exception has been removed.
     base64 an unbounded object in JSON. A versioned, path-free open request,
     range/conditional contract, metadata-only bounded chunk header, and
     bounded magic/length-prefixed frame codec and cumulative verifier now
-    define the binary framing and final size/checksum gate; socket request
-    dispatch remains before adding the HTTP route, while the verifier exposes
-    a cooperative cancellation token that aborts before the next frame.
+    define the binary framing and final size/checksum gate; folder/drive
+    backends now expose the provider-neutral bounded range-read seam with a
+    safe full-reader fallback for future providers; socket request dispatch
+    remains before adding the HTTP route, while the verifier exposes a
+    cooperative cancellation token that aborts before the next frame.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

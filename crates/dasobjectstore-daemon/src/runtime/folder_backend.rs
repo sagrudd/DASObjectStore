@@ -16,7 +16,7 @@ use dasobjectstore_core::store::{CapacityPolicy, CapacityReservationLedger};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File, Metadata, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -582,6 +582,23 @@ impl ObjectStoreBackend for FolderBackend {
         Ok(Box::new(
             File::open(self.object_path(key)?).map_err(io_error)?,
         ))
+    }
+
+    fn read_range(
+        &self,
+        key: &BackendObjectKey,
+        offset: u64,
+        length: u64,
+    ) -> Result<Box<dyn Read + Send>, BackendError> {
+        let mut file = File::open(self.object_path(key)?).map_err(io_error)?;
+        let size = file.metadata().map_err(io_error)?.len();
+        if offset > size {
+            return Err(BackendError::InvalidRequest(
+                "folder object range starts beyond object size".to_string(),
+            ));
+        }
+        file.seek(SeekFrom::Start(offset)).map_err(io_error)?;
+        Ok(Box::new(file.take(length.min(size - offset))))
     }
 
     fn enumerate(&self, prefix: Option<&str>) -> Result<Vec<BackendObjectRecord>, BackendError> {
