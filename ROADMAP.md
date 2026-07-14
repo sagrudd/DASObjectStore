@@ -1363,8 +1363,9 @@ validation) and a streaming assembler that verifies each declared part;
 the assembler now feeds the same transactional PUT lifecycle, with and without
 the daemon logical-capacity provider. Unix provider-stream upload dispatch now
 also drives the folder-profile writer through authorization, reservation, frame
-verification, staged fsync/rename, and path-free commit acknowledgement; HTTP
-listener dispatch remains.
+verification, staged fsync/rename, and path-free commit acknowledgement;
+authenticated standalone HTTP PUT now delegates bounded request bodies through
+that stream, while HTTP GET/range and multipart listener dispatch remain.
 The transport boundary now also publishes versioned, path-free multipart
 completion request and acknowledgement DTOs with the same bounded validation;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
@@ -1381,15 +1382,18 @@ performs the same declared-size and SHA-256 verification while bytes are
 consumed;
 the daemon socket now dispatches authenticated bounded profile-S3 list requests
 through the registered folder binding and daemon-owned capacity policy, while
-the standalone authenticated Web route delegates through the same bounded
-daemon bridge. Authenticated Web list, HEAD, and health routes now share typed
-daemon projections and never expose backend paths; a path-free profile
+the standalone authenticated Web list/HEAD/health routes delegate through the
+same bounded daemon bridge. Authenticated standalone HTTP PUT now streams
+Content-Length-bounded frames through a backpressured daemon bridge and returns
+the path-free commit acknowledgement only after catalogue persistence.
+Authenticated Web list, HEAD, and health routes now share typed daemon
+projections and never expose backend paths; a path-free profile
 diagnostics projection and authenticated Web route distinguish empty,
 synchronized, uncatalogued, and catalogue-missing states with counts and
 reconciliation timestamps. Authenticated Web verification and the read-only
 ``store profile-verify`` CLI now require daemon-side size/checksum agreement
-before reporting success and return no backend location. Multipart HTTP
-routing remains separate.
+before reporting success and return no backend location. HTTP GET/range and
+multipart routing remain separate.
 The same path-free profile-readiness projection is now available through the
 authenticated Web route ``/api/v1/profile-readiness/stores/{store_id}``, using
 the bounded daemon bridge and preserving explicit not-ready reasons.
@@ -1426,11 +1430,12 @@ profile HEAD, verification, capacity, health, readiness, and authenticated Web
 capability/readiness routes are also available without exposing private paths;
 shared SQLite catalogue authority, provider-backed streaming download,
 repair/lifecycle orchestration, and full S3 HTTP integration remain open. The
-provider-neutral runtime now also offers a bounded writer-stream helper and the
+provider-neutral runtime now also offers a bounded writer-stream helper, the
 daemon Unix provider-stream dispatch drives it through authorization,
 reservation, exact byte/checksum verification, staged fsync/rename, and
-catalogue commit before acknowledging success; HTTP listener framing and
-provider-backed transport remain separate.
+catalogue commit before acknowledging success, and the authenticated standalone
+HTTP PUT adapter feeds that stream with bounded channel backpressure; HTTP
+GET/range and multipart listener framing remain separate.
 
 Shared SQLite catalogue integration is currently blocked by a schema/authority
 boundary: profile-private records carry versioned logical keys and local

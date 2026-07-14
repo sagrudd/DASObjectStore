@@ -106,6 +106,33 @@ impl DaemonBridge {
         T: Send + 'static,
         F: FnOnce() -> Result<T, StandaloneObjectBrowserClientError> + Send + 'static,
     {
+        self.call_with_deadline(self.deadline, operation).await
+    }
+
+    pub(crate) async fn call_message_with_deadline<T, F>(
+        &self,
+        deadline: Duration,
+        operation: F,
+    ) -> Result<T, DaemonBridgeError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, String> + Send + 'static,
+    {
+        self.call_with_deadline(deadline, move || {
+            operation().map_err(StandaloneObjectBrowserClientError::bridge_failure)
+        })
+        .await
+    }
+
+    async fn call_with_deadline<T, F>(
+        &self,
+        deadline: Duration,
+        operation: F,
+    ) -> Result<T, DaemonBridgeError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, StandaloneObjectBrowserClientError> + Send + 'static,
+    {
         let request = self.begin_request()?;
         let permit = self
             .permits
@@ -117,7 +144,6 @@ impl DaemonBridge {
                     "daemon bridge semaphore was unexpectedly closed".to_string(),
                 ),
             })?;
-        let deadline = self.deadline;
         let task = tokio::task::spawn_blocking(move || {
             // Keep the permit inside the blocking closure. A timed-out socket
             // call may still be running, and releasing capacity before it
@@ -154,7 +180,7 @@ impl DaemonBridge {
         T: Send + 'static,
         F: FnOnce() -> Result<T, String> + Send + 'static,
     {
-        self.call(move || operation().map_err(StandaloneObjectBrowserClientError::bridge_failure))
+        self.call_message_with_deadline(self.deadline, operation)
             .await
     }
 

@@ -833,16 +833,14 @@ hardware acceptance.
 - [~] Route S3 PUT and multipart completion through quota reservation, daemon
   ingress, durable finalization, and catalogue commit; derive GET/HEAD/list from
   catalogue state rather than provider listings.
-  **Blocker (execution boundary):** the Unix provider-stream protocol now has
-  bounded client-to-daemon upload envelopes, binary-frame dispatch, and a
-  folder-profile writer that performs authorization, reservation, verification,
-  staged fsync/rename, and catalogue commit. Safe HTTP PUT/multipart routing
-  still needs an HTTP listener adapter with the same staging identity,
-  cancellation/backpressure semantics, and transactional catalogue mutation.
-  Do not implement this by writing request bodies directly from the Web process
-  into a managed profile root. **Next acceptance condition:** an authenticated
-  HTTP request must delegate its body to this daemon stream and return the
-  typed commit acknowledgement only after catalogue persistence succeeds.
+  Authenticated HTTP PUT now delegates its bounded body through the daemon
+  provider stream with explicit Content-Length, upload/request identity,
+  checksum headers, channel backpressure, disconnect cancellation, and a
+  typed acknowledgement only after catalogue persistence. **Remaining
+  execution gate:** HTTP GET/range and multipart routing still need adapters
+  with the same daemon-owned staging identity and transactional semantics.
+  Do not implement those paths by writing request bodies directly from the Web
+  process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative
     list/HEAD/GET semantics over folder and drive backends; it never consults
     provider listings or exposes private backend paths. Bounded streaming now
@@ -893,11 +891,12 @@ hardware acceptance.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
-  - [~] Authenticated HTTP GET/PUT and multipart routing follow the bounded
-    daemon payload transport blocker recorded in the Critical viewer follow-up
-    above; keep catalogue authority and provider credentials inside the daemon
-    and fail closed rather than introducing a path-bearing or unbounded JSON
-    shortcut.
+  - [~] Authenticated HTTP GET/range and multipart routing follow the bounded
+    daemon payload transport gate recorded above; the standalone authenticated
+    PUT route now streams through the daemon provider envelope, while GET and
+    multipart still keep catalogue authority and provider credentials inside
+    the daemon and fail closed rather than introducing a path-bearing or
+    unbounded JSON shortcut.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
     daemon bridge; the authenticated Web health route delegates through the
@@ -937,6 +936,12 @@ hardware acceptance.
     path-free commit acknowledgement now complete before the socket response;
     native HTTP listener dispatch and provider-native capability verification
     remain separately gated.
+  - [x] Add the authenticated standalone HTTP profile PUT adapter. It requires
+    explicit Content-Length, request/upload identity, and SHA-256 headers,
+    streams bounded frames through a backpressured daemon bridge, closes the
+    stream on body cancellation, and returns the typed commit acknowledgement
+    only after daemon catalogue persistence; HTTP GET/range and multipart
+    routing remain separate.
 - [~] Add profile/capability discovery and idempotent provisioning APIs so a
   Mnemosyne product requests storage policy without implementing filesystem or
   appliance logic. Static capability discovery and daemon-backed readiness are

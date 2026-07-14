@@ -72,11 +72,13 @@ the logical store ID, prefix, bounded continuation offset, object keys,
 versions, sizes, and checksums. It is path-free and is the serialization seam
 for a future authenticated Web/S3 route; defining that route does not grant a
 consumer direct access to managed roots or provider credentials.
-Provider-backed Web GET/HTTP gateway streaming remains gated on a daemon
-transport contract for bounded binary chunks (or descriptor passing). The
-daemon must retain byte verification, cancellation, and range/conditional
-request semantics; backend paths and unbounded base64 JSON responses are not
-acceptable substitutes.
+The authenticated standalone Web PUT route now delegates bounded request-body
+frames through the daemon provider-stream transport. It requires an explicit
+content length, request/upload identity, and SHA-256 header, and uses bounded
+channel backpressure so cancellation closes the daemon stream. Web GET/range
+and multipart gateway streaming remain gated on equivalent daemon transport
+contracts; backend paths and unbounded base64 JSON responses are not acceptable
+substitutes.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
 checked against the in-flight SHA-256 stage. The backend then performs its

@@ -169,8 +169,11 @@ admits logical and backend capacity, verifies the declared size and SHA-256
 while streaming, then performs staged ``fsync``/rename and commits the
 catalogue before returning the path-free acknowledgement. Clients and Web
 workers must not write request bodies directly into managed profile roots. The
-native HTTP listener adapter is a separate deployment seam and must preserve
-these daemon-owned staging, cancellation, backpressure, and catalogue rules.
+authenticated standalone HTTP PUT route now feeds this stream through a
+bounded backpressure channel and closes it on body cancellation; HTTP
+GET/range and multipart listener adapters remain separate deployment seams and
+must preserve these daemon-owned staging, cancellation, backpressure, and
+catalogue rules.
 
 Source Path Reads
 -----------------
