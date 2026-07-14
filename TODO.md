@@ -2645,11 +2645,11 @@ list until every temporary size-budget exception has been removed.
 
 ### Live Disk IO and throughput-card production follow-up
 
-- [ ] Verify the packaged daemon telemetry loop is running on the appliance,
+- [~] Verify the packaged daemon telemetry loop is running on the appliance,
   writes samples at its configured cadence, and uses the active managed-HDD
   root rather than a development/default path; expose its last successful
   collection time and failure reason to operators.
-- [ ] Resolve every managed HDD mount to the block device actually represented
+- [~] Resolve every managed HDD mount to the block device actually represented
   in `/proc/diskstats`, including partitions, device-mapper/LVM paths, MD RAID,
   USB bridge names, and stable `/dev/disk/by-*` aliases; do not depend only on
   a marker's basename when it cannot match the kernel counter name.
@@ -2659,7 +2659,7 @@ list until every temporary size-budget exception has been removed.
     from partition targets to the nearest reported parent disk while preferring
     a reported partition counter when available. Device-mapper/MD/USB topology
     enrichment remains an open extension.
-- [ ] Validate managed-HDD device markers during enclosure preparation and
+- [~] Validate managed-HDD device markers during enclosure preparation and
   telemetry collection. Emit a per-disk diagnostic when the marker has no
   usable block-device mapping, the device is absent from `/proc/diskstats`, or
   counter access is denied.
@@ -2672,7 +2672,7 @@ list until every temporary size-budget exception has been removed.
 - [x] Model first-sample warm-up separately from unavailable telemetry: retain
   the first counter snapshot, report `first_sample_warmup` for per-disk IO, and
   never present a zero or missing rate as a confirmed idle disk.
-- [ ] Propagate structured per-disk IO missing reasons, sample age, mapped
+- [~] Propagate structured per-disk IO missing reasons, sample age, mapped
   device name, and collection status through the daemon and Home API so the
   Disk IO card identifies the affected disk and corrective action instead of
   only stating that telemetry is unavailable.
@@ -2684,7 +2684,7 @@ list until every temporary size-budget exception has been removed.
     retain valid totals while showing an elevated diagnostic.
   - [x] Carry sample timestamp/age and per-disk identity/rates through the Home
     wire view, along with collection quality and raw missing-data markers.
-- [ ] Make the Home throughput chart explicitly distinguish retained Disk IO
+- [~] Make the Home throughput chart explicitly distinguish retained Disk IO
   samples, legacy throughput-file fallback, no observed IO, and telemetry
   collection failure. Preserve chart gaps and show a linked diagnostic rather
   than silently rendering an empty graph.
