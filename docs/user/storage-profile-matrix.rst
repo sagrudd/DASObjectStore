@@ -61,7 +61,9 @@ Reconciliation listing and transfer execution are isolated behind a
 provider-neutral range/resume/cancellation adapter; Garage is the current
 compatibility implementation. Typed list/download envelopes carry prefix,
 destination, range/resume, and cancellation state, so other providers can
-implement the same recovery contract without inheriting Garage command shape.
+implement the same recovery contract without inheriting Garage command shape;
+manifest-plan execution, checkpoints, partial-range validation, progress, and
+cancellation are shared across adapters.
 The shared-SQLite metadata seam is schema-versioned (v0.4) and records profile
 namespace, transaction id, source retention, and object versions atomically
 with idempotent retries and conflict rejection. It remains isolated from

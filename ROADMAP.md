@@ -1254,7 +1254,9 @@ provider-neutral range/resume/cancellation adapter; Garage supplies the
 current AWS CLI implementation. Typed list/download envelopes carry prefix,
 destination, range/resume, and cancellation state, so non-Garage runtime
 adapters can plug into the same recovery contract without positional command
-coupling.
+coupling. Manifest-plan execution is shared in a provider-neutral helper,
+including per-key checkpoints, partial-range validation, progress, and
+cancellation.
 The authenticated standalone Web surface now exposes matching GET export and
 POST import routes, preserving the daemon as the only catalogue/path authority.
 

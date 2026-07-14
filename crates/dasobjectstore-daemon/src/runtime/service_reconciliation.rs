@@ -167,8 +167,60 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     manifest
         .save_atomic(&manifest_path)
         .map_err(reconciliation_manifest_error)?;
-    let total = plan.actions.len();
-    for (index, action) in plan.actions.iter().enumerate() {
+    execute_reconciliation_plan(
+        &provider,
+        &mut manifest,
+        &manifest_path,
+        &staging_path,
+        &store_id,
+        &plan.actions,
+        is_cancelled,
+        emit_progress,
+    )?;
+    let ingest = submit_ingest_files_with_resource_gate(
+        SubmitIngestFilesRequest {
+            endpoint: store_id,
+            source_path: staging_path.clone(),
+            object_type: ObjectType::Naive,
+            copies: None,
+            hdd_workers: None,
+            ingress_origin: DaemonIngressOrigin::RemoteS3,
+            conflict_policy: DaemonIngestConflictPolicy::Lazy,
+            dry_run: false,
+            client_request_id: Some(format!("garage-reconcile-{accepted_at_utc}")),
+        },
+        accepted_at_utc,
+        emit_progress,
+        capacity_provider,
+        resource_gate,
+    )
+    .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!("S3 reconciliation ingest failed: {error}"),
+    })?;
+    Ok(StoreRepairS3Reconciliation {
+        bucket_name,
+        prefix,
+        staging_path: staging_path.display().to_string(),
+        manifest_path: Some(manifest_path.display().to_string()),
+        ingest_job_id: Some(ingest.job_id.to_string()),
+        dry_run: false,
+    })
+}
+
+fn execute_reconciliation_plan<P: ReconciliationProvider>(
+    provider: &P,
+    manifest: &mut ReconciliationManifest,
+    manifest_path: &Path,
+    staging_path: &Path,
+    store_id: &StoreId,
+    actions: &[ReconciliationAction],
+    is_cancelled: &dyn Fn() -> bool,
+    emit_progress: &mut dyn FnMut(
+        crate::api::DaemonIngestProgressEvent,
+    ) -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let total = actions.len();
+    for (index, action) in actions.iter().enumerate() {
         if is_cancelled() {
             return Err(DaemonServiceRuntimeError::UnsupportedOperation {
                 operation: "S3 reconciliation cancelled by administrator".to_string(),
@@ -212,7 +264,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                 let size_bytes = declared_size.unwrap_or_default();
                 manifest
                     .checkpoint(
-                        &manifest_path,
+                        manifest_path,
                         key,
                         ReconciliationEntryState::InProgress,
                         Some("provider download in progress".to_string()),
@@ -235,7 +287,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                 )?;
                 let destination = staging_path.join(relative_path);
                 if let Some(parent) = destination.parent() {
-                    std::fs::create_dir_all(parent).map_err(|error| {
+                    fs::create_dir_all(parent).map_err(|error| {
                         DaemonServiceRuntimeError::CommandIo {
                             program: "create reconciliation object directory".to_string(),
                             message: error.to_string(),
@@ -246,7 +298,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                     if let Err(error) = validate_partial_offset(&destination, offset, key) {
                         manifest
                             .checkpoint(
-                                &manifest_path,
+                                manifest_path,
                                 key,
                                 ReconciliationEntryState::Failed,
                                 Some(error.to_string()),
@@ -278,7 +330,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                     }
                     manifest
                         .checkpoint(
-                            &manifest_path,
+                            manifest_path,
                             key,
                             ReconciliationEntryState::Failed,
                             Some(error.to_string()),
@@ -299,7 +351,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                         let _ = fs::remove_file(partial);
                         manifest
                             .checkpoint(
-                                &manifest_path,
+                                manifest_path,
                                 key,
                                 ReconciliationEntryState::Failed,
                                 Some(error.to_string()),
@@ -312,7 +364,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                     if let Err(error) = validate_downloaded_size(&destination, size, key) {
                         manifest
                             .checkpoint(
-                                &manifest_path,
+                                manifest_path,
                                 key,
                                 ReconciliationEntryState::Failed,
                                 Some(error.to_string()),
@@ -324,7 +376,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                 }
                 manifest
                     .checkpoint(
-                        &manifest_path,
+                        manifest_path,
                         key,
                         ReconciliationEntryState::Complete,
                         None,
@@ -347,34 +399,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
             }
         }
     }
-    let ingest = submit_ingest_files_with_resource_gate(
-        SubmitIngestFilesRequest {
-            endpoint: store_id,
-            source_path: staging_path.clone(),
-            object_type: ObjectType::Naive,
-            copies: None,
-            hdd_workers: None,
-            ingress_origin: DaemonIngressOrigin::RemoteS3,
-            conflict_policy: DaemonIngestConflictPolicy::Lazy,
-            dry_run: false,
-            client_request_id: Some(format!("garage-reconcile-{accepted_at_utc}")),
-        },
-        accepted_at_utc,
-        emit_progress,
-        capacity_provider,
-        resource_gate,
-    )
-    .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
-        operation: format!("S3 reconciliation ingest failed: {error}"),
-    })?;
-    Ok(StoreRepairS3Reconciliation {
-        bucket_name,
-        prefix,
-        staging_path: staging_path.display().to_string(),
-        manifest_path: Some(manifest_path.display().to_string()),
-        ingest_job_id: Some(ingest.job_id.to_string()),
-        dry_run: false,
-    })
+    Ok(())
 }
 
 /// Provider-neutral listing and transfer seam used by reconciliation. Garage

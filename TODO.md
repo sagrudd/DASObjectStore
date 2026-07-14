@@ -2514,6 +2514,9 @@ list until every temporary size-budget exception has been removed.
     and cancellation state. Garage remains the only command-shaped adapter;
     alternate providers now receive the same path and recovery contract
     without positional argument coupling.
+  - [x] Extract manifest-plan execution into the same provider-neutral helper;
+    per-key checkpointing, partial-range validation, progress, and cancellation
+    now run independently of Garage command orchestration.
 - [~] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
