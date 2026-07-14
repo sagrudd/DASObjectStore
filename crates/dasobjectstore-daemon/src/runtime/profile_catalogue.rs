@@ -9,11 +9,64 @@ use dasobjectstore_core::object_catalogue::{
     PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION,
 };
 use dasobjectstore_core::protection::ProtectionPolicy;
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 
 pub trait ProfileCatalogueBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
 
 impl<T> ProfileCatalogueBackend for T where T: ObjectStoreBackend + ObjectCatalogueAuthority {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProfileCatalogueHandoffRecord {
+    pub transaction_id: String,
+    pub profile_namespace: String,
+    pub store_id: StoreId,
+    pub catalogue: PortableObjectCatalogue,
+    pub state: ProfileCatalogueHandoffState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileCatalogueHandoffState {
+    Prepared,
+    ProfileCommitted,
+    Committed,
+}
+
+/// Read a durable handoff journal entry for restart reconciliation without
+/// exposing its filesystem path through the daemon protocol.
+pub fn read_profile_catalogue_handoff(
+    handoff_root: impl AsRef<Path>,
+    transaction_id: &str,
+) -> Result<Option<ProfileCatalogueHandoffRecord>, BackendError> {
+    validate_transaction_id(transaction_id)?;
+    let path = handoff_root.as_ref().join(format!("{transaction_id}.json"));
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let file = File::open(&path).map_err(io_error)?;
+    let journal: HandoffJournal = serde_json::from_reader(file).map_err(|error| {
+        BackendError::InvalidRequest(format!("handoff journal JSON is invalid: {error}"))
+    })?;
+    if journal.schema_version != HANDOFF_JOURNAL_SCHEMA_VERSION
+        || journal.transaction_id != transaction_id
+    {
+        return Err(BackendError::InvalidRequest(
+            "unsupported or mismatched profile catalogue handoff journal".to_string(),
+        ));
+    }
+    journal.catalogue.validate().map_err(|error| {
+        BackendError::InvalidRequest(format!("handoff journal catalogue is invalid: {error}"))
+    })?;
+    Ok(Some(ProfileCatalogueHandoffRecord {
+        transaction_id: journal.transaction_id,
+        profile_namespace: journal.profile_namespace,
+        store_id: journal.store_id,
+        catalogue: journal.catalogue,
+        state: journal.state.into(),
+    }))
+}
 
 /// Convert a daemon-authoritative backend catalogue into profile-neutral
 /// metadata. The payload itself is never copied by this function.
@@ -98,11 +151,20 @@ pub fn import_profile_catalogue_with_metadata(
     catalogue: &PortableObjectCatalogue,
     backend: &mut dyn ProfileCatalogueBackend,
     live_sqlite_path: impl AsRef<Path>,
+    handoff_root: impl AsRef<Path>,
     transaction_id: &str,
     profile_namespace: &str,
     committed_at_utc: &str,
 ) -> Result<u64, BackendError> {
+    let journal = HandoffJournal::prepare(
+        handoff_root.as_ref(),
+        transaction_id,
+        profile_namespace,
+        store_id,
+        catalogue,
+    )?;
     let imported = import_profile_catalogue(store_id, catalogue, backend)?;
+    journal.write_state(HandoffState::ProfileCommitted)?;
     dasobjectstore_metadata::commit_profile_catalogue(
         live_sqlite_path,
         dasobjectstore_metadata::ProfileCatalogueCommitRequest {
@@ -117,7 +179,116 @@ pub fn import_profile_catalogue_with_metadata(
     .map_err(|error| {
         BackendError::InvalidRequest(format!("profile catalogue metadata handoff: {error}"))
     })?;
+    journal.write_state(HandoffState::Committed)?;
     Ok(imported)
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct HandoffJournal {
+    schema_version: u16,
+    transaction_id: String,
+    profile_namespace: String,
+    store_id: StoreId,
+    catalogue: PortableObjectCatalogue,
+    state: HandoffState,
+    #[serde(skip)]
+    path: std::path::PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum HandoffState {
+    Prepared,
+    ProfileCommitted,
+    Committed,
+}
+
+const HANDOFF_JOURNAL_SCHEMA_VERSION: u16 = 1;
+
+impl From<HandoffState> for ProfileCatalogueHandoffState {
+    fn from(state: HandoffState) -> Self {
+        match state {
+            HandoffState::Prepared => Self::Prepared,
+            HandoffState::ProfileCommitted => Self::ProfileCommitted,
+            HandoffState::Committed => Self::Committed,
+        }
+    }
+}
+
+impl HandoffJournal {
+    fn prepare(
+        root: &Path,
+        transaction_id: &str,
+        profile_namespace: &str,
+        store_id: &StoreId,
+        catalogue: &PortableObjectCatalogue,
+    ) -> Result<Self, BackendError> {
+        validate_transaction_id(transaction_id)?;
+        fs::create_dir_all(root).map_err(io_error)?;
+        let journal = Self {
+            schema_version: HANDOFF_JOURNAL_SCHEMA_VERSION,
+            transaction_id: transaction_id.to_string(),
+            profile_namespace: profile_namespace.to_string(),
+            store_id: store_id.clone(),
+            catalogue: catalogue.clone(),
+            state: HandoffState::Prepared,
+            path: root.join(format!("{transaction_id}.json")),
+        };
+        journal.persist()
+    }
+
+    fn write_state(&self, state: HandoffState) -> Result<(), BackendError> {
+        let mut next = self.clone();
+        next.state = state;
+        next.persist().map(|_| ())
+    }
+
+    fn persist(&self) -> Result<Self, BackendError> {
+        let parent = self.path.parent().ok_or_else(|| {
+            BackendError::InvalidRequest("handoff journal path has no parent".to_string())
+        })?;
+        let bytes = serde_json::to_vec_pretty(self).map_err(|error| {
+            BackendError::InvalidRequest(format!("handoff journal encode failed: {error}"))
+        })?;
+        let temporary = parent.join(format!(
+            ".handoff-{}-{}.tmp",
+            self.transaction_id,
+            std::process::id()
+        ));
+        let mut options = OpenOptions::new();
+        options.create(true).truncate(true).write(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let mut file = options.open(&temporary).map_err(io_error)?;
+        file.write_all(&bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(io_error)?;
+        drop(file);
+        fs::rename(&temporary, &self.path).map_err(io_error)?;
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(io_error)?;
+        Ok(self.clone())
+    }
+}
+
+fn validate_transaction_id(transaction_id: &str) -> Result<(), BackendError> {
+    if transaction_id.is_empty()
+        || transaction_id.contains('/')
+        || transaction_id.contains('\\')
+        || transaction_id == "."
+        || transaction_id == ".."
+    {
+        return Err(BackendError::InvalidRequest(
+            "profile catalogue transaction id must be a safe filename".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn io_error(error: std::io::Error) -> BackendError {
+    BackendError::Io(error.to_string())
 }
 
 fn portable_object(
@@ -320,12 +491,19 @@ mod tests {
             &catalogue,
             &mut backend,
             &db,
+            root.join("handoffs"),
             "tx-daemon-1",
             "folder:codex",
             "2026-07-14T00:00:00Z",
         )
         .expect("metadata handoff");
         assert_eq!(imported, 1);
+        assert!(root.join("handoffs/tx-daemon-1.json").is_file());
+        let handoff = read_profile_catalogue_handoff(root.join("handoffs"), "tx-daemon-1")
+            .expect("read handoff")
+            .expect("handoff exists");
+        assert_eq!(handoff.state, ProfileCatalogueHandoffState::Committed);
+        assert_eq!(handoff.catalogue, catalogue);
         let connection = Connection::open(&db).expect("db");
         assert_eq!(
             connection

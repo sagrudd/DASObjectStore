@@ -1243,7 +1243,9 @@ committing catalogue rows and always reports source retention. Import requests
 now carry an explicit replay-safe transaction id and private profile namespace;
 successful daemon imports record the same verified transaction in the shared
 SQLite adapter. Cross-file rollback and physical appliance reconciliation
-remain deployment-gated.
+remain deployment-gated. A private atomic handoff journal now records prepared,
+profile-committed, and fully-committed states and can be read by restart
+reconciliation without exposing paths through the socket or Web protocol.
 The authenticated standalone Web surface now exposes matching GET export and
 POST import routes, preserving the daemon as the only catalogue/path authority.
 

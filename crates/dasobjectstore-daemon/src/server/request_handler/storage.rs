@@ -565,6 +565,9 @@ where
                     "profile capacity policy is unavailable",
                 )));
             };
+            let handoff_root = binding
+                .backend_root
+                .join(".dasobjectstore/profile-catalogue-handoffs");
             let mut backend =
                 match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
                     Ok(backend) => backend,
@@ -589,6 +592,7 @@ where
                 &request.catalogue,
                 &mut backend,
                 &handler.live_sqlite_path,
+                handoff_root,
                 &request.transaction_id,
                 &request.profile_namespace,
                 &committed_at_utc,

@@ -389,6 +389,11 @@ completion.
     closed; cross-file rollback between the profile catalogue and SQLite, plus
     physical appliance placement reconciliation, remains a later authority
     gate.
+  - [x] Persist a daemon-owned handoff journal beside the private folder
+    catalogue with prepared, profile-committed, and fully-committed states;
+    journal entries are atomic, path-free on the transport, and readable for
+    restart reconciliation. Automatic cross-file rollback is intentionally not
+    claimed until both authorities can share a transaction owner.
   - [x] Add the daemon-owned profile-binding registry: portable manifests are
     validated against canonical folder/drive roots, persisted atomically, and
     per-store capacity probes use the binding when present; profile-binding
