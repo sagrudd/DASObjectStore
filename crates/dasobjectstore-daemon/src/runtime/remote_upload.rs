@@ -930,6 +930,18 @@ mod tests {
             .expect("unsafe completion key is recorded as failed");
         assert!(matches!(failed.final_event, DaemonJobEvent::Failed(_)));
 
+        let mut invalid_upload_id = metadata.clone();
+        invalid_upload_id.upload_id = " ".to_string();
+        let failed = worker
+            .run_with_completion_metadata(
+                worker_request("remote-upload-job-completion-metadata-upload-id"),
+                &completion,
+                invalid_upload_id,
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("blank completion upload id is recorded as failed");
+        assert!(matches!(failed.final_event, DaemonJobEvent::Failed(_)));
+
         let mut invalid_checksum = metadata;
         invalid_checksum.expected_checksum = "sha256:not-a-digest".to_string();
         let failed = worker
