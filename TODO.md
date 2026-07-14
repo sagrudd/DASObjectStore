@@ -425,8 +425,13 @@ completion.
     and identity-over-path rules; strict decode rejects unknown fields and
     future schemas before interpretation. Migration implementation remains
     gated until a new persistent field is approved.
-- [ ] Put existing appliance placement behind the backend contract with
+- [~] Put existing appliance placement behind the backend contract with
   regression evidence showing unchanged ingress, repair, and export behavior.
+  **Blocker (appliance backend):** the shared contract is implemented for
+  folder and guarded-drive profiles, but no appliance adapter currently owns
+  pool placement and transaction handoff. Implementing this boundary requires
+  the appliance placement runtime and a quiescent acceptance environment;
+  do not bypass it by exposing appliance paths through the profile adapters.
 
 ### Gate 2: Universal capacity and transactional admission
 
