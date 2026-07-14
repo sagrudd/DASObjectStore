@@ -2636,9 +2636,10 @@ list until every temporary size-budget exception has been removed.
     authoritative physical enclosure/bay registry is still pending.
   - [~] Tie capacity samples to the physical enclosure/bay registry so every
     disk physically associated with a known DAS enclosure carries the
-    authoritative enclosure association in each sample. A versioned,
-    path-free registry contract now validates enclosure, bay, and disk
-    uniqueness; daemon telemetry wiring and live topology acceptance remain.
+    authoritative enclosure association in each sample. The versioned,
+    path-free registry validates enclosure, bay, and disk uniqueness, and the
+    Linux collector now overrides known disk samples with registry IDs, bay
+    labels, and enclosure labels; live topology acceptance remains.
 - [~] Add per-enclosure disk IO collection for read bytes/s, write bytes/s,
   read operations/s, write operations/s, queue or await signals where available,
   and explicit missing-counter reasons when the host cannot provide a metric:
@@ -2650,8 +2651,8 @@ list until every temporary size-budget exception has been removed.
     summaries, and per-disk IO series for stable current grouping.
   - [~] Tie disk IO samples to the physical enclosure/bay registry so
     per-enclosure IO grouping uses authoritative hardware association. The
-    versioned registry contract is implemented; daemon telemetry wiring and
-    live topology acceptance remain.
+    versioned registry is wired into Linux capacity/IO samples; live topology
+    acceptance remains.
 
 ### Live Disk IO and throughput-card production follow-up
 

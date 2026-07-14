@@ -9,6 +9,8 @@ use super::sessions::{
     collect_appliance_session_telemetry, DEFAULT_LOCAL_GROUP_PATH,
     DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH, DEFAULT_STANDALONE_AUTH_ROOT,
 };
+use dasobjectstore_core::ids::DiskId;
+use dasobjectstore_core::{PhysicalEnclosureRegistry, PhysicalEnclosureRegistryValidationError};
 use dasobjectstore_metadata::{measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -26,6 +28,7 @@ pub struct LinuxProcTelemetryCollector {
     remote_session_path: Option<PathBuf>,
     local_group_path: Option<PathBuf>,
     sys_root: Option<PathBuf>,
+    enclosure_registry: Option<PhysicalEnclosureRegistry>,
     previous_diskstats: Option<BTreeMap<String, LinuxDiskIoCounters>>,
 }
 
@@ -38,6 +41,7 @@ impl LinuxProcTelemetryCollector {
             remote_session_path: None,
             local_group_path: None,
             sys_root: None,
+            enclosure_registry: None,
             previous_diskstats: None,
         }
     }
@@ -62,6 +66,19 @@ impl LinuxProcTelemetryCollector {
     pub fn with_sys_root(mut self, sys_root: impl Into<PathBuf>) -> Self {
         self.sys_root = Some(sys_root.into());
         self
+    }
+
+    /// Attach a validated, path-free enclosure registry to telemetry output.
+    ///
+    /// Marker-provided enclosure and bay values remain available for disks not
+    /// present in the registry; known disks always use the registry association.
+    pub fn with_enclosure_registry(
+        mut self,
+        registry: PhysicalEnclosureRegistry,
+    ) -> Result<Self, PhysicalEnclosureRegistryValidationError> {
+        registry.validate()?;
+        self.enclosure_registry = Some(registry);
+        Ok(self)
     }
 
     pub fn proc_root(&self) -> &Path {
@@ -92,16 +109,21 @@ impl LinuxProcTelemetryCollector {
         let cpu_snapshot = parse_linux_cpu_snapshot(&proc_stat)?;
         let (enclosures, disks, disk_io) = match self.hdd_root.as_deref() {
             Some(hdd_root) => {
-                let (enclosures, disks) = collect_linux_disk_capacity_telemetry(hdd_root)?;
+                let (mut enclosures, mut disks) = collect_linux_disk_capacity_telemetry(hdd_root)?;
                 let proc_diskstats = self.read_proc_file("diskstats")?;
                 let current_diskstats = parse_linux_diskstats(&proc_diskstats)?;
-                let disk_io = collect_linux_disk_io_telemetry_with_sys_root(
+                let mut disk_io = collect_linux_disk_io_telemetry_with_sys_root(
                     hdd_root,
                     &current_diskstats,
                     self.previous_diskstats.as_ref(),
                     elapsed_seconds,
                     self.sys_root.as_deref(),
                 )?;
+                if let Some(registry) = self.enclosure_registry.as_ref() {
+                    apply_enclosure_registry(registry, &mut disks, &mut disk_io);
+                    enclosures = enclosure_capacity_summaries(&disks);
+                    apply_registry_enclosure_labels(registry, &mut enclosures);
+                }
                 self.previous_diskstats = Some(current_diskstats);
                 (enclosures, disks, disk_io)
             }
@@ -762,6 +784,46 @@ fn enclosure_capacity_summaries(
     summaries
 }
 
+fn apply_enclosure_registry(
+    registry: &PhysicalEnclosureRegistry,
+    disks: &mut [ApplianceDiskCapacityTelemetry],
+    disk_io: &mut [ApplianceDiskIoTelemetry],
+) {
+    for disk in disks {
+        let Ok(disk_id) = DiskId::new(disk.disk_id.clone()) else {
+            continue;
+        };
+        let Some((enclosure, bay)) = registry.find_disk(&disk_id) else {
+            continue;
+        };
+        disk.enclosure_id = Some(enclosure.enclosure_id.to_string());
+        disk.bay_label = Some(bay.bay_label.clone());
+    }
+    for disk in disk_io {
+        let Ok(disk_id) = DiskId::new(disk.disk_id.clone()) else {
+            continue;
+        };
+        let Some((enclosure, bay)) = registry.find_disk(&disk_id) else {
+            continue;
+        };
+        disk.enclosure_id = Some(enclosure.enclosure_id.to_string());
+        disk.bay_label = Some(bay.bay_label.clone());
+    }
+}
+
+fn apply_registry_enclosure_labels(
+    registry: &PhysicalEnclosureRegistry,
+    enclosures: &mut [ApplianceEnclosureTelemetry],
+) {
+    for enclosure in enclosures {
+        enclosure.label = registry
+            .enclosures
+            .iter()
+            .find(|known| known.enclosure_id.to_string() == enclosure.enclosure_id)
+            .and_then(|known| known.label.clone());
+    }
+}
+
 fn add_optional_capacity(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),
@@ -869,7 +931,16 @@ fn diskstats_counter_reset(current: &LinuxDiskIoCounters, previous: &LinuxDiskIo
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_diskstats_name_from_sysfs_target, LinuxDiskIoCounters};
+    use super::{
+        apply_enclosure_registry, apply_registry_enclosure_labels,
+        resolve_diskstats_name_from_sysfs_target, ApplianceDiskCapacityTelemetry,
+        ApplianceDiskIoTelemetry, ApplianceEnclosureTelemetry, LinuxDiskIoCounters,
+    };
+    use dasobjectstore_core::ids::{DiskId, EnclosureId};
+    use dasobjectstore_core::{
+        PhysicalBay, PhysicalEnclosure, PhysicalEnclosureRegistry,
+        PHYSICAL_ENCLOSURE_REGISTRY_SCHEMA_VERSION,
+    };
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
@@ -934,6 +1005,75 @@ mod tests {
             Some("sda".to_string())
         );
         fs::remove_dir_all(root).expect("remove sysfs fixture");
+    }
+
+    #[test]
+    fn registry_overrides_marker_associations_for_known_disks() {
+        let registry = PhysicalEnclosureRegistry {
+            schema_version: PHYSICAL_ENCLOSURE_REGISTRY_SCHEMA_VERSION,
+            enclosures: vec![PhysicalEnclosure {
+                enclosure_id: EnclosureId::new("enclosure-authoritative").expect("enclosure"),
+                label: Some("primary".to_string()),
+                bays: vec![PhysicalBay {
+                    disk_id: DiskId::new("disk-1").expect("disk"),
+                    bay_label: "bay-7".to_string(),
+                }],
+            }],
+        };
+        let mut disks = vec![ApplianceDiskCapacityTelemetry {
+            disk_id: "disk-1".to_string(),
+            label: Some("disk".to_string()),
+            mount_path: "/srv/dasobjectstore/hdd/one".to_string(),
+            role: "hdd".to_string(),
+            enclosure_id: Some("marker-enclosure".to_string()),
+            bay_label: Some("marker-bay".to_string()),
+            device_path: None,
+            filesystem: None,
+            total_bytes: Some(100),
+            available_bytes: Some(50),
+            used_percent: Some(50.0),
+            missing_reason: None,
+        }];
+        let mut disk_io = vec![ApplianceDiskIoTelemetry {
+            disk_id: "disk-1".to_string(),
+            label: Some("disk".to_string()),
+            mount_path: "/srv/dasobjectstore/hdd/one".to_string(),
+            role: "hdd".to_string(),
+            enclosure_id: Some("marker-enclosure".to_string()),
+            bay_label: Some("marker-bay".to_string()),
+            device_path: None,
+            device_name: Some("sda".to_string()),
+            read_bytes_per_second: Some(1.0),
+            write_bytes_per_second: Some(2.0),
+            read_operations_per_second: Some(3.0),
+            write_operations_per_second: Some(4.0),
+            average_await_millis: None,
+            io_time_percent: None,
+            missing_reason: None,
+        }];
+        apply_enclosure_registry(&registry, &mut disks, &mut disk_io);
+        assert_eq!(
+            disks[0].enclosure_id.as_deref(),
+            Some("enclosure-authoritative")
+        );
+        assert_eq!(disks[0].bay_label.as_deref(), Some("bay-7"));
+        assert_eq!(
+            disk_io[0].enclosure_id.as_deref(),
+            Some("enclosure-authoritative")
+        );
+        assert_eq!(disk_io[0].bay_label.as_deref(), Some("bay-7"));
+
+        let mut summaries = vec![ApplianceEnclosureTelemetry {
+            enclosure_id: "enclosure-authoritative".to_string(),
+            label: None,
+            disk_ids: vec!["disk-1".to_string()],
+            total_bytes: Some(100),
+            available_bytes: Some(50),
+            used_percent: Some(50.0),
+            missing_reason: None,
+        }];
+        apply_registry_enclosure_labels(&registry, &mut summaries);
+        assert_eq!(summaries[0].label.as_deref(), Some("primary"));
     }
 }
 
