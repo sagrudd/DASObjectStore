@@ -35,6 +35,45 @@ pub struct ProviderStreamOpenRequest {
     pub chunk_size_bytes: u32,
 }
 
+/// Path-free open envelope for a bounded client-to-daemon provider upload.
+///
+/// The daemon must treat `upload_id` as an opaque, single-use capability
+/// reference. It is deliberately not a filesystem path or a provider
+/// credential. Implementations must stage and commit the bytes behind the
+/// daemon boundary before publishing catalogue state.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamUploadOpenRequest {
+    pub schema_version: String,
+    pub request_id: String,
+    pub upload_id: String,
+    pub store_id: StoreId,
+    pub object: BackendObjectKey,
+    pub expected_size_bytes: u64,
+    pub expected_sha256: String,
+    pub chunk_size_bytes: u32,
+}
+
+impl ProviderStreamUploadOpenRequest {
+    pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
+        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+            return Err(ProviderStreamValidationError::UnsupportedSchema {
+                schema_version: self.schema_version.clone(),
+            });
+        }
+        validate_non_blank(&self.request_id, "request_id")?;
+        validate_non_blank(&self.upload_id, "upload_id")?;
+        validate_object_key(&self.object)?;
+        validate_sha256(&self.expected_sha256, "expected_sha256")?;
+        if self.chunk_size_bytes == 0 || self.chunk_size_bytes > PROVIDER_STREAM_MAX_CHUNK_BYTES {
+            return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
+                chunk_size_bytes: self.chunk_size_bytes,
+            });
+        }
+        Ok(())
+    }
+}
+
 impl ProviderStreamOpenRequest {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
         if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
@@ -571,6 +610,24 @@ mod tests {
         }
     }
 
+    fn upload_request() -> ProviderStreamUploadOpenRequest {
+        ProviderStreamUploadOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "upload-stream-1".to_string(),
+            upload_id: "capability-1".to_string(),
+            store_id: StoreId::new("store-1").expect("store"),
+            object: BackendObjectKey {
+                object_id: "folder/file.bin".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            expected_sha256:
+                "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            chunk_size_bytes: 4096,
+        }
+    }
+
     #[test]
     fn open_request_round_trips_and_validates() {
         let request = request();
@@ -578,6 +635,23 @@ mod tests {
         let encoded = serde_json::to_string(&request).expect("encode");
         let decoded: ProviderStreamOpenRequest = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded, request);
+    }
+
+    #[test]
+    fn upload_open_request_round_trips_and_rejects_invalid_capability() {
+        let request = upload_request();
+        request.validate().expect("valid upload request");
+        let encoded = serde_json::to_string(&request).expect("encode");
+        let decoded: ProviderStreamUploadOpenRequest =
+            serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, request);
+
+        let mut invalid = request;
+        invalid.upload_id.clear();
+        assert!(matches!(
+            invalid.validate(),
+            Err(ProviderStreamValidationError::InvalidField { field: "upload_id" })
+        ));
     }
 
     #[test]

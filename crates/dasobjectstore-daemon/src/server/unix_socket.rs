@@ -1,7 +1,7 @@
 use crate::api::{
     write_provider_stream_frame, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
     ProviderStreamChunkHeader, ProviderStreamFrameError, ProviderStreamOpenRequest,
-    ProviderStreamVerifier,
+    ProviderStreamUploadOpenRequest, ProviderStreamVerifier,
 };
 use crate::auth::DaemonLocalActor;
 use crate::runtime::DaemonIngestFilesRuntimeError;
@@ -10,7 +10,7 @@ use crate::DaemonClock;
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::fs;
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -21,6 +21,7 @@ const SOCKET_MODE: u32 = 0o660;
 const MAX_CONTROL_CONNECTIONS: usize = 8;
 const MAX_PRIORITY_CONTROL_CONNECTIONS: usize = 2;
 const MAX_INGEST_CONNECTIONS: usize = 2;
+const MAX_REQUEST_LINE_BYTES: usize = 64 * 1024;
 
 pub struct UnixSocketDaemonServer<H> {
     socket_path: PathBuf,
@@ -170,6 +171,27 @@ pub trait DaemonApiHandler {
         emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
             "not_implemented",
             "provider stream reader is not wired into dasobjectstored yet",
+        )))
+    }
+
+    /// Handle a bounded client-to-daemon provider upload. The default remains
+    /// fail-closed: an envelope is not permission to stage bytes or mutate
+    /// catalogue state. Implementations must consume frames one at a time and
+    /// publish a terminal response only after daemon-owned staging and
+    /// verification complete.
+    fn handle_provider_stream_upload_for_actor(
+        &self,
+        _request: ProviderStreamUploadOpenRequest,
+        _actor: Option<&DaemonLocalActor>,
+        _read_frame: &mut dyn FnMut() -> Result<
+            (ProviderStreamChunkHeader, Vec<u8>),
+            UnixSocketDaemonServerError,
+        >,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "not_implemented",
+            "provider stream upload writer is not wired into dasobjectstored yet",
         )))
     }
 }
@@ -379,6 +401,7 @@ pub enum UnixSocketDaemonServerError {
     Handler(DaemonRequestHandlerError),
     ProviderStreamFrame(ProviderStreamFrameError),
     PeerCredentials(std::io::Error),
+    RequestLineTooLarge { max_bytes: usize },
 }
 
 impl Display for UnixSocketDaemonServerError {
@@ -417,6 +440,10 @@ impl Display for UnixSocketDaemonServerError {
                     "failed to read daemon client credentials: {error}"
                 )
             }
+            Self::RequestLineTooLarge { max_bytes } => write!(
+                formatter,
+                "daemon request envelope exceeds the {max_bytes}-byte limit"
+            ),
         }
     }
 }
@@ -489,20 +516,17 @@ struct PendingStream {
 enum PendingRequest {
     Api(DaemonApiRequest),
     ProviderStream(ProviderStreamOpenRequest),
+    ProviderStreamUpload(ProviderStreamUploadOpenRequest),
 }
 
 fn receive_stream(
     mut stream: UnixStream,
 ) -> Result<Option<PendingStream>, UnixSocketDaemonServerError> {
     let actor = peer_actor_for_stream(&stream)?;
-    let mut line = String::new();
-    BufReader::new(
-        stream
-            .try_clone()
-            .map_err(UnixSocketDaemonServerError::Io)?,
-    )
-    .read_line(&mut line)
-    .map_err(UnixSocketDaemonServerError::Io)?;
+    // Do not use a buffered clone here. Upload requests are followed by
+    // binary frames on the same socket; read-ahead would consume those bytes
+    // into a dropped BufReader before the upload handler can dispatch them.
+    let line = read_request_line(&mut stream)?;
 
     if let Ok(request) = serde_json::from_str::<DaemonApiRequest>(&line) {
         return Ok(Some(PendingStream {
@@ -528,6 +552,23 @@ fn receive_stream(
             actor,
         }));
     }
+    if let Ok(request) = serde_json::from_str::<ProviderStreamUploadOpenRequest>(&line) {
+        if let Err(error) = request.validate() {
+            write_response_frame(
+                &mut stream,
+                &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "bad_request",
+                    format!("invalid provider stream upload request: {error}"),
+                )),
+            )?;
+            return Ok(None);
+        }
+        return Ok(Some(PendingStream {
+            stream,
+            request: PendingRequest::ProviderStreamUpload(request),
+            actor,
+        }));
+    }
     {
         let error = serde_json::from_str::<DaemonApiRequest>(&line).expect_err("request parse");
         write_response_frame(
@@ -538,6 +579,33 @@ fn receive_stream(
             )),
         )?;
         Ok(None)
+    }
+}
+
+fn read_request_line(stream: &mut UnixStream) -> Result<String, UnixSocketDaemonServerError> {
+    let mut bytes = Vec::with_capacity(1024);
+    let mut byte = [0_u8; 1];
+    loop {
+        let read = stream
+            .read(&mut byte)
+            .map_err(UnixSocketDaemonServerError::Io)?;
+        if read == 0 {
+            return Err(UnixSocketDaemonServerError::Io(std::io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "daemon client closed before request envelope newline",
+            )));
+        }
+        if byte[0] == b'\n' {
+            return String::from_utf8(bytes).map_err(|error| {
+                UnixSocketDaemonServerError::Io(std::io::Error::new(ErrorKind::InvalidData, error))
+            });
+        }
+        bytes.push(byte[0]);
+        if bytes.len() > MAX_REQUEST_LINE_BYTES {
+            return Err(UnixSocketDaemonServerError::RequestLineTooLarge {
+                max_bytes: MAX_REQUEST_LINE_BYTES,
+            });
+        }
     }
 }
 
@@ -576,6 +644,24 @@ fn handle_pending_stream(
                 &mut emit_frame,
             )?;
         }
+        PendingRequest::ProviderStreamUpload(request) => {
+            let mut response_stream = pending
+                .stream
+                .try_clone()
+                .map_err(UnixSocketDaemonServerError::Io)?;
+            let mut emit_response =
+                |response| write_response_frame(&mut response_stream, &response);
+            let mut read_frame = || {
+                crate::api::read_provider_stream_frame(&mut pending.stream)
+                    .map_err(UnixSocketDaemonServerError::ProviderStreamFrame)
+            };
+            handler.handle_provider_stream_upload_for_actor(
+                request,
+                pending.actor.as_ref(),
+                &mut read_frame,
+                &mut emit_response,
+            )?;
+        }
     }
     Ok(())
 }
@@ -603,6 +689,7 @@ impl PendingRequest {
         match self {
             Self::Api(request) => request.is_ingest_submission(),
             Self::ProviderStream(_) => false,
+            Self::ProviderStreamUpload(_) => true,
         }
     }
 
@@ -610,6 +697,7 @@ impl PendingRequest {
         match self {
             Self::Api(request) => request.is_priority_control_request(),
             Self::ProviderStream(_) => false,
+            Self::ProviderStreamUpload(_) => false,
         }
     }
 }
@@ -648,8 +736,9 @@ mod tests {
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
         DaemonIngestStage, DaemonJobCancelRequest, DaemonJobId, DaemonServiceStatusResponse,
-        ProviderStreamChunkHeader, ProviderStreamOpenRequest, StoreInventoryRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, PROVIDER_STREAM_SCHEMA_VERSION,
+        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        PROVIDER_STREAM_SCHEMA_VERSION,
     };
     use dasobjectstore_core::backend::BackendObjectKey;
     use dasobjectstore_core::ids::{IngestJobId, StoreId};
@@ -789,6 +878,103 @@ mod tests {
         assert!(header.final_chunk);
         assert_eq!(header.request_id, "provider-stream-test");
         assert_eq!(payload, b"hello");
+    }
+
+    #[test]
+    fn dispatches_provider_stream_upload_to_bounded_frame_reader() {
+        struct ProviderUploadHandler;
+
+        impl DaemonApiHandler for ProviderUploadHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
+                panic!("provider upload test should use the upload handler")
+            }
+
+            fn handle_provider_stream_upload_for_actor(
+                &self,
+                request: ProviderStreamUploadOpenRequest,
+                _actor: Option<&crate::auth::DaemonLocalActor>,
+                read_frame: &mut dyn FnMut() -> Result<
+                    (ProviderStreamChunkHeader, Vec<u8>),
+                    super::UnixSocketDaemonServerError,
+                >,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), super::UnixSocketDaemonServerError>,
+            ) -> Result<(), super::UnixSocketDaemonServerError> {
+                assert_eq!(request.upload_id, "capability-1");
+                let (_, first) = read_frame()?;
+                let (final_header, second) = read_frame()?;
+                assert!(final_header.final_chunk);
+                assert_eq!([first, second].concat(), b"hello");
+                emit_response(DaemonApiResponse::Error(
+                    crate::api::DaemonApiErrorResponse::new("upload_test", "frames consumed"),
+                ))
+            }
+        }
+
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new(
+            "/tmp/dasobjectstored-provider-upload-test.sock",
+            ProviderUploadHandler,
+        );
+        serde_json::to_writer(
+            &mut client,
+            &ProviderStreamUploadOpenRequest {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "upload-stream-1".to_string(),
+                upload_id: "capability-1".to_string(),
+                store_id: StoreId::new("stream-store").expect("store id"),
+                object: BackendObjectKey {
+                    object_id: "objects/hello.txt".to_string(),
+                    version: 1,
+                },
+                expected_size_bytes: 5,
+                expected_sha256:
+                    "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                        .to_string(),
+                chunk_size_bytes: 1024,
+            },
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+        let first = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "upload-stream-1".to_string(),
+            offset: 0,
+            payload_len: 2,
+            final_chunk: false,
+            total_size: None,
+            sha256: None,
+        };
+        crate::api::write_provider_stream_frame(&mut client, &first, b"he").expect("first frame");
+        let final_header = ProviderStreamChunkHeader {
+            offset: 2,
+            payload_len: 3,
+            final_chunk: true,
+            total_size: Some(5),
+            sha256: Some(
+                "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            ),
+            ..first
+        };
+        crate::api::write_provider_stream_frame(&mut client, &final_header, b"llo")
+            .expect("final frame");
+
+        server.handle_stream(server_stream).expect("stream handled");
+        let mut line = String::new();
+        BufReader::new(client)
+            .read_line(&mut line)
+            .expect("response line");
+        let response: DaemonApiResponse = serde_json::from_str(&line).expect("response decoded");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "upload_test"
+        ));
     }
 
     #[test]

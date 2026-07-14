@@ -1,7 +1,8 @@
 use super::{unexpected, DaemonClientError, DaemonClientTransport};
 use crate::api::{
     read_provider_stream_frame, DaemonApiRequest, DaemonApiResponse, DaemonIngestProgressEvent,
-    ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamVerifier,
+    ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+    ProviderStreamVerifier,
 };
 use crate::runtime::DEFAULT_DAEMON_GROUP;
 use std::io::{BufRead, BufReader, Cursor, Read, Write};
@@ -116,6 +117,89 @@ impl UnixSocketDaemonTransport {
                 .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
             emit_frame(&header, &payload)?;
         }
+    }
+
+    /// Send a bounded client-to-daemon provider upload. The caller supplies
+    /// one frame at a time; this method never buffers more than the current
+    /// frame and verifies request identity, contiguous offsets, final size,
+    /// and checksum before writing each frame. The daemon response is emitted
+    /// only after the caller supplies a terminal frame.
+    pub fn upload_provider(
+        &self,
+        request: ProviderStreamUploadOpenRequest,
+        mut next_frame: impl FnMut() -> Result<
+            Option<(ProviderStreamChunkHeader, Vec<u8>)>,
+            DaemonClientError,
+        >,
+    ) -> Result<DaemonApiResponse, DaemonClientError> {
+        request
+            .validate()
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
+            DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
+        })?;
+        if let Some(timeout) = self.idle_timeout {
+            stream
+                .set_read_timeout(Some(timeout))
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        }
+        serde_json::to_writer(&mut stream, &request)
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        stream
+            .write_all(b"\n")
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        stream
+            .flush()
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+
+        let mut verifier = ProviderStreamVerifier::new(request.request_id.clone())
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        loop {
+            let Some((header, payload)) = next_frame()? else {
+                return Err(DaemonClientError::Transport(
+                    "provider stream upload omitted its terminal frame".to_string(),
+                ));
+            };
+            if header.final_chunk {
+                let total_size = verifier
+                    .finish(&header, &payload)
+                    .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+                let checksum = header.sha256.as_deref().ok_or_else(|| {
+                    DaemonClientError::Transport(
+                        "provider stream upload final frame omitted its checksum".to_string(),
+                    )
+                })?;
+                if total_size != request.expected_size_bytes
+                    || !checksum.eq_ignore_ascii_case(&request.expected_sha256)
+                {
+                    return Err(DaemonClientError::Transport(
+                        "provider stream upload differs from its declared size or checksum"
+                            .to_string(),
+                    ));
+                }
+                crate::api::write_provider_stream_frame(&mut stream, &header, &payload)
+                    .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+                break;
+            } else {
+                verifier
+                    .push(&header, &payload)
+                    .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+                crate::api::write_provider_stream_frame(&mut stream, &header, &payload)
+                    .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+            }
+        }
+
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
+        if line.is_empty() {
+            return Err(DaemonClientError::Transport(
+                "daemon closed the upload connection without a final response".to_string(),
+            ));
+        }
+        serde_json::from_str(&line).map_err(|error| DaemonClientError::Transport(error.to_string()))
     }
 }
 
@@ -249,7 +333,7 @@ mod tests {
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, ProviderStreamChunkHeader, ProviderStreamOpenRequest,
-        PROVIDER_STREAM_SCHEMA_VERSION,
+        ProviderStreamUploadOpenRequest, PROVIDER_STREAM_SCHEMA_VERSION,
     };
     use crate::client::{DaemonClient, DaemonClientError};
     use crate::server::{DaemonApiHandler, UnixSocketDaemonServer, UnixSocketDaemonServerError};
@@ -344,6 +428,89 @@ mod tests {
             receipt.sha256,
             "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
+        join.join().expect("server thread joins");
+        let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn unix_socket_transport_uploads_bounded_frames_and_reads_terminal_response() {
+        struct ProviderUploadHandler;
+
+        impl DaemonApiHandler for ProviderUploadHandler {
+            fn handle_api_request(
+                &self,
+                _request: DaemonApiRequest,
+            ) -> Result<DaemonApiResponse, UnixSocketDaemonServerError> {
+                panic!("provider upload test should use the upload handler")
+            }
+
+            fn handle_provider_stream_upload_for_actor(
+                &self,
+                request: ProviderStreamUploadOpenRequest,
+                _actor: Option<&crate::auth::DaemonLocalActor>,
+                read_frame: &mut dyn FnMut() -> Result<
+                    (ProviderStreamChunkHeader, Vec<u8>),
+                    UnixSocketDaemonServerError,
+                >,
+                emit_response: &mut dyn FnMut(
+                    DaemonApiResponse,
+                )
+                    -> Result<(), UnixSocketDaemonServerError>,
+            ) -> Result<(), UnixSocketDaemonServerError> {
+                assert_eq!(request.request_id, "upload-client-1");
+                let (_, payload) = read_frame()?;
+                assert_eq!(payload, b"hello");
+                emit_response(DaemonApiResponse::Error(
+                    crate::api::DaemonApiErrorResponse::new("upload_test", "accepted"),
+                ))
+            }
+        }
+
+        let socket_path = unique_socket_path();
+        let listener = UnixListener::bind(&socket_path).expect("listener binds");
+        let server = UnixSocketDaemonServer::new(&socket_path, ProviderUploadHandler);
+        let join = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("client connects");
+            server.handle_stream(stream).expect("upload handled");
+        });
+        let request = ProviderStreamUploadOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "upload-client-1".to_string(),
+            upload_id: "capability-1".to_string(),
+            store_id: StoreId::new("stream-store").expect("store id"),
+            object: BackendObjectKey {
+                object_id: "objects/hello.txt".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 5,
+            expected_sha256:
+                "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+            chunk_size_bytes: 1024,
+        };
+        let client = UnixSocketDaemonTransport::new(&socket_path);
+        let mut next = Some((
+            ProviderStreamChunkHeader {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "upload-client-1".to_string(),
+                offset: 0,
+                payload_len: 5,
+                final_chunk: true,
+                total_size: Some(5),
+                sha256: Some(
+                    "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                        .to_string(),
+                ),
+            },
+            b"hello".to_vec(),
+        ));
+        let response = client
+            .upload_provider(request, || Ok(next.take()))
+            .expect("upload response");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "upload_test"
+        ));
         join.join().expect("server thread joins");
         let _ = fs::remove_file(socket_path);
     }

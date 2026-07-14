@@ -189,6 +189,13 @@ folder-profile reads, including range and checksum conditions. The Unix-socket
 client now consumes and verifies those frames before delivering payloads to a
 caller-owned sink. Appliance or provider-native readers and the HTTP route
 remain separate; provider-native execution is still intentionally unclaimed.
+The same transport now defines the client-to-daemon upload half: an opaque
+single-use upload capability, expected size/checksum, and bounded chunk size
+are carried in a path-free envelope; the listener reads the request line
+without buffering ahead into binary frames and dispatches one validated frame
+at a time to an explicit upload handler. The default daemon implementation is
+still fail-closed until staging, cancellation/backpressure, reservation
+commit/release, provider verification, and catalogue publication are wired.
 The profile backend contract now exposes a bounded provider-neutral `read_range`
 operation: folder and guarded-drive backends use native seek-bounded reads,
 while future providers retain a safe full-reader fallback until they add

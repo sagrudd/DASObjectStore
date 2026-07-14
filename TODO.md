@@ -2416,6 +2416,19 @@ list until every temporary size-budget exception has been removed.
     checksum conditions; appliance/provider-native readers and the HTTP route
     remain separate. The verifier exposes a cooperative cancellation token
     that aborts before the next frame.
+  - [x] Define the bounded client-to-daemon upload half of the provider-stream
+    transport: upload envelopes carry an opaque single-use capability identity,
+    expected size/checksum, and bounded chunk size; the Unix listener dispatches
+    one validated binary frame at a time to an explicit handler callback. The
+    request-line reader is byte-bounded and never buffers ahead into upload
+    frames. The default daemon handler remains fail-closed until staging,
+    reservation, provider verification, and catalogue commit are wired.
+  - [~] **Remaining upload execution boundary:** a concrete daemon-owned
+    staging writer must consume the upload callback, honor cancellation and
+    backpressure, release or commit the quota reservation transactionally, and
+    publish the verified catalogue record. Provider credentials, live HTTP
+    multipart routing, and appliance acceptance remain unavailable in this
+    macOS-only run; do not treat the transport contract as a completed upload.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned
