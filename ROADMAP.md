@@ -197,6 +197,8 @@ at a time to an explicit upload handler. Oversized request envelopes are
 rejected with a typed `bad_request` response before handler dispatch. The default
 malformed upload frames are likewise translated into a terminal typed
 `bad_request` response while disconnect errors remain transport failures. The
+request-line decoder rejects non-UTF-8 envelopes with the same typed response,
+before JSON or binary-frame dispatch. The
 default daemon implementation is
 still fail-closed until staging, cancellation/backpressure, reservation
 commit/release, provider verification, and catalogue publication are wired.

@@ -402,6 +402,7 @@ pub enum UnixSocketDaemonServerError {
     ProviderStreamFrame(ProviderStreamFrameError),
     PeerCredentials(std::io::Error),
     RequestLineTooLarge { max_bytes: usize },
+    RequestLineInvalidUtf8,
 }
 
 impl Display for UnixSocketDaemonServerError {
@@ -444,6 +445,9 @@ impl Display for UnixSocketDaemonServerError {
                 formatter,
                 "daemon request envelope exceeds the {max_bytes}-byte limit"
             ),
+            Self::RequestLineInvalidUtf8 => {
+                formatter.write_str("daemon request envelope is not valid UTF-8")
+            }
         }
     }
 }
@@ -538,6 +542,16 @@ fn receive_stream(
             )?;
             return Ok(None);
         }
+        Err(UnixSocketDaemonServerError::RequestLineInvalidUtf8) => {
+            write_response_frame(
+                &mut stream,
+                &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "bad_request",
+                    "daemon request envelope must be valid UTF-8",
+                )),
+            )?;
+            return Ok(None);
+        }
         Err(error) => return Err(error),
     };
 
@@ -609,9 +623,8 @@ fn read_request_line(stream: &mut UnixStream) -> Result<String, UnixSocketDaemon
             )));
         }
         if byte[0] == b'\n' {
-            return String::from_utf8(bytes).map_err(|error| {
-                UnixSocketDaemonServerError::Io(std::io::Error::new(ErrorKind::InvalidData, error))
-            });
+            return String::from_utf8(bytes)
+                .map_err(|_| UnixSocketDaemonServerError::RequestLineInvalidUtf8);
         }
         bytes.push(byte[0]);
         if bytes.len() > MAX_REQUEST_LINE_BYTES {
@@ -848,6 +861,29 @@ mod tests {
 
         server.handle_stream(server_stream).expect("stream handled");
         write_join.join().expect("writer thread joins");
+
+        let mut line = String::new();
+        BufReader::new(client)
+            .read_line(&mut line)
+            .expect("response line");
+        let response: DaemonApiResponse = serde_json::from_str(&line).expect("response decoded");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "bad_request"
+        ));
+    }
+
+    #[test]
+    fn rejects_non_utf8_request_envelope_with_typed_bad_request() {
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new("/tmp/dasobjectstored-test.sock", |_request| {
+            panic!("non-UTF-8 request must not reach the handler")
+        });
+
+        client
+            .write_all(&[0xff, b'\n'])
+            .expect("invalid request written");
+        server.handle_stream(server_stream).expect("stream handled");
 
         let mut line = String::new();
         BufReader::new(client)

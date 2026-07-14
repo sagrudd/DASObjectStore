@@ -2434,6 +2434,8 @@ list until every temporary size-budget exception has been removed.
   - [x] Return a typed ``bad_request`` response when a Unix request envelope
     exceeds the byte bound, keeping oversized control-plane input from reaching
     request handlers or being mistaken for a provider-stream frame.
+  - [x] Reject non-UTF-8 request envelopes with the same typed response before
+    JSON/provider-stream dispatch, keeping framing errors explicit and bounded.
   - [x] Translate malformed provider upload frames into a terminal typed
     ``bad_request`` response while preserving client-disconnect errors; handlers
     never need to turn framing failures into ad hoc protocol responses.
