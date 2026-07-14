@@ -2509,6 +2509,11 @@ list until every temporary size-budget exception has been removed.
     current AWS CLI implementation; manifest planning, checkpointing, and
     partial-range validation no longer depend on that command shape, so a
     non-Garage adapter can be added without changing recovery semantics.
+  - [x] Make the reconciliation adapter boundary explicit with typed list and
+    download request envelopes carrying prefix, destination, range/resume,
+    and cancellation state. Garage remains the only command-shaped adapter;
+    alternate providers now receive the same path and recovery contract
+    without positional argument coupling.
 - [~] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition

@@ -150,7 +150,9 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         bucket_name: &bucket_name,
         environment: &environment,
     };
-    let objects = provider.list_objects(prefix.as_deref())?;
+    let objects = provider.list_objects(ReconciliationListRequest {
+        prefix: prefix.as_deref(),
+    })?;
     let plan = plan_reconciliation(&mut manifest, &objects);
     if let Some(action) = plan.actions.iter().find(|action| {
         matches!(
@@ -264,13 +266,13 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
                         reconciliation_temp_suffix()
                     ))
                 });
-                if let Err(error) = provider.download(
+                if let Err(error) = provider.download(ReconciliationDownloadRequest {
                     key,
-                    &destination,
+                    destination: &destination,
                     resume_offset,
-                    temporary_range_path.as_deref(),
+                    range_destination: temporary_range_path.as_deref(),
                     is_cancelled,
-                ) {
+                }) {
                     if let Some(path) = &temporary_range_path {
                         let _ = fs::remove_file(path);
                     }
@@ -379,19 +381,27 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
 /// currently supplies the AWS CLI implementation; other providers can
 /// implement the same listing, range/resume, and cancellation contract without
 /// changing manifest or checkpoint logic.
-trait ReconciliationProvider {
+pub(crate) struct ReconciliationListRequest<'a> {
+    pub(crate) prefix: Option<&'a str>,
+}
+
+pub(crate) struct ReconciliationDownloadRequest<'a> {
+    pub(crate) key: &'a str,
+    pub(crate) destination: &'a Path,
+    pub(crate) resume_offset: Option<u64>,
+    pub(crate) range_destination: Option<&'a Path>,
+    pub(crate) is_cancelled: &'a dyn Fn() -> bool,
+}
+
+pub(crate) trait ReconciliationProvider {
     fn list_objects(
         &self,
-        prefix: Option<&str>,
+        request: ReconciliationListRequest<'_>,
     ) -> Result<Vec<ReconciliationObject>, DaemonServiceRuntimeError>;
 
     fn download(
         &self,
-        key: &str,
-        destination: &Path,
-        resume_offset: Option<u64>,
-        range_destination: Option<&Path>,
-        is_cancelled: &dyn Fn() -> bool,
+        request: ReconciliationDownloadRequest<'_>,
     ) -> Result<(), DaemonServiceRuntimeError>;
 }
 
@@ -405,32 +415,28 @@ struct GarageReconciliationProvider<'a, R> {
 impl<R: ServiceCommandRunner> ReconciliationProvider for GarageReconciliationProvider<'_, R> {
     fn list_objects(
         &self,
-        prefix: Option<&str>,
+        request: ReconciliationListRequest<'_>,
     ) -> Result<Vec<ReconciliationObject>, DaemonServiceRuntimeError> {
         list_garage_objects(
             self.runner,
             self.endpoint,
             self.bucket_name,
-            prefix,
+            request.prefix,
             self.environment,
         )
     }
 
     fn download(
         &self,
-        key: &str,
-        destination: &Path,
-        resume_offset: Option<u64>,
-        range_destination: Option<&Path>,
-        is_cancelled: &dyn Fn() -> bool,
+        request: ReconciliationDownloadRequest<'_>,
     ) -> Result<(), DaemonServiceRuntimeError> {
         let args = reconciliation_download_args(
             self.endpoint,
             self.bucket_name,
-            key,
-            destination,
-            resume_offset,
-            range_destination,
+            request.key,
+            request.destination,
+            request.resume_offset,
+            request.range_destination,
         );
         self.runner
             .run_with_display_args_and_env_cancellable(
@@ -438,7 +444,7 @@ impl<R: ServiceCommandRunner> ReconciliationProvider for GarageReconciliationPro
                 &args,
                 &args,
                 self.environment,
-                is_cancelled,
+                request.is_cancelled,
             )
             .map(|_| ())
     }
@@ -702,7 +708,7 @@ fn emit_reconciliation_key_progress(
 mod tests {
     use super::{
         append_range_download, reconciliation_download_args, GarageReconciliationProvider,
-        ReconciliationProvider,
+        ReconciliationDownloadRequest, ReconciliationProvider,
     };
     use crate::runtime::service::{ServiceCommandOutput, ServiceCommandRunner};
     use std::fs;
@@ -800,26 +806,26 @@ mod tests {
             environment: &environment,
         };
         adapter
-            .download(
-                "reads/sample.fastq",
-                PathBuf::from("/tmp/object").as_path(),
-                Some(12),
-                Some(PathBuf::from("/tmp/object.resume").as_path()),
-                &|| false,
-            )
+            .download(ReconciliationDownloadRequest {
+                key: "reads/sample.fastq",
+                destination: PathBuf::from("/tmp/object").as_path(),
+                resume_offset: Some(12),
+                range_destination: Some(PathBuf::from("/tmp/object.resume").as_path()),
+                is_cancelled: &|| false,
+            })
             .expect("provider command");
         let args = runner.0.lock().expect("runner lock")[0].clone();
         assert_eq!(args[2], "s3api");
         assert_eq!(args[8], "--range");
         assert_eq!(args[9], "bytes=12-");
         assert!(adapter
-            .download(
-                "reads/sample.fastq",
-                PathBuf::from("/tmp/object").as_path(),
-                None,
-                None,
-                &|| true,
-            )
+            .download(ReconciliationDownloadRequest {
+                key: "reads/sample.fastq",
+                destination: PathBuf::from("/tmp/object").as_path(),
+                resume_offset: None,
+                range_destination: None,
+                is_cancelled: &|| true,
+            })
             .is_err());
         assert_eq!(runner.0.lock().expect("runner lock").len(), 1);
     }

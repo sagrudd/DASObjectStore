@@ -1251,8 +1251,10 @@ the verified idempotent import path and treats fully committed entries as
 no-ops.
 Reconciliation listing and download execution are isolated behind a
 provider-neutral range/resume/cancellation adapter; Garage supplies the
-current AWS CLI implementation, while non-Garage providers still require
-their runtime adapters.
+current AWS CLI implementation. Typed list/download envelopes carry prefix,
+destination, range/resume, and cancellation state, so non-Garage runtime
+adapters can plug into the same recovery contract without positional command
+coupling.
 The authenticated standalone Web surface now exposes matching GET export and
 POST import routes, preserving the daemon as the only catalogue/path authority.
 
