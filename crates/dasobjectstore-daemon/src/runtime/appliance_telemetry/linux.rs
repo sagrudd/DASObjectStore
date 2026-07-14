@@ -10,7 +10,7 @@ use super::sessions::{
     DEFAULT_REMOTE_EASYCONNECT_SESSION_PATH, DEFAULT_STANDALONE_AUTH_ROOT,
 };
 use dasobjectstore_metadata::{measure_ssd_capacity, SsdCapacity, SsdCapacityMeasurementError};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -662,18 +662,42 @@ fn resolve_diskstats_name_from_sysfs_target(
     target: &Path,
     current_diskstats: &BTreeMap<String, LinuxDiskIoCounters>,
 ) -> Option<String> {
-    let mut path = Some(target);
-    for _ in 0..16 {
-        let Some(candidate) = path.and_then(Path::file_name) else {
-            break;
-        };
-        let candidate = candidate.to_string_lossy();
-        if current_diskstats.contains_key(candidate.as_ref()) {
-            return Some(candidate.into_owned());
+    fn walk(
+        target: &Path,
+        current_diskstats: &BTreeMap<String, LinuxDiskIoCounters>,
+        visited: &mut BTreeSet<PathBuf>,
+        depth: usize,
+    ) -> Option<String> {
+        if depth > 16 || !visited.insert(target.to_path_buf()) {
+            return None;
         }
-        path = path.and_then(Path::parent);
+        if let Some(candidate) = target.file_name() {
+            let candidate = candidate.to_string_lossy();
+            if current_diskstats.contains_key(candidate.as_ref()) {
+                return Some(candidate.into_owned());
+            }
+        }
+
+        // Device-mapper and MD RAID expose their physical contributors through
+        // sysfs `slaves` links. Follow only this bounded, kernel-owned
+        // relationship so a logical marker can resolve to a reported physical
+        // counter without trusting arbitrary filesystem paths.
+        let slaves = target.join("slaves");
+        if let Ok(entries) = fs::read_dir(slaves) {
+            let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                let child = fs::canonicalize(entry.path()).unwrap_or_else(|_| entry.path());
+                if let Some(name) = walk(&child, current_diskstats, visited, depth + 1) {
+                    return Some(name);
+                }
+            }
+        }
+
+        walk(target.parent()?, current_diskstats, visited, depth + 1)
     }
-    None
+
+    walk(target, current_diskstats, &mut BTreeSet::new(), 0)
 }
 
 fn missing_reason_for_capacity_error(
@@ -847,6 +871,7 @@ fn diskstats_counter_reset(current: &LinuxDiskIoCounters, previous: &LinuxDiskIo
 mod tests {
     use super::{resolve_diskstats_name_from_sysfs_target, LinuxDiskIoCounters};
     use std::collections::BTreeMap;
+    use std::fs;
     use std::path::Path;
 
     fn counters(name: &str) -> LinuxDiskIoCounters {
@@ -890,6 +915,25 @@ mod tests {
             ),
             Some("sda1".to_string())
         );
+    }
+
+    #[test]
+    fn sysfs_target_follows_device_mapper_slaves_to_reported_disk() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-telemetry-slaves-{}",
+            std::process::id()
+        ));
+        let dm = root.join("devices/virtual/block/dm-0");
+        let slave = dm.join("slaves/sda");
+        fs::create_dir_all(&slave).expect("create sysfs fixture");
+
+        let mut current = BTreeMap::new();
+        current.insert("sda".to_string(), counters("sda"));
+        assert_eq!(
+            resolve_diskstats_name_from_sysfs_target(&dm, &current),
+            Some("sda".to_string())
+        );
+        fs::remove_dir_all(root).expect("remove sysfs fixture");
     }
 }
 

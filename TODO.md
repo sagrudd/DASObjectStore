@@ -2665,11 +2665,12 @@ list until every temporary size-budget exception has been removed.
   a marker's basename when it cannot match the kernel counter name.
   - [x] Resolve explicit `diskstats_device` markers and stable `/dev/disk/by-*`
     or `/dev/disk/by-*` aliases (including UUID, PARTUUID, and label aliases)
-    through a fixtureable sysfs root before
-    reporting `device_missing`; canonical sysfs ancestry now also falls back
-    from partition targets to the nearest reported parent disk while preferring
-    a reported partition counter when available. Device-mapper/MD/USB topology
-    enrichment remains an open extension.
+    through a fixtureable sysfs root before reporting `device_missing`;
+    canonical sysfs ancestry now also falls back from partition targets to the
+    nearest reported parent disk while preferring a reported partition counter
+    when available. Bounded `slaves` traversal now resolves device-mapper and
+    MD RAID logical targets to their reported physical counters; USB bridge
+    aliases use the same stable sysfs path without trusting marker basenames.
 - [~] Validate managed-HDD device markers during enclosure preparation and
   telemetry collection. Emit a per-disk diagnostic when the marker has no
   usable block-device mapping, the device is absent from `/proc/diskstats`, or
