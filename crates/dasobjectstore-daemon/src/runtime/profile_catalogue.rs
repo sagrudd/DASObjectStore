@@ -9,6 +9,7 @@ use dasobjectstore_core::object_catalogue::{
     PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION,
 };
 use dasobjectstore_core::protection::ProtectionPolicy;
+use std::path::Path;
 
 pub trait ProfileCatalogueBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
 
@@ -88,6 +89,37 @@ pub fn import_profile_catalogue(
     Ok(records.len() as u64)
 }
 
+/// Import through both the profile authority and the daemon-owned shared
+/// SQLite handoff. The profile commit remains the payload authority; the
+/// SQLite adapter records the exact verified logical transaction for restart,
+/// replay, and a future physical-placement adapter.
+pub fn import_profile_catalogue_with_metadata(
+    store_id: &StoreId,
+    catalogue: &PortableObjectCatalogue,
+    backend: &mut dyn ProfileCatalogueBackend,
+    live_sqlite_path: impl AsRef<Path>,
+    transaction_id: &str,
+    profile_namespace: &str,
+    committed_at_utc: &str,
+) -> Result<u64, BackendError> {
+    let imported = import_profile_catalogue(store_id, catalogue, backend)?;
+    dasobjectstore_metadata::commit_profile_catalogue(
+        live_sqlite_path,
+        dasobjectstore_metadata::ProfileCatalogueCommitRequest {
+            transaction_id,
+            profile_namespace,
+            store_id,
+            catalogue,
+            source_retained: true,
+            committed_at_utc,
+        },
+    )
+    .map_err(|error| {
+        BackendError::InvalidRequest(format!("profile catalogue metadata handoff: {error}"))
+    })?;
+    Ok(imported)
+}
+
 fn portable_object(
     store_id: &StoreId,
     record: BackendObjectRecord,
@@ -152,6 +184,7 @@ mod tests {
     use super::*;
     use dasobjectstore_core::backend::{BackendCapabilities, BackendHealth};
     use dasobjectstore_core::manifest::ObjectStoreManifest;
+    use rusqlite::Connection;
     use std::io::{Cursor, Read};
 
     struct FakeBackend {
@@ -241,5 +274,69 @@ mod tests {
             import_profile_catalogue(&store_id, &catalogue, &mut backend).expect("import");
         assert_eq!(imported, 1);
         assert_eq!(catalogue.store_id, store_id);
+    }
+
+    #[test]
+    fn import_records_replay_safe_metadata_transaction() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-catalogue-daemon-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let db = root.join("live.sqlite");
+        let connection = Connection::open(&db).expect("db");
+        connection
+            .execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)
+            .expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('codex', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("store");
+        drop(connection);
+
+        let store_id = StoreId::new("codex").expect("store");
+        let record = BackendObjectRecord {
+            key: BackendObjectKey {
+                object_id: "reads/a.txt".to_string(),
+                version: 1,
+            },
+            size_bytes: 4,
+            checksum: "sha256:abcd".to_string(),
+            location: ".dasobjectstore/objects/reads/a.txt".to_string(),
+        };
+        let mut backend = FakeBackend { record };
+        let catalogue = export_profile_catalogue(&store_id, &backend).expect("export");
+        let imported = import_profile_catalogue_with_metadata(
+            &store_id,
+            &catalogue,
+            &mut backend,
+            &db,
+            "tx-daemon-1",
+            "folder:codex",
+            "2026-07-14T00:00:00Z",
+        )
+        .expect("metadata handoff");
+        assert_eq!(imported, 1);
+        let connection = Connection::open(&db).expect("db");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM profile_catalogue_objects",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .expect("count"),
+            1
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -48,6 +48,11 @@ verifies every destination payload before committing catalogue rows and always
 reports source retention. The provider-neutral S3 adapter boundary is
 approved, with Garage retained as the local compatibility provider behind the
 daemon authority.
+Import requests carry an explicit replay-safe transaction id and private
+profile namespace. Successful daemon imports record that verified handoff in
+the schema-versioned shared-SQLite adapter; backend paths and credentials do
+not cross the socket or Web boundary. Cross-file rollback and physical
+appliance placement reconciliation remain deployment-gated.
 The shared-SQLite metadata seam is schema-versioned (v0.4) and records profile
 namespace, transaction id, source retention, and object versions atomically
 with idempotent retries and conflict rejection. It remains isolated from

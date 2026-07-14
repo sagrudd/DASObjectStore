@@ -575,10 +575,23 @@ where
                         )));
                     }
                 };
-            let imported_objects = match crate::runtime::import_profile_catalogue(
+            let committed_at_utc = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(duration) => format_utc_timestamp_seconds(duration.as_secs() as i64),
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_catalogue_import_failed",
+                        format!("clock unavailable: {error}"),
+                    )));
+                }
+            };
+            let imported_objects = match crate::runtime::import_profile_catalogue_with_metadata(
                 &store_id,
                 &request.catalogue,
                 &mut backend,
+                &handler.live_sqlite_path,
+                &request.transaction_id,
+                &request.profile_namespace,
+                &committed_at_utc,
             ) {
                 Ok(imported_objects) => imported_objects,
                 Err(error) => {

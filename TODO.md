@@ -383,6 +383,12 @@ completion.
   - [x] Route folder adoption catalogue commits through the shared authority
     seam; richer daemon transaction and SQLite/object-service integration stay
     open.
+  - [x] Extend the Unix-socket import contract with explicit transaction IDs
+    and private profile namespaces, then wire successful daemon imports through
+    the shared-SQLite adapter. Exact retries are idempotent and conflicts fail
+    closed; cross-file rollback between the profile catalogue and SQLite, plus
+    physical appliance placement reconciliation, remains a later authority
+    gate.
   - [x] Add the daemon-owned profile-binding registry: portable manifests are
     validated against canonical folder/drive roots, persisted atomically, and
     per-store capacity probes use the binding when present; profile-binding

@@ -9,7 +9,6 @@ use super::{
 };
 use axum::{extract::Path, http::StatusCode, Json};
 use dasobjectstore_core::ids::StoreId;
-use dasobjectstore_core::object_catalogue::PortableObjectCatalogue;
 use dasobjectstore_daemon::{
     DaemonClient, DaemonRuntimeConfig, ProfileCatalogueExportRequest,
     ProfileCatalogueExportResponse, ProfileCatalogueImportRequest, ProfileCatalogueImportResponse,
@@ -54,7 +53,7 @@ pub(super) async fn standalone_profile_catalogue_export(
 pub(super) async fn standalone_profile_catalogue_import(
     Path(store_id): Path<String>,
     _actor: AuthenticatedGuiActor,
-    Json(catalogue): Json<PortableObjectCatalogue>,
+    Json(mut request): Json<ProfileCatalogueImportRequest>,
 ) -> Result<Json<ProfileCatalogueImportResponse>, (StatusCode, Json<AuthRouteError>)> {
     let store_id = store_id.parse::<StoreId>().map_err(|error| {
         route_error(
@@ -63,10 +62,7 @@ pub(super) async fn standalone_profile_catalogue_import(
             error.to_string(),
         )
     })?;
-    let request = ProfileCatalogueImportRequest {
-        store_id,
-        catalogue,
-    };
+    request.store_id = store_id;
     request.validate().map_err(|error| {
         route_error(
             StatusCode::BAD_REQUEST,

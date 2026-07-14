@@ -1239,8 +1239,11 @@ The daemon now also exposes a versioned Unix-socket portable catalogue
 export/import handoff for bounded folder profiles. Export carries validated
 IDs, versions, hashes, provenance, protection, and logical placements without
 paths or credentials; import verifies every destination payload before
-committing catalogue rows and always reports source retention. Physical archive
-packaging and appliance adapters remain deployment-gated.
+committing catalogue rows and always reports source retention. Import requests
+now carry an explicit replay-safe transaction id and private profile namespace;
+successful daemon imports record the same verified transaction in the shared
+SQLite adapter. Cross-file rollback and physical appliance reconciliation
+remain deployment-gated.
 The authenticated standalone Web surface now exposes matching GET export and
 POST import routes, preserving the daemon as the only catalogue/path authority.
 
