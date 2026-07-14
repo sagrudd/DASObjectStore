@@ -250,7 +250,7 @@ completion.
   - [x] Release an admitted remote-upload capacity reservation when daemon job
     or progress setup fails before transfer execution; invalid-job regression
     coverage proves no reservation leak.
-  - [ ] Complete appliance/provider soak acceptance (blocked while the
+  - [~] Complete appliance/provider soak acceptance (blocked while the
     DASServer, Garage appliance, and deployment credentials are unavailable).
 - [~] Reserve bounded daemon/control-plane capacity and make HTTPS liveness,
   login, static assets, cancellation, and degraded cached status responsive
@@ -876,7 +876,7 @@ hardware acceptance.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
-  - [ ] Authenticated HTTP GET/PUT and multipart routing follow the bounded
+  - [~] Authenticated HTTP GET/PUT and multipart routing follow the bounded
     daemon payload transport blocker recorded in the Critical viewer follow-up
     above; keep catalogue authority and provider credentials inside the daemon
     and fail closed rather than introducing a path-bearing or unbounded JSON
@@ -2463,7 +2463,7 @@ list until every temporary size-budget exception has been removed.
   object-service upload planning and CLI plan output.
 - [x] Wire centralized ingress-origin classification through Web remote-upload
   workspace payloads and Mnemosyne/Synoptikon binding contracts.
-- [ ] Wire centralized ingress-origin classification through future Web
+- [~] Wire centralized ingress-origin classification through future Web
   direct-upload execution and concrete Synoptikon/Mneion submission clients
   once those byte-transfer/client paths are implemented.
   Blocked until Web direct-upload byte-transfer execution and concrete
