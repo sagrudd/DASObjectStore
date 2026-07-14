@@ -138,7 +138,8 @@ Non-secret v1 JSON fixtures for each credential and capability shape are
 checked into the core crate for consumer adapter contract tests.
 The daemon now also provides a state-scoped, expiry-pruned single-use replay
 registry for completion capabilities and a ring-backed proof verifier bound to
-registered public keys. Its completion helper verifies provider state before
+registered public keys, with concurrent-consumer coverage proving a capability
+can be consumed only once. Its completion helper verifies provider state before
 consuming, releases on catalogue failure, and returns an idempotent replay
 result; live catalogue wiring remains.
 The daemon API now publishes a confirmation-bound, path-free revocation

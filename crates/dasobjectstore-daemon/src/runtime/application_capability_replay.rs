@@ -351,6 +351,29 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_consumers_accept_only_one_capability_use() {
+        let path = root("concurrent-consume").join("replay.json");
+        let capability = capability("cap-concurrent", "nonce-concurrent", 1_000, 1_800);
+        let left_path = path.clone();
+        let left_capability = capability.clone();
+        let left = std::thread::spawn(move || {
+            consume_upload_completion_capability(&left_path, &left_capability, 1_100)
+                .expect("left consume")
+        });
+        let right_path = path.clone();
+        let right = std::thread::spawn(move || {
+            consume_upload_completion_capability(&right_path, &capability, 1_100)
+                .expect("right consume")
+        });
+        let outcomes = [
+            left.join().expect("left joins"),
+            right.join().expect("right joins"),
+        ];
+        assert_eq!(outcomes.iter().filter(|accepted| **accepted).count(), 1);
+        assert_eq!(outcomes.iter().filter(|accepted| !**accepted).count(), 1);
+    }
+
+    #[test]
     fn completion_verifies_provider_before_consuming_and_releases_failed_catalogue() {
         let path = root("completion").join("replay.json");
         let capability = capability("cap-1", "nonce-1", 1_000, 1_800);

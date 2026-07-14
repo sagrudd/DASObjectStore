@@ -936,6 +936,8 @@ completion.
     redacted audit events for every credential class. Upload-completion
     capability consumption now has a daemon-owned, state-scoped atomic replay
     registry with expiry pruning and single-use nonce/capability checks;
+    concurrent-consumer regression coverage proves only one completion can
+    consume a capability;
     a confirmation-bound, path-free revocation request/response contract is
     now published and wired through authenticated administrator dispatch to
     atomic identity/key deactivation; redacted, reason-digest audit events are
