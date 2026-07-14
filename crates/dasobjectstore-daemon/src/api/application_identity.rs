@@ -11,6 +11,7 @@ pub const APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION: &str =
     "confirm application credential revocation";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationIdentityRegistrationRequest {
     pub identity: ApplicationIdentity,
     pub dry_run: bool,
@@ -47,6 +48,7 @@ impl ApplicationIdentityRegistrationRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationIdentityRegistrationResponse {
     pub accepted: DaemonJobAcceptedResponse,
     pub identity: ApplicationIdentity,
@@ -102,6 +104,7 @@ impl Display for ApplicationIdentityRegistrationValidationError {
 impl std::error::Error for ApplicationIdentityRegistrationValidationError {}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationKeyRegistrationRequest {
     pub key: ApplicationKeyDescriptor,
     pub dry_run: bool,
@@ -138,6 +141,7 @@ impl ApplicationKeyRegistrationRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationKeyRegistrationResponse {
     pub accepted: DaemonJobAcceptedResponse,
     pub key: ApplicationKeyDescriptor,
@@ -171,6 +175,7 @@ impl ApplicationKeyRegistrationResponse {
 /// daemon performs the state mutation and records audit metadata; callers do
 /// not submit private keys, tokens, or filesystem locations.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationCredentialRevocationRequest {
     pub application_id: String,
     #[serde(default)]
@@ -250,6 +255,7 @@ impl Display for ApplicationCredentialRevocationValidationError {
 impl std::error::Error for ApplicationCredentialRevocationValidationError {}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApplicationCredentialRevocationResponse {
     pub accepted: DaemonJobAcceptedResponse,
     pub application_id: String,
@@ -360,6 +366,13 @@ mod tests {
         let encoded = serde_json::to_string(&request).expect("encode");
         assert!(!encoded.contains("private_key"));
         assert!(!encoded.contains("/srv"));
+    }
+
+    #[test]
+    fn administrator_identity_request_rejects_unknown_fields() {
+        let mut encoded = serde_json::to_value(request()).expect("encode request");
+        encoded["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<ApplicationIdentityRegistrationRequest>(encoded).is_err());
     }
 
     #[test]

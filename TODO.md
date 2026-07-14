@@ -1034,6 +1034,10 @@ hardware acceptance.
     reject unknown JSON fields before validation or claim consumption, with a
     regression covering both directions; the inner versioned contracts remain
     the authoritative scope/lifetime boundary.
+  - [x] Apply the same strict unknown-field boundary to administrator identity,
+    key-rotation, and credential-revocation request/response wrappers so
+    unrecognized fields cannot alter security decisions; registration coverage
+    includes an explicit rejection regression.
 - [~] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit
