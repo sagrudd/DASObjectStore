@@ -937,8 +937,10 @@ hardware acceptance.
     multipart-part stream envelope keyed by ``reservation_id`` and
     ``part_number``. It validates expected part size/checksum, consumes the
     same bounded binary frames, and defines a path-free typed acknowledgement;
-    runtime staging, reservation settlement/abort cleanup, and authenticated
-    HTTP routing remain the next implementation slice.
+    daemon request handling now authorizes the folder profile, admits the full
+    reservation once, stages verified frames through the durable journal, and
+    releases the admission when first-part staging fails; completion settlement
+    and authenticated HTTP routing remain the next implementation slice.
   - [x] Add daemon-owned multipart part staging persistence: reservation-bound
     journals live below the private profile namespace, publish part files only
     after frame-level size/SHA-256 verification, atomically persist metadata,

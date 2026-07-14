@@ -1,6 +1,7 @@
 use super::*;
 use crate::api::{
     DaemonApiErrorResponse, DaemonApiResponse, ProviderStreamChunkHeader,
+    ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
     ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest, ProviderStreamUploadResponse,
     ProviderStreamVerifier,
 };
@@ -19,6 +20,113 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    pub(crate) fn handle_provider_stream_multipart_part_upload_for_actor(
+        &self,
+        request: ProviderStreamMultipartPartUploadOpenRequest,
+        actor: Option<&DaemonLocalActor>,
+        read_frame: &mut dyn FnMut() -> Result<
+            (ProviderStreamChunkHeader, Vec<u8>),
+            UnixSocketDaemonServerError,
+        >,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        let store_id = match self.authorize_endpoint_write(actor, &request.store_id) {
+            Ok(store_id) => store_id,
+            Err(error) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    error.code(),
+                    error.to_string(),
+                )))
+            }
+        };
+        let binding =
+            match read_profile_binding(&self.profile_binding_registry_path, store_id.as_str()) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_unavailable",
+                        "multipart part staging requires a registered bounded folder profile",
+                    )))
+                }
+            };
+        if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "provider_stream_unavailable",
+                "multipart part staging is available for bounded folder profiles only",
+            )));
+        }
+        let mut journal =
+            match crate::runtime::MultipartPartJournal::open(binding.backend_root, &request) {
+                Ok(journal) => journal,
+                Err(error) => {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_multipart_failed",
+                        error.to_string(),
+                    )))
+                }
+            };
+        let admitted = journal.staged_bytes() != 0;
+        if !admitted {
+            let Some(provider) = self.service_orchestrator.capacity_provider() else {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_unavailable",
+                    "multipart part staging requires daemon capacity admission",
+                )));
+            };
+            let admission = provider.admit_remote_upload(
+                store_id.as_str(),
+                request.reservation_size_bytes,
+                &request.reservation_id,
+            );
+            let admission = match admission {
+                Ok(admission) => admission,
+                Err(error) => {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_multipart_failed",
+                        error.to_string(),
+                    )))
+                }
+            };
+            if admission.decision != crate::api::CapacityAdmissionDecision::Admitted {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_rejected",
+                    admission
+                        .message
+                        .unwrap_or_else(|| "multipart capacity admission rejected".to_string()),
+                )));
+            }
+        }
+        let part = match journal.stage_part(&request, &mut || {
+            read_frame()
+                .map_err(|error| crate::runtime::MultipartPartJournalError::Io(error.to_string()))
+        }) {
+            Ok(part) => part,
+            Err(error) => {
+                if !admitted {
+                    if let Some(provider) = self.service_orchestrator.capacity_provider() {
+                        let _ = provider.release(&store_id, &request.reservation_id);
+                    }
+                }
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_failed",
+                    error.to_string(),
+                )));
+            }
+        };
+        emit_response(DaemonApiResponse::ProviderStreamMultipartPartUpload(
+            ProviderStreamMultipartPartUploadResponse {
+                schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: request.request_id,
+                reservation_id: request.reservation_id,
+                part_number: part.part_number,
+                store_id,
+                object: request.object,
+                size_bytes: part.size_bytes,
+                sha256: part.checksum,
+            },
+        ))
+    }
+
     pub(crate) fn handle_provider_stream_upload_for_actor(
         &self,
         request: ProviderStreamUploadOpenRequest,

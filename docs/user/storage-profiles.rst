@@ -190,6 +190,9 @@ Verified part bytes now have a daemon-owned durable journal under the private
 profile namespace, so a completion request can reopen staged parts without
 trusting client paths; capacity settlement and completion assembly remain
 daemon operations.
+The Unix daemon path now performs profile authorization and full-reservation
+admission before accepting the first part, and releases that admission if
+staging fails.
 The response also carries raw backend free space, configured warning/critical
 thresholds, and copy-amplification basis points so presentation adapters can
 show the daemon's decision without rebuilding capacity policy locally.

@@ -413,6 +413,25 @@ where
             emit_response,
         )
     }
+
+    fn handle_provider_stream_multipart_part_upload_for_actor(
+        &self,
+        request: ProviderStreamMultipartPartUploadOpenRequest,
+        actor: Option<&DaemonLocalActor>,
+        read_frame: &mut dyn FnMut() -> Result<
+            (ProviderStreamChunkHeader, Vec<u8>),
+            UnixSocketDaemonServerError,
+        >,
+        emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
+    ) -> Result<(), UnixSocketDaemonServerError> {
+        DaemonRequestHandler::<S, C>::handle_provider_stream_multipart_part_upload_for_actor(
+            self,
+            request,
+            actor,
+            read_frame,
+            emit_response,
+        )
+    }
 }
 
 impl<F> DaemonApiHandler for F

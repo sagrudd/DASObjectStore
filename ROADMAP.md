@@ -1374,6 +1374,9 @@ bounded binary frames and returning a typed acknowledgement contract;
 daemon-owned multipart journals now persist verified part bytes and metadata
 under the private profile namespace, reopen across request boundaries, and
 accept retries idempotently by reservation/part identity;
+Unix daemon handling now authorizes the profile, admits the full reservation
+once, routes frames through that journal, and releases the admission on a
+first-part failure;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
 list prefixes apply the same relative-namespace boundary while allowing a
