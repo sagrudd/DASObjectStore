@@ -1377,6 +1377,10 @@ accept retries idempotently by reservation/part identity;
 Unix daemon handling now authorizes the profile, admits the full reservation
 once, routes frames through that journal, and releases the admission on a
 first-part failure;
+the daemon completion command now requires the exact verified part set,
+reopens journal readers, runs a pre-admitted transactional assembly, commits
+the catalogue/capacity reservation once, and removes the journal only after
+durable success;
 all profile-S3 object responses reject unsafe logical keys, zero versions, and
 malformed SHA-256 checksums before transport dispatch;
 list prefixes apply the same relative-namespace boundary while allowing a
@@ -1420,7 +1424,8 @@ dispatches it through the daemon; listener authentication and mTLS verification
 remain deployment-layer work.
 Stable profile-S3 route constants now identify bounded object listing and
 reservation-bound multipart completion without introducing an HTTP listener;
-listener authentication, request routing, and runtime store dispatch remain.
+daemon request routing and runtime store dispatch now consume the journal-backed
+completion command, while listener authentication remains separate.
 Capacity-enabled local ingest also rejects a client copy-count override before
 any source read when it differs from the daemon ObjectStore policy; legacy
 standalone executor paths retain their explicit override behavior.

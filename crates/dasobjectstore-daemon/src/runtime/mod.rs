@@ -144,6 +144,7 @@ pub use profile_registry::{
 };
 pub use profile_s3::{
     assemble_profile_s3_multipart, complete_profile_s3_multipart,
+    complete_profile_s3_multipart_with_admitted_capacity_provider,
     complete_profile_s3_multipart_with_capacity_provider, delete_profile_object,
     delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
     head_profile_object, list_profile_objects, list_profile_objects_page, profile_diagnostics,

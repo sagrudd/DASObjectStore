@@ -59,6 +59,10 @@ where
         | DaemonApiRequest::ObjectBrowser(_)
         | DaemonApiRequest::ProfileBrowser(_)
         | DaemonApiRequest::ProfileS3List(_)
+        | DaemonApiRequest::ProfileS3MultipartComplete(_)
+        | DaemonApiRequest::ProfileS3Head(_)
+        | DaemonApiRequest::ProfileS3Verify(_)
+        | DaemonApiRequest::ProfileS3Health(_)
         | DaemonApiRequest::ProfileDiagnostics(_)
         | DaemonApiRequest::ObjectDownload(_)
         | DaemonApiRequest::ObjectFolderDownload(_)) => {

@@ -756,6 +756,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
+        DaemonApiResponse::ProfileS3MultipartComplete(_) => "profile_s3_multipart_complete",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",
         DaemonApiResponse::ProfileS3Verify(_) => "profile_s3_verify",
         DaemonApiResponse::ProfileS3Health(_) => "profile_s3_health",

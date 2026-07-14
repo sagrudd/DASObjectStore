@@ -185,7 +185,7 @@ The caller cannot replace those logical observations with request data. Atomic
 reservation mutation and live S3/multipart route wiring remain follow-up work.
 The daemon Unix contract now includes a reservation-bound multipart-part frame
 envelope and typed acknowledgement; runtime staging/settlement and HTTP route
-wiring still require the next daemon-owned implementation slice.
+wiring are split into daemon and outer-adapter boundaries.
 Verified part bytes now have a daemon-owned durable journal under the private
 profile namespace, so a completion request can reopen staged parts without
 trusting client paths; capacity settlement and completion assembly remain
@@ -193,6 +193,9 @@ daemon operations.
 The Unix daemon path now performs profile authorization and full-reservation
 admission before accepting the first part, and releases that admission if
 staging fails.
+Completion now reopens the journal, verifies the exact ordered part set, and
+settles the existing reservation only after catalogue commit; a failed
+completion retains durable staged data for reconciliation.
 The response also carries raw backend free space, configured warning/critical
 thresholds, and copy-amplification basis points so presentation adapters can
 show the daemon's decision without rebuilding capacity policy locally.

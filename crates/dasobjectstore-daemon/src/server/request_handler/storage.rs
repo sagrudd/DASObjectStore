@@ -448,6 +448,157 @@ where
                 store_id, page,
             )))
         }
+        DaemonApiRequest::ProfileS3MultipartComplete(request) => {
+            let store_id = match handler.authorize_endpoint_write(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        "multipart completion requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_unavailable",
+                    "multipart completion is available for bounded folder profiles only",
+                )));
+            }
+            let capacity = match read_store_registry(&handler.store_registry_path) {
+                Ok(definitions) => definitions
+                    .into_iter()
+                    .find(|definition| definition.store_id == store_id)
+                    .map(|definition| definition.policy.capacity),
+                Err(_) => None,
+            };
+            let Some(capacity) = capacity else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_unavailable",
+                    "profile S3 capacity policy is unavailable",
+                )));
+            };
+            let backend_root = binding.backend_root.clone();
+            let journal = match crate::runtime::MultipartPartJournal::open_for_completion(
+                &backend_root,
+                store_id.as_str(),
+                &request.reservation_id,
+                request.key.clone(),
+                request.expected_size_bytes,
+            ) {
+                Ok(journal) => journal,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
+            let journal_parts = journal.parts().collect::<Vec<_>>();
+            let requested_parts = request
+                .parts
+                .iter()
+                .map(|part| crate::runtime::MultipartPartRecord {
+                    part_number: part.part_number,
+                    size_bytes: part.size_bytes,
+                    checksum: part.checksum.clone(),
+                })
+                .collect::<Vec<_>>();
+            if journal_parts != requested_parts
+                || journal.staged_bytes() != request.expected_size_bytes
+            {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_multipart_incomplete",
+                    "multipart completion does not match all verified staged parts",
+                )));
+            }
+            let mut sources = Vec::with_capacity(request.parts.len());
+            for part in &request.parts {
+                let reader = match journal.open_part(part.part_number) {
+                    Ok(reader) => reader,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_incomplete",
+                            error.to_string(),
+                        )));
+                    }
+                };
+                sources.push(crate::runtime::ProfileS3MultipartPartSource {
+                    part: crate::runtime::ProfileS3MultipartPart {
+                        part_number: part.part_number,
+                        size_bytes: part.size_bytes,
+                        checksum: part.checksum.clone(),
+                    },
+                    reader: Box::new(reader),
+                });
+            }
+            let mut backend = match FolderBackend::open(backend_root, binding.manifest, capacity, 0)
+            {
+                Ok(backend) => backend,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
+            let Some(provider) = handler.service_orchestrator.capacity_provider() else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_multipart_unavailable",
+                    "multipart completion requires daemon capacity admission",
+                )));
+            };
+            let completion = crate::runtime::ProfileS3MultipartCompletion {
+                reservation_id: request.reservation_id.clone(),
+                key: request.key.clone(),
+                expected_size_bytes: request.expected_size_bytes,
+                parts: request
+                    .parts
+                    .iter()
+                    .map(|part| crate::runtime::ProfileS3MultipartPart {
+                        part_number: part.part_number,
+                        size_bytes: part.size_bytes,
+                        checksum: part.checksum.clone(),
+                    })
+                    .collect(),
+            };
+            let record =
+                match crate::runtime::complete_profile_s3_multipart_with_admitted_capacity_provider(
+                    provider.as_ref(),
+                    store_id.as_str(),
+                    &mut backend,
+                    &completion,
+                    sources,
+                ) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_failed",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let response = crate::api::ProfileS3MultipartCompletionResponse {
+                schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                store_id,
+                reservation_id: request.reservation_id,
+                key: record.key,
+                committed: true,
+            };
+            let _ = journal.remove();
+            Ok(DaemonApiResponse::ProfileS3MultipartComplete(response))
+        }
         DaemonApiRequest::ProfileS3Head(request) => {
             let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
                 Ok(store_id) => store_id,

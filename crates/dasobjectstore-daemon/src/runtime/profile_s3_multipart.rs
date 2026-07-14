@@ -99,6 +99,40 @@ impl MultipartPartJournal {
         self.manifest.parts.iter().map(|part| part.size_bytes).sum()
     }
 
+    pub fn open_for_completion(
+        root: impl AsRef<Path>,
+        store_id: &str,
+        reservation_id: &str,
+        object: BackendObjectKey,
+        reservation_size_bytes: u64,
+    ) -> Result<Self, MultipartPartJournalError> {
+        let store_id = dasobjectstore_core::ids::StoreId::new(store_id.to_string())
+            .map_err(|_| MultipartPartJournalError::IdentityMismatch)?;
+        let request = ProviderStreamMultipartPartUploadOpenRequest {
+            schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "completion".to_string(),
+            reservation_id: reservation_id.to_string(),
+            reservation_size_bytes,
+            part_number: 1,
+            store_id,
+            object,
+            expected_size_bytes: reservation_size_bytes,
+            expected_sha256: format!("sha256:{}", "0".repeat(64)),
+            chunk_size_bytes: crate::api::PROVIDER_STREAM_MAX_CHUNK_BYTES,
+        };
+        let directory = root
+            .as_ref()
+            .join(NAMESPACE)
+            .join(MULTIPART_DIR)
+            .join(reservation_id);
+        if !directory.join(MANIFEST_FILE).exists() {
+            return Err(MultipartPartJournalError::Manifest(
+                "multipart reservation journal is missing".to_string(),
+            ));
+        }
+        Self::open(root, &request)
+    }
+
     pub fn parts(&self) -> impl Iterator<Item = MultipartPartRecord> + '_ {
         self.manifest.parts.iter().map(|part| MultipartPartRecord {
             part_number: part.part_number,
@@ -226,6 +260,10 @@ impl MultipartPartJournal {
             .find(|part| part.part_number == part_number)
             .ok_or(MultipartPartJournalError::PartNotFound)?;
         Ok(File::open(self.directory.join(&part.file_name)).map_err(io_error)?)
+    }
+
+    pub fn remove(self) -> Result<(), MultipartPartJournalError> {
+        fs::remove_dir_all(self.directory).map_err(io_error)
     }
 
     fn persist(&self) -> Result<(), MultipartPartJournalError> {

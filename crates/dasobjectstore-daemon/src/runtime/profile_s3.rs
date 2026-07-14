@@ -230,6 +230,29 @@ pub fn complete_profile_s3_multipart_with_capacity_provider<'a>(
     )
 }
 
+/// Complete multipart data after the daemon has already admitted the full
+/// reservation while staging parts. This path never re-admits the same
+/// reservation; it settles the existing provider reservation only after the
+/// assembled object is durable and catalogue-committed.
+pub fn complete_profile_s3_multipart_with_admitted_capacity_provider<'a>(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    backend: &mut dyn ProfileS3WriteBackend,
+    completion: &ProfileS3MultipartCompletion,
+    sources: Vec<ProfileS3MultipartPartSource<'a>>,
+) -> Result<BackendObjectRecord, BackendError> {
+    let mut reader = assemble_profile_s3_multipart(completion, sources)?;
+    put_profile_object_with_admitted_capacity_provider(
+        capacity_provider,
+        store_id,
+        backend,
+        &completion.reservation_id,
+        &completion.key,
+        &mut reader,
+        completion.expected_size_bytes,
+    )
+}
+
 impl Read for ProfileS3MultipartReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if buffer.is_empty() || self.finished {
@@ -784,6 +807,57 @@ pub fn put_profile_object_with_capacity_provider(
     };
     // Do not release either reservation here: the payload is durable even if
     // catalogue persistence or logical admission commit subsequently fails.
+    backend.commit_batch(std::slice::from_ref(&finalized))?;
+    capacity_provider
+        .commit(&store_id, reservation_id)
+        .map_err(|error| {
+            BackendError::InvalidRequest(format!(
+                "profile S3 capacity commit failed after durable finalization: {error}"
+            ))
+        })?;
+    Ok(finalized)
+}
+
+fn put_profile_object_with_admitted_capacity_provider(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    backend: &mut dyn ProfileS3WriteBackend,
+    reservation_id: &str,
+    key: &BackendObjectKey,
+    source: &mut dyn Read,
+    size_bytes: u64,
+) -> Result<BackendObjectRecord, BackendError> {
+    validate_runtime_key(key)?;
+    let store_id = StoreId::new(store_id.to_string()).map_err(|error| {
+        BackendError::InvalidRequest(format!("invalid profile S3 ObjectStore id: {error}"))
+    })?;
+    backend.reserve(reservation_id, size_bytes)?;
+    let staged = match backend.stage(reservation_id, key, source) {
+        Ok(staged) => staged,
+        Err(error) => {
+            let backend_cleanup = backend.abort_profile_s3_object(reservation_id, None);
+            let provider_cleanup = capacity_provider
+                .release(&store_id, reservation_id)
+                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            return Err(with_cleanup_error(
+                error,
+                combine_cleanup(backend_cleanup, provider_cleanup),
+            ));
+        }
+    };
+    let finalized = match backend.finalize(staged.clone()) {
+        Ok(finalized) => finalized,
+        Err(error) => {
+            let backend_cleanup = backend.abort_profile_s3_object(reservation_id, Some(&staged));
+            let provider_cleanup = capacity_provider
+                .release(&store_id, reservation_id)
+                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            return Err(with_cleanup_error(
+                error,
+                combine_cleanup(backend_cleanup, provider_cleanup),
+            ));
+        }
+    };
     backend.commit_batch(std::slice::from_ref(&finalized))?;
     capacity_provider
         .commit(&store_id, reservation_id)

@@ -947,9 +947,14 @@ hardware acceptance.
     and reopen across request boundaries with idempotent reservation/part
     retries. Capacity admission settlement and completion consumption remain
     separate runtime steps.
+  - [x] Wire daemon multipart completion through the durable journal: completion
+    requires the exact verified part set, reopens daemon-owned readers, uses a
+    pre-admitted transactional assembler, commits the catalogue and capacity
+    reservation once, and removes the journal only after durable success.
   - [x] Publish stable profile-S3 route constants for bounded object listing
-    and reservation-bound multipart completion; listener authentication,
-    request routing, and runtime store dispatch remain open.
+    and reservation-bound multipart completion; daemon request routing and
+    runtime store dispatch now complete through the journal-backed completion
+    command, while authenticated HTTP listener wiring remains open.
   - [x] Wire the bounded Unix provider-stream upload into the folder-profile
     daemon path. Writer-group authorization, logical/physical reservation,
     frame-by-frame size/checksum verification, staged fsync/rename, and the
