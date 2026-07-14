@@ -1,9 +1,9 @@
 //! Bounded metadata for daemon-owned provider byte streams.
 //!
-//! The Unix-socket transport currently returns JSON responses only. These
-//! contracts describe the safe framing boundary for a future binary stream:
-//! JSON carries request and chunk metadata, while payload bytes travel in
-//! bounded binary frames and never as base64 or backend paths.
+//! The Unix-socket transport carries JSON request/response envelopes alongside
+//! bounded binary frames. JSON carries request and chunk metadata, while
+//! payload bytes travel in length-prefixed frames and never as base64 or
+//! backend paths.
 
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
