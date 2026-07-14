@@ -8,6 +8,7 @@
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::io::{self, Read, Write};
 
@@ -212,6 +213,89 @@ pub fn read_provider_stream_frame<R: Read>(
     Ok((header, payload))
 }
 
+/// Cumulatively verify one provider stream before publishing it as complete.
+/// Each frame must begin exactly at the previous frame's end; the terminal
+/// header supplies the authoritative object size and checksum.
+pub struct ProviderStreamVerifier {
+    request_id: String,
+    next_offset: u64,
+    hasher: Sha256,
+}
+
+impl ProviderStreamVerifier {
+    pub fn new(request_id: impl Into<String>) -> Result<Self, ProviderStreamVerificationError> {
+        let request_id = request_id.into();
+        if request_id.trim().is_empty() {
+            return Err(ProviderStreamVerificationError::InvalidRequestId);
+        }
+        Ok(Self {
+            request_id,
+            next_offset: 0,
+            hasher: Sha256::new(),
+        })
+    }
+
+    pub fn push(
+        &mut self,
+        header: &ProviderStreamChunkHeader,
+        payload: &[u8],
+    ) -> Result<(), ProviderStreamVerificationError> {
+        header.validate()?;
+        if header.request_id != self.request_id {
+            return Err(ProviderStreamVerificationError::RequestIdMismatch);
+        }
+        if header.offset != self.next_offset {
+            return Err(ProviderStreamVerificationError::NonContiguous {
+                expected_offset: self.next_offset,
+                actual_offset: header.offset,
+            });
+        }
+        if payload.len() != header.payload_len as usize {
+            return Err(ProviderStreamVerificationError::PayloadLengthMismatch {
+                declared: header.payload_len,
+                actual: payload.len(),
+            });
+        }
+        self.hasher.update(payload);
+        self.next_offset = self
+            .next_offset
+            .checked_add(payload.len() as u64)
+            .ok_or(ProviderStreamVerificationError::SizeOverflow)?;
+        Ok(())
+    }
+
+    pub fn finish(
+        mut self,
+        header: &ProviderStreamChunkHeader,
+        payload: &[u8],
+    ) -> Result<u64, ProviderStreamVerificationError> {
+        if !header.final_chunk {
+            return Err(ProviderStreamVerificationError::FinalHeaderRequired);
+        }
+        self.push(header, payload)?;
+        let total_size = header
+            .total_size
+            .ok_or(ProviderStreamVerificationError::FinalHeaderRequired)?;
+        if total_size != self.next_offset {
+            return Err(ProviderStreamVerificationError::FinalSizeMismatch {
+                expected: total_size,
+                actual: self.next_offset,
+            });
+        }
+        let expected = header
+            .sha256
+            .as_deref()
+            .ok_or(ProviderStreamVerificationError::FinalHeaderRequired)?
+            .strip_prefix("sha256:")
+            .ok_or(ProviderStreamVerificationError::FinalHeaderRequired)?;
+        let actual = format!("{:x}", self.hasher.finalize());
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(ProviderStreamVerificationError::ChecksumMismatch);
+        }
+        Ok(total_size)
+    }
+}
+
 fn read_u32<R: Read>(reader: &mut R) -> Result<u32, ProviderStreamFrameError> {
     let mut bytes = [0; 4];
     reader.read_exact(&mut bytes)?;
@@ -273,6 +357,66 @@ impl From<io::Error> for ProviderStreamFrameError {
 impl From<ProviderStreamValidationError> for ProviderStreamFrameError {
     fn from(error: ProviderStreamValidationError) -> Self {
         Self::Validation(error)
+    }
+}
+
+#[derive(Debug)]
+pub enum ProviderStreamVerificationError {
+    InvalidRequestId,
+    RequestIdMismatch,
+    NonContiguous {
+        expected_offset: u64,
+        actual_offset: u64,
+    },
+    PayloadLengthMismatch {
+        declared: u32,
+        actual: usize,
+    },
+    SizeOverflow,
+    FinalHeaderRequired,
+    FinalSizeMismatch {
+        expected: u64,
+        actual: u64,
+    },
+    ChecksumMismatch,
+    InvalidHeader(ProviderStreamValidationError),
+}
+
+impl Display for ProviderStreamVerificationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRequestId => formatter.write_str("provider stream request id is blank"),
+            Self::RequestIdMismatch => formatter.write_str("provider stream request id changed"),
+            Self::NonContiguous {
+                expected_offset,
+                actual_offset,
+            } => write!(
+                formatter,
+                "provider stream offset is not contiguous: expected {expected_offset}, got {actual_offset}"
+            ),
+            Self::PayloadLengthMismatch { declared, actual } => write!(
+                formatter,
+                "provider stream payload length mismatch: declared {declared}, actual {actual}"
+            ),
+            Self::SizeOverflow => formatter.write_str("provider stream size overflows"),
+            Self::FinalHeaderRequired => {
+                formatter.write_str("provider stream requires a terminal header")
+            }
+            Self::FinalSizeMismatch { expected, actual } => write!(
+                formatter,
+                "provider stream final size mismatch: expected {expected}, got {actual}"
+            ),
+            Self::ChecksumMismatch => formatter.write_str("provider stream checksum mismatch"),
+            Self::InvalidHeader(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for ProviderStreamVerificationError {}
+
+impl From<ProviderStreamValidationError> for ProviderStreamVerificationError {
+    fn from(error: ProviderStreamValidationError) -> Self {
+        Self::InvalidHeader(error)
     }
 }
 
@@ -479,6 +623,42 @@ mod tests {
             read_provider_stream_frame(&mut oversized.as_slice()),
             Err(ProviderStreamFrameError::HeaderTooLarge { .. })
         ));
+    }
+
+    #[test]
+    fn verifier_requires_contiguous_chunks_and_matching_final_checksum() {
+        let mut verifier = ProviderStreamVerifier::new("stream-1").expect("verifier");
+        let first = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "stream-1".to_string(),
+            offset: 0,
+            payload_len: 3,
+            final_chunk: false,
+            total_size: None,
+            sha256: None,
+        };
+        verifier.push(&first, b"abc").expect("first chunk");
+        let gap = ProviderStreamChunkHeader {
+            offset: 4,
+            payload_len: 3,
+            ..first.clone()
+        };
+        assert!(matches!(
+            verifier.push(&gap, b"def"),
+            Err(ProviderStreamVerificationError::NonContiguous { .. })
+        ));
+
+        let mut all = Sha256::new();
+        all.update(b"abcdef");
+        let final_header = ProviderStreamChunkHeader {
+            offset: 3,
+            payload_len: 3,
+            final_chunk: true,
+            total_size: Some(6),
+            sha256: Some(format!("sha256:{:x}", all.finalize())),
+            ..first
+        };
+        assert_eq!(verifier.finish(&final_header, b"def").expect("finish"), 6);
     }
 
     #[test]

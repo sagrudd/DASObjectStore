@@ -2393,9 +2393,9 @@ list until every temporary size-budget exception has been removed.
     file-descriptor handoff for provider bytes. Do not return backend paths or
     base64 an unbounded object in JSON. A versioned, path-free open request,
     range/conditional contract, metadata-only bounded chunk header, and
-    bounded magic/length-prefixed frame codec now define the binary framing;
-    socket request dispatch, cancellation, and cumulative final verification
-    wiring remain before adding the HTTP route.
+    bounded magic/length-prefixed frame codec and cumulative verifier now
+    define the binary framing and final size/checksum gate; socket request
+    dispatch and cancellation wiring remain before adding the HTTP route.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

@@ -71,6 +71,7 @@ pub use api::{
     ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
     ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamFrameError,
     ProviderStreamOpenRequest, ProviderStreamRange, ProviderStreamValidationError,
+    ProviderStreamVerificationError, ProviderStreamVerifier,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,

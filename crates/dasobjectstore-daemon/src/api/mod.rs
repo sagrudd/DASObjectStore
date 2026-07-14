@@ -170,8 +170,9 @@ pub use profile_s3::{
 pub use provider_stream::{
     read_provider_stream_frame, write_provider_stream_frame, ProviderStreamChunkHeader,
     ProviderStreamCondition, ProviderStreamFrameError, ProviderStreamOpenRequest,
-    ProviderStreamRange, ProviderStreamValidationError, PROVIDER_STREAM_MAX_CHUNK_BYTES,
-    PROVIDER_STREAM_MAX_HEADER_BYTES, PROVIDER_STREAM_SCHEMA_VERSION,
+    ProviderStreamRange, ProviderStreamValidationError, ProviderStreamVerificationError,
+    ProviderStreamVerifier, PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
+    PROVIDER_STREAM_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
