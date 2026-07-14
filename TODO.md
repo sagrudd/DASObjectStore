@@ -841,6 +841,11 @@ completion.
   - [x] Expose the same profile-S3 HEAD metadata contract through the CLI as
     ``store profile-head`` with human and JSON output; payload reads remain
     separate from this metadata-only command.
+  - [ ] Authenticated HTTP GET/PUT and multipart routing follow the bounded
+    daemon payload transport blocker recorded in the Critical viewer follow-up
+    above; keep catalogue authority and provider credentials inside the daemon
+    and fail closed rather than introducing a path-bearing or unbounded JSON
+    shortcut.
   - [x] Add an authenticated profile-S3 health projection for bounded folder
     bindings, returning only provider-neutral state/message fields through the
     daemon bridge; the authenticated Web health route delegates through the
@@ -2323,6 +2328,14 @@ list until every temporary size-budget exception has been removed.
     while the caller consumes the stream, rejecting payload drift instead of
     returning an unchecked provider reader; HTTP/provider-backed route wiring
     remains separate.
+  - [ ] **Blocker (transport contract):** the daemon Unix-socket protocol
+    currently returns one JSON response and has no bounded binary-chunk or
+    file-descriptor handoff for provider bytes. Do not return backend paths or
+    base64 an unbounded object in JSON. Recommended next contract is a bounded
+    daemon-owned chunk stream (or equivalent descriptor-passing transport) with
+    an opaque request identity, per-chunk byte limits, final size/checksum
+    verification, cancellation, and explicit range/conditional-request
+    semantics before adding the HTTP route.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

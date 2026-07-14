@@ -173,6 +173,12 @@ versioned path-free list transport projection; authenticated HTTP gateway and
 multipart dispatch remain deliberately separate. An authenticated profile-S3
 HEAD transport now exposes bounded logical key/version/size/checksum metadata
 through the same daemon bridge without revealing backend paths.
+Provider-backed Web GET/HTTP gateway payload routing is intentionally blocked
+until the daemon Unix-socket protocol gains a bounded binary-chunk (or
+descriptor-passing) handoff with opaque stream identity, cancellation,
+range/conditional semantics, and final size/checksum verification. Returning
+backend paths or embedding unbounded object bytes in JSON would violate the
+authority and data-plane boundaries.
 Folder catalogue mutations now reload the latest durable snapshot under a
 daemon-local serialization boundary before atomic publication, preserving
 sibling records when concurrent request handles commit independently.
