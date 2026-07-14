@@ -1695,7 +1695,7 @@ list until every temporary size-budget exception has been removed.
 - [x] Keep the guarded legacy `direct-to-HDD` import on the same inline-hash
   copy path: an expected digest is now an optional post-copy check, so callers
   without trusted source metadata do not trigger a strict pre-copy read.
-- [ ] Add appliance sustained external-origin throughput and direct-ingest
+- [~] Add appliance sustained external-origin throughput and direct-ingest
   no-precopy soak acceptance. Broader performance/soak acceptance remains
   tracked under Web availability. Deferred while travelling without DAS host
   access; when resumed, verify the appliance is quiescent and do not overlap
@@ -1717,7 +1717,7 @@ list until every temporary size-budget exception has been removed.
   udev mount policy that gives FAT/exFAT/NTFS volumes read-only
   `dasobjectstore` group access at mount time. Unsupported filesystems remain
   explicit CLI diagnostics rather than receiving unsafe broad permissions.
-- [ ] Add an appliance performance acceptance run using a server-local NVMe source and a policy-approved direct-HDD store. Verify that no SSD ingest stage is entered, a bounded one-read fan-out uses distinct HDDs, and the preflight/TUI route explanation matches the daemon decision. Acceptance is gated on a quiescent appliance: do not overlap production ingest, repair/drain, or another performance run. The repeatable sequence is a small `performance-test --scenario direct-hdd --hdd-concurrency 1,2,3,4` run for per-disk/SSD-stage evidence, followed by a `ingest direct-import --dry-run --tui` against the same server-local source to capture the daemon preflight route; only then run the bounded non-dry-run fixture and archive its JSON/TUI evidence.
+- [~] Add an appliance performance acceptance run using a server-local NVMe source and a policy-approved direct-HDD store. Verify that no SSD ingest stage is entered, a bounded one-read fan-out uses distinct HDDs, and the preflight/TUI route explanation matches the daemon decision. Acceptance is gated on a quiescent appliance: do not overlap production ingest, repair/drain, or another performance run. The repeatable sequence is a small `performance-test --scenario direct-hdd --hdd-concurrency 1,2,3,4` run for per-disk/SSD-stage evidence, followed by a `ingest direct-import --dry-run --tui` against the same server-local source to capture the daemon preflight route; only then run the bounded non-dry-run fixture and archive its JSON/TUI evidence.
 - [x] Document the supported operator workflow for inspecting a store's ingest policy, requesting a policy-allowed direct local ingest, and interpreting an SSD-first fallback. Keep external/removable-source staging and data-loss safeguards explicit in `docs/user/ingesting-files.rst`.
 
 - [x] Add a `dasobjectstore-daemon` crate with a small runtime module boundary,
@@ -1972,7 +1972,7 @@ list until every temporary size-budget exception has been removed.
     saturated bridge returns the typed HTTP 429 response before invoking the
     client; appliance I/O saturation and accept-queue measurements remain
     acceptance work.
-- [ ] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
+- [~] Run an appliance soak acceptance test using direct NVMe source reads plus multi-HDD settlement at the configured maximum. Record p95/p99 Web health and dashboard latency, PSI, disk queue latency, and recovery after throttling; fail the release if the WebUI cannot serve its liveness endpoint within the control-plane SLO.
 - [x] Document operator triage for an ingest-pressure incident, including SSD
   pressure, queue/verification indicators, safe daemon throttle/pause/resume
   actions, expected degraded WebUI behavior, and escalation evidence. The
@@ -2707,7 +2707,7 @@ list until every temporary size-budget exception has been removed.
   - [x] Preserve invalid daily samples as fixed-position chart gaps, split SVG
     lines at missing intervals, and show a non-interpolating gap diagnostic;
     the broader appliance integration fixture matrix remains open.
-- [ ] Add appliance integration coverage using managed marker, mount, sysfs,
+- [~] Add appliance integration coverage using managed marker, mount, sysfs,
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device
   diagnostics, Disk IO card values, and throughput-chart points.
