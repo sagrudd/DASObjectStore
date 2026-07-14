@@ -9,9 +9,12 @@ use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
+use std::io::{self, Read, Write};
 
 pub const PROVIDER_STREAM_SCHEMA_VERSION: &str = "dasobjectstore.provider_stream.v1";
 pub const PROVIDER_STREAM_MAX_CHUNK_BYTES: u32 = 1024 * 1024;
+pub const PROVIDER_STREAM_MAX_HEADER_BYTES: u32 = 4096;
+const PROVIDER_STREAM_FRAME_MAGIC: &[u8; 4] = b"DPS1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -138,6 +141,138 @@ impl ProviderStreamChunkHeader {
             return Err(ProviderStreamValidationError::NonFinalMetadataPresent);
         }
         Ok(())
+    }
+}
+
+/// Write one bounded binary frame. The header is JSON metadata; the payload is
+/// written as raw bytes after the fixed magic/length prefix and is never
+/// embedded in JSON.
+pub fn write_provider_stream_frame<W: Write>(
+    writer: &mut W,
+    header: &ProviderStreamChunkHeader,
+    payload: &[u8],
+) -> Result<(), ProviderStreamFrameError> {
+    header.validate()?;
+    if payload.len() != header.payload_len as usize {
+        return Err(ProviderStreamFrameError::PayloadLengthMismatch {
+            declared: header.payload_len,
+            actual: payload.len(),
+        });
+    }
+    let encoded_header = serde_json::to_vec(header)
+        .map_err(|error| ProviderStreamFrameError::HeaderEncode(error.to_string()))?;
+    if encoded_header.len() > PROVIDER_STREAM_MAX_HEADER_BYTES as usize {
+        return Err(ProviderStreamFrameError::HeaderTooLarge {
+            header_bytes: encoded_header.len(),
+        });
+    }
+    writer.write_all(PROVIDER_STREAM_FRAME_MAGIC)?;
+    writer.write_all(&(encoded_header.len() as u32).to_be_bytes())?;
+    writer.write_all(&(payload.len() as u32).to_be_bytes())?;
+    writer.write_all(&encoded_header)?;
+    writer.write_all(payload)?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Read one bounded binary frame, allocating at most one configured chunk and
+/// a small metadata header. Callers must perform cumulative checksum
+/// verification when the final header is received.
+pub fn read_provider_stream_frame<R: Read>(
+    reader: &mut R,
+) -> Result<(ProviderStreamChunkHeader, Vec<u8>), ProviderStreamFrameError> {
+    let mut magic = [0; 4];
+    reader.read_exact(&mut magic)?;
+    if &magic != PROVIDER_STREAM_FRAME_MAGIC {
+        return Err(ProviderStreamFrameError::InvalidMagic);
+    }
+    let header_len = read_u32(reader)?;
+    if header_len > PROVIDER_STREAM_MAX_HEADER_BYTES {
+        return Err(ProviderStreamFrameError::HeaderTooLarge {
+            header_bytes: header_len as usize,
+        });
+    }
+    let payload_len = read_u32(reader)?;
+    if payload_len > PROVIDER_STREAM_MAX_CHUNK_BYTES {
+        return Err(ProviderStreamFrameError::PayloadTooLarge { payload_len });
+    }
+    let mut encoded_header = vec![0; header_len as usize];
+    reader.read_exact(&mut encoded_header)?;
+    let header = serde_json::from_slice::<ProviderStreamChunkHeader>(&encoded_header)
+        .map_err(|error| ProviderStreamFrameError::HeaderDecode(error.to_string()))?;
+    header.validate()?;
+    if payload_len != header.payload_len {
+        return Err(ProviderStreamFrameError::PayloadLengthMismatch {
+            declared: header.payload_len,
+            actual: payload_len as usize,
+        });
+    }
+    let mut payload = vec![0; payload_len as usize];
+    reader.read_exact(&mut payload)?;
+    Ok((header, payload))
+}
+
+fn read_u32<R: Read>(reader: &mut R) -> Result<u32, ProviderStreamFrameError> {
+    let mut bytes = [0; 4];
+    reader.read_exact(&mut bytes)?;
+    Ok(u32::from_be_bytes(bytes))
+}
+
+#[derive(Debug)]
+pub enum ProviderStreamFrameError {
+    Io(io::Error),
+    InvalidMagic,
+    HeaderTooLarge { header_bytes: usize },
+    PayloadTooLarge { payload_len: u32 },
+    PayloadLengthMismatch { declared: u32, actual: usize },
+    HeaderEncode(String),
+    HeaderDecode(String),
+    Validation(ProviderStreamValidationError),
+}
+
+impl Display for ProviderStreamFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(error) => write!(formatter, "provider stream frame IO failed: {error}"),
+            Self::InvalidMagic => formatter.write_str("invalid provider stream frame magic"),
+            Self::HeaderTooLarge { header_bytes } => {
+                write!(
+                    formatter,
+                    "provider stream header is too large: {header_bytes} bytes"
+                )
+            }
+            Self::PayloadTooLarge { payload_len } => {
+                write!(
+                    formatter,
+                    "provider stream payload is too large: {payload_len} bytes"
+                )
+            }
+            Self::PayloadLengthMismatch { declared, actual } => write!(
+                formatter,
+                "provider stream payload length mismatch: declared {declared}, actual {actual}"
+            ),
+            Self::HeaderEncode(error) => {
+                write!(formatter, "provider stream header encode failed: {error}")
+            }
+            Self::HeaderDecode(error) => {
+                write!(formatter, "provider stream header decode failed: {error}")
+            }
+            Self::Validation(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl std::error::Error for ProviderStreamFrameError {}
+
+impl From<io::Error> for ProviderStreamFrameError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<ProviderStreamValidationError> for ProviderStreamFrameError {
+    fn from(error: ProviderStreamValidationError) -> Self {
+        Self::Validation(error)
     }
 }
 
@@ -298,6 +433,51 @@ mod tests {
         assert!(matches!(
             non_final.validate(),
             Err(ProviderStreamValidationError::NonFinalMetadataPresent)
+        ));
+    }
+
+    #[test]
+    fn binary_frame_round_trips_without_json_payload() {
+        let header = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "stream-1".to_string(),
+            offset: 4,
+            payload_len: 3,
+            final_chunk: false,
+            total_size: None,
+            sha256: None,
+        };
+        let mut encoded = Vec::new();
+        write_provider_stream_frame(&mut encoded, &header, b"abc").expect("write frame");
+        assert_eq!(&encoded[..4], b"DPS1");
+        let (decoded, payload) =
+            read_provider_stream_frame(&mut encoded.as_slice()).expect("read frame");
+        assert_eq!(decoded, header);
+        assert_eq!(payload, b"abc");
+    }
+
+    #[test]
+    fn binary_frame_rejects_payload_mismatch_and_oversized_header() {
+        let header = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "stream-1".to_string(),
+            offset: 0,
+            payload_len: 3,
+            final_chunk: false,
+            total_size: None,
+            sha256: None,
+        };
+        let mut encoded = Vec::new();
+        assert!(matches!(
+            write_provider_stream_frame(&mut encoded, &header, b"ab"),
+            Err(ProviderStreamFrameError::PayloadLengthMismatch { .. })
+        ));
+        let mut oversized = b"DPS1".to_vec();
+        oversized.extend_from_slice(&(PROVIDER_STREAM_MAX_HEADER_BYTES + 1).to_be_bytes());
+        oversized.extend_from_slice(&0_u32.to_be_bytes());
+        assert!(matches!(
+            read_provider_stream_frame(&mut oversized.as_slice()),
+            Err(ProviderStreamFrameError::HeaderTooLarge { .. })
         ));
     }
 

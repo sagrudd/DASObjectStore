@@ -2392,10 +2392,10 @@ list until every temporary size-budget exception has been removed.
     currently returns one JSON response and has no bounded binary-chunk or
     file-descriptor handoff for provider bytes. Do not return backend paths or
     base64 an unbounded object in JSON. A versioned, path-free open request,
-    range/conditional contract, and metadata-only bounded chunk header now
-    define the recommended binary framing; socket frame dispatch,
-    cancellation, and final verification wiring remain before adding the HTTP
-    route.
+    range/conditional contract, metadata-only bounded chunk header, and
+    bounded magic/length-prefixed frame codec now define the binary framing;
+    socket request dispatch, cancellation, and cumulative final verification
+    wiring remain before adding the HTTP route.
 - [x] Show explicit browser diagnostics for a genuinely empty store versus
   uncatalogued backend objects, including catalogue count, backend count, last
   reconciliation time, and actionable failure details. The daemon-owned

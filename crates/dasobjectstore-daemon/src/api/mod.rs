@@ -168,9 +168,10 @@ pub use profile_s3::{
     PROFILE_S3_OBJECT_ROUTE, PROFILE_S3_ROUTE_PREFIX, PROFILE_S3_SCHEMA_VERSION,
 };
 pub use provider_stream::{
-    ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamOpenRequest,
+    read_provider_stream_frame, write_provider_stream_frame, ProviderStreamChunkHeader,
+    ProviderStreamCondition, ProviderStreamFrameError, ProviderStreamOpenRequest,
     ProviderStreamRange, ProviderStreamValidationError, PROVIDER_STREAM_MAX_CHUNK_BYTES,
-    PROVIDER_STREAM_SCHEMA_VERSION,
+    PROVIDER_STREAM_MAX_HEADER_BYTES, PROVIDER_STREAM_SCHEMA_VERSION,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
