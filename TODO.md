@@ -838,8 +838,10 @@ hardware acceptance.
   checksum headers, channel backpressure, disconnect cancellation, and a
   typed acknowledgement only after catalogue persistence. Authenticated HTTP
   GET/range now relays daemon-verified frames through the same bounded bridge;
-  **remaining execution gate:** multipart routing still needs an adapter with
-  the same daemon-owned staging identity and transactional semantics.
+  multipart part/completion now use the same daemon-owned staging identity and
+  transactional semantics, and authenticated DELETE is catalogue-authoritative
+  with post-delete capacity reconciliation. Provider-native verification and
+  appliance acceptance remain separately gated.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative
@@ -848,6 +850,11 @@ hardware acceptance.
     hashes bytes in flight and rejects catalogue checksum drift before
     reporting success. The general GET reader now performs the same declared
     size/checksum verification as bytes are consumed.
+  - [x] Add the typed profile-S3 DELETE daemon operation and authenticated Web
+    route. Missing keys are idempotent no-ops; existing keys require daemon
+    capacity admission and reconcile logical used bytes only after the
+    catalogue-authoritative removal. Backend paths and provider credentials
+    remain outside the request/response contract.
   - [x] Add a provider-neutral profile PUT adapter requiring a known content
     length, transactional quota reservation, in-flight hashing, staged
     fsync/rename finalization, and catalogue commit; failed staging/finalization

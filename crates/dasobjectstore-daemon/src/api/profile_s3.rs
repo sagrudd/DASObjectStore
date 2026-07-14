@@ -9,6 +9,7 @@ pub const PROFILE_S3_MAX_MULTIPART_PARTS: usize = 10_000;
 pub const PROFILE_S3_ROUTE_PREFIX: &str = "/api/v1/profile-s3";
 pub const PROFILE_S3_OBJECTS_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects";
 pub const PROFILE_S3_OBJECT_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects/{key}";
+pub const PROFILE_S3_DELETE_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/objects/{key}";
 pub const PROFILE_S3_HEALTH_ROUTE: &str = "/api/v1/profile-s3/stores/{store_id}/health";
 pub const PROFILE_S3_MULTIPART_COMPLETE_ROUTE: &str =
     "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete";
@@ -36,6 +37,10 @@ pub struct ProfileS3HeadRequest {
     pub key: BackendObjectKey,
 }
 
+/// Catalogue-authoritative, idempotent profile-object deletion request.
+/// Backend roots and provider credentials remain daemon-owned.
+pub type ProfileS3DeleteRequest = ProfileS3HeadRequest;
+
 impl ProfileS3HeadRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         if self.store_id.as_str().trim().is_empty() {
@@ -60,6 +65,27 @@ pub struct ProfileS3HeadResponse {
     pub schema_version: String,
     pub store_id: StoreId,
     pub object: ProfileS3ObjectView,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3DeleteResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub key: BackendObjectKey,
+    pub deleted: bool,
+}
+
+impl ProfileS3DeleteResponse {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema_version != PROFILE_S3_SCHEMA_VERSION {
+            return Err("unsupported profile S3 schema".to_string());
+        }
+        if self.store_id.as_str().trim().is_empty() {
+            return Err("profile S3 delete response store identity must not be blank".to_string());
+        }
+        validate_object_key(&self.key)
+            .map_err(|value| format!("profile S3 delete response key is invalid: {value}"))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -440,6 +466,29 @@ mod tests {
         response.objects[0].key.version = 1;
         response.objects[0].checksum = "sha256:short".to_string();
         assert!(response.validate().is_err());
+    }
+
+    #[test]
+    fn delete_contract_is_path_free_and_reports_idempotent_result() {
+        let request = ProfileS3DeleteRequest {
+            store_id: StoreId::new("codex").expect("store id"),
+            key: BackendObjectKey {
+                object_id: "writes/sample.fastq".to_string(),
+                version: 1,
+            },
+        };
+        request.validate().expect("delete request validates");
+        let response = ProfileS3DeleteResponse {
+            schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+            store_id: request.store_id.clone(),
+            key: request.key.clone(),
+            deleted: false,
+        };
+        response.validate().expect("delete response validates");
+        let json = serde_json::to_string(&response).expect("response serializes");
+        assert!(!json.contains("backend_root"));
+        assert!(!json.contains("credentials"));
+        assert!(json.contains("\"deleted\":false"));
     }
 
     #[test]

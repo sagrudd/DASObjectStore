@@ -94,7 +94,9 @@ pub(crate) fn standalone_dashboard_router_with_state(
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/objects/{*object_id}",
-            get(standalone_profile_s3_get).put(standalone_profile_s3_put),
+            get(standalone_profile_s3_get)
+                .put(standalone_profile_s3_put)
+                .delete(standalone_profile_s3_delete),
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete",

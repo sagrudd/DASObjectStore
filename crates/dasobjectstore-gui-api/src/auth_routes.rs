@@ -24,6 +24,8 @@ mod auth_router;
 mod auth_validation;
 #[path = "auth_contracts.rs"]
 mod contracts;
+#[path = "profile_delete.rs"]
+mod profile_delete;
 #[path = "profile_download.rs"]
 mod profile_download;
 #[path = "profile_multipart.rs"]
@@ -107,6 +109,7 @@ use dasobjectstore_daemon::{
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
+use profile_delete::standalone_profile_s3_delete;
 use profile_download::standalone_profile_s3_get;
 use profile_multipart::{
     standalone_profile_s3_multipart_complete, standalone_profile_s3_multipart_part,

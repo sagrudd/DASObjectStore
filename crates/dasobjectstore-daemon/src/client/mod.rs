@@ -33,23 +33,23 @@ use crate::api::{
     ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
     ProfileDiagnosticsRequest, ProfileDiagnosticsResponse, ProfileInspectionRequest,
     ProfileInspectionResponse, ProfileReadinessRequest, ProfileReadinessResponse,
-    ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
-    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartCompletionRequest,
-    ProfileS3MultipartCompletionResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    ProfileS3DeleteRequest, ProfileS3DeleteResponse, ProfileS3HeadRequest, ProfileS3HeadResponse,
+    ProfileS3HealthRequest, ProfileS3HealthResponse, ProfileS3ListRequest, ProfileS3ListResponse,
+    ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
+    ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
+    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -231,6 +231,16 @@ where
         match self.send(DaemonApiRequest::ProfileS3Head(request))? {
             DaemonApiResponse::ProfileS3Head(response) => Ok(response),
             response => Err(unexpected("profile_s3_head", response)),
+        }
+    }
+
+    pub fn profile_s3_delete(
+        &self,
+        request: ProfileS3DeleteRequest,
+    ) -> Result<ProfileS3DeleteResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3Delete(request))? {
+            DaemonApiResponse::ProfileS3Delete(response) => Ok(response),
+            response => Err(unexpected("profile_s3_delete", response)),
         }
     }
 
@@ -767,6 +777,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
+        DaemonApiResponse::ProfileS3Delete(_) => "profile_s3_delete",
         DaemonApiResponse::ProfileS3MultipartComplete(_) => "profile_s3_multipart_complete",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",
         DaemonApiResponse::ProfileS3Verify(_) => "profile_s3_verify",
