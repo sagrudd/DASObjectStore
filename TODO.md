@@ -722,7 +722,7 @@ transaction wiring; those boundaries stay explicit in the child items below.
     daemon, authenticated Web route, and read-only CLI as ``store
     profile-verify``; success requires payload size/checksum agreement and
     returns no backend location.
-- [ ] Add per-user host mode with XDG state/runtime paths and a user service;
+- [~] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.
   - [x] Add pure per-user/system state and runtime path derivation. Per-user
@@ -742,7 +742,7 @@ transaction wiring; those boundaries stay explicit in the child items below.
   - [x] Prove per-user and system host-mode state/runtime namespaces remain
     distinct in a macOS path-coexistence regression; service-manager
     installation and ownership checks remain deployment work.
-- [ ] Validate package-created, programmatically created, adopted, container-
+- [~] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
   - [x] Add a local fixture-matrix integration test covering programmatic
     bounded-folder creation, explicit source-preserving adoption, checkpoint
