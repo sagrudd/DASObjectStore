@@ -47,6 +47,10 @@ same idempotent terminal result. The daemon now has a durable,
 expiry-pruned replay registry for capability IDs and nonces. Its Ed25519/P-256
 verifier handles asymmetric proofs and core issuance rejects unverified proofs;
 mTLS transport verification and public catalogue completion wiring remain.
+Provider verification uses a provider-neutral request/result contract. Garage
+implements that contract through the existing cancellable AWS CLI command
+runner, avoiding a second S3 client stack; provider identity, size, and checksum
+must match before catalogue publication.
 The listener-side mTLS boundary is intentionally not enabled by inference.
 The approved production policy uses native daemon-enforced mTLS with an
 explicitly configured CA trust reference and daemon-owned certificate

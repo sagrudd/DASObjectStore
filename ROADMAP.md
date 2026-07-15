@@ -98,6 +98,11 @@ slice is:
 5. publish contract fixtures for Synoptikon, Mneion, AlleleAnchor, Mnemosyne,
    and standalone integrations without exposing host paths or secrets.
 
+Provider verification will use a provider-neutral contract; Garage will use
+the existing cancellable AWS CLI command runner rather than adding a second S3
+SDK stack. Provider identity, size, and checksum must match before catalogue
+publication.
+
 The packaged CLI now provides a request-file bridge for these daemon-owned
 operations (`application-auth register-identity`, `register-key`, `revoke`,
 and `exchange`). It accepts only the versioned path-free request DTOs; private
