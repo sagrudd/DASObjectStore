@@ -1343,9 +1343,10 @@ through the bounded daemon bridge, so live logical/backend/SSD admission data
 can be consumed without a direct registry read. The Web client now has a typed
 getter/path helper; appliance-backed acceptance remains open.
 
-The normal CLI store-creation path now submits a typed daemon request when a
-writer group and packaged daemon socket are present. Host-registry mutation is
-retained only for explicit registry/test and no-writer-group migration paths;
+The normal CLI store-creation path uses a typed daemon request. Writable stores
+require an explicit writer group; unassigned definitions are permitted only as
+read-only import/migration state and cannot accept ingress until assignment.
+Host-registry mutation remains only for explicit registry/test workflows;
 portable SSD mirroring remains a separate compatibility concern.
 
 The daemon-ownership backlog is now tracked as partial rather than open: store

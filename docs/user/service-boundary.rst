@@ -114,18 +114,18 @@ Store creation boundary
 
 When the packaged daemon is available, the normal
 ``dasobjectstore store create`` command submits a typed
-``create_object_store`` request whenever a writer group is supplied. The
+``create_object_store`` request. Every writable store requires an explicit
+writer group. The
 daemon validates the store policy, selects its system-managed registry, and
 records the accepted creation job. The CLI may still mirror the resulting
 definition to a validated portable SSD registry and apply platform ACLs; it
 does not write the host registry in this path.
 
 An explicit hidden ``--registry-path`` is reserved for local tests and
-migration tooling. A create without a writer group also remains on the legacy
-portable/host-registry path until the daemon contract supports an explicit
-unassigned-writer policy. These fallback cases are intentionally visible in
-the implementation rather than silently treated as daemon-owned production
-mutations.
+migration tooling. Unassigned definitions are permitted only as explicitly
+read-only import or migration state and cannot accept ingress until an
+administrator assigns a writer group. Normal creation without a writer group
+must fail closed rather than mutate the host registry from the CLI.
 
 Daemon-owned store drain
 -------------------------

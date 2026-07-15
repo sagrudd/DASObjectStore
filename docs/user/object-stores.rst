@@ -38,8 +38,9 @@ policy describes the required copies and safety rules; ``dasobjectstored``
 chooses the landing mode, disk placement, verification, and settlement work.
 
 ``--writer-group`` is the Unix group whose members may ingest files into the
-store without root privileges. A store without a writer group is not writable by
-normal users. On Linux, ``store create`` grants that group ACL access to the
+store without root privileges. Writable store creation requires this group. An
+unassigned imported/migration definition is read-only and cannot accept ingress
+until an administrator assigns a writer group. On Linux, ``store create`` grants that group ACL access to the
 known DAS SSD and managed HDD roots when they are present, so users can ingest
 through DASObjectStore without direct ad hoc disk access.
 

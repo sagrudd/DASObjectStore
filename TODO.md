@@ -1447,9 +1447,12 @@ list until every temporary size-budget exception has been removed.
     boundary rather than in the CLI process.
   - [x] Route normal CLI `store create` requests with a writer group through
     the typed daemon creation contract when the packaged daemon socket is
-    available; keep explicit registry-path, no-writer-group, portable mirror,
-    and `store adopt` behavior as separate migration/test fallbacks until an
-    unassigned-writer policy is approved.
+    available. **Approved 2026-07-15:** every writable store requires an
+    explicit writer group. Unassigned definitions are permitted only for
+    explicitly read-only import/migration state and cannot accept ingress until
+    an administrator assigns a writer group. Explicit registry-path tests,
+    portable mirroring, and `store adopt` remain compatibility workflows;
+    normal no-writer-group creation must stop using the CLI mutation fallback.
   - [x] Route `disk lockdown-das` through a typed daemon request; daemon-owned
     root discovery, account setup planning, command execution, confirmation,
     administrator authorization, and dry-run reporting now stay behind the
