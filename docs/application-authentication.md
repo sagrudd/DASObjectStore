@@ -48,13 +48,13 @@ expiry-pruned replay registry for capability IDs and nonces. Its Ed25519/P-256
 verifier handles asymmetric proofs and core issuance rejects unverified proofs;
 mTLS transport verification and public catalogue completion wiring remain.
 The listener-side mTLS boundary is intentionally not enabled by inference.
-Before implementation, deployment policy must choose the trust-store source,
-map verified certificate fingerprints to registered application identities,
-define rotation/revocation behavior, and specify fail-closed handling for
-absent or unknown client certificates. The recommended policy is an
-explicitly enabled listener with a configured CA reference and daemon-owned
-fingerprint mapping. A listener that requires mTLS must never silently fall
-back to bearer-token authentication.
+The approved production policy uses native daemon-enforced mTLS with an
+explicitly configured CA trust reference and daemon-owned certificate
+fingerprint-to-application mapping. Missing, unknown, expired, or revoked
+client certificates fail closed. Controlled certificate rotation may overlap
+active mappings, and a listener that requires mTLS never silently falls back
+to bearer-token authentication. Unix-socket OS-peer authentication remains a
+separate local boundary.
 Credential registration and revocation also emit atomically persisted audit
 events that retain only identity/key metadata and a SHA-256 digest of the
 operator reason. The completion helper verifies provider state before consuming

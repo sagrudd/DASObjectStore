@@ -132,15 +132,16 @@ fingerprints, and its daemon socket now performs proof-verified short-lived
 issuance without persisting bearer tokens. The standalone Web API now dispatches
 the canonical proof-bearing exchange route through the daemon and validates
 claim shape at Web and client response boundaries; mTLS transport verification
-remains a listener concern. This is intentionally blocked pending a security
-decision on the trust-store source, certificate-fingerprint-to-application
-mapping, rotation/revocation, and absent/unknown-client failure semantics.
+remains a listener concern. Native daemon-enforced mTLS with a configured CA
+reference and daemon-owned certificate-fingerprint mapping is approved.
+Missing, unknown, expired, or revoked certificates fail closed, with controlled
+overlap for rotation.
 The exchange and administrator identity/key/revocation DTO wrappers also reject
 unknown JSON fields before registry lookup or claim consumption, preserving a
 strict versioned boundary for authoritative token decisions.
-The recommended boundary is an explicitly enabled mTLS listener with a
-configured CA reference and daemon-owned fingerprint mapping; required mTLS
-must never fall back silently to bearer-token authentication. Native DEB/RPM
+The approved boundary is an explicitly enabled mTLS listener with a configured
+CA reference and daemon-owned fingerprint mapping; required mTLS must never
+fall back silently to bearer-token authentication. Native DEB/RPM
 build scripts also compile the
 daemon with `--no-default-features`, making the package boundary explicit.
 Non-secret v1 JSON fixtures for each credential and capability shape are

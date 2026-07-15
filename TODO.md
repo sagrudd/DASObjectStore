@@ -1102,13 +1102,12 @@ hardware acceptance.
     atomic identity/key deactivation; redacted, reason-digest audit events are
     now persisted atomically for registration, rotation, revocation, and
     access-token issuance, and completion paths, while mTLS listener binding
-    remains. **Blocker (security decision):** listener enforcement needs an
-    approved trust-store source, certificate-fingerprint-to-application
-    identity mapping, rotation/revocation behavior, and fail-closed behavior
-    when a client certificate is absent or unknown. Recommended policy is an
-    explicitly enabled mTLS listener with a configured CA reference and
-    daemon-owned fingerprint mapping; it must never silently fall back to a
-    bearer token when client authentication is required.
+    remains. **Approved 2026-07-15:** native daemon-enforced mTLS uses an
+    explicitly configured CA trust reference plus daemon-owned certificate
+    fingerprint-to-application mapping. Missing, unknown, expired, or revoked
+    client certificates fail closed; controlled rotation may overlap active
+    mappings; a listener requiring mTLS never falls back to bearer-token-only
+    authentication. Listener implementation and deployment acceptance remain.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
