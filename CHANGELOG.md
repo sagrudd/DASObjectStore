@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.84.0 - 2026-07-15
+
+- Generalize the canonical macOS local-Docker authority profile for named
+  consumers and permit only the exact marker-protected Pinakotheke managed root
+  below ``$HOME/.x-img/dasobjectstore``, while retaining private credentials
+  below ``$HOME/.config/dasobjectstore`` and preserving AlleleAnchor defaults.
+
 ## 0.83.1 - 2026-07-15
 
 - Restore the production Rust module-size release gate without exceptions by

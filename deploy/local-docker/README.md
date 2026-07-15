@@ -136,6 +136,24 @@ The rendered daemon configuration carries that same root-scoped Garage Compose
 project name. Daemon-owned lifecycle and credential provisioning therefore
 address the exact service instance rendered for the selected storage root.
 
+### Pinakotheke local profile
+
+The exact ``$HOME/.x-img/dasobjectstore`` root is accepted for Pinakotheke.
+The helper refuses sibling or arbitrary home paths and creates its authority
+marker only when the root is empty. Credentials remain below
+``$HOME/.config/dasobjectstore``. Select the consumer store explicitly:
+
+```bash
+DASOBJECTSTORE_LOCAL_ROOT="$HOME/.x-img/dasobjectstore" \
+DASOBJECTSTORE_LOCAL_PRIVATE_ROOT="$HOME/.config/dasobjectstore" \
+DASOBJECTSTORE_LOCAL_PROFILE=pinakotheke-local \
+DASOBJECTSTORE_LOCAL_STORE_ID=pinakotheke_local \
+DASOBJECTSTORE_LOCAL_STORE_BUCKET=pinakotheke-local \
+DASOBJECTSTORE_LOCAL_STORE_PREFIX=media \
+DASOBJECTSTORE_LOCAL_CONSUMER=pinakotheke \
+./deploy/local-docker/local.sh up
+```
+
 ## Platform boundary
 
 Docker Desktop bind mounts cross a Linux VM. USB disconnects, sleep, Docker

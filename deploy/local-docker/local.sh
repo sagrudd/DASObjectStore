@@ -11,7 +11,12 @@ REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_CONTEXT="${DASOBJECTSTORE_BUILD_CONTEXT:-$(cd "$REPO_DIR/.." && pwd)}"
 ROOT="${DASOBJECTSTORE_LOCAL_ROOT:-/Volumes/Seagate/DASObjectStore}"
 VALIDATION_ROOT="${HOME:-/Users/stephen}/.dasobjectstore-codex-validation"
+PINAKOTHEKE_ROOT="${HOME:-/Users/stephen}/.x-img/dasobjectstore"
 PROFILE="${DASOBJECTSTORE_LOCAL_PROFILE:-alleleanchor-mvp}"
+STORE_ID="${DASOBJECTSTORE_LOCAL_STORE_ID:-alleleanchor_mvp}"
+STORE_BUCKET="${DASOBJECTSTORE_LOCAL_STORE_BUCKET:-alleleanchor-mvp}"
+STORE_PREFIX="${DASOBJECTSTORE_LOCAL_STORE_PREFIX:-mvp}"
+CONSUMER_NAME="${DASOBJECTSTORE_LOCAL_CONSUMER:-alleleanchor}"
 ROOT_KEY="$(printf '%s' "$ROOT" | cksum | awk '{print $1}')"
 PROJECT="${DASOBJECTSTORE_LOCAL_PROJECT:-dasobjectstore-local-${ROOT_KEY}}"
 GARAGE_PROJECT="${DASOBJECTSTORE_LOCAL_GARAGE_PROJECT:-dasobjectstore-${ROOT_KEY}}"
@@ -39,7 +44,7 @@ GARAGE_CONFIG="$CONFIG_DIR/garage.toml"
 DAEMON_CONFIG="$CONFIG_DIR/daemon.json"
 STACK_COMPOSE="$PROFILE_ROOT/compose.yml"
 GARAGE_SECRETS="$CREDENTIALS_DIR/garage.env"
-ALLELEANCHOR_CONFIG="$CREDENTIALS_DIR/alleleanchor-store.toml"
+CONSUMER_CONFIG="$CREDENTIALS_DIR/${CONSUMER_NAME}-store.toml"
 GARAGE_CREDENTIAL_REGISTRY="$OBJECT_SERVICE_DIR/garage-credentials.json"
 
 die() {
@@ -59,7 +64,7 @@ Commands:
   smoke        Run generated-data S3 put/head/list/get/checksum/delete acceptance.
   status       Show daemon and nested Garage Compose status without secrets.
   down         Stop Garage through the daemon, then stop the daemon container.
-  config       Print the generated AlleleAnchor adapter config path.
+  config       Print the generated scoped consumer adapter config path.
   paths        Print non-secret root/project paths without creating them.
 
 Configuration is supplied through environment variables. The defaults target
@@ -70,8 +75,8 @@ EOF
 require_volume_root() {
     case "$ROOT" in
         /Volumes/*) ;;
-        "$VALIDATION_ROOT") ;;
-        *) die "DASOBJECTSTORE_LOCAL_ROOT must be under /Volumes or the dedicated validation root $VALIDATION_ROOT (got $ROOT)" ;;
+        "$VALIDATION_ROOT"|"$PINAKOTHEKE_ROOT") ;;
+        *) die "DASOBJECTSTORE_LOCAL_ROOT must be under /Volumes, $VALIDATION_ROOT, or the exact Pinakotheke managed root $PINAKOTHEKE_ROOT (got $ROOT)" ;;
     esac
     if [ "$ROOT" = "$VALIDATION_ROOT" ]; then
         mkdir -p "$ROOT"
@@ -87,6 +92,18 @@ require_volume_root() {
         used_kib="$(du -sk "$ROOT" | awk '{print $1}')"
         [ "${used_kib:-0}" -le 1073741824 ] || \
             die "validation root exceeds the 1 TiB generated-data safety limit: $ROOT"
+        return
+    fi
+    if [ "$ROOT" = "$PINAKOTHEKE_ROOT" ]; then
+        mkdir -p "$ROOT"
+        local marker="$ROOT/.pinakotheke-dasobjectstore-root"
+        if [ ! -e "$marker" ]; then
+            if find "$ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                die "Pinakotheke DASObjectStore root is not empty and has no authority marker: $ROOT"
+            fi
+            printf 'DASObjectStore-managed Pinakotheke local profile\n' > "$marker"
+            chmod 600 "$marker"
+        fi
         return
     fi
     [ -d "/Volumes" ] || die "/Volumes is unavailable"
@@ -287,6 +304,8 @@ EOF
 
 render_profile() {
     validate_profile_name "DASOBJECTSTORE_LOCAL_PROFILE" "$PROFILE"
+    validate_profile_name "DASOBJECTSTORE_LOCAL_STORE_ID" "$STORE_ID"
+    validate_profile_name "DASOBJECTSTORE_LOCAL_CONSUMER" "$CONSUMER_NAME"
     validate_profile_name "DASOBJECTSTORE_LOCAL_PROJECT" "$PROJECT"
     validate_profile_name "DASOBJECTSTORE_LOCAL_GARAGE_PROJECT" "$GARAGE_PROJECT"
     validate_port
@@ -297,10 +316,10 @@ render_profile() {
     bin="$(das_bin)"
     render_garage_config
     render_daemon_config
-    "$bin" store create alleleanchor_mvp \
+    "$bin" store create "$STORE_ID" \
         --class generated_data \
         --copies 1 \
-        --bucket alleleanchor-mvp \
+        --bucket "$STORE_BUCKET" \
         --ssd-root "$PROFILE_ROOT" \
         --registry-path "$REGISTRY_PATH" \
         --json >/dev/null
@@ -394,10 +413,10 @@ provision() {
     require_command python3
     python3 "$SCRIPT_DIR/export-alleleanchor-config.py" \
         --registry "$GARAGE_CREDENTIAL_REGISTRY" \
-        --store-id alleleanchor_mvp \
+        --store-id "$STORE_ID" \
         --endpoint "http://127.0.0.1:${API_PORT}" \
-        --prefix mvp \
-        --output "$ALLELEANCHOR_CONFIG"
+        --prefix "$STORE_PREFIX" \
+        --output "$CONSUMER_CONFIG"
 }
 
 up() {
@@ -416,7 +435,7 @@ status() {
     [ -f "$STACK_COMPOSE" ] || die "profile is not rendered: run '$0 render'"
     docker_compose ps
     printf 'Garage Compose: %s\n' "$GARAGE_COMPOSE"
-    printf 'AlleleAnchor config: %s\n' "$ALLELEANCHOR_CONFIG"
+    printf 'Consumer config: %s\n' "$CONSUMER_CONFIG"
 }
 
 down() {
@@ -436,7 +455,7 @@ smoke() {
     require_command aws
     require_command python3
     [ -f "$STACK_COMPOSE" ] || die "profile is not rendered: run '$0 up'"
-    [ -f "$ALLELEANCHOR_CONFIG" ] || die "adapter config is unavailable: run '$0 provision'"
+    [ -f "$CONSUMER_CONFIG" ] || die "adapter config is unavailable: run '$0 provision'"
     wait_for_daemon
     wait_for_garage
 
@@ -447,9 +466,9 @@ smoke() {
     image_revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$container_id")"
     [ "$image_revision" = "$SOURCE_COMMIT" ] || die \
         "daemon image revision $image_revision does not match source $SOURCE_COMMIT; run '$0 up'"
-    endpoint="$(awk -F'"' '/^endpoint = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
-    bucket="$(awk -F'"' '/^bucket = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
-    credential_path="$(awk -F'"' '/^path = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
+    endpoint="$(awk -F'"' '/^endpoint = / { print $2; exit }' "$CONSUMER_CONFIG")"
+    bucket="$(awk -F'"' '/^bucket = / { print $2; exit }' "$CONSUMER_CONFIG")"
+    credential_path="$(awk -F'"' '/^path = / { print $2; exit }' "$CONSUMER_CONFIG")"
     [ -n "$endpoint" ] || die "adapter config has no endpoint"
     [ -n "$bucket" ] || die "adapter config has no bucket"
     [ -f "$credential_path" ] || die "adapter credential file is unavailable"
@@ -556,7 +575,7 @@ case "$command" in
         down
         ;;
     config)
-        printf '%s\n' "$ALLELEANCHOR_CONFIG"
+        printf '%s\n' "$CONSUMER_CONFIG"
         ;;
     paths)
         print_paths

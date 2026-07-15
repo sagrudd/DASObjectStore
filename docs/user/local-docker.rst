@@ -73,6 +73,15 @@ directory.
 Validation boundary
 -------------------
 
+Pinakotheke may use the exact managed root
+``$HOME/.x-img/dasobjectstore``. The helper creates an authority marker only in
+an empty directory and keeps credentials under
+``$HOME/.config/dasobjectstore``. Configure ``pinakotheke-local`` as the
+profile, ``pinakotheke_local`` as the store ID, ``pinakotheke-local`` as the
+bucket, ``media`` as the prefix, and ``pinakotheke`` as the consumer through
+the corresponding ``DASOBJECTSTORE_LOCAL_*`` environment variables. Arbitrary
+home-directory roots remain rejected.
+
 The local profile can close a local S3-compatible adapter validation gate for
 AlleleAnchor and other clients. It does not replace Linux appliance soak,
 multi-disk redundancy, SMART, repair, or throughput acceptance. Treat USB
