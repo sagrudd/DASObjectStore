@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.86.0 - 2026-07-15
+
+- Connect product-owned policy templates to an executable, idempotent daemon
+  provisioning workflow shared by Synoptikon, Mneion, Mnemosyne, and
+  standalone/package-managed adapters.
+- Require explicit manifests, complete store/service policy, deployment roots,
+  and authorization identity; reject contract drift before submission without
+  deriving product defaults, paths, credentials, or provider endpoints.
+
 ## 0.85.0 - 2026-07-15
 
 - Activate renewable capacity-reservation leases in the packaged daemon with

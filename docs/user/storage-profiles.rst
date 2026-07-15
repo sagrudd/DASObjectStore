@@ -473,17 +473,29 @@ request up to three local copies.
 The template does not contain a path, credential, provider endpoint, or
 provisioning command. Its typed ingress origin exposes whether SSD-first
 staging is required, but daemon admission remains authoritative. Product
-adapters still own their defaults, authorization, provisioning, and any
-external replication policy; those adapters are not inferred from a profile
+adapters still own their defaults, authorization, deployment roots, and any
+external replication policy; those decisions are not inferred from a profile
 name.
 
 The Mnemosyne adapter crate now provides a strict versioned envelope for this
 boundary. An adapter can validate that a template is owned by its product and
 forward the request without adding defaults or filesystem/provider details.
 Typed adapter identities are available for Synoptikon, Mneion, Mnemosyne, and
-standalone/package-managed deployments; they select ownership validation only.
-Provisioning implementations remain responsible for their own product
-decisions.
+standalone/package-managed deployments. A product can now combine its strict
+template envelope with an explicit portable manifest, complete store policy,
+bucket/group choices, deployment roots, request identity, and administrator
+actor in ``ProductProfileProvisioningPlan``. The adapter rejects schema,
+ownership, profile, host-mode, protection, capacity, or copy-count drift before
+submission, then sends ``ProfileBindingOperation::Provision`` through the same
+typed daemon client used by other management surfaces. Repeating an identical
+request therefore uses the daemon's existing idempotent binding behavior.
+
+This boundary deliberately contains no provider credential or endpoint and
+does not derive a filesystem path or product default. Paths exist only in the
+deployment plan presented to the authenticated daemon; the portable manifest
+continues to carry backend identity rather than location. Products should build
+the plan during their authorized install or project-creation workflow and keep
+all product-specific defaults in their own package.
 
 Profile promotion uses an explicit resumable state contract: planned, copying,
 destination verified, retirement pending, completed, or failed. Source

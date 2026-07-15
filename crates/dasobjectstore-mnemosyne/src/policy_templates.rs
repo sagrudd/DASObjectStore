@@ -82,9 +82,34 @@ pub struct ProductPolicyTemplateEnvelope {
     pub template: StoragePolicyTemplate,
 }
 
+impl ProductPolicyTemplateEnvelope {
+    /// Revalidate a decoded envelope before it crosses into provisioning.
+    pub fn validate(&self) -> Result<(), ProductPolicyTemplateAdapterError> {
+        if self.schema_version != PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION {
+            return Err(ProductPolicyTemplateAdapterError::UnsupportedSchema {
+                schema_version: self.schema_version.clone(),
+            });
+        }
+        validate_slug(&self.adapter_id)?;
+        self.template
+            .validate()
+            .map_err(ProductPolicyTemplateAdapterError::InvalidTemplate)?;
+        if self.template.owner_product != self.adapter_id {
+            return Err(ProductPolicyTemplateAdapterError::OwnerMismatch {
+                adapter_id: self.adapter_id.clone(),
+                owner_product: self.template.owner_product.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProductPolicyTemplateAdapterError {
     InvalidAdapterId,
+    UnsupportedSchema {
+        schema_version: String,
+    },
     InvalidTemplate(StoragePolicyTemplateValidationError),
     OwnerMismatch {
         adapter_id: String,
@@ -97,6 +122,10 @@ impl Display for ProductPolicyTemplateAdapterError {
         match self {
             Self::InvalidAdapterId => formatter.write_str(
                 "adapter ID must be a lowercase ASCII slug containing letters, digits, '.', '_' or '-'",
+            ),
+            Self::UnsupportedSchema { schema_version } => write!(
+                formatter,
+                "unsupported product policy template schema `{schema_version}`"
             ),
             Self::InvalidTemplate(error) => write!(formatter, "invalid policy template: {error}"),
             Self::OwnerMismatch {

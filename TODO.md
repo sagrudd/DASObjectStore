@@ -1063,6 +1063,11 @@ hardware acceptance.
     authenticated Web route ``/api/v1/profile-capabilities``; it remains
     versioned discovery only and does not imply runtime readiness or
     provisioning.
+  - [x] Add an executable product-provisioning bridge that validates an
+    explicit product template, manifest, full store policy, service groups,
+    deployment roots, and actor/request identity before submitting the shared
+    idempotent daemon ``Provision`` job. It derives no paths, credentials,
+    provider endpoints, or product defaults.
   - [x] Add the daemon-owned ``profile_binding`` ``provision`` operation. It
     validates and initializes an explicit bounded backend, reuses an identical
     persisted binding without replacement, and fails closed on a same-store
@@ -1186,7 +1191,7 @@ hardware acceptance.
     key-rotation, and credential-revocation request/response wrappers so
     unrecognized fields cannot alter security decisions; registration coverage
     includes an explicit rejection regression.
-- [~] Provide product-owned policy templates and adapters for Synoptikon,
+- [x] Provide product-owned policy templates and adapters for Synoptikon,
   Mneion, Mnemosyne, and small standalone/package-managed projects.
   - [x] Add a shared `StoragePolicyTemplate` contract carrying explicit
     product ownership, profile, host mode, protection, bounded capacity,
@@ -1202,6 +1207,10 @@ hardware acceptance.
     standalone/package-managed deployments. The registry only selects strict
     ownership validation; it does not invent product defaults or provision
     storage, leaving those decisions with each product.
+  - [x] Connect all typed product identities to the strict provisioning plan
+    and shared daemon client boundary. A representative Synoptikon package
+    plan proves policy-drift rejection and daemon job submission while keeping
+    each product responsible for its explicit defaults and deployment target.
 - [~] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
   import jobs preserving IDs, versions, hashes, provenance, and protection.
   - [x] Add a core resumable promotion state machine that retains source
@@ -1283,6 +1292,9 @@ appliance and representative product workflows before release readiness.
     window, then the documented hardware matrix runs against generated data.
 - [~] Validate generated-data stress tests plus representative Mnemosyne product
   workflows; never use customer/project data in automated acceptance.
+  - [x] Validate a representative non-secret Synoptikon project-provisioning
+    workflow from owned template through the common daemon job response,
+    including strict serialization and mismatch rejection.
 - [~] Require real-world validation readiness, operator runbooks, release notes,
   and no unexplained critical TODO blockers before declaring a profile ready.
   - [x] Add a same-commit deployment evidence verifier and operator runbook for

@@ -1641,6 +1641,13 @@ appliance; capabilities drive UI/actions; product packages can provision a
 bounded store idempotently; Synoptikon/Mneion integration and standalone modes
 use the same daemon job model.
 
+Delivered locally: the product adapter accepts caller-owned templates,
+manifests, complete store/service policy, deployment roots, and authorization
+identity, rejects cross-contract drift, and submits the existing idempotent
+daemon profile-provisioning job. It is profile-neutral and shared by the typed
+Synoptikon, Mneion, Mnemosyne, and standalone identities; physical appliance
+acceptance remains part of the hardware matrix rather than this contract.
+
 ## Milestone 31: Migration, Protection, and Market-Readiness Acceptance
 
 Goal: promote data safely between profiles and prove operational behavior.
