@@ -65,7 +65,7 @@ On AlmaLinux or RHEL package builders, install the native build tools with:
 
 .. code-block:: console
 
-   sudo dnf install rpm-build clang clang-devel pam-devel
+   sudo dnf install rpm-build cargo rust clang clang-devel pam-devel
 
 If the Web page says to install the Trunk WebAssembly toolchain, the installed
 package contains the developer fallback page and should be rebuilt from a

@@ -312,7 +312,10 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_RPM, "Requires:       pam");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
-    assert_contains(BUILD_RPM, "sudo dnf install clang clang-devel pam-devel");
+    assert_contains(
+        BUILD_RPM,
+        "sudo dnf install cargo rust clang clang-devel pam-devel",
+    );
 }
 
 #[test]

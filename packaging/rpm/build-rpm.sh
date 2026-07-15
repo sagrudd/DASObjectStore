@@ -21,7 +21,7 @@ fi
 if ! command -v clang >/dev/null 2>&1 || ! ldconfig -p 2>/dev/null | grep -Eq 'libclang(-[0-9]+)?\.so'; then
   cat >&2 <<ERROR
 Native DASObjectStore package builds require clang, libclang, and PAM headers.
-On AlmaLinux/RHEL: sudo dnf install clang clang-devel pam-devel
+On AlmaLinux/RHEL: sudo dnf install cargo rust clang clang-devel pam-devel
 ERROR
   exit 1
 fi

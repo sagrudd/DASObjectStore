@@ -23,7 +23,7 @@ install_build_dependencies() {
       dnf config-manager --add-repo \
         https://download.docker.com/linux/centos/docker-ce.repo
       dnf groupinstall -y "Development Tools"
-      dnf install -y clang clang-devel pam-devel pkgconf-pkg-config \
+      dnf install -y cargo rust clang clang-devel pam-devel pkgconf-pkg-config \
         openssl-devel curl ca-certificates acl udisks2 rpm-build openssl \
         docker-ce-cli docker-buildx-plugin unzip
       ;;

@@ -247,7 +247,7 @@ require_text "$build_rpm" 'usermod -aG "\$admin_group" "\$service_user"'
 require_text "$build_rpm" 'Requires:       /usr/bin/docker'
 require_text "$build_rpm" 'Requires:       docker-buildx-plugin'
 require_text "$build_rpm" 'Recommends:      awscli'
-require_text "$build_rpm" 'sudo dnf install clang clang-devel pam-devel'
+require_text "$build_rpm" 'sudo dnf install cargo rust clang clang-devel pam-devel'
 
 require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."
