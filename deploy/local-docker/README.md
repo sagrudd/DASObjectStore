@@ -101,7 +101,9 @@ Run the generated-data S3 acceptance only after `up` succeeds:
 ./deploy/local-docker/local.sh smoke
 ```
 
-The command uses the daemon-provisioned scoped credential to perform
+The command first requires the running daemon image's OCI revision label to
+match the current Git revision (run ``up`` to rebuild when it does not). It then
+uses the daemon-provisioned scoped credential to perform
 put/head/list/get/checksum/delete against Garage. It creates only a 64 KiB
 random payload beneath ``$HOME/.dasobjectstore-codex-validation``, removes the
 object and local payload even on failure, and writes a secret-free,

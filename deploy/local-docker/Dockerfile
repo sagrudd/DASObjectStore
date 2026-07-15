@@ -21,6 +21,10 @@ FROM docker:27.5.1-cli AS docker-cli
 
 FROM almalinux:9-minimal
 
+ARG DASOBJECTSTORE_SOURCE_COMMIT=unavailable
+LABEL org.opencontainers.image.source="https://github.com/sagrudd/DASObjectStore"
+LABEL org.opencontainers.image.revision="$DASOBJECTSTORE_SOURCE_COMMIT"
+
 WORKDIR /opt/dasobjectstore
 RUN microdnf install -y \
         ca-certificates \

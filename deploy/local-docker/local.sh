@@ -18,6 +18,7 @@ GARAGE_PROJECT="${DASOBJECTSTORE_LOCAL_GARAGE_PROJECT:-dasobjectstore-${ROOT_KEY
 API_PORT="${DASOBJECTSTORE_LOCAL_API_PORT:-3900}"
 GARAGE_IMAGE="${DASOBJECTSTORE_GARAGE_IMAGE:-dxflrs/garage:v2.3.0}"
 DAEMON_IMAGE="${DASOBJECTSTORE_LOCAL_IMAGE:-dasobjectstore-local:dev}"
+SOURCE_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || printf 'unavailable')"
 
 PROFILE_ROOT="$ROOT/$PROFILE"
 PRIVATE_ROOT="${DASOBJECTSTORE_LOCAL_PRIVATE_ROOT:-${HOME:-/Users/stephen}/.config/dasobjectstore}/${PROFILE}-${ROOT_KEY}"
@@ -256,6 +257,8 @@ services:
     build:
       context: "$BUILD_CONTEXT"
       dockerfile: "DASObjectStore/deploy/local-docker/Dockerfile"
+      args:
+        DASOBJECTSTORE_SOURCE_COMMIT: "$SOURCE_COMMIT"
     init: true
     restart: unless-stopped
     # The image entrypoint is already dasobjectstored; pass only its arguments.
@@ -438,6 +441,12 @@ smoke() {
     wait_for_garage
 
     local endpoint bucket credential_path access_key secret_key
+    local container_id image_revision
+    container_id="$(docker_compose ps -q dasobjectstored)"
+    [ -n "$container_id" ] || die "daemon container is not running"
+    image_revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$container_id")"
+    [ "$image_revision" = "$SOURCE_COMMIT" ] || die \
+        "daemon image revision $image_revision does not match source $SOURCE_COMMIT; run '$0 up'"
     endpoint="$(awk -F'"' '/^endpoint = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
     bucket="$(awk -F'"' '/^bucket = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
     credential_path="$(awk -F'"' '/^path = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
@@ -501,7 +510,7 @@ smoke() {
     evidence_dir="$VALIDATION_ROOT/deployment-evidence"
     mkdir -p "$evidence_dir"
     chmod 700 "$evidence_dir"
-    commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || printf 'unavailable')"
+    commit="$image_revision"
     timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     evidence="$evidence_dir/local-docker-s3-$commit.txt"
     {

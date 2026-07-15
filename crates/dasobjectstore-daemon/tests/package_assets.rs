@@ -24,6 +24,7 @@ const PACKAGE_AUTH_GUARD: &str =
     include_str!("../../../packaging/validate-package-auth-content.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
+const LOCAL_DOCKERFILE: &str = include_str!("../../../deploy/local-docker/Dockerfile");
 const MACOS_USER_SERVICE: &str = include_str!("../../../deploy/macos/user-service.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const PRERM: &str = include_str!("../../../packaging/debian/prerm");
@@ -83,6 +84,9 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
     assert_contains(LOCAL_DOCKER, "get-object");
     assert_contains(LOCAL_DOCKER, "delete-object");
     assert_contains(LOCAL_DOCKER, "local-docker-s3-$commit.txt");
+    assert_contains(LOCAL_DOCKER, "org.opencontainers.image.revision");
+    assert_contains(LOCAL_DOCKERFILE, "DASOBJECTSTORE_SOURCE_COMMIT");
+    assert_contains(LOCAL_DOCKERFILE, "org.opencontainers.image.revision");
 }
 
 #[test]
