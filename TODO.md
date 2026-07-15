@@ -52,11 +52,13 @@ evidence and detailed source tasks.
 ## Current External Blockers (2026-07-13)
 
 - DASServer/Garage hardware, appliance credentials, and deployment access are
-  unavailable while travelling. This blocks appliance/provider soak, package
-  install/reboot/remount/device replacement/full-disk acceptance, packaged
-  telemetry-loop verification, and real-world multi-HDD/S3 performance runs.
-  Continue with macOS unit/contract tests and the dedicated generated-data root
-  instead; do not retry SSH or appliance commands until access is restored.
+  unavailable while travelling. Do not retry DASServer connectivity until the
+  operator confirms they are home. In the interim, a disposable Linux VM is
+  approved for package install/upgrade/uninstall, systemd/cgroup, reboot, and
+  synthetic loop-device coverage. VM evidence must not close physical
+  enclosure, SMART/NVMe, device replacement, multi-HDD/Garage durability, or
+  appliance performance acceptance; those remain scheduled for a quiescent
+  DASServer window using a bounded synthetic ``CODEX`` store.
 - The public paired-session HTTPS completion authentication contract is now
   approved as a scoped-capability design. Implementation remains gated on the
   daemon-owned service-principal, short-lived access-token, and one-time

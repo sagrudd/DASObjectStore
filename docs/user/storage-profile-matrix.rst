@@ -24,8 +24,14 @@ or deployment credentials.
      - Preview: product adapter and runtime inventory pending
    * - ``appliance``
      - Unsupported: appliance authority is not per-user
-     - Blocked: Linux package/device/reboot and appliance acceptance require DAS access
-     - Blocked: Garage/provider soak, credentials, and production telemetry require DAS access
+     - Preview: Linux package/systemd/reboot may use a disposable VM surrogate; physical device acceptance requires DAS access
+     - Blocked: Garage/provider soak, credentials, physical telemetry, replacement, and performance require DAS access
+
+A disposable Linux VM may provide interim package, systemd/cgroup, reboot, and
+synthetic loop-device evidence while the DASServer is unavailable. It is not a
+substitute for physical enclosure identity, SMART/NVMe, real multi-HDD/Garage
+durability, replacement, or performance acceptance. Those gates require a
+quiescent DASServer validation window.
 
 Upgrade and migration policy
 ----------------------------

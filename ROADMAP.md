@@ -253,9 +253,12 @@ remains. Stable telemetry device mapping and the packaged collection loop are
 covered by offline fixtures; physical device mapping and appliance acceptance
 remain deployment-gated. The folder backend and storage request handler have been split below
 the production size budget; the module-size guard now passes with no
-exceptions. Hardware-only acceptance is
-deferred while travelling without DAS access, but offline design, domain,
-metadata, API, test, and packaging work should continue.
+exceptions. Hardware-only acceptance is deferred while travelling without DAS
+access. A disposable Linux VM is approved as an interim surrogate for package,
+systemd/cgroup, reboot, and synthetic loop-device evidence, but it cannot close
+physical enclosure, SMART/NVMe, multi-HDD/Garage durability, replacement, or
+performance acceptance. Those gates resume during a quiescent DASServer window
+after the operator confirms access is available.
 
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are
