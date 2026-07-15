@@ -32,6 +32,9 @@ use tokio_rustls::TlsAcceptor;
 pub struct MtlsApplicationConnectInfo {
     pub peer_address: SocketAddr,
     pub application_id: String,
+    certificate_der: Arc<Vec<u8>>,
+    identity_registry_path: std::path::PathBuf,
+    key_registry_path: std::path::PathBuf,
 }
 
 pub struct MtlsApplicationListener {
@@ -61,6 +64,7 @@ impl axum::serve::Listener for MtlsApplicationListener {
             else {
                 continue;
             };
+            let certificate_der = certificate.as_ref().to_vec();
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -68,7 +72,7 @@ impl axum::serve::Listener for MtlsApplicationListener {
             let Ok(identity) = resolve_mtls_application_identity(
                 &self.identity_registry_path,
                 &self.key_registry_path,
-                certificate.as_ref(),
+                &certificate_der,
                 now,
             ) else {
                 continue;
@@ -78,6 +82,9 @@ impl axum::serve::Listener for MtlsApplicationListener {
                 MtlsApplicationConnectInfo {
                     peer_address,
                     application_id: identity.application_id,
+                    certificate_der: Arc::new(certificate_der),
+                    identity_registry_path: self.identity_registry_path.clone(),
+                    key_registry_path: self.key_registry_path.clone(),
                 },
             );
         }
@@ -87,6 +94,9 @@ impl axum::serve::Listener for MtlsApplicationListener {
         Ok(MtlsApplicationConnectInfo {
             peer_address: self.listener.local_addr()?,
             application_id: String::new(),
+            certificate_der: Arc::new(Vec::new()),
+            identity_registry_path: self.identity_registry_path.clone(),
+            key_registry_path: self.key_registry_path.clone(),
         })
     }
 }
@@ -162,7 +172,7 @@ async fn mtls_exchange(
     ConnectInfo(peer): ConnectInfo<MtlsApplicationConnectInfo>,
     Json(request): Json<ApplicationAccessTokenExchangeRequest>,
 ) -> Result<Json<ApplicationAccessTokenExchangeResponse>, MtlsRouteError> {
-    authorize_application(&peer, &request.exchange.application_id)?;
+    authorize_application(&peer, &request.exchange.application_id).await?;
     daemon_call(move |client| client.exchange_application_access_token(request)).await
 }
 
@@ -170,7 +180,7 @@ async fn mtls_issue_upload_capability(
     ConnectInfo(peer): ConnectInfo<MtlsApplicationConnectInfo>,
     Json(request): Json<ApplicationUploadCapabilityIssueRequest>,
 ) -> Result<Json<ApplicationUploadCapabilityIssueResponse>, MtlsRouteError> {
-    authorize_application(&peer, &request.application_id)?;
+    authorize_application(&peer, &request.application_id).await?;
     daemon_call(move |client| client.issue_application_upload_capability(request)).await
 }
 
@@ -178,15 +188,35 @@ async fn mtls_complete_upload(
     ConnectInfo(peer): ConnectInfo<MtlsApplicationConnectInfo>,
     Json(request): Json<ApplicationUploadCompletionRequest>,
 ) -> Result<Json<ApplicationUploadCompletionResponse>, MtlsRouteError> {
-    authorize_application(&peer, &request.capability.application_id)?;
+    authorize_application(&peer, &request.capability.application_id).await?;
     daemon_call(move |client| client.complete_application_upload(request)).await
 }
 
-fn authorize_application(
+async fn authorize_application(
     peer: &MtlsApplicationConnectInfo,
     requested_application_id: &str,
 ) -> Result<(), MtlsRouteError> {
-    if peer.application_id != requested_application_id {
+    let certificate_der = Arc::clone(&peer.certificate_der);
+    let identity_registry_path = peer.identity_registry_path.clone();
+    let key_registry_path = peer.key_registry_path.clone();
+    let identity = tokio::task::spawn_blocking(move || {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        resolve_mtls_application_identity(
+            identity_registry_path,
+            key_registry_path,
+            certificate_der.as_slice(),
+            now,
+        )
+    })
+    .await
+    .map_err(|_| MtlsRouteError::forbidden("client certificate revalidation failed"))?
+    .map_err(|_| MtlsRouteError::forbidden("client certificate is no longer authorized"))?;
+    if identity.application_id != peer.application_id
+        || identity.application_id != requested_application_id
+    {
         return Err(MtlsRouteError::forbidden(
             "client certificate is not authorized for the requested application identity",
         ));
@@ -295,6 +325,17 @@ mod tests {
         authorize_application, build_application_mtls_listener, MtlsApplicationConnectInfo,
     };
     use crate::StandaloneServerConfig;
+    use dasobjectstore_core::application_auth::{
+        ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
+        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
+        APPLICATION_AUTH_SCHEMA_VERSION,
+    };
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::ingress::IngressOrigin;
+    use dasobjectstore_core::object_type::ObjectType;
+    use dasobjectstore_daemon::runtime::{
+        deactivate_application_key, upsert_application_identity, upsert_application_key,
+    };
     use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
     use rustls::pki_types::{CertificateDer, ServerName};
     use rustls::{ClientConfig, RootCertStore};
@@ -302,19 +343,41 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tokio_rustls::TlsConnector;
 
-    #[test]
-    fn certificate_identity_must_match_requested_application() {
+    #[tokio::test]
+    async fn every_request_revalidates_identity_and_revocation() {
+        let root = test_root("request-revalidation");
+        let identities = root.join("identities.json");
+        let keys = root.join("keys.json");
+        let certificate_der = b"persistent-connection-client-certificate".to_vec();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time")
+            .as_secs();
+        upsert_application_identity(&identities, identity("synoptikon", now))
+            .expect("register identity");
+        upsert_application_key(&keys, key("synoptikon", "cert-1", &certificate_der, now))
+            .expect("register certificate");
         let peer = MtlsApplicationConnectInfo {
             peer_address: "127.0.0.1:49152".parse().expect("address"),
             application_id: "synoptikon".to_string(),
+            certificate_der: Arc::new(certificate_der),
+            identity_registry_path: identities,
+            key_registry_path: keys.clone(),
         };
 
-        assert!(authorize_application(&peer, "synoptikon").is_ok());
-        assert!(authorize_application(&peer, "monas").is_err());
+        assert!(authorize_application(&peer, "synoptikon").await.is_ok());
+        assert!(authorize_application(&peer, "monas").await.is_err());
+        deactivate_application_key(&keys, "synoptikon", "cert-1").expect("revoke certificate");
+        assert!(
+            authorize_application(&peer, "synoptikon").await.is_err(),
+            "a keepalive connection must not survive certificate revocation"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[tokio::test]
@@ -390,6 +453,53 @@ mod tests {
             .local_addr()
             .expect("local address")
             .port()
+    }
+
+    fn identity(application_id: &str, now: u64) -> ApplicationIdentity {
+        ApplicationIdentity {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: application_id.to_string(),
+            owner: "operator".to_string(),
+            purpose: "integration ingress".to_string(),
+            environment: ApplicationEnvironment::Production,
+            credential_kind: ApplicationCredentialKind::MtlsCertificate,
+            scope: ApplicationScope {
+                store_ids: vec![StoreId::new("codex").expect("store")],
+                prefixes: vec!["integration".to_string()],
+                object_types: vec![ObjectType::Fastq],
+                operations: vec![ApplicationOperation::Write],
+                ingress_origin: IngressOrigin::Synoptikon,
+                max_object_bytes: Some(1_000),
+                max_total_bytes: Some(10_000),
+            },
+            issued_at_unix_seconds: now.saturating_sub(60),
+            expires_at_unix_seconds: now + 3_600,
+            active: true,
+        }
+    }
+
+    fn key(
+        application_id: &str,
+        key_id: &str,
+        certificate_der: &[u8],
+        now: u64,
+    ) -> ApplicationKeyDescriptor {
+        use sha2::{Digest, Sha256};
+        let fingerprint = Sha256::digest(certificate_der)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: application_id.to_string(),
+            key_id: key_id.to_string(),
+            algorithm: ApplicationKeyAlgorithm::MtlsCertificate,
+            public_key_fingerprint: format!("sha256:{fingerprint}"),
+            public_key_material: None,
+            issued_at_unix_seconds: now.saturating_sub(60),
+            expires_at_unix_seconds: now + 3_600,
+            active: true,
+        }
     }
 
     fn test_root(label: &str) -> PathBuf {

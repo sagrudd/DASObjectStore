@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.80.1 - 2026-07-15
+
+- Revalidate application certificate mappings on every mTLS request so an
+  existing HTTP keepalive or HTTP/2 connection immediately loses authority
+  after certificate or identity revocation/expiry.
+- Add a persistent-connection regression and correct the listener-audit status
+  in the release backlog.
+
 ## 0.80.0 - 2026-07-15
 
 - Add a dedicated production application mTLS listener with configured client

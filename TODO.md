@@ -1135,15 +1135,18 @@ hardware acceptance.
     a confirmation-bound, path-free revocation request/response contract is
     now published and wired through authenticated administrator dispatch to
     atomic identity/key deactivation; redacted, reason-digest audit events are
-    now persisted atomically for registration, rotation, revocation, and
-    access-token issuance, completion paths, and the native application mTLS
-    listener. **Approved 2026-07-15:** native daemon-enforced mTLS uses an
-    explicitly configured CA trust reference plus daemon-owned certificate
-    fingerprint-to-application mapping. Missing, unknown, expired, or revoked
-    client certificates fail closed; controlled rotation may overlap active
-    mappings; a listener requiring mTLS never falls back to bearer-token-only
-    authentication. Listener implementation is complete; production CA and
-    appliance deployment acceptance remain externally blocked.
+    now persisted atomically for registration, rotation, revocation,
+    access-token issuance, and completion paths. Listener-specific connection
+    audit events remain open. **Approved 2026-07-15:** native daemon-enforced
+    mTLS uses an explicitly configured CA trust reference plus daemon-owned
+    certificate fingerprint-to-application mapping. Missing, unknown, expired,
+    or revoked client certificates fail closed; controlled rotation may
+    overlap active mappings; a listener requiring mTLS never falls back to
+    bearer-token-only authentication. Listener implementation now revalidates
+    the certificate mapping on every request so persistent connections cannot
+    outlive revocation or expiry; listener-specific audit events remain local work,
+    while production CA and appliance deployment acceptance are externally
+    blocked.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and

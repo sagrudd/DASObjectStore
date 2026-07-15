@@ -59,6 +59,7 @@ fn standalone_session_auth_router(auth_store: LocalAuthStore) -> Router {
     standalone_session_auth_router_with_state(StandaloneAuthRouteState::system(auth_store))
 }
 
+#[cfg(test)]
 pub(crate) fn standalone_auth_router_with_state(state: StandaloneAuthRouteState) -> Router {
     standalone_session_auth_router_with_state(state).merge(standalone_application_auth_router())
 }

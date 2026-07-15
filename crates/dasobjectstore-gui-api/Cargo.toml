@@ -32,4 +32,5 @@ uuid.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
+sha2.workspace = true
 tower.workspace = true
