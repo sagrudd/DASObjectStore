@@ -72,10 +72,9 @@ evidence and detailed source tasks.
   still deployment-gated.
 - A canonical macOS Docker profile now keeps ``/etc/dasobjectstore`` inside
   the daemon container and persists the generated single-node Garage profile
-  on the attached volume. Docker Desktop execution and an AlleleAnchor
-  adapter smoke remain environment-gated until ``/Volumes/Seagate`` is added
-  to Docker Desktop file sharing; the profile's bind-mount preflight reports
-  this exact remediation before the daemon starts.
+  under ``$HOME/.dasobjectstore-codex-validation``. Docker Desktop 29.6.1 is
+  reachable on 2026-07-15; local Garage/provider verification and the
+  AlleleAnchor adapter smoke are scheduled against that generated-data root.
 
 ## Market and Mnemosyne Integration Campaign
 
@@ -164,9 +163,10 @@ completion.
   soak acceptance. AlleleAnchor's local ``FileStore`` and container workflow
   remain consumer-side substitutes and must consume exported scoped config,
   not private DAS host paths.
-  Docker Desktop/container startup, Garage provisioning, and S3 smoke are
-  currently blocked in this run because the Docker daemon is unavailable;
-  renderer/configuration and secret-boundary checks remain complete locally.
+  Docker Desktop 29.6.1 and the dedicated validation root are available as of
+  2026-07-15. Container startup, Garage provisioning, provider verification,
+  and S3 smoke remain execution work rather than an environment blocker;
+  renderer/configuration and secret-boundary checks are already complete.
   - [x] Render the daemon/Garage profile against the dedicated validation root
     and validate both generated Compose files with ``docker compose config``;
     container start, Garage provisioning, and S3 smoke remain Docker-daemon
