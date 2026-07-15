@@ -515,7 +515,7 @@ function apiResponse(pathname, method, request, body = {}) {
     return {
       service: "dasobjectstore-gui-web",
       status: "ready",
-      version: "0.76.27",
+      version: "0.78.0",
       instance_id: "visual-instance",
     };
   }

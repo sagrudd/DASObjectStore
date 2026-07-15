@@ -246,6 +246,7 @@ pub(super) fn remote_easyconnect_aws_cli_upload_job_request(
     request: RemoteEasyconnectSubmitAwsCliUploadRequest,
     accepted_at_utc: &str,
     actor: Option<String>,
+    live_sqlite_path: std::path::PathBuf,
 ) -> RemoteEasyconnectAwsCliUploadJobRequest {
     RemoteEasyconnectAwsCliUploadJobRequest {
         job_id: request.job_id,
@@ -270,6 +271,19 @@ pub(super) fn remote_easyconnect_aws_cli_upload_job_request(
             .progress_telemetry
             .map(remote_upload_progress_telemetry),
         progress_message: request.progress_message,
+        completion: request.completion.map(|completion| {
+            crate::runtime::RemoteUploadProviderCompletion {
+                upload_id: completion.upload_id,
+                provider: completion.provider,
+                bucket: completion.bucket,
+                object_id: completion.object_id,
+                object_version: completion.object_version,
+                object_key: completion.object_key,
+                expected_checksum: completion.expected_checksum,
+                endpoint_url: completion.endpoint_url,
+            }
+        }),
+        live_sqlite_path,
     }
 }
 

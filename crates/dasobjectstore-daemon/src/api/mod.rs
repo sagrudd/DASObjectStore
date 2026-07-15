@@ -205,12 +205,13 @@ pub use remote_easyconnect::{
     RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
     RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-    RemoteEasyconnectUploadHandoffFailure, RemoteEasyconnectUploadHandoffMode,
-    RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffResponse,
-    RemoteEasyconnectUploadHandoffState, RemoteEasyconnectUploadProgressTelemetry,
-    RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
-    REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_DISCOVERY_ROUTE,
-    REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE, REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
+    RemoteEasyconnectUploadCompletion, RemoteEasyconnectUploadHandoffFailure,
+    RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
+    RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
+    RemoteEasyconnectUploadProgressTelemetry, RemoteEasyconnectUploadSelectionEntry,
+    RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+    REMOTE_EASYCONNECT_DISCOVERY_ROUTE, REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE,
+    REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
     REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
     REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS, REMOTE_EASYCONNECT_SESSIONS_ROUTE,
@@ -626,6 +627,30 @@ fn remote_easyconnect_validation_error(
             DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "environment.name",
                 value: name,
+            }
+        }
+        RemoteEasyconnectValidationError::UnsupportedCompletionProvider { provider } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "completion.provider",
+                value: provider,
+            }
+        }
+        RemoteEasyconnectValidationError::ZeroObjectVersion => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "completion.object_version",
+                value: "0".to_string(),
+            }
+        }
+        RemoteEasyconnectValidationError::InvalidCompletionChecksum => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "completion.expected_checksum",
+                value: "invalid sha256 digest".to_string(),
+            }
+        }
+        RemoteEasyconnectValidationError::InvalidCompletionObjectKey => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "completion.object_key",
+                value: "unsafe relative key".to_string(),
             }
         }
     }
@@ -1442,6 +1467,7 @@ mod tests {
                 }],
                 progress_telemetry: None,
                 progress_message: None,
+                completion: None,
             },
         );
 

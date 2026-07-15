@@ -410,6 +410,41 @@ fn build_daemon_upload_request(
     source: &Path,
     source_inventory: RemoteSourceInventory,
 ) -> RemoteEasyconnectSubmitAwsCliUploadRequest {
+    let completion = source_inventory.sha256.as_ref().and_then(|checksum| {
+        let crate::s3::AwsS3Operation::UploadFile { destination, .. } = &plan.operation else {
+            return None;
+        };
+        let object_key = destination
+            .strip_prefix(&format!("s3://{}/", route.bucket))?
+            .to_string();
+        let endpoint_url = plan
+            .args
+            .windows(2)
+            .find(|args| args[0] == "--endpoint-url")
+            .map(|args| args[1].clone())?;
+        let object_version = u64::from_str_radix(&checksum[..16], 16).unwrap_or(1).max(1);
+        Some(dasobjectstore_daemon::RemoteEasyconnectUploadCompletion {
+            upload_id: job_id.clone(),
+            provider: "garage".to_string(),
+            bucket: route.bucket.clone(),
+            object_id: object_key.clone(),
+            object_version,
+            object_key,
+            expected_checksum: format!("sha256:{checksum}"),
+            endpoint_url,
+        })
+    });
+    let mut upload_args = plan.args.clone();
+    if let Some(checksum) = &source_inventory.sha256 {
+        let insertion = upload_args.len().saturating_sub(2);
+        upload_args.splice(
+            insertion..insertion,
+            [
+                "--metadata".to_string(),
+                format!("dasobjectstore-sha256={checksum}"),
+            ],
+        );
+    }
     RemoteEasyconnectSubmitAwsCliUploadRequest {
         job_id,
         object_store: route.object_store.clone(),
@@ -417,7 +452,7 @@ fn build_daemon_upload_request(
         policy: plan.backpressure_policy,
         ssd_pressure: dasobjectstore_daemon::DaemonSsdPressure::AcceptingWrites,
         program: plan.program.clone(),
-        args: plan.args.clone(),
+        args: upload_args,
         display_args: redacted_upload_display_args(plan, source),
         environment: daemon_upload_environment(credentials),
         progress_telemetry: Some(RemoteEasyconnectUploadProgressTelemetry {
@@ -430,6 +465,7 @@ fn build_daemon_upload_request(
             "easyconnect upload submitted {} bytes",
             source_inventory.total_bytes
         )),
+        completion,
     }
 }
 
@@ -551,10 +587,11 @@ fn daemon_job_progress_line(job: &DaemonJobSummary) -> String {
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RemoteSourceInventory {
     total_bytes: u64,
     file_count: u64,
+    sha256: Option<String>,
 }
 
 fn source_inventory(path: &Path) -> Result<RemoteSourceInventory, RemoteRunError> {
@@ -563,6 +600,7 @@ fn source_inventory(path: &Path) -> Result<RemoteSourceInventory, RemoteRunError
         return Ok(RemoteSourceInventory {
             total_bytes: metadata.len(),
             file_count: 1,
+            sha256: Some(sha256_file(path)?),
         });
     }
     if !metadata.is_dir() {
@@ -574,14 +612,53 @@ fn source_inventory(path: &Path) -> Result<RemoteSourceInventory, RemoteRunError
     let mut inventory = RemoteSourceInventory {
         total_bytes: 0,
         file_count: 0,
+        sha256: None,
     };
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
-        let child = source_inventory(&entry.path())?;
-        inventory.total_bytes = inventory.total_bytes.saturating_add(child.total_bytes);
-        inventory.file_count = inventory.file_count.saturating_add(child.file_count);
+        let (child_bytes, child_files) = source_inventory_totals(&entry.path())?;
+        inventory.total_bytes = inventory.total_bytes.saturating_add(child_bytes);
+        inventory.file_count = inventory.file_count.saturating_add(child_files);
     }
     Ok(inventory)
+}
+
+fn source_inventory_totals(path: &Path) -> Result<(u64, u64), RemoteRunError> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.is_file() {
+        return Ok((metadata.len(), 1));
+    }
+    if !metadata.is_dir() {
+        return Err(RemoteRunError::UploadRouting(format!(
+            "{} is neither a regular file nor a directory",
+            path.display()
+        )));
+    }
+    let mut bytes = 0_u64;
+    let mut files = 0_u64;
+    for entry in std::fs::read_dir(path)? {
+        let (child_bytes, child_files) = source_inventory_totals(&entry?.path())?;
+        bytes = bytes.saturating_add(child_bytes);
+        files = files.saturating_add(child_files);
+    }
+    Ok((bytes, files))
+}
+
+fn sha256_file(path: &Path) -> Result<String, RemoteRunError> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn default_daemon_socket_path() -> PathBuf {
@@ -1137,6 +1214,19 @@ mod tests {
             .display_args
             .iter()
             .any(|arg| arg == "<source-redacted>"));
+        let completion = request.completion.as_ref().expect("completion contract");
+        assert_eq!(completion.provider, "garage");
+        assert_eq!(completion.bucket, "dos-zymo-fecal-2025-05");
+        assert_eq!(completion.object_key, "raw/PAW10254/reads.fastq.gz");
+        assert_eq!(completion.expected_checksum.len(), 71);
+        assert!(request.args.windows(2).any(|args| {
+            args[0] == "--metadata"
+                && args[1]
+                    == format!(
+                        "dasobjectstore-sha256={}",
+                        &completion.expected_checksum[7..]
+                    )
+        }));
         assert_eq!(request.environment.len(), 3);
         assert!(request
             .environment

@@ -93,6 +93,7 @@ where
                         request,
                         &accepted_at_utc,
                         actor.and_then(|actor| actor.username.clone()),
+                        handler.live_sqlite_path.clone(),
                     ),
                 ) {
                 Ok(report) => Ok(DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(

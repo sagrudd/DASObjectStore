@@ -9,10 +9,12 @@ use std::{fmt, sync::Arc};
 
 mod admission;
 mod cleanup;
+mod completion;
 mod progress;
 mod transfer;
 pub use admission::*;
 pub use cleanup::*;
+pub use completion::*;
 use progress::daemon_job_event_for_summary;
 pub use progress::*;
 pub use transfer::*;
@@ -189,6 +191,8 @@ pub struct RemoteEasyconnectAwsCliUploadJobRequest {
     pub actor: Option<String>,
     pub progress_telemetry: Option<RemoteUploadProgressTelemetry>,
     pub progress_message: Option<String>,
+    pub completion: Option<RemoteUploadProviderCompletion>,
+    pub live_sqlite_path: std::path::PathBuf,
 }
 
 pub fn run_remote_easyconnect_aws_cli_upload_job(
@@ -209,6 +213,8 @@ pub fn run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider(
     capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     request: RemoteEasyconnectAwsCliUploadJobRequest,
 ) -> Result<RemoteUploadS3TransferWorkerReport, DaemonServiceRuntimeError> {
+    let completion_environment = request.environment.clone();
+    let completion_committed_at_utc = request.finished_at_utc.clone();
     let worker_request = RemoteUploadS3TransferWorkerRequest {
         job: RemoteUploadS3TransferJob {
             job_id: request.job_id,
@@ -243,7 +249,21 @@ pub fn run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider(
     } else {
         worker
     };
-    worker.run_byte_transfer(worker_request, &transfer)
+    if let Some(completion) = request.completion {
+        let metadata = completion.transfer_metadata(request.source_bytes);
+        let authority = GarageRemoteUploadCompletionAuthority::new(
+            runner,
+            completion_environment,
+            request.live_sqlite_path,
+            completion_committed_at_utc,
+            completion,
+        );
+        worker.run_with_completion_metadata(worker_request, &authority, metadata, |progress| {
+            transfer.transfer(progress)
+        })
+    } else {
+        worker.run_byte_transfer(worker_request, &transfer)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -271,8 +291,8 @@ mod tests {
         RemoteUploadCancellationCleanupWorker, RemoteUploadCompletionCommit,
         RemoteUploadCompletionCommitError, RemoteUploadCompletionMetadata,
         RemoteUploadCompletionRecord, RemoteUploadMultipartAbortConfig,
-        RemoteUploadProgressTelemetry, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
-        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadProgressTelemetry, RemoteUploadProviderCompletion, RemoteUploadQueueDepths,
+        RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
         RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
         RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
         RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
@@ -1944,6 +1964,70 @@ mod tests {
     }
 
     #[test]
+    fn easyconnect_upload_is_not_complete_until_provider_catalogue_handoff() {
+        let root = temp_root("remote-upload-provider-catalogue-handoff");
+        std::fs::create_dir_all(&root).expect("create test root");
+        let live_sqlite = root.join("live.sqlite");
+        let connection = rusqlite::Connection::open(&live_sqlite).expect("open live sqlite");
+        connection
+            .execute_batch(dasobjectstore_metadata::schema::LIVE_SCHEMA_SQL)
+            .expect("initialize schema");
+        connection
+            .execute_batch(
+                "INSERT INTO pools VALUES ('pool-a', 'active', 'now', 'now');
+                 INSERT INTO stores VALUES ('zymo_fecal_2025.05', 'pool-a', 'folder', '{}', 'now', 'now');",
+            )
+            .expect("initialize store");
+        drop(connection);
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let runner = FakeRemoteUploadCommandRunner {
+            stdout: Some(format!(
+                "{{\"ContentLength\":42,\"Metadata\":{{\"dasobjectstore-sha256\":\"{}\"}}}}",
+                "a".repeat(64)
+            )),
+            ..FakeRemoteUploadCommandRunner::default()
+        };
+        let mut request = easyconnect_aws_cli_job_request("remote-upload-job-complete-1");
+        request.live_sqlite_path = live_sqlite.clone();
+        request.completion = Some(RemoteUploadProviderCompletion {
+            upload_id: "upload-complete-1".to_string(),
+            provider: "garage".to_string(),
+            bucket: "dos-zymo".to_string(),
+            object_id: "reads-object-1".to_string(),
+            object_version: 1,
+            object_key: "raw/reads.fastq.gz".to_string(),
+            expected_checksum: format!("sha256:{}", "a".repeat(64)),
+            endpoint_url: "http://127.0.0.1:3900".to_string(),
+        });
+
+        let report = run_remote_easyconnect_aws_cli_upload_job(
+            &registry,
+            std::sync::Arc::clone(&gate),
+            &runner,
+            request,
+        )
+        .expect("upload and completion reported");
+
+        assert!(matches!(report.final_event, DaemonJobEvent::Complete(_)));
+        let calls = runner.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].args[0], "s3");
+        assert_eq!(&calls[1].args[..2], ["s3api", "head-object"]);
+        let connection = rusqlite::Connection::open(live_sqlite).expect("open live sqlite");
+        let published: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_objects",
+                [],
+                |row| row.get(0),
+            )
+            .expect("published count");
+        assert_eq!(published, 1);
+        drop(calls);
+        cleanup(&root);
+    }
+
+    #[test]
     fn cancellation_cleanup_plan_requires_partial_stage_and_multipart_cleanup() {
         let plan =
             plan_remote_upload_cancellation_cleanup(RemoteUploadCancellationCleanupRequest {
@@ -2347,6 +2431,7 @@ mod tests {
     struct FakeRemoteUploadCommandRunner {
         calls: std::cell::RefCell<Vec<FakeRemoteUploadCommandCall>>,
         fail: bool,
+        stdout: Option<String>,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2397,7 +2482,7 @@ mod tests {
                 });
             }
             Ok(ServiceCommandOutput {
-                stdout: "ok\n".to_string(),
+                stdout: self.stdout.clone().unwrap_or_else(|| "ok\n".to_string()),
             })
         }
     }
@@ -2460,6 +2545,8 @@ mod tests {
                 ..RemoteUploadProgressTelemetry::default()
             }),
             progress_message: Some("easyconnect AWS CLI transfer copied 42 bytes".to_string()),
+            completion: None,
+            live_sqlite_path: std::path::PathBuf::from("/tmp/dasobjectstore-test-live.sqlite"),
         }
     }
 

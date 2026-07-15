@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.78.0 - 2026-07-15
+
+- Add authoritative Garage remote-upload completion: independent provider
+  identity, size, and SHA-256 metadata verification now precedes an idempotent
+  atomic shared-SQLite provider-placement commit and terminal job completion.
+- Extend the strict EasyConnect upload contract with optional object-level
+  completion metadata; paired single-file daemon uploads now stream SHA-256,
+  attach provider metadata, and submit the contract automatically while
+  retaining legacy directory-sync compatibility.
+
 ## 0.77.0 - 2026-07-15
 
 - Complete the bounded provider-stream daemon data plane for authenticated

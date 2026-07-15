@@ -428,6 +428,24 @@ pub struct RemoteEasyconnectSubmitAwsCliUploadRequest {
     #[serde(default)]
     pub progress_telemetry: Option<RemoteEasyconnectUploadProgressTelemetry>,
     pub progress_message: Option<String>,
+    /// Optional daemon-owned completion contract. When present, transfer
+    /// success is provisional until the daemon independently verifies the S3
+    /// object and atomically publishes its provider placement.
+    #[serde(default)]
+    pub completion: Option<RemoteEasyconnectUploadCompletion>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteEasyconnectUploadCompletion {
+    pub upload_id: String,
+    pub provider: String,
+    pub bucket: String,
+    pub object_id: String,
+    pub object_version: u64,
+    pub object_key: String,
+    pub expected_checksum: String,
+    pub endpoint_url: String,
 }
 
 impl RemoteEasyconnectSubmitAwsCliUploadRequest {
@@ -442,6 +460,48 @@ impl RemoteEasyconnectSubmitAwsCliUploadRequest {
             variable.validate()?;
         }
         validate_optional_non_blank("progress_message", self.progress_message.as_deref())?;
+        if let Some(completion) = &self.completion {
+            completion.validate()?;
+            if completion.provider != "garage" {
+                return Err(
+                    RemoteEasyconnectValidationError::UnsupportedCompletionProvider {
+                        provider: completion.provider.clone(),
+                    },
+                );
+            }
+            if completion.object_version == 0 {
+                return Err(RemoteEasyconnectValidationError::ZeroObjectVersion);
+            }
+            if completion.expected_checksum.len() != 71
+                || !completion.expected_checksum.starts_with("sha256:")
+                || !completion.expected_checksum[7..]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(RemoteEasyconnectValidationError::InvalidCompletionChecksum);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl RemoteEasyconnectUploadCompletion {
+    fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        require_non_blank("completion.upload_id", &self.upload_id)?;
+        require_non_blank("completion.provider", &self.provider)?;
+        require_non_blank("completion.bucket", &self.bucket)?;
+        require_non_blank("completion.object_id", &self.object_id)?;
+        require_non_blank("completion.object_key", &self.object_key)?;
+        require_non_blank("completion.endpoint_url", &self.endpoint_url)?;
+        if self.object_key.starts_with('/')
+            || self.object_key.contains('\\')
+            || self
+                .object_key
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            return Err(RemoteEasyconnectValidationError::InvalidCompletionObjectKey);
+        }
         Ok(())
     }
 }
@@ -658,6 +718,10 @@ pub enum RemoteEasyconnectValidationError {
     UploadSelectionByteMismatch { expected: u64, actual: u64 },
     EmptyAwsCliArgs,
     InvalidAwsCliEnvironmentVariable { name: String },
+    UnsupportedCompletionProvider { provider: String },
+    ZeroObjectVersion,
+    InvalidCompletionChecksum,
+    InvalidCompletionObjectKey,
 }
 
 pub fn resolve_remote_easyconnect_session_lifetime_seconds(
@@ -717,6 +781,19 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
             Self::InvalidAwsCliEnvironmentVariable { name } => write!(
                 formatter,
                 "remote easyconnect AWS CLI environment variable name is invalid: {name}"
+            ),
+            Self::UnsupportedCompletionProvider { provider } => write!(
+                formatter,
+                "remote upload completion provider is unsupported: {provider}"
+            ),
+            Self::ZeroObjectVersion => {
+                formatter.write_str("remote upload completion object version must be non-zero")
+            }
+            Self::InvalidCompletionChecksum => formatter.write_str(
+                "remote upload completion checksum must be a sha256 digest",
+            ),
+            Self::InvalidCompletionObjectKey => formatter.write_str(
+                "remote upload completion object key must be a safe relative key",
             ),
         }
     }

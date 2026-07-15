@@ -414,8 +414,21 @@ permit release stay centralized. A completion implementation can additionally
 be injected at the worker boundary; the terminal ``complete`` event is emitted
 only after that implementation commits the manifest/catalogue handoff. A
 handoff error leaves the job failed and releases the intake permit, so provider
-success is never presented as ObjectStore acceptance. The concrete catalogue
-transaction remains profile-specific integration work. The daemon also includes a concrete AWS
+success is never presented as ObjectStore acceptance. For Garage, the
+EasyConnect AWS CLI submit contract can carry a single-object completion record
+with provider, bucket, object identity/version, relative key, endpoint, and
+SHA-256. The daemon then performs an independent ``aws s3api head-object``,
+requires the admitted size and ``dasobjectstore-sha256`` metadata to match, and
+atomically publishes the provider placement through shared SQLite before the
+terminal event. Producers requesting this authoritative completion must set
+that S3 metadata during upload. Legacy multi-object requests without the
+completion record retain transfer-only semantics during migration. The paired
+``dasobjectstore-remote`` daemon-submit path generates this contract
+automatically for a single file: it streams SHA-256 locally, adds the metadata
+to ``aws s3 cp``, and derives a content-stable logical version. Directory
+``sync`` remains transfer-only until its per-key manifest producer is wired.
+The daemon
+also includes a concrete AWS
 CLI transfer adapter for S3-compatible object-service intake. That adapter
 runs the configured ``aws s3`` command through the daemon command-runner
 boundary, keeps redacted display arguments separate from execution arguments,

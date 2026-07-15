@@ -3375,6 +3375,7 @@ mod tests {
                     }],
                     progress_telemetry: None,
                     progress_message: Some("completed".to_string()),
+                    completion: None,
                 },
             ))
             .expect("request handled");

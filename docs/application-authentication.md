@@ -46,11 +46,23 @@ before atomically committing completion. Replays are rejected or return the
 same idempotent terminal result. The daemon now has a durable,
 expiry-pruned replay registry for capability IDs and nonces. Its Ed25519/P-256
 verifier handles asymmetric proofs and core issuance rejects unverified proofs;
-mTLS transport verification and public catalogue completion wiring remain.
+mTLS transport verification and public capability issuance/exposure remain.
 Provider verification uses a provider-neutral request/result contract. Garage
 implements that contract through the existing cancellable AWS CLI command
 runner, avoiding a second S3 client stack; provider identity, size, and checksum
 must match before catalogue publication.
+The daemon-owned EasyConnect AWS CLI path now provides the concrete Garage
+implementation: a completion-bearing request runs `aws s3api head-object`
+after transfer, requires the exact admitted `ContentLength` and the
+`dasobjectstore-sha256` object-metadata value, and atomically publishes a
+provider placement through the shared SQLite catalogue transaction. The job
+does not enter `complete` until that transaction succeeds. Upload producers
+must therefore attach `dasobjectstore-sha256=<lowercase hex digest>` as S3
+object metadata when requesting authoritative completion.
+The paired remote client produces these fields automatically for single-file
+daemon submissions. It hashes the source as a bounded stream and adds the
+checksum metadata to the same `aws s3 cp`; directory sync remains a legacy
+transfer-only path until it can supply a per-key completion manifest.
 The listener-side mTLS boundary is intentionally not enabled by inference.
 The approved production policy uses native daemon-enforced mTLS with an
 explicitly configured CA trust reference and daemon-owned certificate
@@ -70,7 +82,9 @@ Profile-aware remote-upload callers may additionally provide a bounded
 completion metadata record containing an upload ID, relative logical object
 key, exact admitted size, and SHA-256 checksum. The daemon validates that
 record after provider transfer and before invoking the completion authority;
-legacy multi-object jobs may omit object-level metadata.
+legacy multi-object jobs may omit object-level metadata and retain their
+transfer-only terminal semantics during migration; release integrations must
+use the completion-bearing contract.
 
 Renewal tokens are not accepted as bearer credentials for this operation.
 

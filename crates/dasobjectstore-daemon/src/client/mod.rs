@@ -1679,6 +1679,7 @@ mod tests {
                 environment: Vec::new(),
                 progress_telemetry: None,
                 progress_message: Some("completed".to_string()),
+                completion: None,
             })
             .expect("upload submit response");
 

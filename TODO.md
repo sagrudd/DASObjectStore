@@ -223,7 +223,9 @@ completion.
   renewal-only sessions, short-lived scoped access, and one-time upload
   capabilities. Internal admission, transfer, cancellation, and progress
   modules are delivered; service-principal/token-exchange implementation,
-  catalogue completion wiring, and endpoint exposure remain open.
+  concrete Garage provider verification and shared-SQLite catalogue completion
+  are now wired into the EasyConnect AWS CLI submission path; public one-time
+  capability issuance/endpoint exposure remain open.
   **Approved 2026-07-15:** implement a provider-neutral completion-verification
   contract with Garage backed by the existing cancellable AWS CLI command
   runner. The daemon must independently verify provider identity, size, and
@@ -1111,10 +1113,13 @@ hardware acceptance.
     session, upload ID, ObjectStore, object key, expected size/checksum,
     audience, expiry, and nonce; verify provider state before atomic catalogue
     commit and make retries idempotent.
-    The daemon completion authority now verifies provider state before replay
+    The daemon completion authority verifies provider state before replay
     consumption, releases pending capabilities on catalogue failure, and
-    returns an idempotent already-consumed outcome; live catalogue wiring and
-    provider-backed completion remain.
+    returns an idempotent already-consumed outcome. The live EasyConnect path
+    now independently verifies Garage identity, exact size, and SHA-256 object
+    metadata with ``head-object`` before an idempotent atomic shared-SQLite
+    provider-placement commit and terminal job completion. Public capability
+    issuance and authenticated completion endpoint exposure remain.
   - [~] Add explicit expiry, revocation, rotation, replay protection, and
     redacted audit events for every credential class. Upload-completion
     capability consumption now has a daemon-owned, state-scoped atomic replay
