@@ -453,8 +453,13 @@ completion.
   - [x] Document version-1 manifest compatibility, fail-closed future-schema
     handling, untouched legacy metadata, explicit adoption/migration writes,
     and identity-over-path rules; strict decode rejects unknown fields and
-    future schemas before interpretation. Migration implementation remains
-    gated until a new persistent field is approved.
+    future schemas before interpretation. **Approved 2026-07-15:** migration
+    provenance is a separate daemon-owned, versioned sidecar record; manifest
+    v1 and legacy appliance metadata remain unchanged. The record binds the
+    migration ID, source/destination store IDs and manifest digests,
+    verification result/time, source-retention state, and retirement actor/time.
+    Atomic publication and restart reconciliation are required before source
+    retirement can be reported complete.
 - [~] Put existing appliance placement behind the backend contract with
   regression evidence showing unchanged ingress, repair, and export behavior.
   **Blocker (appliance backend):** the shared contract is implemented for

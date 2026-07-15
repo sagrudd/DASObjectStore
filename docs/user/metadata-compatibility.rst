@@ -26,6 +26,15 @@ The decode helper does not itself perform migration, adoption, or filesystem
 writes. Those operations remain gated by the profile adoption and catalogue
 contracts in the campaign roadmap.
 
+Migration provenance is deliberately stored outside manifest v1 and existing
+appliance metadata. A daemon-owned, versioned sidecar record binds the migration
+ID to the source and destination store IDs and manifest digests, destination
+verification result and time, source-retention state, and the administrator and
+time authorizing source retirement. The daemon must publish this record
+atomically and reconcile it after restart. It may not report source retirement
+complete until the durable provenance record says that retirement was
+authorized.
+
 Portable object catalogue companion
 ------------------------------------
 

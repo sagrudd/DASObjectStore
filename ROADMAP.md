@@ -1246,6 +1246,12 @@ remain the next integration gate.
 Folder-to-folder and folder-to-drive migrations now commit the verified
 destination record through the shared authority before advancing migration
 state; destination reopen coverage proves catalogue-backed logical usage.
+Migration provenance will persist in a separate daemon-owned, schema-versioned
+sidecar rather than changing strict manifest v1 or legacy appliance metadata.
+The atomic, restart-safe record binds the migration transaction to source and
+destination store identities and manifest digests, destination verification,
+source retention, and the administrator/time authorizing retirement. Source
+retirement cannot be reported complete until that record is durable.
 The daemon now also exposes a versioned Unix-socket portable catalogue
 export/import handoff for bounded folder profiles. Export carries validated
 IDs, versions, hashes, provenance, protection, and logical placements without

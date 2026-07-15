@@ -315,6 +315,13 @@ stale and are only local probe hints; filesystem and device identities are the
 authority. A future schema migration must be additive, versioned, and tested
 before it can write persistent metadata.
 
+Migration provenance uses a separate daemon-owned, versioned sidecar record;
+it does not add fields to manifest v1 or rewrite legacy appliance metadata. The
+record preserves the migration transaction, source and destination manifest
+digests, verification evidence, source-retention state, and source-retirement
+authorization. Atomic persistence and restart reconciliation are mandatory
+before the daemon can report retirement complete.
+
 All profiles implement the same backend capability boundary: validation,
 reservation, staging, durable finalization, reads, enumeration, verification,
 health, reconciliation, and removal. A profile may report an unsupported
