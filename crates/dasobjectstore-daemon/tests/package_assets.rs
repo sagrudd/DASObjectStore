@@ -307,12 +307,12 @@ fn package_installs_named_pam_service_for_local_web_login() {
     assert_contains(BUILD_RPM, "etc/pam.d");
     assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_RPM, "BuildRequires:  clang");
-    assert_contains(BUILD_RPM, "BuildRequires:  libclang-devel");
+    assert_contains(BUILD_RPM, "BuildRequires:  clang-devel");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
     assert_contains(BUILD_RPM, "Requires:       pam");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
-    assert_contains(BUILD_RPM, "sudo dnf install clang libclang-devel pam-devel");
+    assert_contains(BUILD_RPM, "sudo dnf install clang clang-devel pam-devel");
 }
 
 #[test]
