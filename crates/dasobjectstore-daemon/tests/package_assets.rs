@@ -77,6 +77,12 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
         assert_ne!(first_value, second_value, "{field} must be root-scoped");
     }
     assert_contains(LOCAL_DOCKER, "private config is bound to a different storage root");
+    assert_contains(LOCAL_DOCKER, "put-object");
+    assert_contains(LOCAL_DOCKER, "head-object");
+    assert_contains(LOCAL_DOCKER, "list-objects-v2");
+    assert_contains(LOCAL_DOCKER, "get-object");
+    assert_contains(LOCAL_DOCKER, "delete-object");
+    assert_contains(LOCAL_DOCKER, "local-docker-s3-$commit.txt");
 }
 
 #[test]

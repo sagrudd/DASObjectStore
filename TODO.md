@@ -1236,6 +1236,17 @@ appliance and representative product workflows before release readiness.
 - [~] Run package install/upgrade/uninstall, authentication, quota, S3,
   migration, recovery, security, observability, and performance matrices for
   folder, drive, and appliance.
+  - [x] Run the locally available deployment matrix: native ARM64 Ubuntu and
+    AlmaLinux package install/reinstall/reboot/uninstall with bounded-folder
+    provision/adopt/recovery, transactional macOS per-user launchd lifecycle,
+    and root-scoped Docker/Garage S3 put/head/list/get/checksum/delete. The S3
+    harness now emits secret-free evidence bound to the tested source commit
+    and cleans up its generated object and 64 KiB payload on success or failure.
+  - [~] Run physical drive/appliance telemetry, replacement, multi-HDD
+    durability, performance/soak, and x86_64 package parity. **Blocker:** the
+    DASServer and appropriate x86_64 host are unavailable during cottage
+    development. Acceptance condition: operator confirms a quiescent home-host
+    window, then the documented hardware matrix runs against generated data.
 - [~] Validate generated-data stress tests plus representative Mnemosyne product
   workflows; never use customer/project data in automated acceptance.
 - [~] Require real-world validation readiness, operator runbooks, release notes,

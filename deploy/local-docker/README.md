@@ -95,10 +95,20 @@ that path into an ignored local configuration file). The endpoint is:
 http://127.0.0.1:3900
 ```
 
-Run the existing tiny-fixture DAS smoke test only after `up` succeeds. Keep
-object IDs, credentials, raw reads, profiles, and generated payloads outside
-Git. This local profile can close the S3-compatible adapter integration gate;
-the remote DAS appliance remains a separate deployment/soak acceptance.
+Run the generated-data S3 acceptance only after `up` succeeds:
+
+```bash
+./deploy/local-docker/local.sh smoke
+```
+
+The command uses the daemon-provisioned scoped credential to perform
+put/head/list/get/checksum/delete against Garage. It creates only a 64 KiB
+random payload beneath ``$HOME/.dasobjectstore-codex-validation``, removes the
+object and local payload even on failure, and writes a secret-free,
+source-commit-bound result beneath ``deployment-evidence``. Keep credentials,
+raw reads, profiles, and generated payloads outside Git. This local profile
+closes the S3-compatible adapter integration gate; the remote DAS appliance
+remains a separate deployment/soak acceptance.
 
 ## Overrides
 

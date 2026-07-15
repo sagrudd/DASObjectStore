@@ -280,6 +280,13 @@ logs, and persistent state on uninstall. Isolated macOS acceptance substitutes
 launchctl under the dedicated generated-data root, so the deployment lifecycle
 is exercised without mutating the operator's live service domain.
 
+The root-scoped local Docker/Garage deployment also has a repeatable S3
+acceptance command. It uses the daemon-provisioned AlleleAnchor-compatible
+credential, performs put/head/list/get/checksum/delete with a generated 64 KiB
+payload, cleans up on every exit path, and writes no-secret evidence tied to
+the tested Git commit. This closes the local provider compatibility run while
+leaving physical appliance durability and performance claims explicitly open.
+
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are
 read-only drift until an explicit confirmed reconcile/adopt, and no profile

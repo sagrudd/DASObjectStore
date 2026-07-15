@@ -46,6 +46,12 @@ Run the surrogate matrix from the repository root with
 copies evidence beneath ``$HOME/.dasobjectstore-codex-validation/lima``, and
 deletes successful guests by default so generated VM disks do not accumulate.
 
+For the provider-compatible local profile, start the root-scoped stack and run
+``deploy/local-docker/local.sh smoke``. The smoke uses the daemon-provisioned
+credential for put/head/list/get/checksum/delete, removes the generated object
+on every exit path, and records a secret-free result tied to the source commit
+beneath ``$HOME/.dasobjectstore-codex-validation/deployment-evidence``.
+
 Upgrade and migration policy
 ----------------------------
 

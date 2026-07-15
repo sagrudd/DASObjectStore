@@ -55,6 +55,7 @@ Commands:
   build        Build the daemon image from the DASObjectStore workspace.
   up           Render, build, start the daemon, start Garage, and provision stores.
   provision    Re-run daemon-owned Garage bucket/key provisioning and export config.
+  smoke        Run generated-data S3 put/head/list/get/checksum/delete acceptance.
   status       Show daemon and nested Garage Compose status without secrets.
   down         Stop Garage through the daemon, then stop the daemon container.
   config       Print the generated AlleleAnchor adapter config path.
@@ -427,6 +428,97 @@ down() {
     docker_compose down
 }
 
+smoke() {
+    require_volume_root
+    require_command aws
+    require_command python3
+    [ -f "$STACK_COMPOSE" ] || die "profile is not rendered: run '$0 up'"
+    [ -f "$ALLELEANCHOR_CONFIG" ] || die "adapter config is unavailable: run '$0 provision'"
+    wait_for_daemon
+    wait_for_garage
+
+    local endpoint bucket credential_path access_key secret_key
+    endpoint="$(awk -F'"' '/^endpoint = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
+    bucket="$(awk -F'"' '/^bucket = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
+    credential_path="$(awk -F'"' '/^path = / { print $2; exit }' "$ALLELEANCHOR_CONFIG")"
+    [ -n "$endpoint" ] || die "adapter config has no endpoint"
+    [ -n "$bucket" ] || die "adapter config has no bucket"
+    [ -f "$credential_path" ] || die "adapter credential file is unavailable"
+    access_key="$(awk -F'"' '/^access_key = / { print $2; exit }' "$credential_path")"
+    secret_key="$(awk -F'"' '/^secret_key = / { print $2; exit }' "$credential_path")"
+    [ -n "$access_key" ] || die "adapter credential has no access key"
+    [ -n "$secret_key" ] || die "adapter credential has no secret key"
+
+    local smoke_root source downloaded key checksum downloaded_checksum
+    local head_size head_checksum listed evidence_dir evidence commit timestamp
+    smoke_root="$VALIDATION_ROOT/local-docker-smoke-$$"
+    source="$smoke_root/source.bin"
+    downloaded="$smoke_root/downloaded.bin"
+    key="codex-smoke/$(date -u +%Y%m%dT%H%M%SZ)-$$.bin"
+    mkdir -p "$smoke_root"
+    chmod 700 "$smoke_root"
+    dd if=/dev/urandom of="$source" bs=65536 count=1 2>/dev/null
+    checksum="$(shasum -a 256 "$source" | awk '{print $1}')"
+
+    export AWS_ACCESS_KEY_ID="$access_key"
+    export AWS_SECRET_ACCESS_KEY="$secret_key"
+    export AWS_DEFAULT_REGION=garage
+    local uploaded=0
+    cleanup_smoke() {
+        if [ "$uploaded" -eq 1 ]; then
+            aws --endpoint-url "$endpoint" s3api delete-object \
+                --bucket "$bucket" --key "$key" >/dev/null 2>&1 || true
+        fi
+        rm -rf "$smoke_root"
+    }
+    trap cleanup_smoke EXIT
+
+    aws --endpoint-url "$endpoint" s3api put-object \
+        --bucket "$bucket" --key "$key" --body "$source" \
+        --metadata "sha256=$checksum" >/dev/null
+    uploaded=1
+    head_size="$(aws --endpoint-url "$endpoint" s3api head-object \
+        --bucket "$bucket" --key "$key" --query ContentLength --output text)"
+    head_checksum="$(aws --endpoint-url "$endpoint" s3api head-object \
+        --bucket "$bucket" --key "$key" --query Metadata.sha256 --output text)"
+    [ "$head_size" = "65536" ] || die "S3 HEAD size mismatch: $head_size"
+    [ "$head_checksum" = "$checksum" ] || die "S3 HEAD checksum metadata mismatch"
+    listed="$(aws --endpoint-url "$endpoint" s3api list-objects-v2 \
+        --bucket "$bucket" --prefix "$key" --query 'Contents[0].Key' --output text)"
+    [ "$listed" = "$key" ] || die "S3 LIST did not return the generated object"
+    aws --endpoint-url "$endpoint" s3api get-object \
+        --bucket "$bucket" --key "$key" "$downloaded" >/dev/null
+    downloaded_checksum="$(shasum -a 256 "$downloaded" | awk '{print $1}')"
+    [ "$downloaded_checksum" = "$checksum" ] || die "S3 GET checksum mismatch"
+    aws --endpoint-url "$endpoint" s3api delete-object \
+        --bucket "$bucket" --key "$key" >/dev/null
+    uploaded=0
+    if aws --endpoint-url "$endpoint" s3api head-object \
+        --bucket "$bucket" --key "$key" >/dev/null 2>&1; then
+        die "S3 DELETE left the generated object addressable"
+    fi
+
+    evidence_dir="$VALIDATION_ROOT/deployment-evidence"
+    mkdir -p "$evidence_dir"
+    chmod 700 "$evidence_dir"
+    commit="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || printf 'unavailable')"
+    timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    evidence="$evidence_dir/local-docker-s3-$commit.txt"
+    {
+        printf 'source_commit=%s\n' "$commit"
+        printf 'timestamp_utc=%s\n' "$timestamp"
+        printf 'profile=%s\n' "$PROFILE"
+        printf 'provider=garage\n'
+        printf 'generated_bytes=65536\n'
+        printf 'put=passed\nhead=passed\nlist=passed\nget=passed\n'
+        printf 'checksum=passed\ndelete=passed\n'
+    } > "$evidence"
+    chmod 600 "$evidence"
+    cleanup_smoke
+    trap - EXIT
+    printf 'Local Docker/Garage S3 acceptance passed.\nEvidence: %s\n' "$evidence"
+}
+
 command="${1:-}"
 case "$command" in
     render)
@@ -444,6 +536,9 @@ case "$command" in
         ;;
     provision)
         provision
+        ;;
+    smoke)
+        smoke
         ;;
     status)
         status
