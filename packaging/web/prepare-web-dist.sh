@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/dasobjectstore-gui-web"
 prosopikon_core_root="$repo_root/../prosopikon/crates/prosopikon-core"
 prosopikon_yew_root="$repo_root/../prosopikon/crates/prosopikon-yew"
-dist="$web_root/dist"
+dist="${DASOBJECTSTORE_PREBUILT_WEB_DIST:-$web_root/dist}"
 allow_fallback=0
 
 if [[ "${1:-}" == "--allow-fallback" ]]; then
@@ -65,6 +65,18 @@ ERROR
   )
 }
 
+use_prebuilt_web_dist() {
+  if [[ -z "${DASOBJECTSTORE_PREBUILT_WEB_DIST:-}" ]]; then
+    return 1
+  fi
+  if [[ "$dist" != /* ]]; then
+    printf 'DASOBJECTSTORE_PREBUILT_WEB_DIST must be an absolute path: %s\n' "$dist" >&2
+    return 2
+  fi
+  validate_prosopikon_checkout
+  validate_web_dist
+}
+
 validate_web_dist() {
   if [[ ! -f "$dist/index.html" ]]; then
     printf 'DASObjectStore web build did not produce %s\n' "$dist/index.html" >&2
@@ -83,6 +95,15 @@ validate_web_dist() {
     return 1
   fi
 }
+
+if use_prebuilt_web_dist; then
+  printf '%s\n' "$dist"
+  exit 0
+fi
+
+if [[ -n "${DASOBJECTSTORE_PREBUILT_WEB_DIST:-}" ]]; then
+  exit 1
+fi
 
 if build_web_dist && validate_web_dist; then
   printf '%s\n' "$dist"

@@ -2097,7 +2097,10 @@ list until every temporary size-budget exception has been removed.
     configuration, catalogue, credential, telemetry, or managed storage roots.
   - [ ] Validate the effective cgroup-v2 properties plus install, upgrade,
     reboot, and uninstall behavior in the approved Ubuntu and AlmaLinux Lima
-    guests. This is the remaining surrogate acceptance condition.
+    guests. The committed ARM64 harness builds from ``HEAD``, verifies both
+    service domains, retains persistent-state sentinels through final package
+    removal, and deletes successful guests after copying evidence. Executing
+    both guest matrices is the remaining surrogate acceptance condition.
 - [~] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI. Core admission/degraded projections are implemented; host queue, cgroup, and PSI collection remain deployment-gated.
   - [x] Surface the optional daemon ingest admission action, limiting reason,
     source-read worker count, HDD queue depth, and verification parallelism in

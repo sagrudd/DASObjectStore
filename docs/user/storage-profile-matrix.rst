@@ -34,6 +34,12 @@ physical enclosure identity, SMART/NVMe, real multi-HDD/Garage durability,
 replacement, performance acceptance, or x86_64 parity. Those gates require a
 quiescent DASServer validation window.
 
+Run the surrogate matrix from the repository root with
+``deploy/lima/package-acceptance.sh all``. It creates only the named
+``dasobjectstore-ubuntu-arm64`` and ``dasobjectstore-alma-arm64`` guests,
+copies evidence beneath ``$HOME/.dasobjectstore-codex-validation/lima``, and
+deletes successful guests by default so generated VM disks do not accumulate.
+
 Upgrade and migration policy
 ----------------------------
 

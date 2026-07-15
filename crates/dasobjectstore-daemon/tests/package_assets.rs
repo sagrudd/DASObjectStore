@@ -434,6 +434,8 @@ fn rpm_build_installs_daemon_boundary_assets() {
 #[test]
 fn web_dist_preparation_requires_real_trunk_assets_for_packages() {
     assert_contains(PREPARE_WEB_DIST, "trunk build --release");
+    assert_contains(PREPARE_WEB_DIST, "DASOBJECTSTORE_PREBUILT_WEB_DIST");
+    assert_contains(PREPARE_WEB_DIST, "must be an absolute path");
     assert_contains(PREPARE_WEB_DIST, "cargo install trunk");
     assert_contains(PREPARE_WEB_DIST, "rustup target add wasm32-unknown-unknown");
     assert_contains(PREPARE_WEB_DIST, "trunk build --release >&2");

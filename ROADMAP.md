@@ -267,7 +267,11 @@ in distinct systemd slices with CPU, memory, and I/O accounting and explicit
 control-plane protection. DEB and RPM lifecycle hooks stop units safely while
 retaining all persistent metadata and managed storage on removal. Effective
 cgroup properties and install/upgrade/reboot/uninstall behavior remain queued
-for the approved Ubuntu and AlmaLinux Lima guests.
+for the approved Ubuntu and AlmaLinux Lima guests. A sequential ARM64 Lima
+harness now packages committed source with a strictly validated prebuilt Web
+bundle, reboots each native guest, checks resource properties and retained
+state, and copies evidence outside the repository before deleting successful
+VMs.
 
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are

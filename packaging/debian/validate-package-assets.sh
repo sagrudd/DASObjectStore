@@ -267,6 +267,8 @@ require_absent "$build_remote_deb" 'development-self-signing'
 require_absent "$build_remote_rpm" 'development-self-signing'
 
 require_text "$prepare_web_dist" "trunk build --release"
+require_text "$prepare_web_dist" "DASOBJECTSTORE_PREBUILT_WEB_DIST"
+require_text "$prepare_web_dist" "must be an absolute path"
 require_text "$prepare_web_dist" "wasm32-unknown-unknown"
 require_text "$prepare_web_dist" "validate_prosopikon_checkout"
 require_text "$prepare_web_dist" "prosopikon-core must expose the auth and pam features"
