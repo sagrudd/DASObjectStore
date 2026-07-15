@@ -139,8 +139,9 @@ pub use migration_provenance::{
 };
 pub use migration_worker::{
     copy_folder_object, copy_folder_object_with_provenance, copy_folder_to_drive,
-    copy_folder_to_drive_with_provenance, migrate_folder_store_to_drive_with_provenance,
-    migrate_folder_store_with_provenance, FolderMigrationError,
+    copy_folder_to_drive_with_provenance, migrate_folder_store_to_drive_with_catalogue_handoff,
+    migrate_folder_store_to_drive_with_provenance, migrate_folder_store_with_catalogue_handoff,
+    migrate_folder_store_with_provenance, FolderMigrationError, MigrationCatalogueHandoff,
 };
 pub use object_browser::{
     query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,

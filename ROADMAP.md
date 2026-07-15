@@ -1287,9 +1287,10 @@ The metadata crate now provides a live-SQLite v0.4 profile-catalogue adapter.
 It stores profile namespace, transaction id, source-retention state, and
 versioned object payloads in isolated tables, committing batches atomically and
 making exact retries idempotent while rejecting transaction/object conflicts.
-It intentionally leaves legacy appliance `objects`/`placements` untouched;
-daemon import/migration call-site wiring and physical placement reconciliation
-remain the next integration gate.
+It intentionally leaves legacy appliance `objects`/`placements` untouched.
+Daemon import, restart replay, and whole-store folder/drive migration call
+sites now use this bridge; physical appliance placement reconciliation remains
+the deployment-gated integration gate.
 Folder-to-folder and folder-to-drive migrations now commit verified destination
 records through the shared authority before advancing migration state;
 destination reopen coverage proves catalogue-backed logical usage. Whole-store
@@ -1303,6 +1304,12 @@ digests, destination verification, source retention, and the administrator/time
 authorizing retirement. Checkpoint/sidecar crash windows reconcile safely, and
 source retirement is not reported complete until the final provenance state is
 durable.
+The production whole-store folder and guarded-drive wrappers now export the
+verified destination catalogue and commit it through the daemon-owned shared
+SQLite handoff before returning success. They reuse the stable migration ID as
+the transaction ID, so a crash or unavailable metadata database leaves the
+source retained and the verified destination replayable rather than creating a
+second transaction.
 The daemon now also exposes a versioned Unix-socket portable catalogue
 export/import handoff for bounded folder profiles. Export carries validated
 IDs, versions, hashes, provenance, protection, and logical placements without

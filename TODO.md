@@ -376,8 +376,9 @@ completion.
     The adapter provides the approved boundary with
     explicit profile namespace and transaction IDs; keep backend paths private
     and migrate only through its atomic, conflict-checked handoff. Daemon import
-    and restart replay are wired; remaining work is migration call-site and
-    appliance placement reconciliation when that host is available.
+    restart replay, and whole-store folder/drive migration call sites are
+    wired. Remaining work is physical appliance placement reconciliation when
+    that host is available.
   - [x] Prove authority batches are all-or-none across conflicts and restart;
     a conflicting existing version cannot partially add a new record.
     Catalogue mutations now serialize daemon-local read/modify/write
@@ -1226,6 +1227,12 @@ hardware acceptance.
     checkpoint/sidecar crash window. Exact retries are idempotent and manifest
     drift conflicts fail closed; manifest v1 and appliance metadata are not
     rewritten.
+  - [x] Bridge verified whole-store folder-to-folder and folder-to-drive
+    destination catalogues into shared live SQLite through the daemon-owned
+    crash journal. The stable migration ID makes retries exact and idempotent;
+    a failed shared-metadata commit retains both the verified destination and
+    source so restart can finish safely. Physical appliance placement remains
+    deployment-gated.
   - [x] Add daemon-owned Unix-socket portable catalogue export/import contracts
     for bounded folder profiles. Export serializes validated IDs, versions,
     hashes, provenance, protection, and logical placements without paths or

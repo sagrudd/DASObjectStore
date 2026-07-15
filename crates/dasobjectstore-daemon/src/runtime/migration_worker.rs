@@ -5,6 +5,7 @@ use super::folder_backend::FolderBackend;
 use super::migration_provenance::{
     prepare_migration_provenance, record_migration_destination_verified, MigrationProvenanceError,
 };
+use super::profile_catalogue::{export_profile_catalogue, import_profile_catalogue_with_metadata};
 use dasobjectstore_core::backend::{
     BackendError, BackendObjectKey, BackendObjectRecord, ObjectCatalogueAuthority,
     ObjectStoreBackend,
@@ -13,7 +14,44 @@ use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::manifest::ObjectStoreManifest;
 use dasobjectstore_core::migration::{MigrationTransitionError, StoreMigration};
 use std::fmt::{self, Display};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Daemon-owned destination catalogue handoff required by production
+/// whole-store migration. The migration id is reused as the replay-safe
+/// transaction id; source retention remains mandatory in the SQLite adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationCatalogueHandoff {
+    pub live_sqlite_path: PathBuf,
+    pub handoff_root: PathBuf,
+    pub profile_namespace: String,
+    pub committed_at_utc: String,
+}
+
+impl MigrationCatalogueHandoff {
+    fn validate(&self) -> Result<(), FolderMigrationError> {
+        if self.live_sqlite_path.as_os_str().is_empty() {
+            return Err(FolderMigrationError::InvalidRequest(
+                "migration shared catalogue path must not be empty".to_string(),
+            ));
+        }
+        if self.handoff_root.as_os_str().is_empty() {
+            return Err(FolderMigrationError::InvalidRequest(
+                "migration catalogue handoff root must not be empty".to_string(),
+            ));
+        }
+        if self.profile_namespace.trim().is_empty() {
+            return Err(FolderMigrationError::InvalidRequest(
+                "migration profile namespace must not be empty".to_string(),
+            ));
+        }
+        if self.committed_at_utc.trim().is_empty() {
+            return Err(FolderMigrationError::InvalidRequest(
+                "migration catalogue commit timestamp must not be empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Copy one verified object between bounded folder profiles. The source is
 /// never retired here; the migration remains retirement-pending until an
@@ -147,6 +185,89 @@ pub fn migrate_folder_store_to_drive_with_provenance(
         reservation_prefix,
         verified_at_utc,
     )
+}
+
+/// Migrate a complete folder store and bridge its verified destination
+/// catalogue into daemon-owned shared metadata before reporting success.
+/// Retrying after either catalogue commit is safe because both the handoff
+/// journal and SQLite transaction use the stable migration id.
+pub fn migrate_folder_store_with_catalogue_handoff(
+    migration: &mut StoreMigration,
+    source: &mut FolderBackend,
+    destination: &mut FolderBackend,
+    checkpoint_path: impl AsRef<Path>,
+    provenance_root: impl AsRef<Path>,
+    reservation_prefix: &str,
+    verified_at_utc: &str,
+    handoff: &MigrationCatalogueHandoff,
+) -> Result<u64, FolderMigrationError> {
+    handoff.validate()?;
+    let copied = migrate_folder_store_with_provenance(
+        migration,
+        source,
+        destination,
+        checkpoint_path,
+        provenance_root,
+        reservation_prefix,
+        verified_at_utc,
+    )?;
+    commit_migration_catalogue(migration, destination, handoff)?;
+    Ok(copied)
+}
+
+/// Drive-profile counterpart to
+/// [`migrate_folder_store_with_catalogue_handoff`]. The guarded drive remains
+/// the payload authority and must pass its runtime identity checks during the
+/// export/import verification cycle.
+pub fn migrate_folder_store_to_drive_with_catalogue_handoff(
+    migration: &mut StoreMigration,
+    source: &mut FolderBackend,
+    destination: &mut DriveBackend,
+    checkpoint_path: impl AsRef<Path>,
+    provenance_root: impl AsRef<Path>,
+    reservation_prefix: &str,
+    verified_at_utc: &str,
+    handoff: &MigrationCatalogueHandoff,
+) -> Result<u64, FolderMigrationError> {
+    handoff.validate()?;
+    let copied = migrate_folder_store_to_drive_with_provenance(
+        migration,
+        source,
+        destination,
+        checkpoint_path,
+        provenance_root,
+        reservation_prefix,
+        verified_at_utc,
+    )?;
+    commit_migration_catalogue(migration, destination, handoff)?;
+    Ok(copied)
+}
+
+fn commit_migration_catalogue(
+    migration: &StoreMigration,
+    destination: &mut dyn super::profile_catalogue::ProfileCatalogueBackend,
+    handoff: &MigrationCatalogueHandoff,
+) -> Result<(), FolderMigrationError> {
+    let catalogue = export_profile_catalogue(&migration.destination_store_id, destination)
+        .map_err(|error| FolderMigrationError::Backend {
+            operation: "export verified migration catalogue",
+            error,
+        })?;
+    import_profile_catalogue_with_metadata(
+        &migration.destination_store_id,
+        &catalogue,
+        destination,
+        &handoff.live_sqlite_path,
+        &handoff.handoff_root,
+        &migration.migration_id,
+        &handoff.profile_namespace,
+        &handoff.committed_at_utc,
+    )
+    .map_err(|error| FolderMigrationError::Backend {
+        operation: "commit migration shared catalogue",
+        error,
+    })?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -475,7 +596,8 @@ mod tests {
     use super::super::drive_backend::{DriveBackend, DriveRuntimeGuard};
     use super::{
         copy_folder_object, copy_folder_object_with_provenance, copy_folder_to_drive,
-        migrate_folder_store_with_provenance, FolderMigrationError,
+        migrate_folder_store_with_catalogue_handoff, migrate_folder_store_with_provenance,
+        FolderMigrationError, MigrationCatalogueHandoff,
     };
     use crate::runtime::folder_backend::FolderBackend;
     use crate::runtime::{read_migration_provenance, MigrationVerificationState};
@@ -496,6 +618,25 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn initialize_shared_catalogue(path: &std::path::Path, store_id: &str) {
+        let connection = rusqlite::Connection::open(path).expect("open shared catalogue");
+        connection
+            .execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)
+            .expect("initialize schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('profile-pool', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("insert pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES (?1, 'profile-pool', 'folder', '{}', 'now', 'now')",
+                [store_id],
+            )
+            .expect("insert destination store");
+    }
 
     fn manifest(store_id: &str) -> ObjectStoreManifest {
         ObjectStoreManifest {
@@ -770,6 +911,116 @@ mod tests {
             MigrationVerificationState::Verified
         );
         assert!(provenance.source_retained);
+        let _ = fs::remove_dir_all(source_root);
+        let _ = fs::remove_dir_all(destination_root);
+        let _ = fs::remove_dir_all(state_root);
+    }
+
+    #[test]
+    fn whole_store_migration_commits_replay_safe_shared_catalogue() {
+        let source_root = root("migration-handoff-source");
+        let destination_root = root("migration-handoff-destination");
+        let state_root = root("migration-handoff-state");
+        fs::create_dir_all(&state_root).expect("state root");
+        let live_sqlite_path = state_root.join("live.sqlite");
+        let mut source = FolderBackend::open(
+            &source_root,
+            manifest("source-store"),
+            CapacityPolicy::bounded(1_000, 0),
+            0,
+        )
+        .expect("source opens");
+        let mut destination = FolderBackend::open(
+            &destination_root,
+            manifest("destination-store"),
+            CapacityPolicy::bounded(1_000, 0),
+            0,
+        )
+        .expect("destination opens");
+        let key = BackendObjectKey {
+            object_id: "run/shared-catalogue.txt".to_string(),
+            version: 1,
+        };
+        source.reserve("source-upload", 11).expect("reserve");
+        let staged = source
+            .stage(
+                "source-upload",
+                &key,
+                &mut Cursor::new(b"hello world".to_vec()),
+            )
+            .expect("stage");
+        let finalized = source.finalize(staged).expect("finalize");
+        source.commit_batch(&[finalized]).expect("source catalogue");
+        let mut migration = StoreMigration::new(
+            "migration-shared-catalogue",
+            source.manifest().store_id.clone(),
+            destination.manifest().store_id.clone(),
+        )
+        .expect("migration");
+        let checkpoint = state_root.join("checkpoint.json");
+        let provenance_root = state_root.join("provenance");
+        let handoff = MigrationCatalogueHandoff {
+            live_sqlite_path: live_sqlite_path.clone(),
+            handoff_root: state_root.join("catalogue-handoffs"),
+            profile_namespace: "folder:destination-store".to_string(),
+            committed_at_utc: "2026-07-15T15:00:00Z".to_string(),
+        };
+
+        let first = migrate_folder_store_with_catalogue_handoff(
+            &mut migration,
+            &mut source,
+            &mut destination,
+            &checkpoint,
+            &provenance_root,
+            "migration-shared-reservation",
+            "2026-07-15T15:00:00Z",
+            &handoff,
+        );
+        assert!(matches!(first, Err(FolderMigrationError::Backend { .. })));
+        assert_eq!(migration.state, MigrationState::RetirementPending);
+        assert!(migration.source_retained);
+        assert_eq!(destination.records().expect("destination records").len(), 1);
+
+        initialize_shared_catalogue(&live_sqlite_path, "destination-store");
+
+        for _ in 0..2 {
+            let copied = migrate_folder_store_with_catalogue_handoff(
+                &mut migration,
+                &mut source,
+                &mut destination,
+                &checkpoint,
+                &provenance_root,
+                "migration-shared-reservation",
+                "2026-07-15T15:00:00Z",
+                &handoff,
+            )
+            .expect("migration handoff is replay safe");
+            assert_eq!(copied, 1);
+        }
+        assert_eq!(migration.state, MigrationState::RetirementPending);
+        assert!(migration.source_retained);
+        assert_eq!(source.verify(&key).expect("source retained").size_bytes, 11);
+        let connection = rusqlite::Connection::open(&live_sqlite_path).expect("reopen SQLite");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM profile_catalogue_transactions WHERE transaction_id = 'migration-shared-catalogue' AND source_retained = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("transaction count"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM profile_catalogue_objects",
+                    [],
+                    |row| { row.get::<_, i64>(0) }
+                )
+                .expect("object count"),
+            1
+        );
         let _ = fs::remove_dir_all(source_root);
         let _ = fs::remove_dir_all(destination_root);
         let _ = fs::remove_dir_all(state_root);

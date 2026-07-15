@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.82.0 - 2026-07-15
+
+- Bridge verified whole-store folder-to-folder and folder-to-drive migration
+  catalogues into shared live SQLite before reporting success.
+- Reuse the stable migration ID across the crash journal and shared catalogue
+  transaction so interrupted metadata commits retry exactly once while both
+  the verified destination and source remain retained.
+
 ## 0.81.0 - 2026-07-15
 
 - Move native application mTLS fingerprint mapping and per-request

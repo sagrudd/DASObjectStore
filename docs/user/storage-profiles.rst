@@ -324,6 +324,14 @@ digests, verification evidence, source-retention state, and source-retirement
 authorization. Atomic persistence and restart reconciliation are mandatory
 before the daemon can report retirement complete.
 
+Production whole-store folder-to-folder and folder-to-drive migrations also
+bridge the verified destination catalogue into the shared live SQLite profile
+catalogue before reporting success. The stable migration identifier is the
+transaction identifier for this handoff. If that metadata commit is
+interrupted, the verified destination and its private profile catalogue remain
+durable, the source remains retained, and retrying the same migration resumes
+the journal and commits exactly once.
+
 All profiles implement the same backend capability boundary: validation,
 reservation, staging, durable finalization, reads, enumeration, verification,
 health, reconciliation, and removal. A profile may report an unsupported
@@ -464,5 +472,7 @@ durably finalizes the object, verifies the destination checksum, and stops at
 ``retirement_pending``. Failed finalization does not silently delete staged
 data or release its reservation, so an operator or retry worker can recover it.
 The same worker can target the guarded dedicated-SSD drive backend; drive
-identity validation runs before any filesystem operation. Appliance placement
-adapters and catalogue transaction wiring remain separate integration work.
+identity validation runs before any filesystem operation. The production
+whole-store wrappers complete the replay-safe shared-catalogue transaction
+described above. Appliance physical-placement adapters remain separate,
+deployment-gated integration work.
