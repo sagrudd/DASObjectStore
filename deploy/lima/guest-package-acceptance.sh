@@ -116,6 +116,38 @@ assert_services_and_resources() {
   [[ "$(systemctl show dasobjectstore-storage.slice -p MemoryHigh --value)" != infinity ]]
 }
 
+assert_packaged_folder_profile() {
+  local profile_root=/srv/dasobjectstore/folder-acceptance
+  local manifest="$root/folder-manifest.json"
+  local response="$root/folder-response.json"
+
+  [[ "$(stat -c '%U:%G:%a' /srv/dasobjectstore)" == dasobjectstore:dasobjectstore:750 ]]
+  [[ "$(stat -c '%U:%G:%a' /srv/dasobjectstore/ssd)" == dasobjectstore:dasobjectstore:750 ]]
+  [[ "$(stat -c '%U:%G:%a' /srv/dasobjectstore/hdd)" == root:root:755 ]]
+  install -d -o dasobjectstore -g dasobjectstore -m 0750 "$profile_root"
+  printf 'lima-profile-fixture\n' >"$profile_root/unmanaged.txt"
+  chown dasobjectstore:dasobjectstore "$profile_root/unmanaged.txt"
+  chmod 0640 "$profile_root/unmanaged.txt"
+  printf '%s\n' \
+    '{"schema_version":1,"store_id":"lima-folder-acceptance","deployment_profile":"folder","host_mode":"system","protection":"local_only","backend":{"kind":"folder","root_identity":"lima:folder-acceptance"}}' \
+    >"$manifest"
+
+  dasobjectstore store profile-binding --manifest "$manifest" \
+    --backend-root "$profile_root" --capacity-limit-bytes 1048576 \
+    --operation provision --json >"$response"
+  grep -q '"reused": false' "$response"
+  dasobjectstore store profile-binding --manifest "$manifest" \
+    --backend-root "$profile_root" --capacity-limit-bytes 1048576 \
+    --operation provision --json >"$response"
+  grep -q '"reused": true' "$response"
+  dasobjectstore store profile-binding --manifest "$manifest" \
+    --backend-root "$profile_root" --capacity-limit-bytes 1048576 \
+    --operation adopt --json >"$response"
+  grep -q '"adopted_object_count": 1' "$response"
+  [[ -f "$profile_root/unmanaged.txt" ]]
+  [[ "$(stat -c '%a' "$profile_root/.dasobjectstore")" == 700 ]]
+}
+
 reinstall_package() {
   source "$state_file"
   case "$distro" in
@@ -141,6 +173,7 @@ case "$phase" in
     install_package
     install_local_test_certificate
     assert_services_and_resources
+    assert_packaged_folder_profile
     install -d -o dasobjectstore -g dasobjectstore -m 0750 \
       /var/lib/dasobjectstore /srv/dasobjectstore
     install -o dasobjectstore -g dasobjectstore -m 0640 /dev/null \
@@ -155,8 +188,12 @@ case "$phase" in
   post-reboot)
     source "$state_file"
     assert_services_and_resources
+    dasobjectstore store profile-inspection lima-folder-acceptance --json \
+      >"$root/folder-inspection.json"
+    grep -q '"store_id": "lima-folder-acceptance"' "$root/folder-inspection.json"
     [[ -f /var/lib/dasobjectstore/lima-acceptance-sentinel ]]
     [[ -f /srv/dasobjectstore/lima-acceptance-sentinel ]]
+    [[ -f /srv/dasobjectstore/folder-acceptance/unmanaged.txt ]]
     remove_package
     ! command -v dasobjectstored >/dev/null 2>&1
     ! systemctl is-active --quiet dasobjectstored.service
