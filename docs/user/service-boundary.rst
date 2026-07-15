@@ -175,6 +175,13 @@ catalogue, credentials, telemetry, and managed storage roots. Package removal
 is never authorization to delete stored data. Use formal DASObjectStore
 management operations for retirement or deletion.
 
+Provider transfer and reconciliation operations require a working AWS CLI v2
+``aws`` command. DEB/RPM metadata recommends the distribution package when one
+exists, but does not make it a hard dependency because supported ARM64
+distributions do not all publish that package. Install official AWS CLI v2 on
+such hosts before enabling S3 provider workflows; the daemon fails provider
+commands explicitly when it is absent.
+
 The hidden ``--local-direct`` ingest mode is a developer/test fallback while the
 daemon implementation is being completed. It is not the normal production
 storage path.

@@ -6,6 +6,10 @@ sequentially, builds the native DEB/RPM, and validates install, same-version
 upgrade/reinstall hooks, reboot recovery, cgroup-v2 resource properties, final
 uninstall, and persistent-state retention.
 
+AWS CLI is a recommended rather than hard OS-package dependency because Ubuntu
+24.04 ARM64 does not publish an ``awscli`` package. The guest harness installs
+official AWS CLI v2 ARM64 and verifies it before package installation.
+
 ```bash
 ./deploy/lima/package-acceptance.sh ubuntu
 ./deploy/lima/package-acceptance.sh alma

@@ -16,7 +16,7 @@ install_build_dependencies() {
       apt-get update
       apt-get install -y build-essential clang libclang-dev libpam0g-dev \
         pkg-config libssl-dev curl ca-certificates acl udisks2 docker.io \
-        docker-buildx awscli openssl dpkg-dev
+        docker-buildx openssl dpkg-dev unzip
       ;;
     alma)
       dnf install -y epel-release dnf-plugins-core
@@ -25,13 +25,26 @@ install_build_dependencies() {
       dnf groupinstall -y "Development Tools"
       dnf install -y clang libclang-devel pam-devel pkgconf-pkg-config \
         openssl-devel curl ca-certificates acl udisks2 rpm-build openssl \
-        docker-ce-cli docker-buildx-plugin awscli
+        docker-ce-cli docker-buildx-plugin unzip
       ;;
     *)
       printf 'unsupported distribution: %s\n' "$distro" >&2
       exit 2
       ;;
   esac
+}
+
+install_aws_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    return 0
+  fi
+  curl --proto '=https' --tlsv1.2 -fsSL \
+    https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip \
+    -o /tmp/awscliv2.zip
+  rm -rf /tmp/aws
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  aws --version
 }
 
 install_rust() {
@@ -120,6 +133,7 @@ remove_package() {
 case "$phase" in
   initial)
     install_build_dependencies
+    install_aws_cli
     install_rust
     prepare_workspace
     build_package
